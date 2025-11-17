@@ -1,0 +1,1071 @@
+;/T/ Impression du bon de commande
+;
+;/P/ Programmeur...: Nancy Marceau
+;    Date Création.: 26 mai 1994
+;    Description...: Ce programme permet de faire l'impression des bons de
+;                    commande. Suite à la première impression, on peut
+;                    faire la réimpression du bon de commande ou des duplicatas.
+;    Paramètres....: Compagnie          (Compagnie du menu)
+;                    Numéro de commande (Borne de début)
+;                    Numéro de commande (Borne de fin)
+;    Particularités: Un compteur de réimpression et de duplicatas est
+;                    constamment mis à jour.
+;
+;
+;/M/ Modification..: Pierre Routhier
+;    Date..........: 11 décembre 1996
+;    Description...: Sélection dans le rapport ar335z.qzs des items qui ne
+;                    sont pas annulés. J'ai arrangé le rapport en conséquence
+;                    pour que le total du bon de commande ne contienne pas
+;                    le montant des items annulés.
+;
+;/M/ Francois Richard, 99-07-09
+;
+;    Ajustement pour le changement de siècle
+;
+;***********************************************************************************************************************************
+;
+;/M/ Modifié par.......: Marc Poulin     
+;    Date..............: 03 mars 2000
+;    Description.......: Éliminer la ligne blanche entre la description et la note descriptive.
+;
+;    Référence.........: Stabilisation du module Achat/Réception Inventaire (point 12).
+;
+;    Signet............: MP-00-03-03_S12.
+;
+;    ------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin     
+;    Date..............: 14 mars 2000
+;    Description.......: Ajustement du traitement pour permettre l'impression des commande avec un statut "P" (préliminaire) qui 
+;                        n'ont jamais été imprimées. 
+;
+;    Référence.........: Stabilisation du module Achat/Réception Inventaire (point 17).
+;
+;    Signet............: MP-00-03-14_S17.
+;
+;    ------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin     
+;    Date..............: 28 avril 2000
+;    Description.......: Ajustement du traitement pour permettre le calcul du prix unitaire au prorata des quantités commandées.
+;
+;    Référence.........: Demande Directe - Demandeur: Sylvain Boivin.
+;
+;    Signet............: MP-00-04-28_DD999999.
+;
+;    ------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin     
+;    Date..............: 30 janvier 2001
+;    Description.......: Ajustements afin de faciliter la validation des charges comptables au niveau des services financiers. Ajouter
+;                        en pied de page la liste des items avec leur ventilation comptable (unité et compte administratif).
+;
+;    Référence.........: Demande de changement 000104.
+;
+;    Signet............: MP-01-01-30_D104.
+;
+;    ------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin     
+;    Date..............: 23 avril 2002
+;    Description.......: Ajustements afin d'ajuoter une note de l'Office de langue française.
+;
+;    Référence.........: Demande de changement directe - Demandeur: Sylvain Boivin.
+;
+;    Signet............: MP-02-04-23_DD.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+USE ussetqts NOLIST   ; set process nolimit
+
+RUN ar335t
+
+GLOBAL TEMPORARY G_REIIMP CHARACTER SIZE 1  PARM ; Indicateur de réimpression
+GLOBAL TEMPORARY G_DUPIMP CHARACTER SIZE 1  PARM ; Indicateur de duplicatas
+
+;------------------------------------------------------------------------------
+;
+REQUEST CUMUL_ITEM_PAR_PRODUIT
+
+ACCESS ARCOMMANDE                &
+  LINK  CIECLE OF ARCOMMANDE   , &
+        CMDCLE OF ARCOMMANDE   , &
+        CMDAJT OF ARCOMMANDE     &
+    TO  CIECLE                 , &
+        CMDCLE                 , &
+        CMDAJT                   OF ARCMD_DETAIL 
+
+CHOOSE CIECLE PARM       , &   ; Compagnie du menu
+       CMDCLE PARM RANGE , &   ; Numéro de commande
+       CMDAJT PARM       , &   ; Numéro d'ajustement
+       CMDSTU "A","S","C","P"  ; Statut
+
+SELECT ARCMD_DETAIL IF  CDESTU OF ARCMD_DETAIL <> "X"
+
+SELECT ARCOMMANDE  IF ((G_REIIMP = "1" AND CMDFLGIMP OF ARCOMMANDE = "1") &
+                   OR  (G_DUPIMP = "1" AND CMDFLGIMP OF ARCOMMANDE = "1") &
+                   OR  (G_REIIMP = "0" AND  G_DUPIMP = "0" AND CMDFLGIMP OF ARCOMMANDE = "0") &
+                   OR  (CMDAJT OF ARCOMMANDE <> '000'))
+
+; -----------------------------------
+; MP-00-03-14_S17.
+
+DEFINE D_IMPPRE CHARACTER SIZE 1 = PARM ; Indicateur d'impression des commande préliminaires qui n'ont jamais été imprimées.
+
+SELECT IF D_IMPPRE = "0" OR (D_IMPPRE = "1" AND CMDIMPPRE <> "1") 
+
+; -----------------------------------
+
+DEFINE D_PRDDSC CHARACTER SIZE 52 = PRDCLE    OF ARCMD_DETAIL &
+                                  + CDEDSCPRD OF ARCMD_DETAIL
+
+SORT ON CIECLE  OF ARCMD_DETAIL & ; Compagnie du menu
+     ON CMDCLE  OF ARCMD_DETAIL & ; Numéro de commande
+     ON CMDAJT  OF ARCMD_DETAIL & ; Numéro d'ajustement
+     ON D_PRDDSC                  ; Numéro et description du produit
+
+TEMPORARY T_CDEQTECOM FLOAT SIZE 8
+TEMPORARY T_CDEMNTNET FLOAT SIZE 8
+TEMPORARY T_CDEPRIUNI FLOAT SIZE 8
+TEMPORARY T_CDEMNTTPS FLOAT SIZE 8
+TEMPORARY T_CDEMNTTVQ FLOAT SIZE 8
+TEMPORARY T_CDEMNTTOT FLOAT SIZE 8
+
+ITEM T_CDEQTECOM SUBTOTAL CDEQTECOM OF ARCMD_DETAIL                         RESET AT D_PRDDSC
+ITEM T_CDEMNTNET SUBTOTAL CDEMNTNET OF ARCMD_DETAIL                         RESET AT D_PRDDSC
+ITEM T_CDEPRIUNI = ROUND((T_CDEMNTNET/100) / (T_CDEQTECOM/1000),4) * 10000  RESET AT D_PRDDSC ; MP-00-04-28_DD999999.
+ITEM T_CDEMNTTPS SUBTOTAL CDEMNTTPS OF ARCMD_DETAIL                         RESET AT D_PRDDSC
+ITEM T_CDEMNTTVQ SUBTOTAL CDEMNTTVQ OF ARCMD_DETAIL                         RESET AT D_PRDDSC
+ITEM T_CDEMNTTOT SUBTOTAL CDEMNTTOT OF ARCMD_DETAIL                         RESET AT D_PRDDSC
+
+
+SUBFILE WAR335A KEEP AT D_PRDDSC INCLUDE &
+  CIECLE          OF ARCMD_DETAIL      , &
+  CMDCLE          OF ARCMD_DETAIL      , &
+  CMDAJT          OF ARCMD_DETAIL      , &
+  CDECLE          OF ARCMD_DETAIL      , &
+  PRDCLE          OF ARCMD_DETAIL      , &
+  PRDTYP          OF ARCMD_DETAIL      , &
+  CDETAXTYPTPS    OF ARCMD_DETAIL      , &
+  CDETAXCODTPS    OF ARCMD_DETAIL      , &
+  CDETAXTYPTVQ    OF ARCMD_DETAIL      , &
+  CDETAXCODTVQ    OF ARCMD_DETAIL      , &
+  CDESTU          OF ARCMD_DETAIL      , &
+  CDEDSCPRD       OF ARCMD_DETAIL      , &
+  CPTCLE          OF ARCMD_DETAIL      , &
+  UNACLE          OF ARCMD_DETAIL      , &
+  CDEFLGSUP       OF ARCMD_DETAIL      , &
+  DEVTAU          OF ARCMD_DETAIL      , &
+  CDEDATIMP       OF ARCMD_DETAIL      , &
+  REQCLE          OF ARCMD_DETAIL      , &
+  PECCLE          OF ARCMD_DETAIL      , &
+  CDELIE          OF ARCMD_DETAIL      , &
+  CDEDATLIVPRE    OF ARCMD_DETAIL      , &
+  PRJCLE          OF ARCMD_DETAIL      , &
+  PRACLE          OF ARCMD_DETAIL      , &
+  CDETERESCACH    OF ARCMD_DETAIL      , &
+  IMMCLE          OF ARCMD_DETAIL      , &
+  CDEREFFOU       OF ARCMD_DETAIL      , &
+  T_CDEPRIUNI     ALIAS CDEPRIUNI      , &
+  T_CDEMNTNET     ALIAS CDEMNTNET      , &
+  T_CDEMNTTPS     ALIAS CDEMNTTPS      , &
+  T_CDEMNTTVQ     ALIAS CDEMNTTVQ      , &
+  T_CDEMNTTOT     ALIAS CDEMNTTOT      , &
+  T_CDEQTECOM     ALIAS CDEQTECOM      
+
+
+OUTPUT ARCMD_DETAIL UPDATE IF CMDSTU OF ARCOMMANDE <> "P"
+  ITEM CDEDATIMP OF ARCMD_DETAIL FINAL SYSDATE
+
+
+;------------------------------------------------------------------------------
+;
+REQUEST EXTRAIRE_COMMANDES
+
+ACCESS *WAR335A                  &
+  LINK  CIECLE    OF WAR335A   , &
+        CMDCLE    OF WAR335A   , &
+        CMDAJT    OF WAR335A     &
+    TO  CIECLE                 , &
+        CMDCLE                 , &
+        CMDAJT                   OF ARCOMMANDE                      &
+
+  LINK  FOUCIECLE OF ARCOMMANDE, &
+        FOUCLE    OF ARCOMMANDE, &
+        CIECLE    OF ARCOMMANDE  &
+    TO  FOUCIECLE              , &
+        FOUCLE                 , &
+        FOCCIECLE                OF VFOC_FOU                        &
+
+  LINK  ADECLE OF ARCOMMANDE     &
+    TO  ADECLE                   OF ARADRESSE_EXP  OPTIONAL         &
+
+  LINK  CIECLE OF WAR335A      , &
+        CMDCLE OF WAR335A      , &
+        CMDAJT OF WAR335A      , &
+        CDECLE OF WAR335A      , &
+        "1"                      &
+    TO  CIECLE                 , &
+        CMDCLE                 , &
+        CMDAJT                 , &
+        CDECLE                 , &
+        CDNIMP                   OF ARCDE_NOTE     OPTIONAL
+
+SELECT ARCOMMANDE  IF ((G_REIIMP = "1" AND CMDFLGIMP OF ARCOMMANDE = "1") &
+                   OR  (G_DUPIMP = "1" AND CMDFLGIMP OF ARCOMMANDE = "1") &
+                   OR  (G_REIIMP = "0" AND  G_DUPIMP = "0" AND CMDFLGIMP OF ARCOMMANDE = "0") &
+                   OR  (CMDAJT OF ARCOMMANDE <> '000'))
+
+TEMPORARY T_TMPMEM     CHARACTER  SIZE 01
+TEMPORARY T_TMPTRI1    CHARACTER  SIZE 01
+TEMPORARY T_TMPTRI2    CHARACTER  SIZE 01
+TEMPORARY T_TMPTRI3    CHARACTER  SIZE 01
+TEMPORARY T_CDNDSC     CHARACTER  SIZE 50
+TEMPORARY T_CDNDSCESP  CHARACTER  SIZE 50
+;
+; Ajustement pour le changement de siècle
+;
+DEFINE D_CMDCLE_TRI CHARACTER SIZE 10 = "1" + CMDCLE OF ARCOMMANDE      &
+                                     IF CMDCLE OF ARCOMMANDE[1:1] < "8" &
+                                   ELSE "0" + CMDCLE OF ARCOMMANDE
+
+SORT ON CIECLE OF ARCOMMANDE   &
+     ON D_CMDCLE_TRI           &
+     ON CMDAJT OF ARCOMMANDE   &
+     ON CDECLE OF WAR335A      &
+     ON CDNSEQ OF ARCDE_NOTE
+
+ITEM T_TMPMEM    = "0"
+ITEM T_TMPTRI1   = "5"
+ITEM T_TMPTRI2   = "7"
+ITEM T_TMPTRI3   = "9"
+ITEM T_CDNDSC    = CDNDSC OF ARCDE_NOTE                      
+ITEM T_CDNDSCESP = " "
+
+SUBFILE WAR335B KEEP                      &
+  INCLUDE CIECLE        OF ARCOMMANDE   , &
+          ENTCLE        OF ARCOMMANDE   , &
+          CMDCLE        OF ARCOMMANDE   , &
+          CMDAJT        OF ARCOMMANDE   , &
+          FOUCIECLE     OF ARCOMMANDE   , &
+          FOUCLE        OF ARCOMMANDE   , &
+          REFCLETYP     OF ARCOMMANDE   , &
+          ADECLE        OF ARCOMMANDE   , &
+          RADCLE        OF ARCOMMANDE   , &
+          CMDDAT        OF ARCOMMANDE   , &
+          CMDCOM        OF ARCOMMANDE   , &
+          CMDNBRIMP     OF ARCOMMANDE   , &
+          CMDNBRDUP     OF ARCOMMANDE   , &
+          CMDLIE        OF ARCOMMANDE   , &
+          CDEFAB        OF ARCOMMANDE   , &
+          CDETRP        OF ARCOMMANDE   , &
+          CMDINDDNE     OF ARCOMMANDE   , &
+          CMDREQCLETMP  OF ARCOMMANDE   , &
+          CMDREQCLETMP2 OF ARCOMMANDE   , &
+          CMDREQCLETMP3 OF ARCOMMANDE   , &
+          CMDREQCLETMP4 OF ARCOMMANDE   , &
+          CMDREQCLETMP5 OF ARCOMMANDE   , &
+          FOCTERESCACH  OF VFOC_FOU     , &
+          FOCTERNET     OF VFOC_FOU     , &
+          DEVCLE        OF VFOC_FOU     , &
+          FOULNG        OF VFOC_FOU     , &
+          ADENOM        OF ARADRESSE_EXP, &
+          ADENOMABR     OF ARADRESSE_EXP, &
+          ADEADR1       OF ARADRESSE_EXP, &
+          ADEADR2       OF ARADRESSE_EXP, &
+          ADEADR3       OF ARADRESSE_EXP, &
+          ADEADR4       OF ARADRESSE_EXP, &
+          ADECP         OF ARADRESSE_EXP, &
+          ADETEL        OF ARADRESSE_EXP, &
+          ADEFAX        OF ARADRESSE_EXP, &
+          CDECLE        OF WAR335A      , &
+          PRDCLE        OF WAR335A      , &
+          CDEDSCPRD     OF WAR335A      , &
+          CDETAXCODTVQ  OF WAR335A      , &
+          CDETAXCODTPS  OF WAR335A      , &
+          CDEQTECOM     OF WAR335A      , &
+          CDEPRIUNI     OF WAR335A      , &
+          UNACLE        OF WAR335A      , &
+          REQCLE        OF WAR335A      , &
+          CDEDATLIVPRE  OF WAR335A      , &
+          CDELIE        OF WAR335A      , &
+          CDEMNTTOT     OF WAR335A      , &
+          CDEMNTNET     OF WAR335A      , &
+          CDEMNTTPS     OF WAR335A      , &
+          CDEMNTTVQ     OF WAR335A      , &
+          CDNSEQ        OF ARCDE_NOTE   , &
+          T_CDNDSC      ALIAS CDNDSC    , &
+          T_TMPMEM      ALIAS TMPMEM    , &
+          T_TMPTRI2     ALIAS TMPTRI    , &
+          G_REIIMP                      , &
+          G_DUPIMP                      
+
+@IF MP-00-03-03_S12
+SUBFILE WAR335B KEEP IF RECORD ARCDE_NOTE EXIST &
+                     AT CDECLE OF WAR335A  & 
+               ALIAS A1_WAR335B            &
+  INCLUDE CIECLE        OF ARCOMMANDE    , &
+          ENTCLE        OF ARCOMMANDE    , &
+          CMDCLE        OF ARCOMMANDE    , &
+          CMDAJT        OF ARCOMMANDE    , &
+          FOUCIECLE     OF ARCOMMANDE    , &
+          FOUCLE        OF ARCOMMANDE    , &
+          REFCLETYP     OF ARCOMMANDE    , &
+          ADECLE        OF ARCOMMANDE    , &
+          RADCLE        OF ARCOMMANDE    , &
+          CMDDAT        OF ARCOMMANDE    , &
+          CMDCOM        OF ARCOMMANDE    , &
+          CMDNBRIMP     OF ARCOMMANDE    , &
+          CMDNBRDUP     OF ARCOMMANDE    , &
+          CMDLIE        OF ARCOMMANDE    , &
+          CDEFAB        OF ARCOMMANDE    , &
+          CDETRP        OF ARCOMMANDE    , &
+          CMDINDDNE     OF ARCOMMANDE    , &
+          CMDREQCLETMP  OF ARCOMMANDE    , &
+          CMDREQCLETMP2 OF ARCOMMANDE    , &
+          CMDREQCLETMP3 OF ARCOMMANDE    , &
+          CMDREQCLETMP4 OF ARCOMMANDE    , &
+          CMDREQCLETMP5 OF ARCOMMANDE    , &
+          FOCTERESCACH  OF VFOC_FOU      , &
+          FOCTERNET     OF VFOC_FOU      , &
+          DEVCLE        OF VFOC_FOU      , &
+          FOULNG        OF VFOC_FOU      , &
+          ADENOM        OF ARADRESSE_EXP , &
+          ADENOMABR     OF ARADRESSE_EXP , &
+          ADEADR1       OF ARADRESSE_EXP , &
+          ADEADR2       OF ARADRESSE_EXP , &
+          ADEADR3       OF ARADRESSE_EXP , &
+          ADEADR4       OF ARADRESSE_EXP , &
+          ADECP         OF ARADRESSE_EXP , &
+          ADETEL        OF ARADRESSE_EXP , &
+          ADEFAX        OF ARADRESSE_EXP , &
+          CDECLE        OF WAR335A       , &
+          PRDCLE        OF WAR335A       , &
+          CDEDSCPRD     OF WAR335A       , &
+          CDETAXCODTVQ  OF WAR335A       , &
+          CDETAXCODTPS  OF WAR335A       , &
+          CDEQTECOM     OF WAR335A       , &
+          CDEPRIUNI     OF WAR335A       , &
+          UNACLE        OF WAR335A       , &
+          REQCLE        OF WAR335A       , &
+          CDEDATLIVPRE  OF WAR335A       , &
+          CDELIE        OF WAR335A       , &
+          CDEMNTTOT     OF WAR335A       , &
+          CDEMNTNET     OF WAR335A       , &
+          CDEMNTTPS     OF WAR335A       , &
+          CDEMNTTVQ     OF WAR335A       , &
+          CDNSEQ        OF ARCDE_NOTE    , &
+          T_CDNDSCESP   ALIAS CDNDSC     , &
+          T_TMPMEM      ALIAS TMPMEM     , &
+          T_TMPTRI1     ALIAS TMPTRI     , &
+          G_REIIMP                       , &
+          G_DUPIMP                      
+@ENDIF
+
+SUBFILE WAR335B KEEP IF RECORD ARCDE_NOTE EXIST &
+                     AT CDECLE OF WAR335A  & 
+               ALIAS A2_WAR335B            &
+  INCLUDE CIECLE        OF ARCOMMANDE    , &
+          ENTCLE        OF ARCOMMANDE    , &
+          CMDCLE        OF ARCOMMANDE    , &
+          CMDAJT        OF ARCOMMANDE    , &
+          FOUCIECLE     OF ARCOMMANDE    , &
+          FOUCLE        OF ARCOMMANDE    , &
+          REFCLETYP     OF ARCOMMANDE    , &
+          ADECLE        OF ARCOMMANDE    , &
+          RADCLE        OF ARCOMMANDE    , &
+          CMDDAT        OF ARCOMMANDE    , &
+          CMDCOM        OF ARCOMMANDE    , &
+          CMDNBRIMP     OF ARCOMMANDE    , &
+          CMDNBRDUP     OF ARCOMMANDE    , &
+          CMDLIE        OF ARCOMMANDE    , &
+          CDEFAB        OF ARCOMMANDE    , &
+          CDETRP        OF ARCOMMANDE    , &
+          CMDINDDNE     OF ARCOMMANDE    , &
+          CMDREQCLETMP  OF ARCOMMANDE    , &
+          CMDREQCLETMP2 OF ARCOMMANDE    , &
+          CMDREQCLETMP3 OF ARCOMMANDE    , &
+          CMDREQCLETMP4 OF ARCOMMANDE    , &
+          CMDREQCLETMP5 OF ARCOMMANDE    , &
+          FOCTERESCACH  OF VFOC_FOU      , &
+          FOCTERNET     OF VFOC_FOU      , &
+          DEVCLE        OF VFOC_FOU      , &
+          FOULNG        OF VFOC_FOU      , &
+          ADENOM        OF ARADRESSE_EXP , &
+          ADENOMABR     OF ARADRESSE_EXP , &
+          ADEADR1       OF ARADRESSE_EXP , &
+          ADEADR2       OF ARADRESSE_EXP , &
+          ADEADR3       OF ARADRESSE_EXP , &
+          ADEADR4       OF ARADRESSE_EXP , &
+          ADECP         OF ARADRESSE_EXP , &
+          ADETEL        OF ARADRESSE_EXP , &
+          ADEFAX        OF ARADRESSE_EXP , &
+          CDECLE        OF WAR335A       , &
+          PRDCLE        OF WAR335A       , &
+          CDEDSCPRD     OF WAR335A       , &
+          CDETAXCODTVQ  OF WAR335A       , &
+          CDETAXCODTPS  OF WAR335A       , &
+          CDEQTECOM     OF WAR335A       , &
+          CDEPRIUNI     OF WAR335A       , &
+          UNACLE        OF WAR335A       , &
+          REQCLE        OF WAR335A       , &
+          CDEDATLIVPRE  OF WAR335A       , &
+          CDELIE        OF WAR335A       , &
+          CDEMNTTOT     OF WAR335A       , &
+          CDEMNTNET     OF WAR335A       , &
+          CDEMNTTPS     OF WAR335A       , &
+          CDEMNTTVQ     OF WAR335A       , &
+          CDNSEQ        OF ARCDE_NOTE    , &
+          T_CDNDSCESP   ALIAS CDNDSC     , &
+          T_TMPMEM      ALIAS TMPMEM     , &
+          T_TMPTRI3     ALIAS TMPTRI     , &
+          G_REIIMP                       , &
+          G_DUPIMP                      
+
+SUBFILE WAR335C KEEP AT CMDAJT            &
+  INCLUDE CIECLE        OF ARCOMMANDE   , &
+          ENTCLE        OF ARCOMMANDE   , &
+          CMDCLE        OF ARCOMMANDE   , &
+          CMDAJT        OF ARCOMMANDE   , &
+          FOUCIECLE     OF ARCOMMANDE   , &
+          FOUCLE        OF ARCOMMANDE   , &
+          REFCLETYP     OF ARCOMMANDE   , &
+          ADECLE        OF ARCOMMANDE   , &
+          RADCLE        OF ARCOMMANDE   , &
+          CMDDAT        OF ARCOMMANDE   , &
+          CMDCOM        OF ARCOMMANDE   , &
+          CMDNBRIMP     OF ARCOMMANDE   , &
+          CMDNBRDUP     OF ARCOMMANDE   , &
+          CMDLIE        OF ARCOMMANDE   , &
+          CDEFAB        OF ARCOMMANDE   , &
+          CDETRP        OF ARCOMMANDE   , &
+          CMDINDDNE     OF ARCOMMANDE   , &
+          CMDREQCLETMP  OF ARCOMMANDE   , &
+          CMDREQCLETMP2 OF ARCOMMANDE   , &
+          CMDREQCLETMP3 OF ARCOMMANDE   , &
+          CMDREQCLETMP4 OF ARCOMMANDE   , &
+          CMDREQCLETMP5 OF ARCOMMANDE   , &
+          FOCTERESCACH  OF VFOC_FOU     , &
+          FOCTERNET     OF VFOC_FOU     , &
+          DEVCLE        OF VFOC_FOU     , &
+          FOULNG        OF VFOC_FOU     , &
+          ADENOM        OF ARADRESSE_EXP, &
+          ADENOMABR     OF ARADRESSE_EXP, &
+          ADEADR1       OF ARADRESSE_EXP, &
+          ADEADR2       OF ARADRESSE_EXP, &
+          ADEADR3       OF ARADRESSE_EXP, &
+          ADEADR4       OF ARADRESSE_EXP, &
+          ADECP         OF ARADRESSE_EXP, &
+          ADETEL        OF ARADRESSE_EXP, &
+          ADEFAX        OF ARADRESSE_EXP, &
+          CDECLE        OF WAR335A      , &
+          PRDCLE        OF WAR335A      , &
+          CDEDSCPRD     OF WAR335A      , &
+          CDETAXCODTVQ  OF WAR335A      , &
+          CDETAXCODTPS  OF WAR335A      , &
+          CDEQTECOM     OF WAR335A      , &
+          CDEPRIUNI     OF WAR335A      , &
+          UNACLE        OF WAR335A      , &
+          REQCLE        OF WAR335A      , &
+          CDEDATLIVPRE  OF WAR335A      , &
+          CDELIE        OF WAR335A      , &
+          CDEMNTTOT     OF WAR335A      , &
+          CDEMNTNET     OF WAR335A      , &
+          CDEMNTTPS     OF WAR335A      , &
+          CDEMNTTVQ     OF WAR335A      , &
+          CDNSEQ        OF ARCDE_NOTE   , &
+          CDNDSC        OF ARCDE_NOTE   , &
+          T_TMPMEM      ALIAS TMPMEM    , &
+          T_TMPTRI3     ALIAS TMPTRI    , &
+          G_REIIMP                      , &
+          G_DUPIMP                     
+
+SUBFILE WAR335V KEEP AT CDECLE            &
+  INCLUDE CIECLE        OF ARCOMMANDE   , &
+          ENTCLE        OF ARCOMMANDE   , &
+          CMDCLE        OF ARCOMMANDE   , &
+          CMDAJT        OF ARCOMMANDE   , &
+          FOUCIECLE     OF ARCOMMANDE   , &
+          FOUCLE        OF ARCOMMANDE   , &
+          REFCLETYP     OF ARCOMMANDE   , &
+          ADECLE        OF ARCOMMANDE   , &
+          RADCLE        OF ARCOMMANDE   , &
+          CMDDAT        OF ARCOMMANDE   , &
+          CMDCOM        OF ARCOMMANDE   , &
+          CMDNBRIMP     OF ARCOMMANDE   , &
+          CMDNBRDUP     OF ARCOMMANDE   , &
+          CMDLIE        OF ARCOMMANDE   , &
+          CDEFAB        OF ARCOMMANDE   , &
+          CDETRP        OF ARCOMMANDE   , &
+          CMDINDDNE     OF ARCOMMANDE   , &
+          CMDREQCLETMP  OF ARCOMMANDE   , &
+          CMDREQCLETMP2 OF ARCOMMANDE   , &
+          CMDREQCLETMP3 OF ARCOMMANDE   , &
+          CMDREQCLETMP4 OF ARCOMMANDE   , &
+          CMDREQCLETMP5 OF ARCOMMANDE   , &
+          FOCTERESCACH  OF VFOC_FOU     , &
+          FOCTERNET     OF VFOC_FOU     , &
+          DEVCLE        OF VFOC_FOU     , &
+          FOULNG        OF VFOC_FOU     , &
+          ADENOM        OF ARADRESSE_EXP, &
+          ADENOMABR     OF ARADRESSE_EXP, &
+          ADEADR1       OF ARADRESSE_EXP, &
+          ADEADR2       OF ARADRESSE_EXP, &
+          ADEADR3       OF ARADRESSE_EXP, &
+          ADEADR4       OF ARADRESSE_EXP, &
+          ADECP         OF ARADRESSE_EXP, &
+          ADETEL        OF ARADRESSE_EXP, &
+          ADEFAX        OF ARADRESSE_EXP, &
+          CDECLE        OF WAR335A      , &
+          PRDCLE        OF WAR335A      , &
+          CDEDSCPRD     OF WAR335A      , &
+          CDETAXCODTVQ  OF WAR335A      , &
+          CDETAXCODTPS  OF WAR335A      , &
+          CDEQTECOM     OF WAR335A      , &
+          CDEPRIUNI     OF WAR335A      , &
+          UNACLE        OF WAR335A      , &
+          REQCLE        OF WAR335A      , &
+          CDEDATLIVPRE  OF WAR335A      , &
+          CDELIE        OF WAR335A      , &
+          CDEMNTTOT     OF WAR335A      , &
+          CDEMNTNET     OF WAR335A      , &
+          CDEMNTTPS     OF WAR335A      , &
+          CDEMNTTVQ     OF WAR335A      , &
+          CDNSEQ        OF ARCDE_NOTE   , &
+          CDNDSC        OF ARCDE_NOTE   , &
+          T_TMPMEM      ALIAS TMPMEM    , &
+          T_TMPTRI3     ALIAS TMPTRI    , &
+          G_REIIMP                      , &
+          G_DUPIMP                     
+
+OUTPUT ARCOMMANDE UPDATE AT CMDAJT
+  ITEM CMDIMPPRE OF ARCOMMANDE FINAL "1" ; MP-00-03-14_S17.
+  ITEM CMDFLGIMP OF ARCOMMANDE FINAL "1"                         IF CMDSTU OF ARCOMMANDE <> "P"
+  ITEM CMDNBRIMP OF ARCOMMANDE FINAL CMDNBRIMP OF ARCOMMANDE + 1 IF CMDSTU OF ARCOMMANDE <> "P" AND G_REIIMP = "1"
+  ITEM CMDNBRDUP OF ARCOMMANDE FINAL CMDNBRDUP OF ARCOMMANDE + 1 IF CMDSTU OF ARCOMMANDE <> "P" AND G_DUPIMP = "1"
+
+;------------------------------------------------------------------------------
+;
+REQUEST EXTRAIRE_DESC_PRODUIT
+
+ACCESS *WAR335V                    &
+
+  LINK  CIECLE    OF WAR335V     , &
+        PRDCLE    OF WAR335V       &
+    TO  CIECLE                   , &
+        PRDCLE    OF ARPRODUIT
+
+OUTPUT *WAR335B ALIAS A01_WAR335B ADD IF PRDTYP OF ARPRODUIT <> 'D' AND PRDDSC2 OF ARPRODUIT <> ' '
+  ITEM CDNDSC   OF A01_WAR335B FINAL PRDDSC2 OF ARPRODUIT
+  ITEM TMPMEM   OF A01_WAR335B FINAL "0"
+  ITEM TMPTRI   OF A01_WAR335B FINAL "1"
+
+;OUTPUT *WAR335B ALIAS A02_WAR335B ADD IF PRDTYP OF ARPRODUIT <> 'D' AND PRDDSC3 OF ARPRODUIT <> ' '
+;  ITEM CDNDSC   OF A02_WAR335B FINAL PRDDSC3 OF ARPRODUIT
+;  ITEM TMPMEM   OF A02_WAR335B FINAL "0"
+;  ITEM TMPTRI   OF A02_WAR335B FINAL "3"
+
+
+;-------------------------------------------------------------------------------
+;
+REQUEST EXTRAIRE_MEMO
+
+ACCESS *WAR335C                &
+
+  LINK CIECLE     OF WAR335C , &
+       "2"                   , &
+       CMDCLE     OF WAR335C , &
+       FOUCLE     OF WAR335C   &
+  TO   CIECLE                , &
+       ARMTYP                , &
+       ARMNUMREF             , &
+       FOUCLE                  OF ARMEMO      OPTIONAL &
+
+  LINK CIECLE     OF ARMEMO  , &
+       ARMTIMSTP  OF ARMEMO    &
+  TO   CIECLE                , &
+       ARMTIMSTP               OF ARARM_LIGNE OPTIONAL
+
+DEFINE D_CMDCLE_TRI CHARACTER SIZE 10 = "1" + CMDCLE OF WAR335C      &
+                                     IF CMDCLE OF WAR335C[1:1] < "8" &
+                                   ELSE "0" + CMDCLE OF WAR335C
+
+SORT ON CIECLE OF WAR335C &
+     ON D_CMDCLE_TRI      &
+     ON CMDAJT OF WAR335C &
+     ON CDECLE OF WAR335C &
+     ON CDNSEQ OF WAR335C
+
+OUTPUT *WAR335B ADD IF RECORD ARARM_LIGNE EXIST 
+  ITEM CDNSEQ OF WAR335B FINAL ARLCLELIG OF ARARM_LIGNE
+  ITEM CDNDSC OF WAR335B FINAL ARLTXT    OF ARARM_LIGNE
+  ITEM TMPMEM OF WAR335B FINAL "1"
+  ITEM TMPTRI OF WAR335B FINAL "5"
+
+OUTPUT *WAR335B ALIAS A1_WAR335B ADD           &
+                   IF RECORD ARARM_LIGNE EXIST &
+                   AT CMDAJT OF WAR335C        
+  ITEM CDNSEQ OF A1_WAR335B FINAL ARLCLELIG OF ARARM_LIGNE
+  ITEM CDNDSC OF A1_WAR335B FINAL " "
+  ITEM TMPMEM OF A1_WAR335B FINAL "1"
+  ITEM TMPTRI OF A1_WAR335B FINAL "1"
+
+;OUTPUT *WAR335B ALIAS A2_WAR335B ADD           &
+;                   IF RECORD ARARM_LIGNE EXIST &
+;                   AT CMDAJT OF WAR335C        
+;  ITEM CDNSEQ OF A2_WAR335B FINAL ARLCLELIG OF ARARM_LIGNE
+;  ITEM CDNDSC OF A2_WAR335B FINAL "                     Mémo"
+;  ITEM TMPMEM OF A2_WAR335B FINAL "1"
+;  ITEM TMPTRI OF A2_WAR335B FINAL "2"
+
+;OUTPUT *WAR335B ALIAS A3_WAR335B ADD           &
+;                   IF RECORD ARARM_LIGNE EXIST &
+;                   AT CMDAJT OF WAR335C        
+;  ITEM CDNSEQ OF A3_WAR335B FINAL ARLCLELIG OF ARARM_LIGNE
+;  ITEM CDNDSC OF A3_WAR335B FINAL "                    ------"
+;  ITEM TMPMEM OF A3_WAR335B FINAL "1"
+;  ITEM TMPTRI OF A3_WAR335B FINAL "3"
+
+OUTPUT *WAR335B ALIAS A4_WAR335B ADD           &
+                   IF RECORD ARARM_LIGNE EXIST &
+                   AT CMDAJT OF WAR335C        
+  ITEM CDNSEQ OF A4_WAR335B FINAL ARLCLELIG OF ARARM_LIGNE
+  ITEM CDNDSC OF A4_WAR335B FINAL " "
+  ITEM TMPMEM OF A4_WAR335B FINAL "1"
+  ITEM TMPTRI OF A4_WAR335B FINAL "4"
+
+;------------------------------------------------------------------------------
+;
+REQUEST IDENTIFIER_LIGNE_BLANCHE
+
+ACCESS *WAR335B
+
+SORT ON CIECLE   OF WAR335B &
+     ON CMDCLE   OF WAR335B &
+     ON CMDAJT   OF WAR335B &
+     ON TMPMEM   OF WAR335B &
+     ON CDECLE   OF WAR335B &
+     ON TMPTRI   OF WAR335B &
+     ON CDNSEQ   OF WAR335B
+
+OUTPUT WAR335B UPDATE AT CMDAJT
+  ITEM TMPTRI OF WAR335B FINAL 'X' IF TMPMEM OF WAR335B = '0' AND TMPTRI OF WAR335B = '9'
+
+;------------------------------------------------------------------------------
+;
+REQUEST ELIMINER_LIGNE_BLANCHE
+
+ACCESS *WAR335B
+
+SELECT IF TMPTRI OF WAR335B <> 'X'
+
+temp t_ite_uc1 character size 162 ; MP-01-01-30_D104.
+temp t_ite_uc2 character size 162 ; MP-01-01-30_D104.
+temp t_ite_uc3 character size 003 ; MP-01-01-30_D104.
+
+SUBFILE WAR335D KEEP INCLUDE WAR335B  , &
+                             t_ite_uc1, & ; MP-01-01-30_D104.
+                             t_ite_uc2, & ; MP-01-01-30_D104.
+                             t_ite_uc3    ; MP-01-01-30_D104.
+
+;------------------------------------------------------------------------------
+; MP-01-01-30_D104.
+;
+request items_unites_comptes_1
+
+access *WAR335D
+
+sort on ciecle of WAR335D &
+     on cmdcle of WAR335D &
+     on cmdajt of WAR335D 
+
+subfile WAR335U keep at cmdajt of WAR335D  &
+                include ciecle of WAR335D, &
+                        cmdcle of WAR335D, &
+                        cmdajt of WAR335D
+
+;------------------------------------------------------------------------------
+; MP-01-01-30_D104.
+;
+request items_unites_comptes_2
+
+access *WAR335U link ciecle of WAR335U     , &
+                     cmdcle of WAR335U     , &
+                     cmdajt of WAR335U       &
+                  to ciecle                , &
+                     cmdcle                , &
+                     cmdajt of arcmd_detail
+
+define d_unt_cpt character size 15 = truncate(unacle of arcmd_detail) &
+                                   + "-"                              &
+                                   + cptcle of arcmd_detail
+
+sort on ciecle of WAR335U &
+     on cmdcle of WAR335U &
+     on cmdajt of WAR335U &
+     on d_unt_cpt
+
+temp t_ite       character size 162
+temp t_vir       character size 001
+temp t_ite_uc1   character size 162
+temp t_ite_id1   integer   size 002
+temp t_ite_uc2   character size 162
+temp t_ite_id2   integer   size 002
+temp t_ite_uc3   character size 003
+temp t_ite_all   integer   size 002
+
+item t_vir       = ","                                          &
+                if t_ite <> ""                                  &
+          reset to "" at d_unt_cpt                              
+                                                        
+item t_ite       = truncate(t_ite)                              &
+                 + truncate(t_vir)                              &
+                 + trunc(lj(asc(cdecle of arcmd_detail/1000)))  &
+                if "000" =  asc(cdecle of arcmd_detail,6)[4:3]  &
+              else truncate(t_ite)                              &
+                 + t_vir                                        &
+                 + trunc(lj(asc(cdecle of arcmd_detail/1000)))  &
+                 + "."                                          &
+                 + asc(cdecle of arcmd_detail,6)[4:3]           &
+          reset to "" at d_unt_cpt                              
+                                                        
+item t_ite_id1   = 1                                            &
+                if 162 <= size(truncate(t_ite_uc1))             &
+                        + size(truncate(t_ite))                 &
+                        + size(truncate(d_unt_cpt))             &
+                        + 4                                     &
+          reset to 0 at cmdajt                                  
+                                                                
+
+item t_ite_uc1   = truncate(t_ite_uc1)                          &
+                 + "  "                                         &
+                 + truncate(t_ite)                              &
+                 + ": "                                         &
+                 + truncate(d_unt_cpt)                          &
+                if t_ite_id1 = 0                                &
+                at d_unt_cpt                                    &
+          reset to "" at cmdajt                                 
+
+item t_ite_id2   = 1                                            &
+                if t_ite_id1 = 1                           and  &
+                   162 <= size(truncate(t_ite_uc2))             &
+                        + size(truncate(t_ite))                 &
+                        + size(truncate(d_unt_cpt))             &
+                        + 4                                     &
+          reset to 0 at cmdajt                                  
+
+item t_ite_uc2   = truncate(t_ite_uc2)                          &
+                 + "  "                                         &
+                 + truncate(t_ite)                              &
+                 + ": "                                         &
+                 + truncate(d_unt_cpt)                          &
+                if t_ite_id1 = 1                           and  &
+                   t_ite_id2 = 0                                &
+                at d_unt_cpt                                    &
+          reset to "" at cmdajt                                 
+                                                                
+item t_ite_uc3   = "..."                                        &
+                if t_ite_id2 = 1                                &
+          reset to "" at cmdajt                                 
+
+item t_ite_all = t_ite_all + 1                                  &
+              at d_unt_cpt                                      &
+          reset at cmdajt                                       
+          
+subfile WAR335X keep at cmdajt include ciecle of WAR335U      , &
+                                       cmdcle of WAR335U      , &
+                                       cmdajt of WAR335U      , &
+                                       t_ite_uc1              , &
+                                       t_ite_uc2              , &
+                                       t_ite_uc3              , &
+                                       t_ite_all              , &
+                                       d_unt_cpt                &
+                                 index WAR335U_IDX              &
+                               segment ciecle                 , &
+                                       cmdcle                 , &
+                                       cmdajt                   
+
+;------------------------------------------------------------------------------
+; MP-01-01-30_D104.
+;
+request items_unites_comptes_3
+
+access *WAR335D link ciecle of WAR335D , &
+                     cmdcle of WAR335D , &
+                     cmdajt of WAR335D   &
+                  to ciecle            , &
+                     cmdcle            , &
+                     cmdajt of *WAR335X
+
+output WAR335D update 
+  item t_ite_uc1 of WAR335D final "Tous les items sont imputés à: " &
+                                + d_unt_cpt of WAR335X              &
+                               if t_ite_uc1 of WAR335X = "" and     &
+                                  t_ite_uc2 of WAR335X = "" and     &
+                                  t_ite_all of WAR335X = 1          &
+                             else t_ite_uc1 of WAR335X              
+  item t_ite_uc2 of WAR335D final t_ite_uc2 of WAR335X
+  item t_ite_uc3 of WAR335D final " "                               &
+                               if t_ite_uc1 of WAR335X = "" and     &
+                                  t_ite_uc2 of WAR335X = "" and     &
+                                  t_ite_all of WAR335X = 1          &
+                             else t_ite_uc3 of WAR335X              
+
+;------------------------------------------------------------------------------
+;
+REQUEST COMPTER_LIGNES_PAR_COMMANDE_1
+
+ACCESS *WAR335D
+
+SORT ON CIECLE   OF WAR335D &
+     ON CMDCLE   OF WAR335D &
+     ON CMDAJT   OF WAR335D &
+     ON TMPMEM   OF WAR335D &
+     ON CDECLE   OF WAR335D &
+     ON TMPTRI   OF WAR335D &
+     ON CDNSEQ   OF WAR335D
+
+TEMP T_COMP_LIG INTEGER SIZE 4
+ITEM T_COMP_LIG COUNT RESET AT CMDAJT
+
+SUBFILE WAR335E KEEP AT CMDAJT INCLUDE WAR335D, T_COMP_LIG
+SUBFILE WAR335Y KEEP           INCLUDE WAR335D            
+
+;------------------------------------------------------------------------------
+;
+REQUEST COMPTER_LIGNES_PAR_COMMANDE_2
+
+ACCESS *WAR335Y
+
+SORTED ON CIECLE   OF WAR335Y &
+       ON CMDCLE   OF WAR335Y &
+       ON CMDAJT   OF WAR335Y &
+       ON CDECLE   OF WAR335Y 
+
+TEMP T_COMP_ITE INTEGER SIZE 4
+ITEM T_COMP_ITE COUNT AT CDECLE RESET AT CMDAJT
+
+SUBFILE WAR335Z KEEP AT CMDAJT INCLUDE CIECLE OF WAR335Y, &
+                                       CMDCLE OF WAR335Y, &
+                                       CMDAJT OF WAR335Y, &
+                                       T_COMP_ITE         &
+                                 INDEX WAR335Z_IDX        &
+                               SEGMENT CIECLE           , &
+                                       CMDCLE           , &
+                                       CMDAJT           
+
+;------------------------------------------------------------------------------
+;
+REQUEST COMPTER_LIGNES_PAR_COMMANDE_3
+
+ACCESS *WAR335E LINK CIECLE OF WAR335E, &
+                     CMDCLE OF WAR335E, &
+                     CMDAJT OF WAR335E  &
+                  TO CIECLE           , &
+                     CMDCLE           , &
+                     CMDAJT OF *WAR335Z  
+
+OUTPUT WAR335E UPDATE 
+  ITEM T_COMP_LIG OF WAR335E FINAL T_COMP_LIG OF WAR335E + T_COMP_ITE OF WAR335Z
+
+;------------------------------------------------------------------------------
+;
+REQUEST CONSERVER_NOMBRE_DE_PAGES
+
+ACCESS *WAR335E
+
+SUBFILE WAR335W KEEP INCLUDE CIECLE     OF WAR335E, &
+                             CMDCLE     OF WAR335E, &
+                             CMDAJT     OF WAR335E, &
+                             T_COMP_LIG OF WAR335E  &
+                       INDEX WAR335W_IDX            &
+                     SEGMENT CIECLE               , &
+                             CMDCLE               , &
+                             CMDAJT               
+
+;------------------------------------------------------------------------------
+;
+REQUEST AJOUTER_LIGNES_PAR_COMMANDE
+
+ACCESS *WAR335E
+
+SELECT IF 0 <> MOD(T_COMP_LIG OF WAR335E,22)
+
+; MP-01-01-30_D104. - Le nombre de ligne de détail par page est ramené de 27 à 24 afin de permettre
+;                     l'impression de la liste des items et de leur ventilation comptable.
+; MP-02-04-23_DD.   - Le nombre de ligne de détail par page est ramené de 24 à 22 afin de permettre
+;                     l'impression du rappel de l'Office de langue française.
+
+OUTPUT *WAR335D ALIAS A01_WAR335D ADD IF T_COMP_LIG OF WAR335E < (CEILING(T_COMP_LIG OF WAR335E/22) * 22)
+  ITEM CDNDSC OF A01_WAR335D FINAL " "
+  ITEM TMPMEM OF A01_WAR335D FINAL "2"
+  ITEM TMPTRI OF A01_WAR335D FINAL "1"
+
+OUTPUT *WAR335D ALIAS A02_WAR335D ADD IF T_COMP_LIG OF WAR335E < (CEILING(T_COMP_LIG OF WAR335E/22) * 22) - 1
+  ITEM CDNDSC OF A02_WAR335D FINAL " "
+  ITEM TMPMEM OF A02_WAR335D FINAL "2"
+  ITEM TMPTRI OF A02_WAR335D FINAL "1"
+
+OUTPUT *WAR335D ALIAS A03_WAR335D ADD IF T_COMP_LIG OF WAR335E < (CEILING(T_COMP_LIG OF WAR335E/22) * 22) - 2
+  ITEM CDNDSC OF A03_WAR335D FINAL " "
+  ITEM TMPMEM OF A03_WAR335D FINAL "2"
+  ITEM TMPTRI OF A03_WAR335D FINAL "1"
+
+OUTPUT *WAR335D ALIAS A04_WAR335D ADD IF T_COMP_LIG OF WAR335E < (CEILING(T_COMP_LIG OF WAR335E/22) * 22) - 3
+  ITEM CDNDSC OF A04_WAR335D FINAL " "
+  ITEM TMPMEM OF A04_WAR335D FINAL "2"
+  ITEM TMPTRI OF A04_WAR335D FINAL "1"
+
+OUTPUT *WAR335D ALIAS A05_WAR335D ADD IF T_COMP_LIG OF WAR335E < (CEILING(T_COMP_LIG OF WAR335E/22) * 22) - 4
+  ITEM CDNDSC OF A05_WAR335D FINAL " "
+  ITEM TMPMEM OF A05_WAR335D FINAL "2"
+  ITEM TMPTRI OF A05_WAR335D FINAL "1"
+
+OUTPUT *WAR335D ALIAS A06_WAR335D ADD IF T_COMP_LIG OF WAR335E < (CEILING(T_COMP_LIG OF WAR335E/22) * 22) - 5
+  ITEM CDNDSC OF A06_WAR335D FINAL " "
+  ITEM TMPMEM OF A06_WAR335D FINAL "2"
+  ITEM TMPTRI OF A06_WAR335D FINAL "1"
+
+OUTPUT *WAR335D ALIAS A07_WAR335D ADD IF T_COMP_LIG OF WAR335E < (CEILING(T_COMP_LIG OF WAR335E/22) * 22) - 6
+  ITEM CDNDSC OF A07_WAR335D FINAL " "
+  ITEM TMPMEM OF A07_WAR335D FINAL "2"
+  ITEM TMPTRI OF A07_WAR335D FINAL "1"
+
+OUTPUT *WAR335D ALIAS A08_WAR335D ADD IF T_COMP_LIG OF WAR335E < (CEILING(T_COMP_LIG OF WAR335E/22) * 22) - 7
+  ITEM CDNDSC OF A08_WAR335D FINAL " "
+  ITEM TMPMEM OF A08_WAR335D FINAL "2"
+  ITEM TMPTRI OF A08_WAR335D FINAL "1"
+
+OUTPUT *WAR335D ALIAS A09_WAR335D ADD IF T_COMP_LIG OF WAR335E < (CEILING(T_COMP_LIG OF WAR335E/22) * 22) - 8
+  ITEM CDNDSC OF A09_WAR335D FINAL " "
+  ITEM TMPMEM OF A09_WAR335D FINAL "2"
+  ITEM TMPTRI OF A09_WAR335D FINAL "1"
+
+OUTPUT *WAR335D ALIAS A10_WAR335D ADD IF T_COMP_LIG OF WAR335E < (CEILING(T_COMP_LIG OF WAR335E/22) * 22) - 9
+  ITEM CDNDSC OF A10_WAR335D FINAL " "
+  ITEM TMPMEM OF A10_WAR335D FINAL "2"
+  ITEM TMPTRI OF A10_WAR335D FINAL "1"
+
+OUTPUT *WAR335D ALIAS A11_WAR335D ADD IF T_COMP_LIG OF WAR335E < (CEILING(T_COMP_LIG OF WAR335E/22) * 22) - 10
+  ITEM CDNDSC OF A11_WAR335D FINAL " "
+  ITEM TMPMEM OF A11_WAR335D FINAL "2"
+  ITEM TMPTRI OF A11_WAR335D FINAL "1"
+
+OUTPUT *WAR335D ALIAS A12_WAR335D ADD IF T_COMP_LIG OF WAR335E < (CEILING(T_COMP_LIG OF WAR335E/22) * 22) - 11
+  ITEM CDNDSC OF A12_WAR335D FINAL " "
+  ITEM TMPMEM OF A12_WAR335D FINAL "2"
+  ITEM TMPTRI OF A12_WAR335D FINAL "1"
+
+OUTPUT *WAR335D ALIAS A13_WAR335D ADD IF T_COMP_LIG OF WAR335E < (CEILING(T_COMP_LIG OF WAR335E/22) * 22) - 12
+  ITEM CDNDSC OF A13_WAR335D FINAL " "
+  ITEM TMPMEM OF A13_WAR335D FINAL "2"
+  ITEM TMPTRI OF A13_WAR335D FINAL "1"
+
+OUTPUT *WAR335D ALIAS A14_WAR335D ADD IF T_COMP_LIG OF WAR335E < (CEILING(T_COMP_LIG OF WAR335E/22) * 22) - 13
+  ITEM CDNDSC OF A14_WAR335D FINAL " "
+  ITEM TMPMEM OF A14_WAR335D FINAL "2"
+  ITEM TMPTRI OF A14_WAR335D FINAL "1"
+
+OUTPUT *WAR335D ALIAS A15_WAR335D ADD IF T_COMP_LIG OF WAR335E < (CEILING(T_COMP_LIG OF WAR335E/22) * 22) - 14
+  ITEM CDNDSC OF A15_WAR335D FINAL " "
+  ITEM TMPMEM OF A15_WAR335D FINAL "2"
+  ITEM TMPTRI OF A15_WAR335D FINAL "1"
+
+OUTPUT *WAR335D ALIAS A16_WAR335D ADD IF T_COMP_LIG OF WAR335E < (CEILING(T_COMP_LIG OF WAR335E/22) * 22) - 15
+  ITEM CDNDSC OF A16_WAR335D FINAL " "
+  ITEM TMPMEM OF A16_WAR335D FINAL "2"
+  ITEM TMPTRI OF A16_WAR335D FINAL "1"
+
+OUTPUT *WAR335D ALIAS A17_WAR335D ADD IF T_COMP_LIG OF WAR335E < (CEILING(T_COMP_LIG OF WAR335E/22) * 22) - 16
+  ITEM CDNDSC OF A17_WAR335D FINAL " "
+  ITEM TMPMEM OF A17_WAR335D FINAL "2"
+  ITEM TMPTRI OF A17_WAR335D FINAL "1"
+
+OUTPUT *WAR335D ALIAS A18_WAR335D ADD IF T_COMP_LIG OF WAR335E < (CEILING(T_COMP_LIG OF WAR335E/22) * 22) - 17
+  ITEM CDNDSC OF A18_WAR335D FINAL " "
+  ITEM TMPMEM OF A18_WAR335D FINAL "2"
+  ITEM TMPTRI OF A18_WAR335D FINAL "1"
+
+OUTPUT *WAR335D ALIAS A19_WAR335D ADD IF T_COMP_LIG OF WAR335E < (CEILING(T_COMP_LIG OF WAR335E/22) * 22) - 18
+  ITEM CDNDSC OF A19_WAR335D FINAL " "
+  ITEM TMPMEM OF A19_WAR335D FINAL "2"
+  ITEM TMPTRI OF A19_WAR335D FINAL "1"
+
+OUTPUT *WAR335D ALIAS A20_WAR335D ADD IF T_COMP_LIG OF WAR335E < (CEILING(T_COMP_LIG OF WAR335E/22) * 22) - 19
+  ITEM CDNDSC OF A20_WAR335D FINAL " "
+  ITEM TMPMEM OF A20_WAR335D FINAL "2"
+  ITEM TMPTRI OF A20_WAR335D FINAL "1"
+
+OUTPUT *WAR335D ALIAS A21_WAR335D ADD IF T_COMP_LIG OF WAR335E < (CEILING(T_COMP_LIG OF WAR335E/22) * 22) - 20
+  ITEM CDNDSC OF A21_WAR335D FINAL " "
+  ITEM TMPMEM OF A21_WAR335D FINAL "2"
+  ITEM TMPTRI OF A21_WAR335D FINAL "1"
+
+;------------------------------------------------------------------------------
+;
+REQUEST SORT_SUBFILE
+
+ACCESS *WAR335D
+
+SORT ON CIECLE   OF WAR335D &
+     ON CMDCLE   OF WAR335D &
+     ON CMDAJT   OF WAR335D &
+     ON TMPMEM   OF WAR335D &
+     ON CDECLE   OF WAR335D &
+     ON TMPTRI   OF WAR335D &
+     ON CDNSEQ   OF WAR335D
+
+TEMP T_IND_TOT INTEGER   SIZE 002
+TEMP T_NBR_PAG INTEGER   SIZE 002
+
+SUBFILE WAR335F KEEP INCLUDE WAR335D  , &
+                             T_IND_TOT, &
+                             T_NBR_PAG
+
+;------------------------------------------------------------------------------
+;
+REQUEST IDENTIFIER_LIG_TOT
+
+ACCESS *WAR335F
+
+SORTED ON CIECLE   OF WAR335F &
+       ON CMDCLE   OF WAR335F &
+       ON CMDAJT   OF WAR335F &
+       ON TMPMEM   OF WAR335F &
+       ON CDECLE   OF WAR335F &
+       ON TMPTRI   OF WAR335F &
+       ON CDNSEQ   OF WAR335F
+
+OUTPUT WAR335F UPDATE AT CMDAJT
+  ITEM T_IND_TOT OF WAR335F FINAL 1
+
+;------------------------------------------------------------------------------
+;
+REQUEST CONSERVER_NBR_PAG
+
+ACCESS *WAR335F LINK CIECLE OF WAR335F, &
+                     CMDCLE OF WAR335F, &
+                     CMDAJT OF WAR335F  &
+                  TO CIECLE           , &
+                     CMDCLE           , &
+                     CMDAJT OF *WAR335W  
+
+SORTED ON CIECLE   OF WAR335F &
+       ON CMDCLE   OF WAR335F &
+       ON CMDAJT   OF WAR335F &
+       ON TMPMEM   OF WAR335F &
+       ON CDECLE   OF WAR335F &
+       ON TMPTRI   OF WAR335F &
+       ON CDNSEQ   OF WAR335F
+
+; MP-01-01-30_D104. - Le nombre de ligne de détail par page est ramené de 27 à 24 afin de permettre
+;                     l'impression de la liste des items et de leur ventilation comptable.
+; MP-02-04-23_DD.   - Le nombre de ligne de détail par page est ramené de 24 à 22 afin de permettre
+;                     l'impression du rappel de l'Office de langue française.
+
+OUTPUT WAR335F UPDATE 
+  ITEM T_NBR_PAG OF WAR335F FINAL CEILING(T_COMP_LIG OF WAR335W/22)
+
+
+BUILD

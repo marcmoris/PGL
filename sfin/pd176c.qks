@@ -1,0 +1,1050 @@
+;/T/ 2.2.2 Réception de diagramme
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1994-09-01
+;
+;    Description..: Ce pranorame permet de saisir la réception des diagrammes.
+;                   Les diagrammes recu proviennent des bons de commande de
+;                   transfert entre Granicor et une usine secondaire ou un
+;                   sous-contractant.
+;
+;/M/ Modification.: Denis Pouliot
+;    Date.........: 22 août 1996
+;    But..........: Ajouter mise à jour sur ciecle de PDREC_DIAGRAMME
+;                   Modifier mise à jour sur PDCAISSON pour utiliser A_CAI_FICH
+;                   Ajouter certains PUT manquant sur fichier DESIGNER.
+;                   (SOS # 312)
+;
+;
+;/M/ Programmeur..: Claudie Doyon
+;    Date.........: 27 Octobre 1999
+;    Description..: Modification de la procédure delete et appel la procédure
+;                   internal traiter_caisson_neg dans la préupdate aulieu 
+;                   de la delete. Donc ce qui empèche que les qtés emballées
+;                   soit mit à jour même si il n'y a pas de sauvegarde.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd176c ACTIONBAR                    &
+              MODE LABEL "" AT 2,80        &
+              NOACTION                     &
+              FIELDMARK RETAIN STARTUP     &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU ,      &
+                        T_CIENOM,          &
+                        T_FOUNOM,          &
+                        PDRECEPTION,       &
+                        PDBON_COMMANDE
+
+
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+USE ustrasse NOLIST
+
+
+;-------------------------------------------------------------------------------
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD176C"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+USE pd176c.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Vérification caisson " ACTION DESIGNER D001
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%Vérification caisson " ACTION DESIGNER D001
+@ENDIF
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; Nom compagnie
+TEMPORARY T_FOUNOM    CHARACTER SIZE 40 RESET AT STARTUP ; Nom du fournisseur
+
+TEMPORARY T_SITENT    CHARACTER SIZE 2 ; Site d'entrepôt
+
+TEMPORARY ASCNCOCAI        CHARACTER SIZE 9 ;variable test
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du volume d'une pièce de granit
+;
+USE usvarvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour l'appel des dépisteurs
+;
+
+TEMPORARY T_CAINUMCAI    CHARACTER SIZE 09
+
+
+;-------------------------------------------------------------------------------
+;
+; Sert à valider les codes bilingue et pour les sous-écrans de consultation
+;
+DEFINE    D_CAISTU       CHARACTER SIZE 16 = "CAISTU"
+TEMPORARY T_CAISTU       CHARACTER SIZE 04
+DEFINE    D_CAIETA       CHARACTER SIZE 16 = "CAIETA"
+TEMPORARY T_CAIETA       CHARACTER SIZE 04
+
+TEMPORARY T_CAISTU_E     CHARACTER SIZE 01 
+;-------------------------------------------------------------------------------
+;
+; Réception
+;
+
+FILE PDRECEPTION    MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Bon de commande
+;
+
+FILE PDBON_COMMANDE MASTER
+
+
+
+FILE PDREC_CAISSON ALIAS A_PDREC PRIMARY &
+                   NOITEM
+
+  ACCESS VIA     CIECLE,                        &
+                 RCTNUMREC                      &
+         USING   T_CIECLEMNU,                   &
+                 RCTNUMREC       OF PDRECEPTION &
+         ORDERBY CIECLE,                        &
+                 RCTNUMREC,                     &
+                 CAINUMCAI
+
+  ITEM RCTNUMREC OF A_PDREC INITIAL RCTNUMREC OF PDRECEPTION
+  ITEM CIECLE    OF A_PDREC INITIAL T_CIECLEMNU
+
+;-------------------------------------------------------------------------------
+;
+; Réception de caisson
+;
+
+FILE PDREC_CAISSON DETAIL &
+                   NOITEM  &
+                   OCCURS 11 TIMES
+
+  ACCESS VIA     CIECLE,                        &
+                 RCTNUMREC                      &
+         USING   T_CIECLEMNU,                   &
+                 RCTNUMREC       OF PDRECEPTION &
+         ORDERBY CIECLE,                        &
+                 RCTNUMREC,                     &
+                 CAINUMCAI
+
+  ITEM RCTNUMREC OF PDREC_CAISSON INITIAL RCTNUMREC OF PDRECEPTION
+  ITEM CIECLE    OF PDREC_CAISSON INITIAL T_CIECLEMNU
+;-------------------------------------------------------------------------------
+;
+; Caisson
+;
+
+FILE PDCAISSON REFERENCE OCCURS WITH PDREC_CAISSON
+
+  ACCESS VIA   CIECLE,   &
+               CAINUMCAI &
+         USING T_CIECLEMNU, &
+               CAINUMCAI OF PDREC_CAISSON
+
+
+  ITEM TPDTYPPRD OF PDREC_CAISSON INITIAL TPDTYPPRD OF PDCAISSON FIXED
+
+
+;-------------------------------------------------------------------------------
+;
+; Code bilingue (Statut du caisson)
+;
+
+FILE VCBI_DSC  REFERENCE &
+               ALIAS A_CBI_CAISTU OCCURS WITH PDREC_CAISSON
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_CAISTU,                             &
+               CAISTU OF PDCAISSON
+
+
+;-------------------------------------------------------------------------------
+;
+; Code bilingue (État du caisson)
+;
+
+FILE VCBI_DSC  REFERENCE &
+               ALIAS A_CBI_CAIETA OCCURS WITH PDREC_CAISSON
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_CAIETA,                             &
+               CAIETA OF PDCAISSON
+
+;-------------------------------------------------------------------------------
+;
+; Mise à jour du fichier des caissons
+;
+
+FILE PDCAISSON DESIGNER ALIAS A_CAI_FICH
+
+
+;-------------------------------------------------------------------------------
+;
+; Emballage diagramme
+;
+
+FILE PDEMBAL_DIAG DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+; Réception diagramme
+;
+
+FILE PDREC_DIAGRAMME DESIGNER
+
+
+;-------------------------------------------------------------------------------
+;
+; Détail du bon de commande
+;
+
+FILE PDDET_BON_COMMAN DESIGNER
+
+
+;-------------------------------------------------------------------------------
+;
+; Produit - Bon commande
+;
+
+FILE PDPROD_BON_CMD DESIGNER
+
+
+;-------------------------------------------------------------------------------
+;
+; Diagramme
+;
+
+FILE PDDIAGRAMME DESIGNER
+
+;
+; Compagnie
+;
+
+FILE MCCOMPAGNIE DESIGNER
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire au traitement
+;
+TEMPORARY T_SILENT       CHARACTER SIZE 01
+TEMPORARY T_TYPE_PRODUIT CHARACTER SIZE 02 INITIAL "DI" RESET AT STARTUP
+TEMPORARY T_OLD_VOL      FLOAT     SIZE 08
+TEMPORARY T_NEW_VOL      FLOAT     SIZE 08
+TEMPORARY T_OLD_SUR      FLOAT     SIZE 08
+TEMPORARY T_NEW_SUR      FLOAT     SIZE 08
+
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+
+SKIP
+
+
+TITLE &
+@IF FRANCAIS
+      " Réception de caisson " &
+@ELSE
+      " %%%Réception de caisson " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+
+ALIGN (,3,19) (,38,56)
+
+
+FIELD RCTNUMREC OF PDRECEPTION                &
+label "No. réception.:"&
+        DISPLAY                               &
+        PREDISPLAY REFRESH
+
+
+FIELD RCTDATREC OF PDRECEPTION                 FORMAT YYYYMMDD &
+PATTERN "####/##/##"&
+label "Date réception:"&
+        DISPLAY PREDISPLAY REFRESH
+
+
+ALIGN (,3,19) (,,38)
+
+
+FIELD FOUCLE       OF PDBON_COMMANDE          &
+label "Fournisseur...:"&
+        DISPLAY PREDISPLAY REFRESH
+
+
+FIELD T_FOUNOM                                &
+        DISPLAY PREDISPLAY REFRESH
+
+
+DRAW 8,2 TO 8,79
+
+
+SKIP TO LINE 08
+
+
+TITLE &
+@IF FRANCAIS
+      " Caisson " &
+@ELSE
+      " %%%Caisson " &
+@ENDIF
+      CENTERED AT ,1
+
+
+SKIP TO LINE 10
+
+TITLE &
+@IF FRANCAIS
+      " Caisson   Statut       Date emb. Site   État          Surface   Poids est." &
+@ELSE
+      "%%%isson   Statut       Date emb. Site   État          Surface   Poids est." &
+@ENDIF
+      AT ,2
+
+SKIP TO LINE 11
+
+
+ALIGN (2,2,3) (,,13) (,,15) (,,26) (,,37) (,,40) (,,43) (,,45) (,,56) (,,66)
+
+
+CLUSTER OCCURS WITH PDREC_CAISSON
+
+
+FIELD CAINUMCAI        OF PDREC_CAISSON    &
+        HIDDEN                             &
+        LABEL " "                          &
+        NUMERIC                            &
+        REQUIRED                           &
+        NOCHANGE                           &
+        LOOKUP ON PDCAISSON                &
+          MESSAGE 3129 ; Ce numéro de caisson n'existe pas
+
+
+FIELD CAISTU           OF PDCAISSON        &
+        DISPLAY
+
+
+FIELD CBIDSC           OF A_CBI_CAISTU     &
+        DISPLAY                            &
+        SIZE 10
+
+
+FIELD CAIDATEMB        OF PDCAISSON         FORMAT YYYYMMDD &
+PATTERN "####/##/##"&
+        DISPLAY
+
+
+FIELD CAISITEMB        OF PDCAISSON        &
+        DISPLAY
+
+
+FIELD CAISITENT        OF PDCAISSON        &
+        DISPLAY
+
+
+FIELD CAIETA           OF PDCAISSON        &
+        DISPLAY
+
+
+FIELD CBIDSC           OF A_CBI_CAIETA     &
+        DISPLAY                            &
+        SIZE 10
+
+
+FIELD CAIMC2           OF PDCAISSON        &
+        picture "^^^^.^^^^"&
+        DISPLAY
+
+
+FIELD CAIPOIEST        OF PDCAISSON        &
+        picture "^^^,^^^.^^^^"&
+        DISPLAY
+
+
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+PROCEDURE OUTPUT CAISITENT
+BEGIN
+  GET MCCOMPAGNIE VIA CIECLE USING T_CIECLEMNU OPT
+  IF ACCESSOK
+  THEN BEGIN
+         IF 0 <> SIZE(TRUNC(CIESITENT OF MCCOMPAGNIE))
+         THEN LET FIELDTEXT = CIESITENT OF MCCOMPAGNIE
+    END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Procedure pour le calcul du volume d'une pièce de granit
+;
+
+USE uscalvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel de dépisteur pour le champ
+;
+
+PROCEDURE INPUT CAINUMCAI
+BEGIN
+LET ASCNCOCAI = ASCII(NCONV(FIELDTEXT),9)
+
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CAINUMCAI = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd135 MODE F &
+                     PASSING T_CAINUMCAI, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_CAINUMCAI )
+  END
+END
+;---------------------------------------------------------------------------
+;-----verifier si le caisson fait parti du p\o
+
+PROCEDURE EDIT CAINUMCAI
+BEGIN
+   GET PDCAISSON  &
+      VIA   CIECLE,    &
+            CAINUMCAI, &
+            BCMNUMBCM  &
+      USING T_CIECLEMNU, &
+            ASCNCOCAI , &
+            BCMNUMBCM OF PDRECEPTION opt
+    IF NOT ACCESSOK
+    THEN BEGIN
+      ERROR "Le caisson n'est pas en relation avec le p\o !"
+    END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+
+PROCEDURE INTERNAL TRAITE_CAISSON
+BEGIN
+  ;
+  ; Recherche tous les diagrammes du caisson
+  ;
+  WHILE RETRIEVING PDEMBAL_DIAG &
+    VIA   CIECLE,          &
+          CAINUMCAI        &
+    USING T_CIECLEMNU,     &
+          CAINUMCAI        OF PDREC_CAISSON
+  BEGIN
+    ;
+    ; Recherche le caisson
+    ;
+    GET A_CAI_FICH OPTIONAL &
+      VIA   CIECLE,   &
+            CAINUMCAI &
+      USING T_CIECLEMNU, &
+            CAINUMCAI OF PDEMBAL_DIAG
+    IF NOT ACCESSOK
+    THEN BEGIN
+      ERROR "Le caisson n'existe pas au système !"
+    END
+    ;
+    ; Recherche le diagramme à traiter
+    ;
+    GET PDDIAGRAMME OPTIONAL &
+      VIA   CIECLE,          &
+            DIANUM002        &
+      USING T_CIECLEMNU,     &
+            DIANUM002        OF PDEMBAL_DIAG
+    IF NOT ACCESSOK
+    THEN BEGIN
+      ERROR "Le caisson doit obligatoirement être relié à un diagramme !"
+    END
+    ;
+    ; Pour chaque diagramme trouvé on met à jour
+    ; le détail du bon de commande.
+    ;
+    GET PDDET_BON_COMMAN OPTIONAL &
+      VIA   CIECLE,      &
+            BCMNUMBCM  , &
+            DIANUM002   & ; , &
+  ;          PRICODPRI    &
+      USING T_CIECLEMNU,                  &
+            BCMNUMBCM    OF PDRECEPTION,  &
+            DIANUM002    OF PDEMBAL_DIAG ;, &
+  ;          PRICODPRI    OF PDEMBAL_DIAG
+    IF NOT ACCESSOK
+    THEN BEGIN
+           ERROR &
+"Le lien entre le caisson / diagramme et détail (BC) n'est pas adéquat ! "
+    END
+    ;
+    ; Mise à jour du l'enregistrement des diagrammes donnés en sous-traitance
+    ; (Usine secondaire ou sous-contractant)
+    ;
+    GET PDPROD_BON_CMD OPTIONAL &
+      VIA   CIECLE,    &
+            BCMNUMBCM, &
+            DIANUM002  & ;, &
+ ;           PRICODPRI  &
+      USING T_CIECLEMNU,               &
+            BCMNUMBCM OF PDRECEPTION, &
+            DIANUM002 OF PDEMBAL_DIAG ;, &
+ ;           PRICODPRI OF PDEMBAL_DIAG
+
+    IF NOT ACCESSOK
+    THEN BEGIN
+      ERROR &
+"Le lien entre le caisson / diagramme et détail (BC) n'est pas adéquat ! "
+    END
+    ELSE BEGIN
+           ;
+           ; Le principe veut que l'on ne peu pas recevoir quelque
+           ; chose que l'on a déjà !
+           ;
+           GET MCCOMPAGNIE VIA CIECLE USING T_CIECLEMNU OPT
+           IF ACCESSOK
+           THEN BEGIN
+                  IF 0 <> SIZE(TRUNC(CIESITENT OF MCCOMPAGNIE))
+                  THEN BEGIN
+
+                  IF CIESITENT OF MCCOMPAGNIE = CAISITENT OF A_CAI_FICH
+                  THEN ERROR "Le caisson n'a pas le bon site d'entreposage !"
+
+                  END
+          END
+    END
+    ;
+    ;
+    ;
+
+    GET PDREC_DIAGRAMME OPTIONAL &
+      VIA   CIECLE,    &
+            RCTNUMREC, &
+            DIANUM002, &
+            BCMNUMBCM, &
+            PODNUMLIG  &
+      USING T_CIECLEMNU,              &
+            RCTNUMREC OF PDRECEPTION, &
+            DIANUM002 OF PDEMBAL_DIAG, &
+            BCMNUMBCM OF PDRECEPTION, &
+            PODNUMLIG OF PDDET_BON_COMMAN
+
+    ;
+    ; Mise à jour des informations du diagramme
+    ;
+    LET DIAQTEEMB OF PDDIAGRAMME = DIAQTEEMB OF PDDIAGRAMME + &
+                                   EMDQTEPRD OF PDEMBAL_DIAG
+;    IF BCMCODTYPBCM OF PDBON_COMMANDE = "T"
+;    THEN BEGIN
+;      LET DIAQTEPREUSC OF PDDIAGRAMME = DIAQTEPREUSC OF PDDIAGRAMME + &
+;                                        EMDQTEPRD OF PDEMBAL_DIAG
+;    END
+;    ELSE BEGIN
+;      LET DIAQTEPRESCT OF PDDIAGRAMME = DIAQTEPRESCT OF PDDIAGRAMME + &
+;                                        EMDQTEPRD OF PDEMBAL_DIAG
+;    END
+    ;
+    ;  Mise à jour des information sur le détail du bon de commande
+    ;
+    LET PODQTERCU        OF PDDET_BON_COMMAN = PODQTERCU        OF PDDET_BON_COMMAN + &
+                                               EMDQTEPRD        OF PDEMBAL_DIAG
+    LET PODVOLRCU        OF PDDET_BON_COMMAN = PODVOLRCU        OF PDDET_BON_COMMAN + &
+                                               (DIAVOLMC3       OF PDDIAGRAMME * EMDQTEPRD        OF PDEMBAL_DIAG)
+    LET PODSURRCU        OF PDDET_BON_COMMAN = PODSURRCU        OF PDDET_BON_COMMAN + &
+                                               (DIASURMC2       OF PDDIAGRAMME * EMDQTEPRD        OF PDEMBAL_DIAG)
+    LET PODRCU           OF PDDET_BON_COMMAN = "1"
+    IF PODQTECMD         OF PDDET_BON_COMMAN <= PODQTERCU OF PDDET_BON_COMMAN
+    THEN BEGIN
+      LET PODCPL           OF PDDET_BON_COMMAN = "1"
+    END
+    ;
+    ; Mise à jour du lien Produit - Bon de commande
+    ;
+    IF BCMCODTYPBCM OF PDBON_COMMANDE = "T" &
+       AND &
+       PBCQTECMDDBTUSC OF PDPROD_BON_CMD <> 0
+    THEN BEGIN
+      LET PBCQTERCUDBTUSC  OF PDPROD_BON_CMD = PBCQTERCUDBTUSC  OF PDPROD_BON_CMD + &
+                                               EMDQTEPRD        OF PDEMBAL_DIAG
+    END
+    IF BCMCODTYPBCM OF PDBON_COMMANDE = "T" &
+       AND &
+       PBCQTECMDFINUSC OF PDPROD_BON_CMD <> 0
+    THEN BEGIN
+      LET PBCQTERCUFINUSC  OF PDPROD_BON_CMD = PBCQTERCUFINUSC  OF PDPROD_BON_CMD + &
+                                               EMDQTEPRD        OF PDEMBAL_DIAG
+    END
+    IF BCMCODTYPBCM OF PDBON_COMMANDE <> "T" &
+       AND &
+       PBCQTECMDDBTSCT OF PDPROD_BON_CMD <> 0
+    THEN BEGIN
+      LET PBCQTERCUDBTSCT  OF PDPROD_BON_CMD = PBCQTERCUDBTSCT  OF PDPROD_BON_CMD + &
+                                               EMDQTEPRD        OF PDEMBAL_DIAG
+    END
+    IF BCMCODTYPBCM OF PDBON_COMMANDE <> "T" &
+       AND &
+       PBCQTECMDFINSCT OF PDPROD_BON_CMD <> 0
+    THEN BEGIN
+      LET PBCQTERCUFINSCT  OF PDPROD_BON_CMD = PBCQTERCUFINSCT  OF PDPROD_BON_CMD + &
+                                               EMDQTEPRD        OF PDEMBAL_DIAG
+    END
+
+    ;
+    ; Creation de l'enregistrement de reception de diagramme
+    ;
+    LET CIECLE           OF PDREC_DIAGRAMME = T_CIECLEMNU
+    LET RCTNUMREC        OF PDREC_DIAGRAMME = RCTNUMREC        OF PDRECEPTION
+    LET PJTABR           OF PDREC_DIAGRAMME = PJTABR           OF PDEMBAL_DIAG
+    LET DIANUMDIA002     OF PDREC_DIAGRAMME = DIANUMDIA002     OF PDEMBAL_DIAG
+    LET PODNUMLIG        OF PDREC_DIAGRAMME = PODNUMLIG        OF PDDET_BON_COMMAN
+    LET BCMNUMBCM        OF PDREC_DIAGRAMME = BCMNUMBCM        OF PDRECEPTION
+    LET RCDPRI           OF PDREC_DIAGRAMME = PRICODPRI        OF PDEMBAL_DIAG
+    LET RCDQTE           OF PDREC_DIAGRAMME = EMDQTEPRD        OF PDEMBAL_DIAG
+    LET RCDPRIUNI        OF PDREC_DIAGRAMME = PODPRI           OF PDDET_BON_COMMAN
+    LET DIANUM002        OF PDREC_DIAGRAMME = DIANUM002        OF PDEMBAL_DIAG
+    LET RCDFLGFIN        OF PDREC_DIAGRAMME = CAIETA           OF A_CAI_FICH
+
+    ;
+    ; Mise à jour information du caisson
+    ;
+
+    LET RCTNUMREC        OF A_CAI_FICH = RCTNUMREC        OF PDRECEPTION
+    LET BCMNUMBCM        OF A_CAI_FICH = BCMNUMBCM        OF PDRECEPTION
+
+
+    PUT PDREC_DIAGRAMME  RESET
+    PUT PDDET_BON_COMMAN RESET
+    PUT PDDIAGRAMME      RESET
+    PUT PDPROD_BON_CMD   RESET
+    PUT A_CAI_FICH       RESET
+  END
+  ;
+  ; Mise-à-jour pour maintenir le site d'entreposage du caisson
+  ;
+  GET MCCOMPAGNIE VIA CIECLE USING T_CIECLEMNU OPT
+  IF ACCESSOK
+  THEN BEGIN
+         IF 0 <> SIZE(TRUNC(CIESITENT OF MCCOMPAGNIE))
+         THEN BEGIN
+                GET A_CAI_FICH OPTIONAL &
+                    VIA   CIECLE,   &
+                          CAINUMCAI &
+                    USING T_CIECLEMNU, &
+                          CAINUMCAI OF PDREC_CAISSON
+                LET CAISITENT OF A_CAI_FICH = CIESITENT OF MCCOMPAGNIE
+                PUT A_CAI_FICH       RESET
+         END
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+
+PROCEDURE INTERNAL TRAITE_CAISSON_NEG
+BEGIN
+ ;
+  ; Recherche tous les diagrammes du caisson
+  ;
+  WHILE RETRIEVING PDEMBAL_DIAG &
+    VIA   CIECLE,          &
+          CAINUMCAI        &
+    USING T_CIECLEMNU,     &
+          CAINUMCAI        OF PDREC_CAISSON
+  BEGIN
+    ;
+    ; Recherche le caisson
+    ;
+    GET PDCAISSON &
+      VIA   CIECLE,   &
+            CAINUMCAI &
+      USING T_CIECLEMNU, &
+            CAINUMCAI OF PDEMBAL_DIAG opt
+    IF NOT ACCESSOK
+    THEN BEGIN
+      ERROR "Le caisson n'existe pas au système !"
+    END
+
+
+
+
+    ;
+    ; Recherche le diagramme à traiter
+    ;
+    GET PDDIAGRAMME &
+      VIA   CIECLE,          &
+            DIANUM002        &
+      USING T_CIECLEMNU,     &
+            DIANUM002        OF PDEMBAL_DIAG
+    IF NOT ACCESSOK
+    THEN BEGIN
+      ERROR "Le caisson doit obligatoirement être relié à un diagramme !"
+    END
+    ELSE BEGIN
+      LET DIAQTEEMB OF PDDIAGRAMME = DIAQTEEMB OF PDDIAGRAMME - &
+                                     EMDQTEPRD OF PDEMBAL_DIAG
+;      IF CAISITEMB OF PDCAISSON = "SC"
+;      THEN BEGIN
+;        LET DIAQTEPREUSC OF PDDIAGRAMME = DIAQTEPREUSC OF PDDIAGRAMME - &
+;                                          EMDQTEPRD OF PDEMBAL_DIAG
+;      END
+;      ELSE BEGIN
+;        LET DIAQTEPRESCT OF PDDIAGRAMME = DIAQTEPRESCT OF PDDIAGRAMME - &
+;                                          EMDQTEPRD OF PDEMBAL_DIAG
+;      END
+      PUT PDDIAGRAMME RESET
+    END
+    ;
+    ; Pour chaque diagramme trouvé on met à jour
+    ; le détail du bon de commande.
+    ;
+    GET PDDET_BON_COMMAN &
+      VIA   CIECLE,      &
+            BCMNUMBCM  , &
+            DIANUM002  & ; , &
+;            PRICODPRI    &
+      USING T_CIECLEMNU,                  &
+            BCMNUMBCM    OF PDRECEPTION,  &
+            DIANUM002    OF PDEMBAL_DIAG ; & ;, &
+;            PRICODPRI    OF PDEMBAL_DIAG
+    IF ACCESSOK
+    THEN BEGIN
+
+      GET PDPROD_BON_CMD OPTIONAL &
+        VIA   CIECLE,    &
+              BCMNUMBCM, &
+              DIANUM002  & ;, &
+;              PRICODPRI  &
+        USING T_CIECLEMNU,               &
+              BCMNUMBCM OF PDRECEPTION, &
+              DIANUM002 OF PDEMBAL_DIAG ;, &
+;              PRICODPRI OF PDEMBAL_DIAG
+
+      IF NOT ACCESSOK
+      THEN BEGIN
+        ERROR &
+"Le lien entre le caisson / diagramme et détail (BC) n'est pas adéquat ! "
+      END
+      ELSE BEGIN
+           ;
+           ; Le principe veut que l'on ne peu pas recevoir quelque
+           ; chose que l'on a déjà !
+           ;
+           GET MCCOMPAGNIE VIA CIECLE USING T_CIECLEMNU OPT
+           IF ACCESSOK
+           THEN BEGIN
+                  IF 0 <> SIZE(TRUNC(CIESITENT OF MCCOMPAGNIE))
+                  THEN BEGIN
+
+                  IF CIESITENT OF MCCOMPAGNIE = CAISITENT OF A_CAI_FICH
+                  THEN ERROR "Le caisson n'a pas le bon site d'entreposage !"
+
+                  END
+          END
+    END
+
+       LET PODQTERCU        OF PDDET_BON_COMMAN = PODQTERCU        OF PDDET_BON_COMMAN - &
+                                                  EMDQTEPRD        OF PDEMBAL_DIAG
+       LET PODVOLRCU        OF PDDET_BON_COMMAN = PODVOLRCU        OF PDDET_BON_COMMAN - &
+                                                  (DIAVOLMC3       OF PDDIAGRAMME * EMDQTEPRD        OF PDEMBAL_DIAG)
+       LET PODSURRCU        OF PDDET_BON_COMMAN = PODSURRCU        OF PDDET_BON_COMMAN - &
+                                                  (DIASURMC2       OF PDDIAGRAMME * EMDQTEPRD        OF PDEMBAL_DIAG)
+       IF  PODQTERCU        OF PDDET_BON_COMMAN > 0
+       THEN BEGIN
+         LET PODRCU           OF PDDET_BON_COMMAN = "1"
+       END
+       ELSE BEGIN
+         LET PODRCU           OF PDDET_BON_COMMAN = "0"
+       END
+       IF PODQTECMD         OF PDDET_BON_COMMAN <= PODQTERCU OF PDDET_BON_COMMAN
+       THEN BEGIN
+         LET PODCPL           OF PDDET_BON_COMMAN = "1"
+       END
+       ELSE BEGIN
+         LET PODCPL           OF PDDET_BON_COMMAN = "1"
+       END
+    IF BCMCODTYPBCM OF PDBON_COMMANDE = "T"
+    THEN BEGIN
+      LET PBCQTERCUDBTUSC  OF PDPROD_BON_CMD = PBCQTERCUDBTUSC  OF PDPROD_BON_CMD - &
+                                               EMDQTEPRD        OF PDEMBAL_DIAG
+    END
+    IF BCMCODTYPBCM OF PDBON_COMMANDE = "T"
+    THEN BEGIN
+      LET PBCQTERCUFINUSC  OF PDPROD_BON_CMD = PBCQTERCUFINUSC  OF PDPROD_BON_CMD - &
+                                               EMDQTEPRD        OF PDEMBAL_DIAG
+    END
+    IF BCMCODTYPBCM OF PDBON_COMMANDE <> "T"
+    THEN BEGIN
+      LET PBCQTERCUDBTSCT  OF PDPROD_BON_CMD = PBCQTERCUDBTSCT  OF PDPROD_BON_CMD - &
+                                               EMDQTEPRD        OF PDEMBAL_DIAG
+    END
+    IF BCMCODTYPBCM OF PDBON_COMMANDE <> "T"
+    THEN BEGIN
+      LET PBCQTERCUFINSCT  OF PDPROD_BON_CMD = PBCQTERCUFINSCT  OF PDPROD_BON_CMD - &
+                                               EMDQTEPRD        OF PDEMBAL_DIAG
+    END
+       PUT PDPROD_BON_CMD   RESET
+       PUT PDDET_BON_COMMAN RESET
+    END
+    ELSE BEGIN
+           ERROR &
+"Le lien entre le caisson / diagramme et détail (BC) n'est pas adéquat ! "
+    END
+
+;
+;remettre le site a son premier etat
+;
+    GET A_CAI_FICH OPTIONAL &
+     VIA   CIECLE,   &
+           CAINUMCAI &
+     USING T_CIECLEMNU, &
+           CAINUMCAI OF PDREC_CAISSON
+      LET CAISITENT OF A_CAI_FICH = CAISITEMB OF A_CAI_FICH
+
+      LET RCTNUMREC OF A_CAI_FICH = 0
+
+      PUT A_CAI_FICH
+
+
+
+    ;
+    ; Creation de l'enregistrement de reception de diagramme
+    ;
+    GET PDREC_DIAGRAMME OPTIONAL &
+      VIA   CIECLE,          &
+            RCTNUMREC,       &
+            PJTABR,          &
+            DIANUMDIA002,    &
+            BCMNUMBCM,       &
+            PODNUMLIG        &
+      USING T_CIECLEMNU,                      &
+            RCTNUMREC        OF PDRECEPTION, &
+            PJTABR           OF PDEMBAL_DIAG, &
+            DIANUMDIA002     OF PDEMBAL_DIAG, &
+            BCMNUMBCM        OF PDRECEPTION, &
+            PODNUMLIG        OF PDDET_BON_COMMAN
+    IF ACCESSOK
+    THEN BEGIN
+      DELETE PDREC_DIAGRAMME
+      PUT PDREC_DIAGRAMME
+    END
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation d'accès à la table
+  ;
+  FOR PDREC_CAISSON
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF PDREC_CAISSON &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF PDREC_CAISSON &
+       AND NOT NEWRECORD     OF PDREC_CAISSON &
+       AND NOT DELETEDRECORD OF PDREC_CAISSON &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+
+    ;
+    ; Évaluation des champs indiquant une mise à jour du bon de commande.
+    ;
+    IF NOT NEWRECORD OF PDREC_CAISSON AND &
+       ALTEREDRECORD OF PDREC_CAISSON
+    THEN BEGIN
+      LET RCTDATDERMAJ    OF PDRECEPTION = SYSDATE
+      LET RCTHREDERMAJ    OF PDRECEPTION = SYSTIME / 10000
+      LET RCTUSRDERMAJ    OF PDRECEPTION = LOGONID
+    END
+  END
+  ;
+  ; Mise à jour des quantités de diagramme
+  ;
+  FOR PDREC_CAISSON
+  BEGIN
+    ;
+    ; Nouvel enregistrement
+    ;
+    IF          NEWRECORD     OF PDREC_CAISSON &
+        AND NOT DELETEDRECORD OF PDREC_CAISSON
+    THEN BEGIN
+      DO INTERNAL TRAITE_CAISSON
+    END
+    ;
+    ; Detruit enregistrement
+    ;
+    IF         DELETEDRECORD OF PDREC_CAISSON &
+       AND NOT NEWRECORD     OF PDREC_CAISSON
+    THEN BEGIN
+      DO INTERNAL TRAITE_CAISSON_NEG
+    END
+
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Destruction des lignes de détail
+;
+PROCEDURE DELETE
+BEGIN
+  FOR PDREC_CAISSON
+  BEGIN
+     
+      IF CAISTU OF PDCAISSON <> "E"
+      THEN delete pdrec_caisson
+      ELSE LET T_CAISTU_E = "E"
+  END
+  IF T_CAISTU_E = "E"
+  THEN WARNING "Les caissons expédiés ne seront pas détruits."
+END
+
+PROCEDURE DETAIL DELETE
+BEGIN
+  IF CAISTU OF PDCAISSON = "E"
+  THEN WARNING "Vous ne pouvez supprimer un caisson expédié."
+  ELSE delete pdrec_caisson
+END
+
+
+PROCEDURE ENTRY
+    BEGIN
+      DISPLAY RCTNUMREC OF PDRECEPTION
+      DISPLAY RCTDATREC OF PDRECEPTION
+      DISPLAY FOUCLE OF PDBON_COMMANDE
+      DISPLAY T_FOUNOM
+      FOR PDREC_CAISSON
+        BEGIN
+      ACCEPT CAINUMCAI OF PDREC_CAISSON
+      DISPLAY CAISTU OF PDCAISSON
+      DISPLAY CBIDSC OF A_CBI_CAISTU
+      DISPLAY CAIDATEMB OF PDCAISSON
+      DISPLAY CAISITEMB OF PDCAISSON
+      DISPLAY CAISITENT OF PDCAISSON
+      DISPLAY CAIETA OF PDCAISSON
+      DISPLAY CBIDSC OF A_CBI_CAIETA
+      DISPLAY CAIMC2 OF PDCAISSON
+      DISPLAY CAIPOIEST OF PDCAISSON
+          END
+      END
+
+
+BUILD DETAIL LIST
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+**************************** Réception de diagramme ****************************
+*                                                                              *
+* No. réception.: xxxxxxxxx          Date réception:   xxxxxxxx                *
+* Fournisseur...: xxxxxx             xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  *
+*                                                                              *
+*********************************** Caisson ************************************
+*                                                                              *
+* Caisson   Statut       Date emb. Site   État            Surface   Poids est. *
+* xxxxxxxxx x xxxxxxxxxx xxxxxxxxxx xx xx x xxxxxxxxxx xxxxxxxxx xxxxxxxxxxxxx*
+* xxxxxxxxx x xxxxxxxxxx xxxxxxxx  xx xx  x xxxxxxxxxx  xxxxxxxxx xxxxxxxxxxxxx*
+* xxxxxxxxx x xxxxxxxxxx xxxxxxxx  xx xx  x xxxxxxxxxx  xxxxxxxxx xxxxxxxxxxxxx*
+* xxxxxxxxx x xxxxxxxxxx xxxxxxxx  xx xx  x xxxxxxxxxx  xxxxxxxxx xxxxxxxxxxxxx*
+* xxxxxxxxx x xxxxxxxxxx xxxxxxxx  xx xx  x xxxxxxxxxx  xxxxxxxxx xxxxxxxxxxxxx*
+* xxxxxxxxx x xxxxxxxxxx xxxxxxxx  xx xx  x xxxxxxxxxx  xxxxxxxxx xxxxxxxxxxxxx*
+* xxxxxxxxx x xxxxxxxxxx xxxxxxxx  xx xx  x xxxxxxxxxx  xxxxxxxxx xxxxxxxxxxxxx*
+* xxxxxxxxx x xxxxxxxxxx xxxxxxxx  xx xx  x xxxxxxxxxx  xxxxxxxxx xxxxxxxxxxxxx*
+* xxxxxxxxx x xxxxxxxxxx xxxxxxxx  xx xx  x xxxxxxxxxx  xxxxxxxxx xxxxxxxxxxxxx*
+* xxxxxxxxx x xxxxxxxxxx xxxxxxxx  xx xx  x xxxxxxxxxx  xxxxxxxxx xxxxxxxxxxxxx*
+* xxxxxxxxx x xxxxxxxxxx xxxxxxxx  xx xx  x xxxxxxxxxx  xxxxxxxxx xxxxxxxxxxxxx*
+*                                                                              *
+********************************************************************************
+@ENDIF

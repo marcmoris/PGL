@@ -1,0 +1,261 @@
+;/T/ Enregistrer les caissons.
+;
+;/P/ Programmeur..: René Bonneau
+;    Date Création: 1996-03-28
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   l'inventaire physique de caisson.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN ig004 ACTIONBAR                    &
+             MODE LABEL "" AT 2,80        &
+             NOACTION                     &
+             FIELDMARK RETAIN STARTUP     &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU ,      &
+                       T_CIENOM
+
+;-------------------------------------------------------------------------------
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "ig004"
+
+;-------------------------------------------------------------------------------
+; Documentation de l'écran.
+;
+USE ig004.hlp NOLIST
+
+;-------------------------------------------------------------------------------
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+;-------------------------------------------------------------------------------
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+;-------------------------------------------------------------------------------
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+; Fichier utiliser dans le dans l'écran
+;
+FILE INCAISSON PRIMARY OCCURS 18
+
+    ITEM CIECLE     OF INCAISSON INITIAL T_CIECLEMNU
+    ITEM ICANUMPGE  OF INCAISSON INIT FIRST(ICANUMPGE OF INCAISSON)
+    ITEM ICADATINV  OF INCAISSON INIT SYSDATE
+;    ITEM ICAHREINV  OF INCAISSON INIT SYSTIME
+
+FILE INCAISSON DESIGNER ALIAS INCAISSON_EXISTE
+;    SELECT IF CIECLE OF INCAISSON_EXISTE = T_CIECLEMNU
+
+FILE PDCAISSON     DESIGNER
+
+FILE PDPROJET        REFERENCE OCCURS WITH INCAISSON
+
+FILE INCAISSON DESIGNER ALIAS INCAISSON_BOUCLE
+;-------------------------------------------------------------------------------
+;Variables temporaires
+;
+TEMPORARY T_PJTABR       CHARACTER SIZE 2
+TEMPORARY T_PJTANN       CHARACTER SIZE 2
+TEMPORARY T_PJTNUMSEQ    CHARACTER SIZE 3
+TEMPORARY T_PJTNUMPRO    CHARACTER SIZE 7
+TEMPORARY T_CHAMP        INTEGER UNSIGNED SIZE 01
+TEMPORARY T_CAINUMCAI    CHARACTER SIZE 9
+
+TEMPORARY T_COMPTEUR        INT SIZE 2
+TEMPORARY T_COMPTEUR_BOUCLE INT SIZE 2
+
+TEMPORARY T_HEURE           CHAR SIZE 4
+TEMPORARY T_HEURE_BOUCLE    CHAR SIZE 4
+TEMPORARY T_TEMPS           CHAR SIZE 8
+TEMPORARY T_VARIABLE        CHAR SIZE 6
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      "CAISSONS DE PROJETS  " &
+@ELSE
+      "%%%CAISSONS DE PROJETS" &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+DRAW 3,01 TO 23,9
+
+SKIP TO LINE 4
+TITLE "PAGE" AT ,3
+
+SKIP
+ALIGN (,,2)
+FIELD ICANUMPGE OF INCAISSON           &
+        REQUIRED
+
+SKIP TO LINE 4
+TITLE "LOCAL  PROJET     CAISSON    COMMENTAIRE " AT ,14
+
+SKIP
+ALIGN(11,,14)(,,21)(,,32)(,,43)
+CLUSTER OCCURS WITH INCAISSON
+
+FIELD ICANUMLOC OF INCAISSON &
+         PATTERN "##^<"                     &
+         REQUIRED DUPLICATE
+
+FIELD PJTNUMPRO OF INCAISSON REQUIRED DUPLICATE &
+             LOOKUP ON PDPROJET   &
+                VIA   PJTNUMPRO ,  &
+                      CIECLE      &
+                USING PJTNUMPRO,  &
+                      T_CIECLEMNU &
+                MESSAGE 1807 ; "CE CODE DE PROJET EST INEXISTANT..."
+
+FIELD CAINUMCAI OF INCAISSON REQUIRED NUM SIGNIF 9 &
+              LOOKUP ON PDCAISSON &
+                 VIA   CAINUMCAI, &
+                       CIECLE     &
+                 USING CAINUMCAI, &
+                       T_CIECLEMNU OPTIONAL &
+                MESSAGE 1809 & ; "CE NUMERO DE CAISSON N'EXISTE PAS..."
+              ,NOTON INCAISSON_EXISTE &
+                 VIA   CAINUMCAI, &
+                       CIECLE     &
+                 USING CAINUMCAI, &
+                       T_CIECLEMNU OPTIONAL &
+                MESSAGE 1810 ; "CE NUMERO DE CAISSON FAIT DEJA PARTIE DE L'INVENTAIRE..."
+
+FIELD ICADESC OF INCAISSON &
+        FOR 1,35
+
+CLUSTER
+
+PROCEDURE INPUT ICANUMLOC
+BEGIN
+  IF 0 <> SIZE(TRUNC(FIELDTEXT))
+  THEN BEGIN
+    IF MATCHPATTERN(FIELDTEXT,"#^<")
+    THEN LET FIELDTEXT = "0" + FIELDTEXT
+  END
+END
+
+;-------------------------------------------------------------------------------
+; Appel de dépisteur pour le champ
+;
+PROCEDURE INPUT CAINUMCAI
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CAINUMCAI = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd135 MODE F &
+                     PASSING T_CAINUMCAI, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_CAINUMCAI )
+  END
+END
+
+;-------------------------------------------------------------------------------
+; Appel dépisteur No commande int (attention cet appel est particulier)
+;
+;PROCEDURE INPUT PJTABR
+;BEGIN
+;  IF 0 <> INDEX(FIELDTEXT,"*")
+;  THEN BEGIN
+;    LET T_PJTABR           = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+;    LET T_PJTANN           = ""
+;    LET T_PJTNUMSEQ        = ""
+;    LET T_PJTNUMPRO        = ""
+;    LET T_CHAMP            = 4
+;    RUN SCREEN ig129 MODE F                     &
+;                     PASSING T_PJTABR,          &
+;                             T_PJTANN,          &
+;                             T_PJTNUMSEQ,       &
+;                             T_PJTNUMPRO,       &
+;                             T_CHAMP,           &
+;                             T_CIECLEMNU
+;    LET FIELDTEXT          = TRUNCATE( T_PJTABR )
+;  END
+;END
+
+;------------------------------------------------------------------------------
+PROCEDURE PATH
+BEGIN
+  REQUEST ICANUMPGE OF INCAISSON
+  IF PROMPTOK
+  THEN LET PATH = 1
+  IF PATH = 0
+  THEN BEGIN
+    REQUEST CAINUMCAI OF INCAISSON
+    IF PROMPTOK
+    THEN LET PATH = 2
+    ELSE ERROR "UNE CLE EST REQUISE"
+  END
+END
+
+;-------------------------------------------------------------------------------
+PROCEDURE FIND
+BEGIN
+  FOR INCAISSON
+  BEGIN
+    IF PATH = 1
+    THEN GET INCAISSON VIA     CIECLE,           &
+                                   ICANUMPGE         &
+                           USING   T_CIECLEMNU,      &
+                                   ICANUMPGE       OPTIONAL
+
+    ELSE GET INCAISSON VIA     CIECLE,           &
+                                   CAINUMCAI         &
+                           USING   T_CIECLEMNU,      &
+                                   CAINUMCAI       OPTIONAL
+
+  END
+END
+
+PROCEDURE PREUPDATE
+BEGIN
+    LET T_COMPTEUR = 0
+    LET T_TEMPS    = ASCII(SYSTIME)
+    LET T_HEURE    = T_TEMPS[1:4]
+    LET T_COMPTEUR_BOUCLE = 0
+    WHILE RETRIEVING INCAISSON_BOUCLE VIA CIECLE, ICANUMPGE &
+                     USING CIECLE    OF INCAISSON, &
+                           ICANUMPGE OF INCAISSON
+    BEGIN
+      LET T_HEURE_BOUCLE = ASCII(ICAHREINV OF INCAISSON_BOUCLE)[1:4]
+      IF T_HEURE_BOUCLE = T_HEURE
+      THEN LET T_COMPTEUR_BOUCLE = &
+               NCONVERT(ASCII(ICAHREINV OF INCAISSON_BOUCLE)[5:2]) + 25
+    END
+    LET T_COMPTEUR = T_COMPTEUR_BOUCLE
+    FOR INCAISSON
+      BEGIN
+        IF NEWRECORD OF INCAISSON
+        THEN BEGIN
+           LET T_COMPTEUR = T_COMPTEUR + 1
+           LET T_VARIABLE = T_HEURE + ASCII(T_COMPTEUR,2)
+           LET ICAHREINV  OF INCAISSON = NCONVERT(T_VARIABLE) * 10000
+        END
+     END
+END
+
+BUILD

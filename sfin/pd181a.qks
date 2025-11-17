@@ -1,0 +1,294 @@
+;/T/ Gérer les tranches (Défauts de tranche)
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1994-09-23
+;
+;    Description..: Ce panorama permet d'enregister les défauts de tranche
+;
+;
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd181a ACTIONBAR                   &
+             MODE LABEL "" AT 2,80        &
+             NOACTION                     &
+             FIELDMARK RETAIN STARTUP     &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU ,      &
+                       T_CIENOM,          &
+                       PDTRANCHE
+
+
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD181A"
+
+
+;-------------------------------------------------------------------------------
+; Documentation de l'écran.
+;
+USE pd181a.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour l'appel des pop-up
+;
+TEMPORARY T_DTRCODDEF CHAR SIZE 04
+
+
+;-------------------------------------------------------------------------------
+;
+; Tranche
+;
+FILE PDTRANCHE MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Tranche défauts
+;
+FILE PDTRANCHE_DEF PRIMARY &
+                   NOITEM  &
+                   OCCURS 9
+
+  ACCESS VIA     CIECLE,                      &
+                 TRANUMTRA002                 &
+         USING   T_CIECLEMNU,                 &
+                 TRANUMTRA002 OF PDTRANCHE    &
+         ORDERBY CIECLE,                      &
+                 TRANUMTRA002,                &
+                 DTRCODDEF
+
+  ITEM TRANUMTRA002 OF PDTRANCHE_DEF INITIAL TRANUMTRA002 OF PDTRANCHE FIXED
+  ITEM CIECLE       OF PDTRANCHE_DEF INITIAL T_CIECLEMNU
+
+;-------------------------------------------------------------------------------
+;
+; Défauts de tranche
+;
+
+FILE PDDEF_DE_TRANCHE REFERENCE 
+
+  ACCESS VIA     CIECLE,                      &
+                 DTRCODDEF                    &
+         USING   T_CIECLEMNU,                 &
+                 DTRCODDEF OF PDTRANCHE_DEF
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Tranche " &
+@ELSE
+      " %%%Tranche " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP TO LINE 5
+
+ALIGN (,3,19)
+
+FIELD TRANUMTRA002 OF PDTRANCHE               &
+        DISPLAY                               &
+        NUMERIC                               &
+        BWZ                                   &
+        FIXED
+
+DRAW 7,2 TO 7,79
+
+SKIP TO LINE 7
+
+TITLE &
+@IF FRANCAIS
+      " Défauts de tranche " &
+@ELSE
+      " %%%Défauts de tranche " &
+@ENDIF
+      CENTERED AT ,1
+
+SKIP TO LINE 9
+
+TITLE &
+@IF FRANCAIS
+      " Code de défaut  Description " &
+@ELSE
+      " %%%Code de défaut  Description " &
+@ENDIF
+      AT  ,13
+
+SKIP TO LINE 11
+
+ALIGN (,,19) (,,30)
+
+CLUSTER OCCURS WITH PDTRANCHE_DEF
+
+FIELD DTRCODDEF OF PDTRANCHE_DEF &
+        HIDDEN                                &
+        REQUIRED                              &
+        LOOKUP ON PDDEF_DE_TRANCHE       &
+          VIA     CIECLE,                     &
+                  DTRCODDEF                   &
+          USING   T_CIECLEMNU,                &
+                  DTRCODDEF OF PDTRANCHE_DEF  &
+          MESSAGE 2954 ,                      & ; Ce code de défaut n'existe pas
+               NOTON PDTRANCHE_DEF                 &
+          VIA     CIECLE,                               &
+                  TRANUMTRA002,                         &
+                  DTRCODDEF                             &
+          USING   T_CIECLEMNU,                          &
+                  TRANUMTRA002    OF PDTRANCHE_DEF,     &
+                  DTRCODDEF       OF PDTRANCHE_DEF      &
+          MESSAGE 2956 ; Ce code de défaut existe déjà pour cette tranche
+
+
+FIELD DTRDSCFRA OF PDDEF_DE_TRANCHE &
+        DISPLAY
+
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du pop-up pour le choix des défauts.
+;
+
+PROCEDURE INPUT DTRCODDEF
+BEGIN
+
+
+
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_DTRCODDEF = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd116 MODE F &
+                     PASSING T_DTRCODDEF, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_DTRCODDEF )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  FOR PDTRANCHE_DEF
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF PDTRANCHE_DEF &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF PDTRANCHE_DEF &
+       AND NOT NEWRECORD     OF PDTRANCHE_DEF &
+       AND NOT DELETEDRECORD OF PDTRANCHE_DEF &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+  END
+END
+
+
+BUILD
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+*********************************** Tranche ************************************
+*                                                                              *
+* No. tranche...: xxxxxxxxx                                                    *
+*                                                                              *
+****************************** Défauts de tranche ******************************
+*                                                                              *
+*            Code de défaut  Description                                       *
+*                                                                              *
+*                 xx         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          *
+*                 xx         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          *
+*                 xx         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          *
+*                 xx         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          *
+*                 xx         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          *
+*                 xx         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          *
+*                 xx         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          *
+*                 xx         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          *
+*                 xx         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+********************************************************************************
+@ENDIF

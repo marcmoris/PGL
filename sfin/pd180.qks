@@ -1,0 +1,1305 @@
+;/T/ 2.1.2 Identifier le positionnement des blocs.
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1994-09-16
+;
+;    Description..: Cette unité de traitement permet d'inscrire dans la base
+;                   de données les blocs en cours de traitement. On identifie
+;                   les différentes étapes du traitement des blocs.
+;
+;/M/ François Déry, 12 mai 1999
+;       Ajout du in dict sur la transaction des séquences.
+;
+;/V/ Écran vérifier pour le passage à l'an 2000
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date..............: 28 juin 2001
+;    Description.......: En cas d'annulation ou de destruction de blocs, valider qu'aucun bloc n'est encore associé au montage.
+;
+;    Référence.........: Demande de changement 000141.
+;
+;    Signet............: MP-01-06-28_D141.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+SCREEN pd180 ACTIONBAR                    &
+             MODE LABEL "" AT 2,80        &
+             NOACTION                     &
+             FIELDMARK RETAIN STARTUP     &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU ,      &
+                       T_CIENOM
+
+;-------------------------------------------------------------------------------
+;
+; Déclaration de la transaction pour donner un numéro séquence
+;
+
+TRANSACTION NO_SEQ READ WRITE &
+                   RESERVING FOR PROTECTED WRITE PDSEQ_RAP_MONT IN DICT
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD180"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+USE pd180.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+TEMPORARY T-MESSAGE CHAR SIZE 50 RESET AT STARTUP
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables nécessaire pour le traitement
+;
+
+TEMPORARY T_TYFCODFIN        CHARACTER SIZE 04
+TEMPORARY T_SILENT           CHARACTER SIZE 01
+TEMPORARY T_SILENT_02        CHARACTER SIZE 01
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables néssaire pour l'appel des dépisteurs
+;
+
+TEMPORARY T_BLONUMGRA001APR  CHARACTER SIZE 04
+TEMPORARY T_BLONUMGRA002APR  CHARACTER SIZE 05
+TEMPORARY T_BLORECAPR        CHARACTER SIZE 01
+TEMPORARY T_CHAMP            INTEGER UNSIGNED SIZE 01
+TEMPORARY T_COD              INTEGER UNSIGNED SIZE 02
+TEMPORARY T_STU              CHARACTER SIZE 1
+
+
+;-------------------------------------------------------------------------------
+;
+; Sert à valider les codes bilingue et pour les sous-écrans de consultation
+;
+DEFINE    D_RMOSTU    CHARACTER SIZE 16 = "RMOSTU"
+TEMPORARY T_RMOSTU    CHARACTER SIZE 04
+
+
+;-------------------------------------------------------------------------------
+;
+; Dimension maximum et minimun
+;
+USE usdimprd NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du volume d'une pièce de granit
+;
+USE usvarvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Rapport de montage
+;
+
+FILE PDRAP_MONTAGE PRIMARY NOITEM
+
+  ACCESS VIA     CIECLE,          &
+                 RMSNUMSEQ        &
+         USING   T_CIECLEMNU,                      &
+                 RMSNUMSEQ        OF PDRAP_MONTAGE &
+         REQUEST RMSNUMSEQ        OF PDRAP_MONTAGE &
+         ORDERBY CIECLE,          &
+                 RMSNUMSEQ
+
+  ACCESS VIA     CIECLE      &
+         USING   T_CIECLEMNU &
+         ORDERBY CIECLE,     &
+                 RMSNUMSEQ
+
+  ITEM CIECLE           OF PDRAP_MONTAGE    INITIAL T_CIECLEMNU
+  ITEM RMODATCRE        OF PDRAP_MONTAGE    INITIAL SYSDATE
+  ITEM RMOHRECRE        OF PDRAP_MONTAGE    INITIAL SYSTIME / 10000
+  ITEM RMOUSRCRE        OF PDRAP_MONTAGE    INITIAL LOGONID
+  ITEM RMOSTU           OF PDRAP_MONTAGE    INITIAL "P"
+
+
+;-------------------------------------------------------------------------------
+;
+; Détail rapport de montage
+;
+
+FILE PDDET_RAP_MONT  DETAIL OCCURS 10 TIMES &
+                     NOITEM
+
+  ACCESS VIA     CIECLE,          &
+                 RMSNUMSEQ        &
+         USING   T_CIECLEMNU,                      &
+                 RMSNUMSEQ        OF PDRAP_MONTAGE &
+         ORDERBY CIECLE,          &
+                 RMSNUMSEQ,       &
+                 BLONUMBLOAPR,    &
+                 TYFCODFIN,       &
+                 RMDEPATRA
+
+  ITEM CIECLE       OF PDDET_RAP_MONT  INITIAL T_CIECLEMNU
+  ITEM RMSNUMSEQ    OF PDDET_RAP_MONT  INITIAL RMSNUMSEQ OF PDRAP_MONTAGE FIXED
+
+  ITEM BLONUMBLOAPR OF PDDET_RAP_MONT  FINAL   BLONUMGRA001APR OF PDDET_RAP_MONT   + &
+                                               BLONUMGRA002APR OF PDDET_RAP_MONT   + &
+                                               BLORECAPR       OF PDDET_RAP_MONT
+
+
+;-------------------------------------------------------------------------------
+;
+; Détail rapport de montage (Validation, mise à jour)
+;
+
+FILE PDDET_RAP_MONT  DESIGNER ALIAS RMD_DETAIL_RAP_MONT
+
+FILE PDMONTAGE_BLOC DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+; Bloc
+;
+
+FILE PDBLOC        REFERENCE OCCURS WITH PDDET_RAP_MONT
+
+  ACCESS VIA     CIECLE,                      &
+                 BLONUMGRA001APR,             &
+                 BLONUMGRA002APR,             &
+                 BLORECAPR                    &
+         USING   T_CIECLEMNU,                       &
+                 BLONUMGRA001APR OF PDDET_RAP_MONT, &
+                 BLONUMGRA002APR OF PDDET_RAP_MONT, &
+                 BLORECAPR       OF PDDET_RAP_MONT
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Bloc (Vérification)
+;
+
+FILE PDBLOC        DESIGNER ALIAS BLO_VERIF
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro séquentiel pour les rapports de montage
+;
+
+FILE PDSEQ_RAP_MONT  DESIGNER &
+                      TRANSACTION NO_SEQ
+
+
+;-------------------------------------------------------------------------------
+;
+; Détail planification sciage (VÉRIFICATION)
+;
+
+FILE PDDET_RAP_MONT  REFERENCE &
+                      ALIAS RMD_VERIF OCCURS WITH PDDET_RAP_MONT
+
+  ACCESS VIA     CIECLE,                      &
+                 BLONUMGRA001APR,             &
+                 BLONUMGRA002APR,             &
+                 BLORECAPR                    &
+         USING   T_CIECLEMNU,                       &
+                 BLONUMGRA001APR OF PDDET_RAP_MONT, &
+                 BLONUMGRA002APR OF PDDET_RAP_MONT, &
+                 BLORECAPR       OF PDDET_RAP_MONT
+
+  SELECT IF RMSNUMSEQ OF RMD_VERIF <> RMSNUMSEQ OF PDDET_RAP_MONT
+
+
+;-------------------------------------------------------------------------------
+;
+; Rapport de montage (VALIDATION)
+;
+
+FILE PDRAP_MONTAGE DESIGNER ALIAS RMO_VALID
+
+
+;-------------------------------------------------------------------------------
+;
+; Type de fini
+;
+
+FILE PDTYPE_FINI REFERENCE
+
+  ACCESS VIA     CIECLE,               &
+                 TYFCODFIN             &
+         USING   T_CIECLEMNU,          &
+                 TYFCODFIN OF PDDET_RAP_MONT
+
+
+;-------------------------------------------------------------------------------
+;
+; Cout de production
+;
+
+FILE PDCOUT_PRODUCT REFERENCE
+
+  ACCESS VIA     CIECLE,               &
+                 CPRANN                &
+         USING   T_CIECLEMNU,          &
+                 ASCII(SYSDATE)[1:4] &
+         ORDERBY CIECLE,               &
+                 CPRANN
+
+
+;-------------------------------------------------------------------------------
+;
+; Code bilingue (Statut)
+;
+
+FILE VCBI_DSC  REFERENCE &
+               ALIAS A_CBI_RMOSTU
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_RMOSTU,                             &
+               RMOSTU           OF PDRAP_MONTAGE
+
+
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Positionnement des blocs " &
+@ELSE
+      " %%%Positionnement des blocs " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+ALIGN (2,3,19)
+
+
+FIELD RMSNUMSEQ        OF PDRAP_MONTAGE    &
+        HIDDEN ID 5                        &
+        DISPLAY
+
+
+FIELD RMOPRI           OF PDRAP_MONTAGE    &
+        HIDDEN ID 10                       &
+        DEFAULT 99
+
+
+ALIGN (2,3,19) (,,24)
+
+
+FIELD RMOSTU           OF PDRAP_MONTAGE    &
+        HIDDEN ID 15                       &
+        DISPLAY ON ENTRY
+
+
+FIELD CBIDSC           OF A_CBI_RMOSTU     &
+        DISPLAY
+
+
+ALIGN (2,3,19)
+
+
+FIELD RMODSC001        OF PDRAP_MONTAGE    &
+        HIDDEN ID 20
+
+
+DRAW 9,2 TO 9,79
+
+SKIP TO LINE 9
+
+TITLE &
+@IF FRANCAIS
+      " Bloc " &
+@ELSE
+      " %%%Bloc " &
+@ENDIF
+      CENTERED AT ,1
+
+
+SKIP TO LINE 11
+
+
+TITLE &
+@IF FRANCAIS
+      "    No bloc       Fini      M3     Epais   % planif   Lame        M2 " &
+@ELSE
+      "%%% No bloc       Fini      M3     Epais   % planif   Lame        M2 " &
+@ENDIF
+      AT ,2
+
+SKIP TO LINE 12
+
+
+ALIGN (4,5,6) (,10,11) (,16,17) (,,21) (,,27) (,,38) (,,46) (,,56) (,,64)
+
+
+CLUSTER OCCURS WITH PDDET_RAP_MONT  ID BASE 25
+
+
+FIELD BLONUMGRA001APR  OF PDDET_RAP_MONT   &
+        HIDDEN                             &
+        LABEL " "                          &
+        REQUIRED                           &
+        NOCHANGE                           &
+        NUMERIC                            &
+        AUTONEXT                           &
+        DUPLICATE
+
+
+FIELD BLONUMGRA002APR  OF PDDET_RAP_MONT   &
+        HIDDEN                             &
+        LABEL "-"                          &
+        REQUIRED                           &
+        NOCHANGE                           &
+        NUMERIC                            &
+        AUTONEXT                           &
+        DUPLICATE
+
+
+FIELD BLORECAPR        OF PDDET_RAP_MONT   &
+        HIDDEN                             &
+        LABEL "-"                          &
+        NOCHANGE                           &
+        DUPLICATE
+
+
+FIELD T_SILENT                             &
+        SILENT                             &
+        LOOKUP ON PDBLOC                   &
+          VIA   CIECLE ,                   &
+                BLONUMGRA001APR,           &
+                BLONUMGRA002APR,           &
+                BLORECAPR                  &
+          USING T_CIECLEMNU ,                       &
+                BLONUMGRA001APR  OF PDDET_RAP_MONT, &
+                BLONUMGRA002APR  OF PDDET_RAP_MONT, &
+                BLORECAPR        OF PDDET_RAP_MONT  &
+          MESSAGE 2943 ; Ce numéro de bloc n'existe pas
+
+
+FIELD TYFCODFIN        OF PDDET_RAP_MONT   &
+        HIDDEN                             &
+        NUMERIC                            &
+        BWZ                                &
+        REQUIRED                           &
+        NOCHANGE                           &
+        DUPLICATE                          &
+        LOOKUP ON PDTYPE_FINI              &
+          MESSAGE 2911 ; Ce code de fini n'existe pas
+
+
+FIELD BLOVOLMC3NET     OF PDBLOC           &
+        DISPLAY
+
+
+FIELD RMDEPATRA        OF PDDET_RAP_MONT   &
+        HIDDEN                             &
+        REQUIRED                           &
+        NOCHANGE
+
+
+FIELD T_SILENT_02                          &
+        SILENT
+
+
+FIELD RMDPCTBLOPLA     OF PDDET_RAP_MONT   &
+        HIDDEN                             &
+        REQUIRED
+
+
+FIELD RMDEPATRTLAM     OF PDDET_RAP_MONT   &
+        HIDDEN
+
+
+FIELD RMDMC2NET        OF PDDET_RAP_MONT   &
+        HIDDEN                             &
+        DISPLAY
+
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procedure pour le calcul du volume d'une pièce de granit
+;
+
+USE uscalvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que le positionnement n'est pas annulé
+;
+
+PROCEDURE EDIT RMOSTU
+BEGIN
+  IF OLDVALUE(RMOSTU OF PDRAP_MONTAGE) = "A" &
+     AND &
+     FIELDTEXT <> "P"
+  THEN BEGIN
+    ERROR 3034 ; On ne peut modifier un positionnement annuler
+  END
+  ;
+  ; Valide que le statut saisit soit "A" Annuler (Par ce panorame seul possible)
+  ;
+  IF FIELDTEXT <> "A" &
+     AND &
+     FIELDTEXT <> "P"
+  THEN BEGIN
+    ERROR 2942 ; Ce statut est invalide
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que le positionnement n'est pas annulé
+;
+
+PROCEDURE EDIT RMOPRI
+BEGIN
+  IF RMOSTU           OF PDRAP_MONTAGE = "A"
+  THEN BEGIN
+    ERROR 3034 ; On ne peut modifier un positionnement annuler
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que le positionnement n'est pas annulé
+;
+
+PROCEDURE EDIT RMODSC001
+BEGIN
+  IF RMOSTU           OF PDRAP_MONTAGE    = "A"
+  THEN BEGIN
+    ERROR 3034 ; On ne peut modifier un positionnement annuler
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel dépisteur No bloc (attemtion cet appel est particulier)
+;
+
+PROCEDURE INPUT BLONUMGRA001APR
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_BLONUMGRA001APR  = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_BLONUMGRA002APR  = ""
+    LET T_BLORECAPR        = ""
+    LET T_CHAMP            = 1
+    LET T_COD              = 2
+    LET T_STU              = ""
+    RUN SCREEN pd121 MODE F &
+                     PASSING T_BLONUMGRA001APR, &
+                             T_BLONUMGRA002APR, &
+                             T_BLORECAPR,       &
+                             T_CHAMP,           &
+                             T_COD,             &
+                             T_STU,             &
+                             T_CIECLEMNU
+    LET FIELDTEXT                 = TRUNCATE( T_BLONUMGRA001APR )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel dépisteur No bloc (attemtion cet appel est particulier)
+;
+
+PROCEDURE INPUT BLONUMGRA002APR
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_BLONUMGRA001APR  = BLONUMGRA001APR OF PDDET_RAP_MONT
+    LET T_BLONUMGRA002APR  = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_BLORECAPR        = ""
+    LET T_CHAMP            = 2
+    LET T_COD              = 2
+    LET T_STU              = ""
+    RUN SCREEN pd121 MODE F &
+                     PASSING T_BLONUMGRA001APR, &
+                             T_BLONUMGRA002APR, &
+                             T_BLORECAPR,       &
+                             T_CHAMP,           &
+                             T_COD,             &
+                             T_STU,             &
+                             T_CIECLEMNU
+    LET BLONUMGRA001APR OF PDDET_RAP_MONT   = TRUNCATE( T_BLONUMGRA001APR )
+    LET FIELDTEXT                           = TRUNCATE( T_BLONUMGRA002APR )
+  END
+  IF 0 <> SIZE( TRUNCATE( T_BLONUMGRA002APR ) ) AND &
+     0 =  SIZE( TRUNCATE( FIELDTEXT) )
+  THEN BEGIN
+    LET FIELDTEXT                 = TRUNCATE( T_BLONUMGRA002APR )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel dépisteur No bloc (attemtion cet appel est particulier)
+;
+
+PROCEDURE INPUT BLORECAPR
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_BLONUMGRA001APR  = BLONUMGRA001APR OF PDDET_RAP_MONT
+    LET T_BLONUMGRA002APR  = BLONUMGRA001APR OF PDDET_RAP_MONT
+    LET T_BLORECAPR        = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_CHAMP            = 3
+    LET T_COD              = 2
+    LET T_STU              = ""
+    RUN SCREEN pd121 MODE F &
+                     PASSING T_BLONUMGRA001APR, &
+                             T_BLONUMGRA002APR, &
+                             T_BLORECAPR,       &
+                             T_CHAMP,           &
+                             T_COD,             &
+                             T_STU,             &
+                             T_CIECLEMNU
+    LET BLONUMGRA001APR OF PDDET_RAP_MONT   = TRUNCATE( T_BLONUMGRA001APR )
+    LET BLONUMGRA002APR OF PDDET_RAP_MONT   = TRUNCATE( T_BLONUMGRA002APR )
+    LET FIELDTEXT                           = TRUNCATE( T_BLORECAPR )
+  END
+  IF 0 <> SIZE( TRUNCATE( T_BLORECAPR ) ) AND &
+     0 = SIZE( TRUNCATE( FIELDTEXT) )
+  THEN BEGIN
+    LET FIELDTEXT                 = TRUNCATE( T_BLORECAPR )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide le statut du bloc
+;
+
+PROCEDURE PROCESS T_SILENT
+BEGIN
+  IF BLOSTU OF PDBLOC <> "I" &
+     AND &
+     BLOSTU OF PDBLOC <> "R" &
+     AND &
+     BLOSTU OF PDBLOC <> "A" &
+     AND &
+     BLOSTU OF PDBLOC <> "S"
+  THEN BEGIN
+    ERROR 2952 ; Le bloc est deja traité
+  END
+  ;
+  ; Valide que le bloc n'est pas sur un montage
+  ;
+  WHILE RETRIEVING RMD_DETAIL_RAP_MONT &
+    VIA   CIECLE,                    &
+          BLONUMGRA001APR,           &
+          BLONUMGRA002APR,           &
+          BLORECAPR                  &
+    USING T_CIECLEMNU,                        &
+          BLONUMGRA001APR  OF PDDET_RAP_MONT, &
+          BLONUMGRA002APR  OF PDDET_RAP_MONT, &
+          BLORECAPR        OF PDDET_RAP_MONT
+  BEGIN
+    IF RMSNUMSEQ OF PDDET_RAP_MONT <> RMSNUMSEQ OF RMD_DETAIL_RAP_MONT
+    THEN BEGIN
+      IF RMSNUMSEQ OF PDDET_RAP_MONT <> 0
+      THEN BEGIN
+        ERROR 2974 ; Ce numéro de bloc est déjà sur un montage
+      END
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur (popup) pour le champs
+;
+
+PROCEDURE INPUT TYFCODFIN
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TYFCODFIN = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd101 MODE F &
+                     PASSING T_TYFCODFIN, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_TYFCODFIN )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que l'épaisseur des tranche ne dépasse pas les dimansion limite
+;
+
+PROCEDURE PROCESS RMDEPATRA
+BEGIN
+  IF RMDEPATRA        OF PDDET_RAP_MONT  > T_DIM_MAX_EPA_TR &
+     OR &
+     RMDEPATRA        OF PDDET_RAP_MONT  < T_DIM_MIN_EPA_TR
+  THEN BEGIN
+    ERROR 2951 ; Cette dimension est hors des limites
+  END
+  ;
+  ; Calcul le M2 net a partir des dimension, du pourcentage et de l'epaisseur
+  ; du trait de scie.
+  ;
+  IF 0 <> RMDEPATRTLAM OF PDDET_RAP_MONT
+  THEN BEGIN
+    LET TZ_LARGEUR   = BLOLONNET        OF PDBLOC
+    LET TZ_HAUTEUR   = BLOHAUNET        OF PDBLOC
+    LET TZ_EPAISSEUR = BLOLARNET        OF PDBLOC
+    DO INTERNAL CALVOL
+    LET RMDMC2NET     OF PDDET_RAP_MONT  = (TZ_VOLUME * RMDPCTBLOPLA OF PDDET_RAP_MONT ) / &
+                                          ( (RMDEPATRA OF PDDET_RAP_MONT  + RMDEPATRTLAM OF PDDET_RAP_MONT  )/1000)
+    DISPLAY RMDMC2NET OF PDDET_RAP_MONT
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure de validation complexe pour une ligne de détail.
+; Il faut s'assurer qu'il n'existe pas 2 ligne de détail identique pour un bloc
+; sauf si une des ligne appartient à un montage annulé.
+;
+
+PROCEDURE EDIT T_SILENT_02
+BEGIN
+  WHILE RETRIEVING RMD_DETAIL_RAP_MONT &
+    VIA   CIECLE ,                   &
+          BLONUMGRA001APR,           &
+          BLONUMGRA002APR,           &
+          BLORECAPR,                 &
+          TYFCODFIN,                 &
+          RMDEPATRA                  &
+    USING T_CIECLEMNU,                          &
+          BLONUMGRA001APR  OF PDDET_RAP_MONT,   &
+          BLONUMGRA002APR  OF PDDET_RAP_MONT,   &
+          BLORECAPR        OF PDDET_RAP_MONT,   &
+          TYFCODFIN        OF PDDET_RAP_MONT,   &
+          RMDEPATRA        OF PDDET_RAP_MONT
+  BEGIN
+    GET RMO_VALID OPTIONAL &
+      VIA   CIECLE,        &
+            RMSNUMSEQ      &
+      USING T_CIECLEMNU,   &
+            RMSNUMSEQ OF RMD_DETAIL_RAP_MONT
+    IF ACCESSOK
+    THEN BEGIN
+      IF RMOSTU OF RMO_VALID <> "A"
+      THEN BEGIN
+        LET T-MESSAGE = "Ce bloc existe au montage " + &
+                        ASCII(RMSNUMSEQ OF RMD_DETAIL_RAP_MONT)
+        ERROR "Ce bloc est déjà associé à un montage"
+      END
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du M2 net planifier
+;
+
+PROCEDURE EDIT RMDPCTBLOPLA
+BEGIN
+  ;
+  ; Valide la partie décimale.
+  ;
+  USE usvaldec2 NOLIST
+  ;
+  ; Calcul le M2 net a partir des dimension, du pourcentage et de l'epaisseur
+  ; du trait de scie.
+  ;
+  IF 0 <> RMDEPATRTLAM OF PDDET_RAP_MONT
+  THEN BEGIN
+    LET TZ_LARGEUR   = BLOLONNET        OF PDBLOC
+    LET TZ_HAUTEUR   = BLOHAUNET        OF PDBLOC
+    LET TZ_EPAISSEUR = BLOLARNET        OF PDBLOC
+    DO INTERNAL CALVOL
+    LET RMDMC2NET     OF PDDET_RAP_MONT  = (TZ_VOLUME * FIELDVALUE ) / &
+                                          ( (RMDEPATRA OF PDDET_RAP_MONT + RMDEPATRTLAM OF PDDET_RAP_MONT )/1000)
+    DISPLAY RMDMC2NET OF PDDET_RAP_MONT
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Assigne ine valeur par défaut
+;
+
+PROCEDURE INPUT RMDEPATRTLAM
+BEGIN
+  IF 0 = SIZE(FIELDTEXT) AND ENTRYMODE
+  THEN BEGIN
+    LET FIELDTEXT = "11"
+;    LET FIELDTEXT = ASCII(CPREPATRTLAM OF PDCOUT_PRODUCT)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul le m2 net
+;
+
+PROCEDURE PROCESS RMDEPATRTLAM
+BEGIN
+  ;
+  ; Calcul le M2 net a partir des dimension, du pourcentage et de l'epaisseur
+  ; du trait de scie.
+  ;
+  LET TZ_LARGEUR   = BLOLONNET        OF PDBLOC
+  LET TZ_HAUTEUR   = BLOHAUNET        OF PDBLOC
+  LET TZ_EPAISSEUR = BLOLARNET        OF PDBLOC
+  DO INTERNAL CALVOL
+  LET RMDMC2NET     OF PDDET_RAP_MONT  = (TZ_VOLUME * RMDPCTBLOPLA OF PDDET_RAP_MONT ) / &
+                                          ( (RMDEPATRA OF PDDET_RAP_MONT  + RMDEPATRTLAM OF PDDET_RAP_MONT )/1000)
+  DISPLAY RMDMC2NET OF PDDET_RAP_MONT
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Permet la saisie de la ligne de détail si modification
+;
+
+PROCEDURE DESIGNER 25
+BEGIN
+  IF RMOSTU OF PDRAP_MONTAGE = "P"
+  THEN BEGIN
+    ACCEPT BLONUMGRA001APR  OF PDDET_RAP_MONT
+    ACCEPT BLONUMGRA002APR  OF PDDET_RAP_MONT
+    ACCEPT BLORECAPR        OF PDDET_RAP_MONT
+    ACCEPT TYFCODFIN        OF PDDET_RAP_MONT
+    ACCEPT RMDEPATRA        OF PDDET_RAP_MONT
+    ACCEPT RMDPCTBLOPLA     OF PDDET_RAP_MONT
+    ACCEPT RMDEPATRTLAM     OF PDDET_RAP_MONT
+    DISPLAY RMDMC2NET       OF PDDET_RAP_MONT
+  END
+  ELSE BEGIN
+    IF RMOSTU OF PDRAP_MONTAGE   = "B"
+    THEN BEGIN
+      ACCEPT TYFCODFIN        OF PDDET_RAP_MONT
+      ACCEPT RMDEPATRA        OF PDDET_RAP_MONT
+      ACCEPT RMDPCTBLOPLA     OF PDDET_RAP_MONT
+      ACCEPT RMDEPATRTLAM     OF PDDET_RAP_MONT
+      DISPLAY RMDMC2NET       OF PDDET_RAP_MONT
+    END
+    ELSE BEGIN
+      IF RMOSTU OF PDRAP_MONTAGE  = "A"
+      THEN BEGIN
+        ERROR 2934 ; On ne peut pas modifier un positionnement annuler
+      END
+      ELSE BEGIN
+        ERROR 3033 ; On ne peut pas ajouter ou modifier un positionnement en cours de sciage
+      END
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que le total du bloc planifier est de 100%
+;
+
+PROCEDURE INTERNAL VALIDE_BLOC
+BEGIN
+  WHILE RETRIEVING BLO_VERIF             &
+    VIA     CIECLE,                      &
+            BLONUMGRA001APR,             &
+            BLONUMGRA002APR,             &
+            BLORECAPR                    &
+    USING   T_CIECLEMNU,                       &
+            BLONUMGRA001APR OF PDDET_RAP_MONT, &
+            BLONUMGRA002APR OF PDDET_RAP_MONT, &
+            BLORECAPR       OF PDDET_RAP_MONT
+  BEGIN
+    IF 1.00 <> BLOTOTPCTPLA OF BLO_VERIF
+    THEN BEGIN
+      null
+;      WARNING 2953 ; Le pourcentage n'égale pas 100 %
+    END
+  END
+END
+
+
+PROCEDURE INTERNAL MAJ_POUR_BLOC
+BEGIN
+  GET RMD_DETAIL_RAP_MONT OPTIONAL &
+    VIA    CIECLE,           &
+           RMSNUMSEQ,        &
+           BLONUMGRA001APR,  &
+           BLONUMGRA002APR,  &
+           BLORECAPR,        &
+           RMDEPATRA,        &
+           TYFCODFIN         &
+    USING  T_CIECLEMNU,                                &
+           RMSNUMSEQ         OF PDDET_RAP_MONT,        &
+           BLONUMGRA001APR   OF PDDET_RAP_MONT,        &
+           BLONUMGRA002APR   OF PDDET_RAP_MONT,        &
+           BLORECAPR         OF PDDET_RAP_MONT,        &
+           RMDEPATRA         OF PDDET_RAP_MONT,        &
+           TYFCODFIN         OF PDDET_RAP_MONT
+  IF ACCESSOK
+  THEN BEGIN
+    IF RMDPCTBLOPLA OF PDDET_RAP_MONT <> RMDPCTBLOPLA OF RMD_DETAIL_RAP_MONT
+    THEN BEGIN
+      LET BLOTOTPCTPLA OF BLO_VERIF = BLOTOTPCTPLA     OF BLO_VERIF - &
+                                      RMDPCTBLOPLA     OF RMD_DETAIL_RAP_MONT + &
+                                      RMDPCTBLOPLA     OF PDDET_RAP_MONT
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDRAP_MONTAGE &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDRAP_MONTAGE &
+     AND NOT NEWRECORD     OF PDRAP_MONTAGE &
+     AND NOT DELETEDRECORD OF PDRAP_MONTAGE &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  FOR PDDET_RAP_MONT
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF PDDET_RAP_MONT  &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF PDDET_RAP_MONT  &
+       AND NOT NEWRECORD     OF PDDET_RAP_MONT  &
+       AND NOT DELETEDRECORD OF PDDET_RAP_MONT  &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+  END
+  ;
+  ; Valide que le bloc n'est pas une un autre rapport de positionnement
+  ;
+  IF RMOSTU OF PDRAP_MONTAGE <> "A"
+  THEN BEGIN
+    FOR PDDET_RAP_MONT
+    BEGIN
+      GET RMD_VERIF OPTIONAL
+      IF ACCESSOK
+      THEN BEGIN
+        GET RMO_VALID OPTIONAL &
+          VIA   CIECLE,   &
+                RMSNUMSEQ &
+          USING T_CIECLEMNU, &
+                RMSNUMSEQ OF PDRAP_MONTAGE
+        IF ACCESSOK AND RMOSTU OF RMO_VALID <> "A"
+        THEN BEGIN
+          ERROR 2938 ; Ce bloc est déjà sur un rapport de positionnement
+        END
+      END
+    END
+  END
+
+  ;
+  ; Calcul du % du bloc planifier
+  ;
+  IF RMOSTU OF PDRAP_MONTAGE <> "A"
+  THEN BEGIN
+    FOR PDDET_RAP_MONT
+    BEGIN
+      GET BLO_VERIF OPTIONAL                 &
+        VIA     CIECLE,                      &
+                BLONUMGRA001APR,             &
+                BLONUMGRA002APR,             &
+                BLORECAPR                    &
+        USING   T_CIECLEMNU,                       &
+                BLONUMGRA001APR OF PDDET_RAP_MONT, &
+                BLONUMGRA002APR OF PDDET_RAP_MONT, &
+                BLORECAPR       OF PDDET_RAP_MONT
+      IF ACCESSOK
+      THEN BEGIN
+        IF NEWRECORD OF PDDET_RAP_MONT
+        THEN BEGIN
+          LET BLOTOTPCTPLA OF BLO_VERIF = BLOTOTPCTPLA     OF BLO_VERIF + &
+                                          RMDPCTBLOPLA     OF PDDET_RAP_MONT
+        END
+        IF ALTEREDRECORD OF PDDET_RAP_MONT &
+           AND &
+           NOT DELETEDRECORD OF PDDET_RAP_MONT
+        THEN BEGIN
+            DO INTERNAL MAJ_POUR_BLOC
+        END
+        IF BLOTOTPCTPLA OF BLO_VERIF > 0.00 and NOT DELETEDRECORD OF PDDET_RAP_MONT
+        THEN BEGIN
+          LET BLOSTU OF BLO_VERIF = "S" ; Sciage
+        END
+        PUT BLO_VERIF
+      END
+    END
+  END
+  ELSE BEGIN
+    FOR PDDET_RAP_MONT
+    BEGIN
+      GET BLO_VERIF OPTIONAL                 &
+        VIA     CIECLE,                      &
+                BLONUMGRA001APR,             &
+                BLONUMGRA002APR,             &
+                BLORECAPR                    &
+        USING   T_CIECLEMNU,                       &
+                BLONUMGRA001APR OF PDDET_RAP_MONT, &
+                BLONUMGRA002APR OF PDDET_RAP_MONT, &
+                BLORECAPR       OF PDDET_RAP_MONT
+      IF ACCESSOK
+      THEN BEGIN
+       GET PDMONTAGE_BLOC OPT &
+          VIA     CIECLE,                 &
+                  BLONUMGRA001APR,        &
+                  BLONUMGRA002APR,        &
+                  BLORECAPR               &
+          USING   T_CIECLEMNU,                       &
+                  BLONUMGRA001APR OF PDDET_RAP_MONT,&
+                  BLONUMGRA002APR OF PDDET_RAP_MONT, &
+                  BLORECAPR       OF PDDET_RAP_MONT
+         IF ACCESSOK
+         THEN BEGIN
+          LET BLOTOTPCTPLA OF BLO_VERIF = 0.00
+          PUT BLO_VERIF
+         END
+         ELSE BEGIN
+          LET BLOSTU       OF BLO_VERIF = "I" ; Inventaire
+                        ;si pas dans montage
+          LET BLOTOTPCTPLA OF BLO_VERIF = 0.00
+          PUT BLO_VERIF
+         END
+    END
+   END
+  END
+  ;
+  ; Incrémentation du numéro de séquence
+  ;
+  IF 0 = RMSNUMSEQ        OF PDRAP_MONTAGE
+  THEN BEGIN
+    START TRANSACTION NO_SEQ
+    GET PDSEQ_RAP_MONT  OPTIONAL        &
+      VIA   CIECLE                      &
+      USING T_CIECLEMNU
+    IF NOT ACCESSOK
+    THEN BEGIN
+      LET CIECLE OF PDSEQ_RAP_MONT = T_CIECLEMNU
+    END
+    LET RMSNUMSEQ        OF PDSEQ_RAP_MONT  = RMSNUMSEQ        OF PDSEQ_RAP_MONT  + 1
+    LET RMSNUMSEQ        OF PDRAP_MONTAGE   = RMSNUMSEQ        OF PDSEQ_RAP_MONT
+    PUT PDSEQ_RAP_MONT
+    DISPLAY RMSNUMSEQ        OF PDRAP_MONTAGE
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procedure UPDATE
+;
+
+PROCEDURE UPDATE
+BEGIN
+  PUT PDRAP_MONTAGE
+  FOR PDDET_RAP_MONT
+  BEGIN
+    PUT PDDET_RAP_MONT
+  END
+  ;
+  ; Valide que le bloc est planifié à 100%
+  ;
+  IF RMOSTU OF PDRAP_MONTAGE <> "A"
+  THEN BEGIN
+    FOR PDDET_RAP_MONT
+    BEGIN
+      DO INTERNAL VALIDE_BLOC
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Permet d'afficher le numéro de montage
+;
+
+PROCEDURE POSTUPDATE
+BEGIN
+  IF CORRECTMODE
+  THEN BEGIN
+    DISPLAY RMSNUMSEQ        OF PDRAP_MONTAGE
+    WARNING = " "
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; procedure de destruction pour les lignes de détail
+;
+
+PROCEDURE DELETE
+BEGIN
+  ; ---------------------------------------------------------------------------
+  ; MP-01-06-28_D141.
+  ; En cas d'annulation, valider qu'aucun bloc n'est encore associé au montage.
+ 
+  GET PDMONTAGE_BLOC VIA RMSNUMSEQ                 , &
+                         CIECLE                      &
+                   USING RMSNUMSEQ OF PDRAP_MONTAGE, &
+                         CIECLE    OF PDRAP_MONTAGE  OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    ERROR "PD401 *E* Des blocs sont encore associés au montage"
+  END
+  ; ---------------------------------------------------------------------------
+
+  FOR PDDET_RAP_MONT
+  BEGIN
+    IF NOT DELETEDRECORD OF PDRAP_MONTAGE
+    THEN BEGIN
+      ;
+      ; Replace le bloc en inventaire
+      ;
+      IF BLOTOTPCTPLA OF PDBLOC  <= 0.00
+      THEN BEGIN
+      GET BLO_VERIF OPTIONAL                 &
+        VIA     CIECLE,                      &
+                BLONUMGRA001APR,             &
+                BLONUMGRA002APR,             &
+                BLORECAPR                    &
+        USING   T_CIECLEMNU,                       &
+                BLONUMGRA001APR OF PDDET_RAP_MONT, &
+                BLONUMGRA002APR OF PDDET_RAP_MONT, &
+                BLORECAPR       OF PDDET_RAP_MONT
+      IF ACCESSOK
+      THEN BEGIN
+       GET PDMONTAGE_BLOC OPT &
+          VIA     CIECLE,                 &
+                  BLONUMGRA001APR,        &
+                  BLONUMGRA002APR,        &
+                  BLORECAPR               &
+          USING   T_CIECLEMNU,                       &
+                  BLONUMGRA001APR OF PDDET_RAP_MONT,&
+                  BLONUMGRA002APR OF PDDET_RAP_MONT, &
+                  BLORECAPR       OF PDDET_RAP_MONT
+         IF ACCESSOK
+         THEN BEGIN
+          LET BLOTOTPCTPLA OF BLO_VERIF = 0.00
+          PUT BLO_VERIF
+         END
+         ELSE BEGIN
+          LET BLOSTU       OF BLO_VERIF = "I" ; Inventaire
+                        ;si pas dans montage
+          LET BLOTOTPCTPLA OF BLO_VERIF = 0.00
+          PUT BLO_VERIF
+         END
+     END
+     END
+    END
+    DELETE PDDET_RAP_MONT
+  END
+  ;
+  ; Mise à jour du statut
+  ;
+  LET RMOSTU           OF PDRAP_MONTAGE = "A"
+  PUT PDRAP_MONTAGE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+
+PROCEDURE DETAIL DELETE
+BEGIN
+  IF NOT DELETEDRECORD OF PDDET_RAP_MONT
+  THEN BEGIN
+     ; ---------------------------------------------------------------------------
+     ; MP-01-06-28_D141.
+     ; En cas d'annulation, valider que le bloc n'est encore associé au montage.
+
+     GET PDMONTAGE_BLOC VIA BLONUMGRA001APR                  , &
+                            BLONUMGRA002APR                  , &
+                            BLORECAPR                        , &
+                            CIECLE                           , &
+                            RMSNUMSEQ                          &
+                      USING BLONUMGRA001APR OF PDDET_RAP_MONT, &
+                            BLONUMGRA002APR OF PDDET_RAP_MONT, &
+                            BLORECAPR       OF PDDET_RAP_MONT, &
+                            T_CIECLEMNU                      , &
+                            RMSNUMSEQ                          OPTIONAL
+     IF ACCESSOK
+     THEN BEGIN
+       ERROR "PD402 *E* Ce bloc est encore associé au montage"
+     END
+     ; ---------------------------------------------------------------------------
+
+    ;
+    ; Replace le bloc en inventaire
+    ;
+    GET BLO_VERIF OPTIONAL                 &
+      VIA     CIECLE,                      &
+              BLONUMGRA001APR,             &
+              BLONUMGRA002APR,             &
+              BLORECAPR                    &
+      USING   T_CIECLEMNU,                       &
+              BLONUMGRA001APR OF PDDET_RAP_MONT, &
+              BLONUMGRA002APR OF PDDET_RAP_MONT, &
+              BLORECAPR       OF PDDET_RAP_MONT
+    IF ACCESSOK
+    THEN BEGIN
+      LET BLOTOTPCTPLA OF BLO_VERIF = BLOTOTPCTPLA     OF BLO_VERIF - &
+                                      RMDPCTBLOPLA     OF PDDET_RAP_MONT
+      GET PDMONTAGE_BLOC OPT &
+         VIA     CIECLE,                 &
+                 BLONUMGRA001APR,        &
+                 BLONUMGRA002APR,        &
+                 BLORECAPR               &
+         USING   T_CIECLEMNU,                       &
+                 BLONUMGRA001APR OF PDDET_RAP_MONT,&
+                 BLONUMGRA002APR OF PDDET_RAP_MONT, &
+                 BLORECAPR       OF PDDET_RAP_MONT
+      IF NOT ACCESSOK
+      THEN BEGIN
+         LET BLOSTU       OF BLO_VERIF = "I" ; Inventaire
+                        ;si pas dans montage
+      END
+
+      PUT BLO_VERIF
+
+    END
+  END
+
+  DELETE PDDET_RAP_MONT
+END
+
+
+BUILD
+
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+*************************** Positionnement des blocs ***************************
+*                                                                              *
+* Num. montage..: xxxxxxxxxxx                                                  *
+* Priorité......: xx                                                           *
+* Statut........: x    xxxxxxxxxxxxxxxxxxxxxxxxx                               *
+* Description...: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+************************************* Bloc *************************************
+*                                                                              *
+*    No bloc       Fini      M3     Epais   % planif   Lame        M2          *
+*    xxxx-xxxxx-x   xx    xxxxxxx    xxxx    xxxxxx    xxxx    xxxxxxxxxx      *
+*    xxxx-xxxxx-x   xx    xxxxxxx    xxxx    xxxxxx    xxxx    xxxxxxxxxx      *
+*    xxxx-xxxxx-x   xx    xxxxxxx    xxxx    xxxxxx    xxxx    xxxxxxxxxx      *
+*    xxxx-xxxxx-x   xx    xxxxxxx    xxxx    xxxxxx    xxxx    xxxxxxxxxx      *
+*    xxxx-xxxxx-x   xx    xxxxxxx    xxxx    xxxxxx    xxxx    xxxxxxxxxx      *
+*    xxxx-xxxxx-x   xx    xxxxxxx    xxxx    xxxxxx    xxxx    xxxxxxxxxx      *
+*    xxxx-xxxxx-x   xx    xxxxxxx    xxxx    xxxxxx    xxxx    xxxxxxxxxx      *
+*    xxxx-xxxxx-x   xx    xxxxxxx    xxxx    xxxxxx    xxxx    xxxxxxxxxx      *
+*    xxxx-xxxxx-x   xx    xxxxxxx    xxxx    xxxxxx    xxxx    xxxxxxxxxx      *
+*    xxxx-xxxxx-x   xx    xxxxxxx    xxxx    xxxxxx    xxxx    xxxxxxxxxx      *
+*                                                                              *
+********************************************************************************
+@ENDIF

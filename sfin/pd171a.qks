@@ -1,0 +1,1450 @@
+;/T/ 1.4.4 Détail du bon de commande P/O
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1994-07-26
+;
+;    Description..: Cette écran permet de faire la gestion du détail du bon de
+;                   commande.
+;
+;/M/ François Déry, 12 mai 1999
+;       Ajout de la transaction NO_SEQ car elle était référée sans être définie.
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd171a ACTIONBAR                         &
+              MODE LABEL "" AT 2,132            &
+              FROM 1,1 TO 23,132                &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              HELP POPUP FROM 4,9 TO 20,72      &
+              RECEIVING PDBON_COMMANDE,         &
+                        T_CIECLEMNU   ,         &
+                        T_CIENOM
+
+;
+TRANSACTION NO_SEQ READ WRITE &
+                   RESERVING FOR PROTECTED WRITE PDSEQ_BON_COMMAN IN DICT
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD171A"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+USE pd171a.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable servant a l'appel des dépisteurs
+;
+TEMPORARY T_INFO CHAR SIZE 20
+TEMPORARY T_TPDTYPPRD CHARACTER SIZE 04
+TEMPORARY T_TGRCODGRA CHARACTER SIZE 04
+TEMPORARY T_TYFCODFIN CHARACTER SIZE 04
+TEMPORARY T_SILENT CHAR SIZE 1
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du volume d'une pièce de granit
+;
+use usvarvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Dimension maximum et minimum des pièces de granit
+;
+
+USE usdimprd NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du prix d'une ligne de détail bon de commande
+;
+USE usvarprigra NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Bon de commande
+;
+FILE PDBON_COMMANDE MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Détail du bon de commande
+;
+FILE PDDET_BON_COMMAN PRIMARY &
+                      NOITEM  &
+                      OCCURS 11
+
+  ACCESS VIA     CIECLE,   &
+                 BCMNUMBCM &
+         USING   T_CIECLEMNU,                &
+                 BCMNUMBCM OF PDBON_COMMANDE &
+         ORDERBY CIECLE,    &
+                 BCMNUMBCM, &
+                 PODNUMLIG
+
+
+  ITEM CIECLE    OF PDDET_BON_COMMAN INITIAL T_CIECLEMNU
+  ITEM TPDTYPPRD OF PDDET_BON_COMMAN INITIAL "BL"
+  ITEM PODRCU    OF PDDET_BON_COMMAN INITIAL "0"
+  ITEM PODCPL    OF PDDET_BON_COMMAN INITIAL "0"
+  ITEM PODQTERCU OF PDDET_BON_COMMAN INITIAL 0
+  ITEM PODVOLCMD OF PDDET_BON_COMMAN INITIAL 0.00
+  ITEM PODSURCMD OF PDDET_BON_COMMAN INITIAL 0.00
+  ITEM PODVOLRCU OF PDDET_BON_COMMAN INITIAL 0.00
+  ITEM PODSURRCU OF PDDET_BON_COMMAN INITIAL 0.00
+  ITEM PODBLOC   OF PDDET_BON_COMMAN INITIAL " "
+  ITEM PODCODUNM OF PDDET_BON_COMMAN INITIAL " "
+  ITEM PODLONG   OF PDDET_BON_COMMAN INITIAL " "
+  ITEM PODHAUT   OF PDDET_BON_COMMAN INITIAL " "
+  ITEM PODLARG   OF PDDET_BON_COMMAN INITIAL " "
+  ITEM PODVOL    OF PDDET_BON_COMMAN INITIAL 0.00
+
+;-------------------------------------------------------------------------------
+;
+; Numéro séquentiel pour les bons de commande
+;
+
+FILE PDSEQ_BON_COMMAN DESIGNER &
+                      TRANSACTION NO_SEQ
+
+
+;-------------------------------------------------------------------------------
+;
+; Conversion unité mesure (utiliser dans le USE pour le calcul du prix).
+;
+
+FILE PDCONVERT_UN_M DESIGNER OPEN READ ALIAS A_CUM_UNM
+
+
+;-------------------------------------------------------------------------------
+;
+; Type de produit
+;
+
+FILE PDTYPE_PRODUIT DESIGNER OPEN READ ALIAS A_TPD_PRODUIT
+
+
+;-------------------------------------------------------------------------------
+;
+; Type de produit
+;
+
+FILE PDTYPE_PRODUIT REFERENCE
+
+  ACCESS VIA     CIECLE,                     &
+                 TPDTYPPRD                   &
+         USING   T_CIECLEMNU,                &
+                 TPDTYPPRD OF PDDET_BON_COMMAN
+
+
+;-------------------------------------------------------------------------------
+;
+; Type de granit
+;
+
+FILE PDTYPE_GRANIT REFERENCE
+
+  ACCESS VIA     CIECLE,                       &
+                 TGRCODGRA                     &
+         USING   T_CIECLEMNU,                  &
+                 TGRCODGRA OF PDDET_BON_COMMAN
+
+
+;-------------------------------------------------------------------------------
+;
+; Type de fini
+;
+
+FILE PDTYPE_FINI REFERENCE
+
+  ACCESS VIA     CIECLE,                       &
+                 TYFCODFIN                     &
+         USING   T_CIECLEMNU,                  &
+                 TYFCODFIN OF PDDET_BON_COMMAN
+
+
+;-------------------------------------------------------------------------------
+;
+; Fournisseurs
+
+FILE VFOC_FOU REFERENCE
+
+  ACCESS VIA     FOUCLE,                      &
+                 FOCCIECLE                    &
+         USING   FOUCLE    OF PDBON_COMMANDE, &
+                 T_CIECLEMNU
+
+;-------------------------------------------------------------------------------
+;
+; Variable servant au traitement
+;
+
+TEMPORARY T_NOLIG INT SIZE 04 RESET AT STARTUP ; Pour no ligne automatique.
+
+
+TEMPORARY T_OLD_MC3  FLOAT SIZE 8 ; Pour le calcul du volume
+TEMPORARY T_OLD_MC2  FLOAT SIZE 8 ; Pour le calcul de la surface
+TEMPORARY T_OLD_PRIX FLOAT SIZE 8 ; Prix calculer pour une ligne de détail
+TEMPORARY T_NEW_MC3  FLOAT SIZE 8 ; Pour le calcul du volume
+TEMPORARY T_NEW_MC2  FLOAT SIZE 8 ; Pour le calcul de la surface
+TEMPORARY T_NEW_PRIX FLOAT SIZE 8 ; Prix calculer pour une ligne de détail
+
+;-------------------------------------------------------------------------------
+
+
+USE usdrw132    NOLIST  ; Draw pour les écrans
+USE ustitstd132 NOLIST  ; En-tête pour les écrans
+USE ushilite    NOLIST  ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE " Bon de commande (P/O) " CENTERED AT ,1
+
+
+SKIP TO LINE 5
+
+ALIGN (,3,14) (,30,43) (,,50)
+
+
+FIELD BCMNUMBCM OF PDBON_COMMANDE &
+      LABEL "No de P/O:"          &
+      DISPLAY                     &
+      FIXED
+
+
+FIELD FOUCLE    OF PDBON_COMMANDE &
+      LABEL "Fournisseur:"        &
+      DISPLAY                     &
+      FIXED
+
+FIELD FOUNOM    OF VFOC_FOU       &
+      NOLABEL                     &
+      DISPLAY                     &
+      FIXED
+
+SKIP TO LINE 7
+
+TITLE " Détail du bon de commande (P/O) " CENTERED AT ,1
+
+
+SKIP TO LINE 9
+
+USE ustitoff NOLIST ; Pour placer le TITLE OFF
+
+TITLE "No. Type Cod Typ   Numéro       __________________Impérial________________ ___Métrique____           ______Quantité______    " AT ,3
+SKIP
+TITLE "lig prod gra fin   de bloc  U/M    Long        Haut      Larg      Volume  Long Haut Larg    Prix    commandée déjà reçue R C" AT ,3
+
+SKIP
+
+ALIGN (02,02,03) (,,08) (,,12) (,,16) (,,20) (,,31) (,,35) (,,46) (,,57) (,,68) (,,78) (,,83) (,,88) (,,94) (,,104) (,,115) (,,125) (,,127)
+
+CLUSTER OCCURS WITH PDDET_BON_COMMAN ID BASE 15
+
+FIELD PODNUMLIG OF PDDET_BON_COMMAN                        &
+      HIDDEN                                               &
+      LABEL " "                                            &
+      REQUIRED                                             &
+      NOCHANGE                                             &
+      LOOKUP NOTON PDDET_BON_COMMAN                        &
+               VIA CIECLE,                                 &
+                   BCMNUMBCM,                              &
+                   PODNUMLIG                               &
+             USING T_CIECLEMNU,                            &
+                   BCMNUMBCM OF PDBON_COMMANDE,            &
+                   PODNUMLIG OF PDDET_BON_COMMAN           &
+           MESSAGE 2921 ; Ce numéro de ligne existe déjà
+
+FIELD TPDTYPPRD OF PDDET_BON_COMMAN                        &
+      DUPLICATE                                            &
+      LOOKUP ON PDTYPE_PRODUIT                             &
+        MESSAGE 2918 ; Ce produit n'existe pas
+
+FIELD TGRCODGRA OF PDDET_BON_COMMAN                        &
+      REQUIRED                                             &
+      NUMERIC                                              &
+      BWZ                                                  &
+      DUPLICATE                                            &
+      LOOKUP ON PDTYPE_GRANIT                              &
+        MESSAGE 2910 ; Ce type de granit n'existe pas
+
+FIELD T_SILENT                                             &
+      SILENT
+
+FIELD TYFCODFIN OF PDDET_BON_COMMAN                        &
+      DEFAULT "00"                                         & ; fini indeterminer ou brut
+      NUMERIC                                              &
+      BWZ                                                  &
+      DUPLICATE                                            &
+      LOOKUP ON PDTYPE_FINI                                &
+        MESSAGE 2911 ; Ce type de fini n'existe pas
+
+FIELD PODBLOC   OF PDDET_BON_COMMAN                        &
+      UPSHIFT                                              &
+      REQUIRED                                             &
+      DUPLICATE                                          
+
+FIELD PODCODUNM OF PDDET_BON_COMMAN                        &
+      UPSHIFT                                              &
+      REQUIRED                                             &
+      DUPLICATE                                            &
+      SELECTBOX ON EDIT VALUES "M2", "M3", "P2", "P3"
+
+FIELD PODLONG   OF PDDET_BON_COMMAN                        &
+      REQUIRED                                             &
+      DUPLICATE                                            &
+      ENTRY IF PODCODUNM OF PDDET_BON_COMMAN = "P2" OR     &
+               PODCODUNM OF PDDET_BON_COMMAN = "P3"        
+
+FIELD PODHAUT   OF PDDET_BON_COMMAN                        &
+      REQUIRED                                             &
+      DUPLICATE                                            &
+      ENTRY IF PODCODUNM OF PDDET_BON_COMMAN = "P2" OR     &
+               PODCODUNM OF PDDET_BON_COMMAN = "P3"        
+
+FIELD PODLARG   OF PDDET_BON_COMMAN                        &
+      REQUIRED                                             &
+      DUPLICATE                                            &
+      ENTRY IF PODCODUNM OF PDDET_BON_COMMAN = "P2" OR     &
+               PODCODUNM OF PDDET_BON_COMMAN = "P3"        
+
+FIELD PODVOL    OF PDDET_BON_COMMAN                        &
+      REQUIRED                                             &
+      DUPLICATE                                            &
+      OUTPUT SCALE 2                                       &
+      SIGNIFICANCE 5                                       &
+      PICTURE "^,^^^.^^ "                                  &
+      ENTRY IF PODCODUNM OF PDDET_BON_COMMAN = "P2" OR     &
+               PODCODUNM OF PDDET_BON_COMMAN = "P3"        
+
+FIELD PODLON   OF PDDET_BON_COMMAN                         &
+      REQUIRED                                             &
+      DUPLICATE                                            &
+      ENTRY IF PODCODUNM OF PDDET_BON_COMMAN = "M2" OR     &
+               PODCODUNM OF PDDET_BON_COMMAN = "M3"        
+                                                         
+FIELD PODHAU    OF PDDET_BON_COMMAN                        &
+      REQUIRED                                             &
+      DUPLICATE                                            &
+      ENTRY IF PODCODUNM OF PDDET_BON_COMMAN = "M2" OR     &
+               PODCODUNM OF PDDET_BON_COMMAN = "M3"        
+                                                         
+FIELD PODEPA OF PDDET_BON_COMMAN                           &
+      REQUIRED                                             &
+      DUPLICATE                                            &
+      ENTRY IF PODCODUNM OF PDDET_BON_COMMAN = "M2" OR     &
+               PODCODUNM OF PDDET_BON_COMMAN = "M3"        
+                                                         
+FIELD PODPRI OF PDDET_BON_COMMAN                           &
+      REQUIRED                                             &
+      DUPLICATE                                            &
+      PICTURE "^,^^^.^^ "                                
+                                                        
+FIELD PODQTECMD OF PDDET_BON_COMMAN                        &
+      REQUIRED                                             &
+      DUPLICATE                                            &
+      PICTURE "^^^.^^^^ "                                
+                                                        
+FIELD PODQTERCU OF PDDET_BON_COMMAN                        &
+      DISPLAY                                              &
+      PICTURE "^^^.^^^^ "
+
+FIELD PODRCU    OF PDDET_BON_COMMAN                        &
+      DISPLAY                                            
+                                                         
+                                                         
+FIELD PODCPL    OF PDDET_BON_COMMAN                        &
+      DISPLAY                                            
+                                                         
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul du prix d'une ligne de détail bon commande
+;
+
+USE uscalprigra NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul du volume d'une pièce de granit
+;
+
+USE uscalvol NOLIST
+
+;-------------------------------------------------------------------------------
+;
+; Procedure permettant de générer le numéro de ligne automatique
+;
+
+PROCEDURE INPUT PODNUMLIG
+BEGIN
+  IF 0 = SIZE(FIELDTEXT ) AND &
+     PODNUMLIG OF PDDET_BON_COMMAN = 0
+  THEN BEGIN
+    LET FIELDTEXT = ASCII( T_NOLIG + 1 )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure permettant de générer le numéro de ligne automatique
+;
+
+PROCEDURE PROCESS PODNUMLIG
+BEGIN
+  LET T_NOLIG = PODNUMLIG OF PDDET_BON_COMMAN
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;  Appel du dépisteur (popup) pour le champs
+;
+
+PROCEDURE INPUT TPDTYPPRD
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TPDTYPPRD = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd118 MODE F &
+                     PASSING T_TPDTYPPRD,&
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_TPDTYPPRD )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide qu'il n'y a pas de diagramme sur ce type de bon de commande
+;
+
+PROCEDURE EDIT TPDTYPPRD
+BEGIN
+  IF TPDTYPPRD = "DI"
+  THEN BEGIN
+    ERROR 2929 ; On ne peut acheter un diagramme sur ce type de bon de commande
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur (popup) pour le champs
+;
+
+PROCEDURE INPUT TGRCODGRA
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TGRCODGRA = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd100 MODE F &
+                     PASSING T_TGRCODGRA, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_TGRCODGRA )
+  END
+END
+;----------------------------------------------------------------------------
+PROCEDURE EDIT T_SILENT
+BEGIN
+  GET PDTYPE_GRANIT OPT &
+   VIA CIECLE,TGRCODGRA USING T_CIECLEMNU,TGRCODGRA OF PDDET_BON_COMMAN
+  IF ACCESSOK
+  THEN LET T_INFO = TGRDSCFRA001 OF PDTYPE_GRANIT
+WARNING = T_INFO
+END
+;--------------------------------------------------------------------------
+; Appel du dépisteur (popup) pour le champ
+;
+
+PROCEDURE INPUT TYFCODFIN
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TYFCODFIN = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd101 MODE F &
+                     PASSING T_TYFCODFIN, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_TYFCODFIN )
+  END
+  ELSE BEGIN
+    IF 0 = SIZE(FIELDTEXT)
+    THEN BEGIN
+      LET FIELDTEXT = "00"
+    END
+  END
+END
+;-------------------------------------------------------------------------------
+;
+;
+;
+
+PROCEDURE EDIT TYFCODFIN
+BEGIN
+  IF "BL" = TPDTYPPRD OF PDDET_BON_COMMAN &
+     AND &
+     "00" <> FIELDTEXT
+  THEN BEGIN
+    ERROR 3115 ; Pour un bloc le fini de surface doit être brut
+  END
+LET T_INFO = TYFDSCFRA001 OF PDTYPE_FINI
+WARNING = T_INFO
+END
+
+;-------------------------------------------------------------------------------
+;
+
+PROCEDURE INPUT PODCODUNM OF PDDET_BON_COMMAN
+BEGIN
+  IF 0=SIZE(TRUNCATE(FIELDTEXT)) AND 0=SIZE(TRUNCATE(PODCODUNM OF PDDET_BON_COMMAN))
+  THEN BEGIN
+    IF TPDTYPPRD OF PDDET_BON_COMMAN = "BL"
+    THEN LET FIELDTEXT = "M3"
+    ELSE LET FIELDTEXT = "M2"
+  END
+  
+  IF 0=SIZE(TRUNCATE(FIELDTEXT))
+  THEN LET FIELDTEXT = PODCODUNM OF PDDET_BON_COMMAN
+
+  IF FIELDTEXT = "M2" OR FIELDTEXT = "M3"
+  THEN BEGIN
+    IF PODCODUNM OF PDDET_BON_COMMAN = "P2" OR PODCODUNM OF PDDET_BON_COMMAN = "P3"
+    THEN BEGIN
+      LET PODVOLCMD OF PDDET_BON_COMMAN = 0
+      LET PODSURCMD OF PDDET_BON_COMMAN = 0
+      LET PODQTECMD OF PDDET_BON_COMMAN = 0
+    END
+  END
+END
+PROCEDURE EDIT PODCODUNM OF PDDET_BON_COMMAN
+BEGIN
+  IF NOT ((TPDTYPPRD OF PDDET_BON_COMMAN = "BL" AND (FIELDTEXT = "M3" OR FIELDTEXT = "P3"))  OR &
+          (TPDTYPPRD OF PDDET_BON_COMMAN = "TR" AND (FIELDTEXT = "M2" OR FIELDTEXT = "P2")))
+  THEN BEGIN
+    ERROR "Code d'unité de mesure incompatible avec le type de produit"
+  END
+END
+PROCEDURE PROCESS PODCODUNM OF PDDET_BON_COMMAN
+BEGIN
+  DISPLAY FIELD PODQTECMD OF PDDET_BON_COMMAN
+END
+
+
+PROCEDURE INPUT PODLONG OF PDDET_BON_COMMAN
+BEGIN
+  IF 0=SIZE(TRUNCATE(FIELDTEXT))
+  THEN LET FIELDTEXT = PODLONG OF PDDET_BON_COMMAN
+END
+PROCEDURE EDIT PODLONG OF PDDET_BON_COMMAN
+BEGIN
+  IF 0=SIZE(TRUNCATE(FIELDTEXT))
+  THEN ERROR 1072 ; PA072E Ce champ est obligatoire 
+END
+
+PROCEDURE INPUT PODHAUT OF PDDET_BON_COMMAN
+BEGIN
+  IF 0=SIZE(TRUNCATE(FIELDTEXT))
+  THEN LET FIELDTEXT = PODHAUT OF PDDET_BON_COMMAN
+END
+PROCEDURE EDIT PODHAUT OF PDDET_BON_COMMAN
+BEGIN
+  IF 0=SIZE(TRUNCATE(FIELDTEXT))
+  THEN ERROR 1072 ; PA072E Ce champ est obligatoire 
+END
+
+PROCEDURE INPUT PODLARG OF PDDET_BON_COMMAN
+BEGIN
+  IF 0=SIZE(TRUNCATE(FIELDTEXT))
+  THEN LET FIELDTEXT = PODLARG OF PDDET_BON_COMMAN
+END
+PROCEDURE EDIT PODLARG OF PDDET_BON_COMMAN
+BEGIN
+  IF PODCODUNM OF PDDET_BON_COMMAN = "P3" AND 0=SIZE(TRUNCATE(FIELDTEXT))
+  THEN ERROR 1072 ; PA072E Ce champ est obligatoire 
+END
+
+PROCEDURE INPUT PODVOL OF PDDET_BON_COMMAN
+BEGIN
+  IF 0=NCONVERT(FIELDTEXT)
+  THEN ERROR 1072 ; PA072E Ce champ est obligatoire 
+END
+
+PROCEDURE PROCESS PODVOL OF PDDET_BON_COMMAN
+BEGIN
+  IF PODCODUNM OF PDDET_BON_COMMAN = "P2"
+  THEN LET PODSURCMD OF PDDET_BON_COMMAN = ROUND((0.09290304 * (PODVOL OF PDDET_BON_COMMAN * PODQTECMD OF PDDET_BON_COMMAN)),4)
+  ELSE LET PODVOLCMD OF PDDET_BON_COMMAN = ROUND((0.02831685 * (PODVOL OF PDDET_BON_COMMAN * PODQTECMD OF PDDET_BON_COMMAN)),4)
+END
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du volume commandé et du prix total de la ligne de détail
+;
+
+PROCEDURE EDIT PODHAU
+BEGIN
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    ;
+    ; Valide les dimension minimum et maximum pour un bloc
+    ;
+    IF TPDTYPPRD OF PDDET_BON_COMMAN = "BL" AND &
+       (FIELDVALUE        > T_DIM_MAX_LAR_BL OR &
+        FIELDVALUE        < T_DIM_MIN_LAR_BL)
+    THEN BEGIN
+      ERROR 2947 ; Cette dimension est hors des limites
+    END
+    ;
+    ; Valide les dimension minimum et maximum pour une tranche
+    ;
+    IF TPDTYPPRD OF PDDET_BON_COMMAN = "TR" AND &
+       (FIELDVALUE        > T_DIM_MAX_HAU_TR OR &
+        FIELDVALUE        < T_DIM_MIN_HAU_TR)
+    THEN BEGIN
+      ERROR 2947 ; Cette dimension est hors des limites
+    END
+    ;
+    ; Valide les dimension minimum et maximum pour un produit dimension
+    ;
+    IF TPDTYPPRD OF PDDET_BON_COMMAN = "PD" AND &
+       (FIELDVALUE        > T_DIM_MAX_LAR_PD OR &
+        FIELDVALUE        < T_DIM_MIN_LAR_PD)
+    THEN BEGIN
+      ERROR 2962 ; Cette dimension est hors des limites
+    END
+    ;
+    ; Valide les dimension minimum et maximum pour un diagramme
+    ;
+    IF TPDTYPPRD OF PDDET_BON_COMMAN = "DI" AND &
+       (FIELDVALUE        > T_DIM_MAX_LAR_DI OR &
+        FIELDVALUE        < T_DIM_MIN_LAR_DI)
+    THEN BEGIN
+      ERROR 2962 ; Cette dimension est hors des limites
+    END
+    ;
+    ; Calcul du volume commandé précedant
+    ;
+    LET TZ_LARGEUR              = PODLON          OF PDDET_BON_COMMAN
+    LET TZ_HAUTEUR              = OLDVALUE(PODHAU OF PDDET_BON_COMMAN)
+    LET TZ_EPAISSEUR            = PODEPA          OF PDDET_BON_COMMAN
+    DO INTERNAL CALVOL
+    LET T_OLD_MC3 = TZ_VOLUME
+    LET T_OLD_MC2 = TZ_MC2
+    ;
+    ; Calcul du volume actuel
+    ;
+    LET TZ_LARGEUR              = PODLON            OF PDDET_BON_COMMAN
+    LET TZ_HAUTEUR              = FIELDVALUE
+    LET TZ_EPAISSEUR            = PODEPA            OF PDDET_BON_COMMAN
+    DO INTERNAL CALVOL
+    LET T_NEW_MC3 = TZ_VOLUME
+    LET T_NEW_MC2 = TZ_MC2
+    LET PODVOLCMD OF PDDET_BON_COMMAN = ROUND((TZ_VOLUME * PODQTECMD OF PDDET_BON_COMMAN),4)
+    LET PODSURCMD OF PDDET_BON_COMMAN = ROUND((TZ_MC2    * PODQTECMD OF PDDET_BON_COMMAN),4)
+    ;
+    ; Recherche de l'unité de mesure standard pour le type de produit
+    ;
+    GET A_TPD_PRODUIT         &
+      VIA   CIECLE,           &
+            TPDTYPPRD         &
+      USING T_CIECLEMNU,      &
+            TPDTYPPRD         OF PDDET_BON_COMMAN OPTIONAL
+    IF NOT ACCESSOK
+    THEN BEGIN
+       ERROR 2963 ; Ce code de produit n'existe pas
+    END
+    ;
+    ; Recherche du facteur de conversion pour l'unité de mesure
+    ;
+    GET A_CUM_UNM OPTIONAL      &
+       VIA    CIECLE,           &
+              CUMCODUNMINT,     &
+              CUMCODUNMEXT      &
+       USING  T_CIECLEMNU,      &
+              UNMCODUNM         OF A_TPD_PRODUIT,    &
+              UNMCODUNM         OF PDTYPE_PRODUIT
+    IF NOT ACCESSOK
+    THEN BEGIN
+       ERROR 3104 ; Le facteur de conversion n'existe pas pour cette combinaison
+    END
+    ;
+    ; Calcul du prix total précédant pour la ligne de détail
+    ;
+    LET TZ_CPG_COD_PRD          = TPDTYPPRD         OF PDDET_BON_COMMAN
+    LET TZ_CPG_FAC_CON          = CUMFACCON         OF A_CUM_UNM
+    LET TZ_CPG_PRI_UNI          = PODPRI            OF PDDET_BON_COMMAN
+    LET TZ_CPG_UNM              = UNMCODUNM         OF PDTYPE_PRODUIT
+    LET TZ_CPG_VOL_MC3          = T_OLD_MC3
+    LET TZ_CPG_VOL_MC2          = T_OLD_MC2
+    LET TZ_CPG_QTE              = PODQTECMD         OF PDDET_BON_COMMAN
+
+    DO INTERNAL CALPRIGRA
+
+    LET T_OLD_PRIX = TZ_CPG_PRI_TOT
+
+    ;
+    ; Calcul du prix total ACTUEL pour la ligne de détail
+    ;
+
+    LET TZ_CPG_COD_PRD          = TPDTYPPRD         OF PDDET_BON_COMMAN
+    LET TZ_CPG_FAC_CON          = CUMFACCON         OF A_CUM_UNM
+    LET TZ_CPG_PRI_UNI          = PODPRI            OF PDDET_BON_COMMAN
+    LET TZ_CPG_UNM              = UNMCODUNM         OF PDTYPE_PRODUIT
+    LET TZ_CPG_VOL_MC3          = T_NEW_MC3
+    LET TZ_CPG_VOL_MC2          = T_NEW_MC2
+    LET TZ_CPG_QTE              = PODQTECMD         OF PDDET_BON_COMMAN
+    DO INTERNAL CALPRIGRA
+    LET T_NEW_PRIX = TZ_CPG_PRI_TOT
+    ;
+    ; Calcul du nouveau total pour la ligne du maitre
+    ;
+    LET PODPRITOTLIGBCM OF PDDET_BON_COMMAN = PODPRITOTLIGBCM OF PDDET_BON_COMMAN - &
+                                              T_OLD_PRIX + &
+                                              T_NEW_PRIX
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du volume commandé et du prix total de la ligne de détail
+;
+
+PROCEDURE EDIT PODLON
+BEGIN
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    ;
+    ; Valide les dimension minimum et maximum pour un bloc
+    ;
+    IF TPDTYPPRD OF PDDET_BON_COMMAN = "BL" AND &
+       (FIELDVALUE        > T_DIM_MAX_HAU_BL OR &
+        FIELDVALUE        < T_DIM_MIN_HAU_BL)
+    THEN BEGIN
+      ERROR 2947 ; Cette dimension est hors des limites
+    END
+    ;
+    ; Valide les dimension minimum et maximum pour une tranche
+    ;
+    IF TPDTYPPRD OF PDDET_BON_COMMAN = "TR" AND &
+       (FIELDVALUE        > T_DIM_MAX_HAU_TR OR &
+        FIELDVALUE        < T_DIM_MIN_HAU_TR)
+    THEN BEGIN
+      ERROR 2947 ; Cette dimension est hors des limites
+    END
+    ;
+    ; Valide les dimension minimum et maximum pour un produit dimension
+    ;
+    IF TPDTYPPRD OF PDDET_BON_COMMAN = "PD" AND &
+       (FIELDVALUE        > T_DIM_MAX_HAU_PD OR &
+        FIELDVALUE        < T_DIM_MIN_HAU_PD)
+    THEN BEGIN
+      ERROR 2962 ; Cette dimension est hors des limites
+    END
+    ;
+    ; Valide les dimension minimum et maximum pour un diagramme
+    ;
+    IF TPDTYPPRD OF PDDET_BON_COMMAN = "DI" AND &
+       (FIELDVALUE        > T_DIM_MAX_HAU_DI OR &
+        FIELDVALUE        < T_DIM_MIN_HAU_DI)
+    THEN BEGIN
+      ERROR 2962 ; Cette dimension est hors des limites
+    END
+    ;
+    ; Calcul du volume commandé précedant
+    ;
+    LET TZ_LARGEUR              = OLDVALUE(PODLON OF PDDET_BON_COMMAN)
+    LET TZ_HAUTEUR              = PODHAU          OF PDDET_BON_COMMAN
+    LET TZ_EPAISSEUR            = PODEPA          OF PDDET_BON_COMMAN
+    DO INTERNAL CALVOL
+    LET T_OLD_MC3 = TZ_VOLUME
+    LET T_OLD_MC2 = TZ_MC2
+    ;
+    ; Calcul du volume actuel
+    ;
+    LET TZ_LARGEUR              = FIELDVALUE
+    LET TZ_HAUTEUR              = PODHAU            OF PDDET_BON_COMMAN
+    LET TZ_EPAISSEUR            = PODEPA            OF PDDET_BON_COMMAN
+    DO INTERNAL CALVOL
+    LET T_NEW_MC3 = TZ_VOLUME
+    LET T_NEW_MC2 = TZ_MC2
+    LET PODVOLCMD OF PDDET_BON_COMMAN = ROUND((TZ_VOLUME * PODQTECMD OF PDDET_BON_COMMAN),4)
+    LET PODSURCMD OF PDDET_BON_COMMAN = ROUND((TZ_MC2    * PODQTECMD OF PDDET_BON_COMMAN),4)
+    ;
+    ; Recherche de l'unité de mesure standard pour le type de produit
+    ;
+    GET A_TPD_PRODUIT         &
+      VIA   CIECLE,           &
+            TPDTYPPRD         &
+      USING T_CIECLEMNU,      &
+            TPDTYPPRD         OF PDDET_BON_COMMAN OPTIONAL
+    IF NOT ACCESSOK
+    THEN BEGIN
+       ERROR 2963 ; Ce code de produit n'existe pas
+    END
+    ;
+    ; Recherche du facteur de conversion pour l'unité de mesure
+    ;
+    GET A_CUM_UNM OPTIONAL      &
+       VIA    CIECLE,           &
+              CUMCODUNMINT,     &
+              CUMCODUNMEXT      &
+       USING  T_CIECLEMNU,      &
+              UNMCODUNM         OF A_TPD_PRODUIT,    &
+              UNMCODUNM         OF PDTYPE_PRODUIT
+    IF NOT ACCESSOK
+    THEN BEGIN
+       ERROR 3104 ; Le facteur de conversion n'existe pas pour cette combinaison
+    END
+    ;
+    ; Calcul du prix total précédant pour la ligne de détail
+    ;
+    LET TZ_CPG_COD_PRD          = TPDTYPPRD         OF PDDET_BON_COMMAN
+    LET TZ_CPG_FAC_CON          = CUMFACCON         OF A_CUM_UNM
+    LET TZ_CPG_PRI_UNI          = PODPRI            OF PDDET_BON_COMMAN
+    LET TZ_CPG_UNM              = UNMCODUNM         OF PDTYPE_PRODUIT
+    LET TZ_CPG_VOL_MC3          = T_OLD_MC3
+    LET TZ_CPG_VOL_MC2          = T_OLD_MC2
+    LET TZ_CPG_QTE              = PODQTECMD         OF PDDET_BON_COMMAN
+
+    DO INTERNAL CALPRIGRA
+
+    LET T_OLD_PRIX = TZ_CPG_PRI_TOT
+
+    ;
+    ; Calcul du prix total ACTUEL pour la ligne de détail
+    ;
+
+    LET TZ_CPG_COD_PRD          = TPDTYPPRD         OF PDDET_BON_COMMAN
+    LET TZ_CPG_FAC_CON          = CUMFACCON         OF A_CUM_UNM
+    LET TZ_CPG_PRI_UNI          = PODPRI            OF PDDET_BON_COMMAN
+    LET TZ_CPG_UNM              = UNMCODUNM         OF PDTYPE_PRODUIT
+    LET TZ_CPG_VOL_MC3          = T_NEW_MC3
+    LET TZ_CPG_VOL_MC2          = T_NEW_MC2
+    LET TZ_CPG_QTE              = PODQTECMD         OF PDDET_BON_COMMAN
+    DO INTERNAL CALPRIGRA
+    LET T_NEW_PRIX = TZ_CPG_PRI_TOT
+    ;
+    ; Calcul du nouveau total pour la ligne du maitre
+    ;
+    LET PODPRITOTLIGBCM OF PDDET_BON_COMMAN = PODPRITOTLIGBCM OF PDDET_BON_COMMAN - &
+                                              T_OLD_PRIX + &
+                                              T_NEW_PRIX
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du volume commandé et du prix total de la ligne de détail
+;
+
+PROCEDURE EDIT PODEPA
+BEGIN
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    ;
+    ; Valide les dimension minimum et maximum pour un bloc
+    ;
+    IF TPDTYPPRD OF PDDET_BON_COMMAN = "BL" AND &
+       (FIELDVALUE        > T_DIM_MAX_EPA_BL OR &
+        FIELDVALUE        < T_DIM_MIN_EPA_BL)
+    THEN BEGIN
+      ERROR 3147 ; Cette dimension est hors des limites
+    END
+    ;
+    ; Valide les dimension minimum et maximum pour une tranche
+    ;
+    IF TPDTYPPRD OF PDDET_BON_COMMAN = "TR" AND &
+       (FIELDVALUE        > T_DIM_MAX_EPA_TR OR &
+        FIELDVALUE        < T_DIM_MIN_EPA_TR)
+    THEN BEGIN
+      ERROR 2962 ; Cette dimension est hors des limites
+    END
+    ;
+    ; Valide les dimension minimum et maximum pour un produit dimension
+    ;
+    IF TPDTYPPRD OF PDDET_BON_COMMAN = "PD" AND &
+       (FIELDVALUE        > T_DIM_MAX_EPA_PD OR &
+        FIELDVALUE        < T_DIM_MIN_EPA_PD)
+    THEN BEGIN
+      ERROR 2962 ; Cette dimension est hors des limites
+    END
+    ;
+    ; Valide les dimension minimum et maximum pour un diagramme
+    ;
+    IF TPDTYPPRD OF PDDET_BON_COMMAN = "DI" AND &
+       (FIELDVALUE        > T_DIM_MAX_EPA_DI OR &
+        FIELDVALUE        < T_DIM_MIN_EPA_DI)
+    THEN BEGIN
+      ERROR 2962 ; Cette dimension est hors des limites
+    END
+    ;
+    ; Calcul du volume commandé précedant
+    ;
+    LET TZ_LARGEUR              = PODLON          OF PDDET_BON_COMMAN
+    LET TZ_HAUTEUR              = PODHAU          OF PDDET_BON_COMMAN
+    LET TZ_EPAISSEUR            = OLDVALUE(PODEPA OF PDDET_BON_COMMAN)
+    DO INTERNAL CALVOL
+    LET T_OLD_MC3 = TZ_VOLUME
+    LET T_OLD_MC2 = TZ_MC2
+    ;
+    ; Calcul du volume actuel
+    ;
+    LET TZ_LARGEUR              = PODLON            OF PDDET_BON_COMMAN
+    LET TZ_HAUTEUR              = PODHAU            OF PDDET_BON_COMMAN
+    LET TZ_EPAISSEUR            = FIELDVALUE
+    DO INTERNAL CALVOL
+    LET T_NEW_MC3 = TZ_VOLUME
+    LET T_NEW_MC2 = TZ_MC2
+    LET PODVOLCMD OF PDDET_BON_COMMAN = ROUND((TZ_VOLUME * PODQTECMD OF PDDET_BON_COMMAN),4)
+    LET PODSURCMD OF PDDET_BON_COMMAN = ROUND((TZ_MC2    * PODQTECMD OF PDDET_BON_COMMAN),4)
+    ;
+    ; Recherche de l'unité de mesure standard pour le type de produit
+    ;
+    GET A_TPD_PRODUIT         &
+      VIA   CIECLE,           &
+            TPDTYPPRD         &
+      USING T_CIECLEMNU,      &
+            TPDTYPPRD         OF PDDET_BON_COMMAN OPTIONAL
+    IF NOT ACCESSOK
+    THEN BEGIN
+       ERROR 2963 ; Ce code de produit n'existe pas
+    END
+    ;
+    ; Recherche du facteur de conversion pour l'unité de mesure
+    ;
+    GET A_CUM_UNM OPTIONAL      &
+       VIA    CIECLE ,          &
+              CUMCODUNMINT,     &
+              CUMCODUNMEXT      &
+       USING  T_CIECLEMNU,      &
+              UNMCODUNM         OF A_TPD_PRODUIT,    &
+              UNMCODUNM         OF PDTYPE_PRODUIT
+    IF NOT ACCESSOK
+    THEN BEGIN
+       ERROR 3104 ; Le facteur de conversion n'existe pas pour cette combinaison
+    END
+    ;
+    ; Calcul du prix total précédant pour la ligne de détail
+    ;
+    LET TZ_CPG_COD_PRD          = TPDTYPPRD         OF PDDET_BON_COMMAN
+    LET TZ_CPG_FAC_CON          = CUMFACCON         OF A_CUM_UNM
+    LET TZ_CPG_PRI_UNI          = PODPRI            OF PDDET_BON_COMMAN
+    LET TZ_CPG_UNM              = UNMCODUNM         OF PDTYPE_PRODUIT
+    LET TZ_CPG_VOL_MC3          = T_OLD_MC3
+    LET TZ_CPG_VOL_MC2          = T_OLD_MC2
+    LET TZ_CPG_QTE              = PODQTECMD         OF PDDET_BON_COMMAN
+
+    DO INTERNAL CALPRIGRA
+
+    LET T_OLD_PRIX = TZ_CPG_PRI_TOT
+
+    ;
+    ; Calcul du prix total ACTUEL pour la ligne de détail
+    ;
+
+    LET TZ_CPG_COD_PRD          = TPDTYPPRD         OF PDDET_BON_COMMAN
+    LET TZ_CPG_FAC_CON          = CUMFACCON         OF A_CUM_UNM
+    LET TZ_CPG_PRI_UNI          = PODPRI            OF PDDET_BON_COMMAN
+    LET TZ_CPG_UNM              = UNMCODUNM         OF PDTYPE_PRODUIT
+    LET TZ_CPG_VOL_MC3          = T_NEW_MC3
+    LET TZ_CPG_VOL_MC2          = T_NEW_MC2
+    LET TZ_CPG_QTE              = PODQTECMD         OF PDDET_BON_COMMAN
+    DO INTERNAL CALPRIGRA
+    LET T_NEW_PRIX = TZ_CPG_PRI_TOT
+    ;
+    ; Calcul du nouveau total pour la ligne du maitre
+    ;
+    LET PODPRITOTLIGBCM OF PDDET_BON_COMMAN = PODPRITOTLIGBCM OF PDDET_BON_COMMAN - &
+                                              T_OLD_PRIX + &
+                                              T_NEW_PRIX
+  END
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide le nombre de décimal pour le champ
+;
+
+PROCEDURE EDIT PODPRI
+BEGIN
+  ;
+  ; Valide la partie décimale.
+  ;
+  USE usvaldec NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du volume commandé et du prix total de la ligne de détail
+;
+
+PROCEDURE INPUT PODQTECMD
+BEGIN
+  IF 0 = NCONVERT(FIELDTEXT) AND PODQTECMD = 0
+  THEN ERROR 1072 ; PA072E Ce champ est obligatoire 
+END
+
+PROCEDURE EDIT PODQTECMD
+BEGIN
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+
+      IF FIELDTEXT <= ASCII(PODQTERCU OF PDDET_BON_COMMAN)
+      THEN BEGIN
+        ERROR "La quantité commandée est inférieure à la quantité recue"
+      END
+
+    ;
+    ; Calcul du volume
+    ;
+    LET TZ_LARGEUR              = PODLON            OF PDDET_BON_COMMAN
+    LET TZ_HAUTEUR              = PODHAU            OF PDDET_BON_COMMAN
+    LET TZ_EPAISSEUR            = PODEPA            OF PDDET_BON_COMMAN
+    DO INTERNAL CALVOL
+
+    ;
+    ; Recherche de l'unité de mesure standard pour le type de produit
+    ;
+    GET A_TPD_PRODUIT         &
+      VIA   CIECLE,           &
+            TPDTYPPRD         &
+      USING T_CIECLEMNU,      &
+            TPDTYPPRD         OF PDDET_BON_COMMAN OPTIONAL
+    IF NOT ACCESSOK
+    THEN BEGIN
+       ERROR 2963 ; Ce code de produit n'existe pas
+    END
+    ;
+    ; Recherche du facteur de conversion pour l'unité de mesure
+    ;
+    GET A_CUM_UNM OPTIONAL      &
+       VIA    CIECLE,           &
+              CUMCODUNMINT,     &
+              CUMCODUNMEXT      &
+       USING  T_CIECLEMNU,      &
+              UNMCODUNM         OF A_TPD_PRODUIT,    &
+              UNMCODUNM         OF PDTYPE_PRODUIT
+    IF NOT ACCESSOK
+    THEN BEGIN
+       ERROR 3104 ; Le facteur de conversion n'existe pas pour cette combinaison
+    END
+    ;
+    ; Calcul du prix total précédant pour la ligne de détail
+    ;
+    LET TZ_CPG_COD_PRD          = TPDTYPPRD         OF PDDET_BON_COMMAN
+    LET TZ_CPG_FAC_CON          = CUMFACCON         OF A_CUM_UNM
+    LET TZ_CPG_PRI_UNI          = PODPRI            OF PDDET_BON_COMMAN
+    LET TZ_CPG_UNM              = UNMCODUNM         OF PDTYPE_PRODUIT
+    LET TZ_CPG_VOL_MC3          = TZ_VOLUME
+    LET TZ_CPG_VOL_MC2          = TZ_MC2
+    LET TZ_CPG_QTE              = OLDVALUE(PODQTECMD OF PDDET_BON_COMMAN)
+
+    DO INTERNAL CALPRIGRA
+
+    LET T_OLD_PRIX = TZ_CPG_PRI_TOT
+
+    ;
+    ; Calcul du prix total ACTUEL pour la ligne de détail
+    ;
+
+    LET TZ_CPG_COD_PRD          = TPDTYPPRD         OF PDDET_BON_COMMAN
+    LET TZ_CPG_FAC_CON          = CUMFACCON         OF A_CUM_UNM
+    LET TZ_CPG_PRI_UNI          = PODPRI            OF PDDET_BON_COMMAN
+    LET TZ_CPG_UNM              = UNMCODUNM         OF PDTYPE_PRODUIT
+    LET TZ_CPG_VOL_MC3          = TZ_VOLUME
+    LET TZ_CPG_VOL_MC2          = TZ_MC2
+    LET TZ_CPG_QTE              = FIELDVALUE ; PODQTECMD OF PDDET_BON_COMMAN
+    DO INTERNAL CALPRIGRA
+    LET T_NEW_PRIX = TZ_CPG_PRI_TOT
+    ;
+    ; Calcul du nouveau total pour la ligne du maitre
+    ;
+    LET PODPRITOTLIGBCM OF PDDET_BON_COMMAN = PODPRITOTLIGBCM OF PDDET_BON_COMMAN - &
+                                              T_OLD_PRIX + &
+                                              T_NEW_PRIX
+
+    IF PODCODUNM OF PDDET_BON_COMMAN = "P2" OR PODCODUNM OF PDDET_BON_COMMAN = "P3"
+    THEN BEGIN
+      IF PODCODUNM OF PDDET_BON_COMMAN = "P2"
+      THEN LET PODSURCMD OF PDDET_BON_COMMAN = ROUND((0.09290304 * (PODVOL OF PDDET_BON_COMMAN * PODQTECMD OF PDDET_BON_COMMAN)),4)
+      ELSE LET PODVOLCMD OF PDDET_BON_COMMAN = ROUND((0.02831685 * (PODVOL OF PDDET_BON_COMMAN * PODQTECMD OF PDDET_BON_COMMAN)),4)
+    END
+    ELSE BEGIN
+      LET PODVOLCMD OF PDDET_BON_COMMAN = PODVOLCMD OF PDDET_BON_COMMAN -         &
+                                          ROUND((TZ_VOLUME * OLDVALUE(PODQTECMD OF PDDET_BON_COMMAN)),4) + &
+                                          ROUND((TZ_VOLUME * FIELDVALUE),4)
+
+      LET PODSURCMD OF PDDET_BON_COMMAN = PODSURCMD OF PDDET_BON_COMMAN -         &
+                                          ROUND((TZ_MC2    * OLDVALUE(PODQTECMD OF PDDET_BON_COMMAN)),4) + &
+                                          ROUND((TZ_MC2    * FIELDVALUE),4)
+    END
+
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour convertir OUI,NON en 1,0
+;
+
+PROCEDURE INPUT PODRCU
+BEGIN
+  USE usflginp NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour convertir 1,0 en OUI,NON
+;
+PROCEDURE OUTPUT PODRCU
+BEGIN
+  USE usflgout NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour convertir OUI,NON en 1,0
+;
+PROCEDURE INPUT PODCPL
+BEGIN
+  USE usflginp NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour convertir 1,0 en OUI,NON
+;
+
+PROCEDURE OUTPUT PODCPL
+BEGIN
+  USE usflgout NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour évaluer les champs PODRCU, PODCPL
+;
+
+PROCEDURE PROCESS PODQTERCU
+BEGIN
+  IF PODQTERCU OF PDDET_BON_COMMAN > 0
+  THEN BEGIN
+    LET PODRCU OF PDDET_BON_COMMAN = "1"
+    END
+  ELSE BEGIN
+    LET PODRCU OF PDDET_BON_COMMAN = "0"
+  END
+  IF PODQTERCU OF PDDET_BON_COMMAN >= PODQTECMD OF PDDET_BON_COMMAN
+  THEN BEGIN
+    LET PODCPL OF PDDET_BON_COMMAN = "1"
+    END
+  ELSE BEGIN
+    LET PODCPL OF PDDET_BON_COMMAN = "0"
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Évaluation la possibilite de mise à jour du bon de commande.
+; On ne peut modifier une ligne de détail si il y a eu une réception.
+;
+
+PROCEDURE DESIGNER 15
+BEGIN
+  ACCEPT  PODNUMLIG OF PDDET_BON_COMMAN
+  ACCEPT  TPDTYPPRD OF PDDET_BON_COMMAN
+  ACCEPT  TGRCODGRA OF PDDET_BON_COMMAN
+
+  EDIT T_SILENT
+
+  ACCEPT  TYFCODFIN OF PDDET_BON_COMMAN
+  
+  ACCEPT  PODBLOC   OF PDDET_BON_COMMAN
+  ACCEPT  PODCODUNM OF PDDET_BON_COMMAN
+ 
+  IF PODCODUNM OF PDDET_BON_COMMAN = "P2" OR &
+     PODCODUNM OF PDDET_BON_COMMAN = "P3"     
+  THEN BEGIN
+    ACCEPT  PODLONG OF PDDET_BON_COMMAN
+    ACCEPT  PODHAUT OF PDDET_BON_COMMAN
+    ACCEPT  PODLARG OF PDDET_BON_COMMAN
+    ACCEPT  PODVOL  OF PDDET_BON_COMMAN
+  END
+  ELSE BEGIN
+    ACCEPT  PODLON  OF PDDET_BON_COMMAN
+    ACCEPT  PODHAU  OF PDDET_BON_COMMAN
+    ACCEPT  PODEPA  OF PDDET_BON_COMMAN
+  END
+  
+  ACCEPT  PODPRI    OF PDDET_BON_COMMAN
+
+  ACCEPT  PODQTECMD OF PDDET_BON_COMMAN
+  DISPLAY PODQTERCU OF PDDET_BON_COMMAN
+
+  DISPLAY PODRCU    OF PDDET_BON_COMMAN
+  DISPLAY PODCPL    OF PDDET_BON_COMMAN
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Initialise le numéro de ligne au dernier numéro de ligne trouvé
+;
+
+PROCEDURE POSTFIND
+BEGIN
+  LET T_NOLIG = PODNUMLIG OF PDDET_BON_COMMAN
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+
+  FOR PDDET_BON_COMMAN
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF PDDET_BON_COMMAN &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF PDDET_BON_COMMAN &
+       AND NOT NEWRECORD     OF PDDET_BON_COMMAN &
+       AND NOT DELETEDRECORD OF PDDET_BON_COMMAN &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+  END
+  ;
+  ; Incrémentation du numéro de séquence
+  ;
+  IF 0 = BCMNUMBCM OF PDBON_COMMANDE
+  THEN BEGIN
+    START TRANSACTION NO_SEQ
+    GET PDSEQ_BON_COMMAN OPTIONAL       &
+      VIA     CIECLE                    &
+      USING   T_CIECLEMNU
+    LET BCQNUM OF PDSEQ_BON_COMMAN = BCQNUM OF PDSEQ_BON_COMMAN + 1
+    LET BCMNUMBCM OF PDBON_COMMANDE = BCQNUM OF PDSEQ_BON_COMMAN
+    PUT PDSEQ_BON_COMMAN
+  END
+
+
+  FOR PDDET_BON_COMMAN
+  BEGIN
+    ;
+    ; Évaluation des champs indiquant une mise à jour du bon de commande.
+    ;
+    IF NOT NEWRECORD OF PDBON_COMMANDE AND &
+       ALTEREDRECORD OF PDDET_BON_COMMAN
+    THEN BEGIN
+      LET BCMDATMAJ    OF PDBON_COMMANDE = SYSDATE
+      LET BCMHREMAJ    OF PDBON_COMMANDE = SYSTIME / 10000
+      LET BCMUSRMAJ    OF PDBON_COMMANDE = LOGONID
+    END
+    ;
+    ; Remplace le final
+    ;
+    LET BCMNUMBCM OF PDDET_BON_COMMAN = BCMNUMBCM OF PDBON_COMMANDE
+
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Permet de faire afficher le numéro de séquence du bon de commande
+;
+
+PROCEDURE POSTUPDATE
+BEGIN
+  IF CORRECTMODE
+  THEN BEGIN
+    DISPLAY BCMNUMBCM    OF PDBON_COMMANDE
+    WARNING = " "
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour valider la destruction d'une ligne de détail.
+;
+
+PROCEDURE DELETE
+BEGIN
+  IF PODQTERCU OF PDDET_BON_COMMAN > 0
+  THEN BEGIN
+    ERROR 2920 ; On ne peut détruire une ligne de détail ayant une qte reçu
+  END
+  DELETE PDDET_BON_COMMAN
+END
+
+;--------------------------------------------------
+
+PROCEDURE APPEND
+BEGIN
+  ACCEPT  PODNUMLIG OF PDDET_BON_COMMAN
+  ACCEPT  TPDTYPPRD OF PDDET_BON_COMMAN
+  ACCEPT  TGRCODGRA OF PDDET_BON_COMMAN
+
+  EDIT T_SILENT
+
+  ACCEPT  TYFCODFIN OF PDDET_BON_COMMAN
+  
+  ACCEPT  PODBLOC   OF PDDET_BON_COMMAN
+  ACCEPT  PODCODUNM OF PDDET_BON_COMMAN
+
+  IF PODCODUNM OF PDDET_BON_COMMAN = "P2" OR &
+     PODCODUNM OF PDDET_BON_COMMAN = "P3"     
+  THEN BEGIN
+    ACCEPT  PODLONG OF PDDET_BON_COMMAN
+    ACCEPT  PODHAUT OF PDDET_BON_COMMAN
+    ACCEPT  PODLARG OF PDDET_BON_COMMAN
+    ACCEPT  PODVOL  OF PDDET_BON_COMMAN
+  END
+  ELSE BEGIN
+    ACCEPT  PODLON  OF PDDET_BON_COMMAN
+    ACCEPT  PODHAU  OF PDDET_BON_COMMAN
+    ACCEPT  PODEPA  OF PDDET_BON_COMMAN
+  END
+  
+  ACCEPT  PODPRI    OF PDDET_BON_COMMAN
+
+  ACCEPT  PODQTECMD OF PDDET_BON_COMMAN
+  DISPLAY PODQTERCU OF PDDET_BON_COMMAN
+
+  DISPLAY PODRCU    OF PDDET_BON_COMMAN
+  DISPLAY PODCPL    OF PDDET_BON_COMMAN
+END
+
+;--------------------------------------------------
+
+PROCEDURE ENTRY
+BEGIN
+  FOR PDDET_BON_COMMAN
+    BEGIN
+      PERFORM APPEND
+    END
+END
+
+
+BUILD DETAIL LIST
+
+@IF FORMAT
+
+xxxx                                           xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                            x
+****************************************************** Bon de commande (P/O) *******************************************************
+*                                                                                                                                  *
+* No de P/O: xxxxxxxxxxx     Fournisseur: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                          *
+*                                                                                                                                  *
+*                                                 Détail du bon de commande (P/O)                                                  *
+*                                                                                                                                  *
+* No. Type Cod Typ   Numéro       __________________Impérial________________ ___Métrique____           ______Quantité______        *
+* lig prod gra fin   de bloc  U/M    Long        Haut      Épais     Volume  Long Haut Épais   Prix    commandée déjà reçue R C    *
+* xxx  xx  xxx xx  xxxxxxxxxx xx  xxxxxxxxxx xxxxxxxxxx xxxxxxxxxx xxxxxxxxx xxxx xxxx xxxx  xxxxxxxxx xxxxxxxxx  xxxxxxxxx x x    *
+* xxx  xx  xxx xx  xxxxxxxxxx xx  xxxxxxxxxx xxxxxxxxxx xxxxxxxxxx xxxxxxxxx xxxx xxxx xxxx  xxxxxxxxx xxxxxxxxx  xxxxxxxxx x x    *
+* xxx  xx  xxx xx  xxxxxxxxxx xx  xxxxxxxxxx xxxxxxxxxx xxxxxxxxxx xxxxxxxxx xxxx xxxx xxxx  xxxxxxxxx xxxxxxxxx  xxxxxxxxx x x    *
+* xxx  xx  xxx xx  xxxxxxxxxx xx  xxxxxxxxxx xxxxxxxxxx xxxxxxxxxx xxxxxxxxx xxxx xxxx xxxx  xxxxxxxxx xxxxxxxxx  xxxxxxxxx x x    *
+* xxx  xx  xxx xx  xxxxxxxxxx xx  xxxxxxxxxx xxxxxxxxxx xxxxxxxxxx xxxxxxxxx xxxx xxxx xxxx  xxxxxxxxx xxxxxxxxx  xxxxxxxxx x x    *
+* xxx  xx  xxx xx  xxxxxxxxxx xx  xxxxxxxxxx xxxxxxxxxx xxxxxxxxxx xxxxxxxxx xxxx xxxx xxxx  xxxxxxxxx xxxxxxxxx  xxxxxxxxx x x    *
+* xxx  xx  xxx xx  xxxxxxxxxx xx  xxxxxxxxxx xxxxxxxxxx xxxxxxxxxx xxxxxxxxx xxxx xxxx xxxx  xxxxxxxxx xxxxxxxxx  xxxxxxxxx x x    *
+* xxx  xx  xxx xx  xxxxxxxxxx xx  xxxxxxxxxx xxxxxxxxxx xxxxxxxxxx xxxxxxxxx xxxx xxxx xxxx  xxxxxxxxx xxxxxxxxx  xxxxxxxxx x x    *
+* xxx  xx  xxx xx  xxxxxxxxxx xx  xxxxxxxxxx xxxxxxxxxx xxxxxxxxxx xxxxxxxxx xxxx xxxx xxxx  xxxxxxxxx xxxxxxxxx  xxxxxxxxx x x    *
+* xxx  xx  xxx xx  xxxxxxxxxx xx  xxxxxxxxxx xxxxxxxxxx xxxxxxxxxx xxxxxxxxx xxxx xxxx xxxx  xxxxxxxxx xxxxxxxxx  xxxxxxxxx x x    *
+* xxx  xx  xxx xx  xxxxxxxxxx xx  xxxxxxxxxx xxxxxxxxxx xxxxxxxxxx xxxxxxxxx xxxx xxxx xxxx  xxxxxxxxx xxxxxxxxx  xxxxxxxxx x x    *
+*                                                                                                                                  *
+************************************************************************************************************************************
+
+@ENDIF

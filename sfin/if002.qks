@@ -1,0 +1,2136 @@
+;/T/ Gestion de bloc - Expedition
+;
+;/P/ Programmeur..: Marc Poulin
+;    Date Creation: 22 octobre 1999
+;
+;    Description..: Cet ecran permet de saisir les informations
+;                   concernant l'expedition des blocs. Cet ecran provient
+;                   de l'ancien module Columbia et a ete restructure pour
+;                   etre inclus dans PGL
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date..............: 29 mars 2000
+;    Description.......: Le montant d'expédition est utilisé pour calculer le coût par mètre cube pour chaque
+;                        bloc associé à l'expédition.
+;
+;    Référence.........: Demande de changement 000033.
+;
+;    Signet............: MP-00-03-22_D33.
+;
+;    --------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date..............: 31 mars 2000
+;    Description.......: Ajustement du traitement afin que le code fournisseur soit égal par défaut au 
+;                        code "GRAN01" et que le champ VIA devienne obligatoire et ne soit plus généré 
+;                        automatiquement.
+;
+;    Référence.........: Demande de changement 000034.
+;
+;    Signet............: MP-00-03-31_D34.
+;
+;    --------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date..............: 05 mai 2000
+;    Description.......: Ajustement du traitement afin que le code fournisseur soit égal par défaut au 
+;                        code "ROBI01" si la compagnie est égale à 1100 (Robiroc) sinon le code demeure
+;                        par défaut "GRAN01".
+;
+;    Référence.........: Demande Directe.
+;
+;    Signet............: MP-00-05-05_DD999999.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+SCREEN if002 ACTIONBAR                         &
+             MODE LABEL "" AT 2,132            &
+             FROM 1,1 TO 23,132                &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72      &
+             RECEIVING T_CIECLE,               &
+                       T_CIENOM
+
+USE ussectmp  NOLIST
+    "IF002"
+
+USE if002.hlp NOLIST
+
+USE usactecr  NOLIST
+
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Carte de bloc  " ACTION DESIGNER D002 MARK
+  MENUITEM LABEL "Vérification   " ACTION DESIGNER D001
+
+;-------------------------------------------------------------------------------
+;
+; Reçues en paramètres
+;
+TEMPORARY T_CIECLE     CHARACTER SIZE 04  RESET AT STARTUP ; Numéro de cie
+TEMPORARY T_CIENOM     CHARACTER SIZE 40  RESET AT STARTUP ; Nom de la compagnie
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_CLICIECLE  CHARACTER SIZE 04  RESET AT STARTUP ; Compagnie du client
+TEMPORARY T_FOUCIECLE  CHARACTER SIZE 04  RESET AT STARTUP ; Compagnie du fournisseur
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY TS_TGRCODGRA CHARACTER SIZE 03  RESET AT MODE
+TEMPORARY TS_CATCLE    CHARACTER SIZE 03  RESET AT MODE
+TEMPORARY TS_CLRCLE    CHARACTER SIZE 03  RESET AT MODE
+TEMPORARY TS_QLTCLE    CHARACTER SIZE 03  RESET AT MODE
+TEMPORARY TS_ETRCLE    CHARACTER SIZE 04  RESET AT MODE
+
+;-----------------------------------------------------------------------------
+;
+; Table des expéditions
+;
+FILE IFEXPEDITION  PRIMARY NOITEM
+  ACCESS VIA CIECLE               , &
+             EXNCLE                 &
+       USING T_CIECLE             , &
+             EXNCLE OF IFEXPEDITION &
+     REQUEST EXNCLE OF IFEXPEDITION &
+     ORDERBY CIECLE               , &
+             EXNCLE
+
+  ACCESS VIA CIECLE                 &
+       USING T_CIECLE               &
+     ORDERBY CIECLE               , &
+             EXNCLE
+
+  ITEM CIECLE OF IFEXPEDITION INITIAL T_CIECLE
+
+;-----------------------------------------------------------------------------
+;
+; Table des expéditions de blocs
+;
+FILE IFBLOC_EXPED  DETAIL NOITEM  OCCURS 8 TIMES  OPEN 1
+  ACCESS VIA CIECLE  , &
+             EXNCLE    &
+       USING T_CIECLE, &
+             EXNCLE OF IFEXPEDITION
+
+  ITEM CIECLE OF IFBLOC_EXPED INITIAL T_CIECLE
+  ITEM EXNCLE OF IFBLOC_EXPED INITIAL EXNCLE OF IFEXPEDITION
+
+;-----------------------------------------------------------------------------
+;
+; Table des blocs
+;
+FILE IFBLOC  DESIGNER  OCCURS WITH IFBLOC_EXPED  OPEN 1
+  ACCESS VIA CIECLE                   , &
+             TGRCODGRA                , &
+             IFCCLE                   , &
+             BLCCLE                   , &
+             BLCRED                     &
+       USING T_CIECLE                 , &
+             TGRCODGRA OF IFBLOC_EXPED, &
+             IFCCLE    OF IFBLOC_EXPED, &
+             BLCCLE    OF IFBLOC_EXPED, &
+             BLCRED    OF IFBLOC_EXPED
+
+;-----------------------------------------------------------------------------
+;
+; Table des montants d'expédition
+;
+FILE IFEXPEDITION_MNT  REFERENCE
+  ACCESS VIA CIECLE                   , &
+             FOUCIECLE                , &
+             FOUCLE                   , &
+             CAPCLE                   , &
+             EXNCLE                     &
+       USING T_CIECLE                 , &
+             FOUCIECLE OF IFEXPEDITION, &
+             FOUCLE    OF IFEXPEDITION, &
+             CAPCLE    OF IFEXPEDITION, &
+             EXNCLE    OF IFEXPEDITION
+
+;-----------------------------------------------------------------------------
+;
+; Informations sur le Holding.
+;
+FILE MCHOLDING  REFERENCE
+  ACCESS VIA CIENMC USING "1"
+
+;-----------------------------------------------------------------------------
+;
+; Client des comptes a recevoir
+;
+FILE CRCLIENT REFERENCE
+
+;-----------------------------------------------------------------------------
+;
+; Table des commandes internes
+;
+FILE PDCOMMAN_INTERNE  REFERENCE
+  ACCESS VIA CIECLE                , &
+             PJTABR                , &
+             COMNUMCOMINT          , &
+             PJTANN                  &
+       USING T_CIECLE              , &
+             PJTABR       OF IFBLOC, &
+             COMNUMCOMINT OF IFBLOC, &
+             PJTANN       OF IFBLOC
+
+;-----------------------------------------------------------------------------
+;
+; Cette table est utilisée pour valider l'adresse de facturation ou pour créer
+; l'adresse si nécessaire.
+;
+
+FILE MCREF_ADRESSE  REFERENCE
+  ACCESS VIA REFCIECLE                       , &
+             REFCLETYP                       , &
+             REFCLENUM                       , &
+             RADCLE                            &
+       USING "----"                          , &
+             "C"                             , &
+             CLICLE       OF PDCOMMAN_INTERNE, &
+             COMNUMADRLIV OF PDCOMMAN_INTERNE
+
+;-----------------------------------------------------------------------------
+;
+; Fournisseur des comptes a payer - Fournisseur expédition
+;
+FILE CPFOURNISSEUR  REFERENCE  OPEN 1
+  ACCESS VIA FOUCIECLE   , &
+             FOUCLE        &
+       USING T_FOUCIECLE , &
+             FOUCLE OF IFEXPEDITION
+
+;-----------------------------------------------------------------------------
+;
+; Fournisseur des comptes a payer - Transporteur expédition
+;
+FILE CPFOURNISSEUR  REFERENCE  ALIAS A_VALID_FOU  OPEN 2
+  ACCESS VIA FOUCIECLE   , &
+             FOUCLE        &
+       USING T_FOUCIECLE , &
+             FOUTRP OF IFEXPEDITION
+
+;-----------------------------------------------------------------------------
+;
+; Type de granit
+;
+FILE PDTYPE_GRANIT  REFERENCE  OCCURS WITH IFBLOC_EXPED  OPEN 1
+
+;-----------------------------------------------------------------------------
+;
+; Ligne de detail d'une commande
+;
+FILE PDDETAIL_C_I  DESIGNER
+  ACCESS VIA CIECLE                , &
+             PJTABR                , &
+             PJTANN                , &
+             COMNUMCOMINT          , &
+             DCINUMLIG             , &
+             TPDTYPPRD             , &
+             TGRCODGRA               &
+       USING T_CIECLE              , &
+             PJTABR       OF IFBLOC, &
+             PJTANN       OF IFBLOC, &
+             COMNUMCOMINT OF IFBLOC, &
+             DCINUMLIG    OF IFBLOC, &
+             "BL"                  , &
+             TGRCODGRA    OF IFBLOC
+
+;-----------------------------------------------------------------------------
+;
+; Charte de numerotation des blocs
+;
+FILE IFCHARTE  REFERENCE
+
+;-----------------------------------------------------------------------------
+;
+; Lot d'expedition
+;
+FILE IFLOT REFERENCE
+
+;-----------------------------------------------------------------------------
+;
+; Table des expéditions de blocs - Validations en cas de destruction
+;
+FILE IFBLOC_EXPED  DESIGNER  ALIAS A_VALID_BLE  OPEN 2
+  ACCESS VIA CIECLE                , &
+             EXNCLE                  &
+       USING T_CIECLE              , &
+             EXNCLE OF IFEXPEDITION  &
+    OPTIONAL
+
+;-----------------------------------------------------------------------------
+;
+; Table des blocs
+;
+FILE IFBLOC  DESIGNER  ALIAS A_VALID_BLC  OPEN 2
+  ACCESS VIA CIECLE                  , &
+             TGRCODGRA               , &
+             IFCCLE                  , &
+             BLCCLE                  , &
+             BLCRED                    &
+       USING T_CIECLE                , &
+             TGRCODGRA OF A_VALID_BLE, &
+             IFCCLE    OF A_VALID_BLE, &
+             BLCCLE    OF A_VALID_BLE, &
+             BLCRED    OF A_VALID_BLE
+
+;-----------------------------------------------------------------------------
+;
+; Type de granit - Pour paramètre de sélection
+;
+FILE PDTYPE_GRANIT  REFERENCE  ALIAS A_SELEC_TGR  OPEN 2
+  ACCESS VIA CIECLE                   , &
+             TGRCODGRA                  &
+       USING T_CIECLE                 , &
+             TS_TGRCODGRA
+
+;-----------------------------------------------------------------------------
+;
+; Categorie de granit - Pour paramètre de sélection
+;
+FILE IFCATEGORIE  REFERENCE  OPEN 1
+  ACCESS VIA CIECLE          , &
+             CATCLE            &
+       USING T_CIECLE        , &
+             TS_CATCLE
+
+;-----------------------------------------------------------------------------
+;
+; Categorie de granit - Pour affichage
+;
+FILE IFCATEGORIE  REFERENCE  ALIAS A_AFFIC_CAT  OCCURS WITH IFBLOC_EXPED  OPEN 2
+  ACCESS VIA CIECLE          , &
+             CATCLE            &
+       USING T_CIECLE        , &
+             CATCLE OF IFBLOC
+
+;-----------------------------------------------------------------------------
+;
+; Couleur - Pour paramètre de sélection
+;
+FILE IFCOULEUR  REFERENCE  OPEN 1
+  ACCESS VIA CIECLE          , &
+             CLRCLE            &
+       USING T_CIECLE        , &
+             TS_CLRCLE
+
+;-----------------------------------------------------------------------------
+;
+; Couleur - Pour affichage
+;
+FILE IFCOULEUR  REFERENCE  ALIAS A_AFFIC_CLR  OCCURS WITH IFBLOC_EXPED  OPEN 2
+  ACCESS VIA CIECLE          , &
+             CLRCLE            &
+       USING T_CIECLE        , &
+             CLRCLE OF IFBLOC
+
+;-----------------------------------------------------------------------------
+;
+; Qualite de granit - Pour paramètre de sélection
+;
+FILE IFQUALITE  REFERENCE  OPEN 1
+  ACCESS VIA CIECLE          , &
+             QLTCLE            &
+       USING T_CIECLE        , &
+             TS_QLTCLE
+
+;-----------------------------------------------------------------------------
+;
+; Qualite de granit - Pour affichage
+;
+FILE IFQUALITE  REFERENCE  ALIAS A_AFFIC_QLT  OCCURS WITH IFBLOC_EXPED  OPEN 2
+  ACCESS VIA CIECLE          , &
+             QLTCLE            &
+       USING T_CIECLE        , &
+             QLTCLE OF IFBLOC
+
+;-----------------------------------------------------------------------------
+;
+; Entrepôt - Pour paramètre de sélection
+;
+FILE IFENTREPOT  REFERENCE  OPEN 1
+  ACCESS VIA CIECLE          , &
+             ETRCLE            &
+       USING T_CIECLE        , &
+             TS_ETRCLE
+
+;-----------------------------------------------------------------------------
+;
+; Entrepôt - Pour affichage
+;
+FILE IFENTREPOT  REFERENCE  ALIAS A_AFFIC_ETR  OCCURS WITH IFBLOC_EXPED  OPEN 2
+  ACCESS VIA CIECLE          , &
+             ETRCLE            &
+       USING T_CIECLE        , &
+             ETRCLE OF IFBLOC
+
+;------------------------------------------------------------------------------
+;
+TEMPORARY TMP-M3-TOT       INTEGER   SIZE 04
+TEMPORARY TMP-M3-DEL       INTEGER   SIZE 04
+
+TEMPORARY TMP-TOT-M3       INTEGER   SIZE 08  RESET AT STARTUP ; MP-00-03-22_D33.
+TEMPORARY TMP-COU-M3       INTEGER   SIZE 08  RESET AT STARTUP ; MP-00-03-22_D33.
+
+TEMPORARY T_TGRCODGRA      CHARACTER SIZE 03  RESET AT STARTUP ; Type de granit
+TEMPORARY T_IFCCLE         CHARACTER SIZE 02  RESET AT STARTUP ; Code de charte
+TEMPORARY T_BLCCLE         CHARACTER SIZE 06  RESET AT STARTUP ; Numéro de bloc
+TEMPORARY T_BLCRED         CHARACTER SIZE 01  RESET AT STARTUP ; Redimensionnement
+
+TEMPORARY T_FOUCLE         CHARACTER SIZE 06  RESET AT STARTUP ; Code de fournisseur
+TEMPORARY T_FOUTRP         CHARACTER SIZE 06  RESET AT STARTUP ; Code de fournisseur (transporteur)
+TEMPORARY T_USINE_SEC      CHARACTER SIZE 01  RESET AT STARTUP ; Code de sécurité
+TEMPORARY T_IFLCLE         CHARACTER SIZE 09  RESET AT STARTUP ; Code de lot d'expédition
+TEMPORARY T_CLICLE         CHARACTER SIZE 06  RESET AT STARTUP ; Code de client
+TEMPORARY T_CATCLE         CHARACTER SIZE 03  RESET AT STARTUP ; Code de catégorie
+TEMPORARY T_CLRCLE         CHARACTER SIZE 03  RESET AT STARTUP ; Code de couleur
+TEMPORARY T_QLTCLE         CHARACTER SIZE 03  RESET AT STARTUP ; Code de qualité
+TEMPORARY T_ETRCLE         CHARACTER SIZE 04  RESET AT STARTUP ; Code d'entrepôt
+
+TEMPORARY TS_OUI_NON       CHARACTER SIZE 01  INITIAL '0'  RESET AT MODE
+
+TEMPORARY TO_TGRCODGRA     CHARACTER SIZE 03  RESET AT MODE
+
+TEMPORARY T_SILENT1        CHARACTER SIZE 01  RESET AT STARTUP
+TEMPORARY T_SILENT2        CHARACTER SIZE 01  RESET AT STARTUP
+TEMPORARY T_POPUP          INTEGER   SIZE 01  RESET AT STARTUP
+
+TEMPORARY T_NUM_BLOC_1     CHARACTER SIZE 12  RESET AT STARTUP
+TEMPORARY T_NUM_BLOC_2     CHARACTER SIZE 12  RESET AT STARTUP
+TEMPORARY T_NUM_BLOC_3     CHARACTER SIZE 12  RESET AT STARTUP
+TEMPORARY T_NUM_BLOC_4     CHARACTER SIZE 12  RESET AT STARTUP
+TEMPORARY T_NUM_BLOC_5     CHARACTER SIZE 12  RESET AT STARTUP
+TEMPORARY T_NUM_BLOC_6     CHARACTER SIZE 12  RESET AT STARTUP
+TEMPORARY T_NUM_BLOC_7     CHARACTER SIZE 12  RESET AT STARTUP
+TEMPORARY T_NUM_BLOC_8     CHARACTER SIZE 12  RESET AT STARTUP
+
+TEMPORARY T_COMLGN         CHARACTER SIZE 07  OCCURS WITH IFBLOC_EXPED
+
+DEFINE DZ_CIECLE           CHARACTER SIZE 04 = T_CIECLE
+DEFINE DZ_CIENOM           CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;------------------------------------------------------------------------------
+;
+; Variables servant a appelle if001
+;
+TEMPORARY T_TGRCODGRA_ORI    CHARACTER SIZE 3
+TEMPORARY T_IFCCLE_ORI       CHARACTER SIZE 2
+TEMPORARY T_BLCCLE_ORI       CHARACTER SIZE 6
+TEMPORARY T_BLCRED_ORI       CHARACTER SIZE 1
+
+;-------------------------------------------------------------------------------
+;
+USE usvarprd    NOLIST
+
+USE usdrw132    NOLIST  ; Draw pour les écrans
+USE ustitstd132 NOLIST  ; En-tête pour les écrans
+USE ushilite    NOLIST
+
+DRAW 12,1 TO 12,132
+
+SKIP
+
+TITLE " Gestion des expéditions " CENTERED AT ,1
+SKIP
+
+USE ustitoff NOLIST
+
+SKIP TO LINE 4
+
+ALIGN(2,3,19)(,27,45)(,57,72)(,,79)(99,101,120)
+FIELD EXNCLE OF IFEXPEDITION            &
+      HIDDEN                            &
+      NOCHANGE                          &
+      REQUIRED                          &
+      NUMERIC                           &
+      SIGNIF 5                          &
+      LABEL "No expédition.:"           &
+      PIC "^^^^^"                       &
+      BWZ                               &
+      LOOKUP NOTON IFEXPEDITION         &
+         VIA CIECLE                ,    &
+             EXNCLE                     &
+       USING CIECLE OF IFEXPEDITION,    &
+             EXNCLE OF IFEXPEDITION     &
+     MESSAGE 3280 ; PD380 *E* Expédition déjà existante
+
+FIELD EXNDAT OF IFEXPEDITION            &
+      LABEL "Date expédition.:"         &
+      NOCHANGE                          &
+      DEFAULT SYSDATE                   &
+      SIZE 10
+
+FIELD FOUCLE OF IFEXPEDITION            &
+      LABEL "Fournisseur..:"            &
+      LOOKUP ON CPFOURNISSEUR           &
+         VIA FOUCIECLE  ,               &
+             FOUCLE                     &
+       USING T_FOUCIECLE,               &
+             FOUCLE OF IFEXPEDITION     &
+     MESSAGE 2917 ; PD017E Ce fournisseur n'existe pas
+
+FIELD FOUNOMABR OF CPFOURNISSEUR        &
+      DISPLAY
+
+FIELD IFLCLE OF IFEXPEDITION            &
+      HIDDEN                            &
+      REQUIRED                          &
+      NOCHANGE                          &
+      LABEL "Lot expédition...:"        &
+      LOOKUP ON IFLOT                   &
+         VIA CIECLE  ,                  &
+             IFLCLE                     &
+       USING T_CIECLE,                  &
+             IFLCLE OF IFEXPEDITION     &
+     MESSAGE 3272 ; PD372E Ce lot d'expedition n'existe pas
+
+SKIP
+
+ALIGN(2,3,19)(,27,45)(,57,72)(,,79)(,101,120)
+FIELD CLICLE OF IFEXPEDITION            &
+      HIDDEN                            &
+      REQUIRED                          & ; Option à enlever si le code client dans l'exépdition devient optionnel
+      NOCHANGE                          &
+      LABEL "No client.....:"           &
+      LOOKUP ON CRCLIENT                &
+         VIA CLICIECLE,                 &
+             CLICLE                     &
+       USING T_CLICIECLE,               &
+             CLICLE OF IFEXPEDITION     &
+     MESSAGE 2968 ; PD068 *E* Ce client n'existe pas
+
+FIELD EXNDATTRANS OF IFEXPEDITION       &
+      LABEL "Transféré le....:"         &
+      DISPLAY                           &
+      SIZE 10
+
+FIELD FOUTRP OF IFEXPEDITION            &
+      LABEL "Via..........:"            &
+      REQUIRED                          &
+      LOOKUP ON A_VALID_FOU             &
+         VIA FOUCIECLE  ,               &
+             FOUCLE                     &
+       USING T_FOUCIECLE,               &
+             FOUTRP OF IFEXPEDITION     &
+     MESSAGE 2917 ; PD017E Ce fournisseur n'existe pas
+
+FIELD FOUNOMABR OF A_VALID_FOU          &
+      DISPLAY
+
+FIELD EXNDATREC  OF IFEXPEDITION        &
+      DISPLAY ON ENTRY                  &
+      LABEL "Transporté le....:"        &
+      FORMAT YYYYMMDD                   &
+      SIZE 10
+
+SKIP
+
+ALIGN(2,3,19)
+FIELD EXNADR1 OF IFEXPEDITION           &
+      HIDDEN                            &
+      LABEL "Expédié à.....:"           &
+      DEFAULT RADADR1 OF MCREF_ADRESSE  &
+      SIZE 36
+
+SKIP
+
+ALIGN(2,,19)
+FIELD EXNADR2 OF IFEXPEDITION           &
+      ID SAME                           &
+      DEFAULT RADADR2 OF MCREF_ADRESSE  &
+      SIZE 36
+
+FIELD EXNADR3 OF IFEXPEDITION           &
+      ID SAME                           &
+      DEFAULT RADADR3 OF MCREF_ADRESSE  &
+      SIZE 36
+
+FIELD EXNCP   OF IFEXPEDITION           &
+      ID SAME                           &
+      NOLABEL                           &
+      DEFAULT RADCP OF MCREF_ADRESSE
+
+
+SKIP TO 6
+ALIGN(55,57,72)(,101,120)
+
+FIELD CAPCLE OF IFEXPEDITION            &
+      HIDDEN                            &
+      LABEL "Facture CP...:"
+
+FIELD EXNCOUTOT OF IFEXPEDITION         &    ; MP-00-03-22_D33.
+      LABEL "Coûts transport..:"        &
+      PICTURE " ^^^,^^^.^^"             &
+      FLOAT "$"                         &
+      ENTRY IF CAPCLE OF IFEXPEDITION <> " " ; MP-00-03-22_D33.
+
+SKIP TO 8
+ALIGN(55,57,72)
+FIELD EXNTOTAL   OF IFEXPEDITION        &
+      HIDDEN                            &
+      REQUIRED                          &
+      LABEL "Total M3.....:"
+
+FIELD T_SILENT2                         &
+      SILENT
+
+TITLE "_____Type_____  ___Catégorie___  ____Couleur____  ____Qualité____  ________Entrepôt_________"  AT 10,33
+
+SKIP TO 11
+
+ALIGN(02,03,28)(,,33)(,,37)(,,49)(,,53)(,,66)(,,70)(,,83)(,,87)(,,100)(,,105)
+FIELD TS_OUI_NON                        &
+      HIDDEN                            &
+      LABEL "Paramètres de sélection:"  &
+      DEFAULT "0"                       &
+      SIZE 3                            &
+      UPSHIFT                           &
+      VALUE "1", "0", "O", "N"          &
+      PREDISPLAY
+
+FIELD TS_TGRCODGRA                      &
+      ENTRY IF TS_OUI_NON = "1"
+
+FIELD TGRDSCFRA001 OF A_SELEC_TGR       &
+      DISPLAY                           &
+      SIZE 10
+
+FIELD TS_CATCLE                         &
+      ENTRY IF TS_OUI_NON = "1"
+
+FIELD CATDSCFRA OF IFCATEGORIE          &
+      DISPLAY                           &
+      SIZE 11
+
+FIELD TS_CLRCLE                         &
+      ENTRY IF TS_OUI_NON = "1"
+
+FIELD CLRDSCFRA OF IFCOULEUR            &
+      DISPLAY                           &
+      SIZE 11
+
+FIELD TS_QLTCLE                         &
+      ENTRY IF TS_OUI_NON = "1"
+
+FIELD QLTDSCFRA OF IFQUALITE            &
+      DISPLAY                           &
+      SIZE 11
+
+FIELD TS_ETRCLE                         &
+      ENTRY IF TS_OUI_NON = "1"
+
+FIELD ETRDSCFRA001 OF IFENTREPOT        &
+      DISPLAY                           &
+      SIZE 20
+
+TITLE "            ____Dimensions____     M3"                                                                                          AT 13,6
+TITLE "No bloc     Long   Haut   Larg   Total  ___Catégorie___ ____Couleur____ ____Qualité____ ____Entrepôt___ Commande  Lgn Facture"  AT 14,6
+
+SKIP TO 15
+
+ALIGN(2,2,3)(,,6)(,8,9)(,15,16)(,,18)(,23,25)(,30,32)(,,38)(,,46)(,,50)(,,62)(,,66)(,,78)(,,82)(,,94)(,,99)(,,110)(,112,113)(,115,116)(,,124)
+CLUSTER OCCURS WITH IFBLOC_EXPED
+
+FIELD TGRCODGRA OF IFBLOC_EXPED         &
+      HIDDEN                            &
+      REQUIRED                          &
+      NOCHANGE                          &
+      LABEL " "                         &
+      LOOKUP ON PDTYPE_GRANIT           &
+         VIA CIECLE                   , &
+             TGRCODGRA                  &
+       USING T_CIECLE                 , &
+             TGRCODGRA OF IFBLOC_EXPED  &
+     MESSAGE 3257 ; PD357 Ce type de granit est inexistant
+
+FIELD IFCCLE OF IFBLOC_EXPED            &
+      ENTRY IF T_POPUP = 0              &
+      REQUIRED                          &
+      NOCHANGE                          &
+      LOOKUP ON IFCHARTE                &
+         VIA CIECLE                   , &
+             IFCCLE                     &
+       USING CIECLE OF IFBLOC_EXPED   , &
+             IFCCLE OF IFBLOC_EXPED     &
+     MESSAGE 3258 ; PD358 Il n'y a pas de correspondance dans la charte des blocs
+
+FIELD BLCCLE OF IFBLOC_EXPED            &
+      ENTRY IF T_POPUP = 0              &
+      REQUIRED                          &
+      PATTERN "######"                  &
+      NOCHANGE                          &
+      LABEL "-"
+
+FIELD BLCRED OF IFBLOC_EXPED            &
+      ENTRY IF T_POPUP = 0              &
+      NOCHANGE                          &
+      LABEL "-"
+
+FIELD T_SILENT1                         &
+      SILENT                            &
+      LOOKUP ON IFBLOC                  &
+         VIA CIECLE                   , &
+             TGRCODGRA                , &
+             IFCCLE                   , &
+             BLCCLE                   , &
+             BLCRED                     &
+       USING CIECLE    OF IFBLOC_EXPED, &
+             TGRCODGRA OF IFBLOC_EXPED, &
+             IFCCLE    OF IFBLOC_EXPED, &
+             BLCCLE    OF IFBLOC_EXPED, &
+             BLCRED    OF IFBLOC_EXPED  &
+     MESSAGE 3281                     , & ; PD381 *E* Numéro de bloc inexistant
+             NOTON IFBLOC_EXPED         &
+         VIA CIECLE                   , &
+             EXNCLE                   , &
+             TGRCODGRA                , &
+             IFCCLE                   , &
+             BLCCLE                   , &
+             BLCRED                     &
+       USING CIECLE    OF IFBLOC_EXPED, &
+             EXNCLE    OF IFBLOC_EXPED, &
+             TGRCODGRA OF IFBLOC_EXPED, &
+             IFCCLE    OF IFBLOC_EXPED, &
+             BLCCLE    OF IFBLOC_EXPED, &
+             BLCRED    OF IFBLOC_EXPED  &
+     MESSAGE 3282 ; "E* Cette combinaison existe déjà
+
+FIELD BLCVENDULONG OF IFBLOC            &
+      BWZ                               &
+      DISPLAY
+
+FIELD BLCVENDUHAU  OF IFBLOC            &
+      LABEL "x"                         &
+      BWZ                               &
+      DISPLAY
+
+FIELD BLCVENDULAR  OF IFBLOC            &
+      LABEL "x"                         &
+      BWZ                               &
+      DISPLAY
+
+FIELD BLCM3TOT     OF IFBLOC            &
+      BWZ                               &
+      DISPLAY
+
+FIELD CATCLE       OF IFBLOC            &
+      DISPLAY
+
+FIELD CATDSCFRA    OF A_AFFIC_CAT       &
+      DISPLAY                           &
+      SIZE 11
+
+FIELD CLRCLE       OF IFBLOC            &
+      DISPLAY
+
+FIELD CLRDSCFRA    OF A_AFFIC_CLR       &
+      DISPLAY                           &
+      SIZE 11
+
+FIELD QLTCLE       OF IFBLOC            &
+      DISPLAY
+
+FIELD QLTDSCFRA    OF A_AFFIC_QLT       &
+      DISPLAY                           &
+      SIZE 11
+
+FIELD ETRCLE       OF IFBLOC            &
+      DISPLAY
+
+FIELD ETRDSCFRA001 OF A_AFFIC_ETR       &
+      DISPLAY                           &
+      SIZE 10
+
+FIELD PJTABR       OF IFBLOC            &
+      DISPLAY
+
+FIELD PJTANN       OF IFBLOC            &
+      LABEL "-"                         &
+      DISPLAY
+
+FIELD T_COMLGN                          &
+      LABEL "-"                         &
+      DISPLAY
+
+FIELD FTRNUMFAC    OF IFBLOC            &
+      BWZ                               &
+      DISPLAY
+
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+; Valide la securite d'acces de l'ecran.
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+
+  ; Verifier si il existe ou nom une compagnie pour le client dans le holding
+
+  IF HLDCHTCLI OF MCHOLDING = "1"
+  THEN LET T_CLICIECLE = T_CIECLE
+  ELSE LET T_CLICIECLE = HLDCHRSUB OF MCHOLDING
+
+  ; Verifier si il existe ou nom une compagnie pour le fournisseur dans le holding
+
+  IF HLDCHTFOU OF MCHOLDING = "1"
+  THEN LET T_FOUCIECLE = T_CIECLE
+  ELSE LET T_FOUCIECLE = HLDCHRSUB OF MCHOLDING
+END
+
+;------------------------------------------------------------------------------
+;
+; Pop-up sur le fournisseur
+;
+PROCEDURE INPUT FOUCLE OF IFEXPEDITION
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_FOUCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd117 MODE F &
+                     PASSING T_CIECLE   , &
+                             T_FOUCLE   , &
+                             T_USINE_SEC  &
+                     WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE( T_FOUCLE )
+  END
+
+  ; --------------------------------------------------------------------------
+  ; MP-00-05-05_DD999999.
+
+  IF 0=SIZE(TRUNCATE(FIELDTEXT)) AND 0=SIZE(TRUNCATE(FOUCLE OF IFEXPEDITION))
+  THEN BEGIN
+    IF T_CIECLE = "1100"
+    THEN LET FIELDTEXT = "ROBI01"
+    ELSE LET FIELDTEXT = "GRAN01"
+  END
+  ; --------------------------------------------------------------------------
+
+END
+
+;------------------------------------------------------------------------------
+;
+; Pop-up sur le lot d'expedition
+;
+PROCEDURE INPUT IFLCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_IFLCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN if112 PASSING T_CIECLE, &
+                             T_IFLCLE  &
+                     MODE F            &
+                     WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_IFLCLE)
+  END
+END
+
+;------------------------------------------------------------------------------
+;
+; Pop-up sur le fournisseur
+;
+PROCEDURE INPUT FOUTRP
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_FOUTRP = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd117 MODE F &
+                     PASSING T_CIECLE   , &
+                             T_FOUTRP   , &
+                             T_USINE_SEC  &
+                     WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE( T_FOUTRP )
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Pop-up sur le type de granit
+;
+PROCEDURE INPUT TGRCODGRA OF IFBLOC_EXPED
+BEGIN
+  LET T_POPUP = 0
+
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    IF ENTRYMODE
+    THEN BEGIN
+       LET T_TGRCODGRA  = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+       LET T_IFCCLE     = " "
+       LET T_BLCCLE     = " "
+       LET T_BLCRED     = " "
+       LET T_CLICLE     = CLICLE OF IFEXPEDITION
+       LET T_FOUCLE     = FOUCLE OF IFEXPEDITION
+       LET T_IFLCLE     = IFLCLE OF IFEXPEDITION
+
+       LET TO_TGRCODGRA = TS_TGRCODGRA
+
+       IF T_TGRCODGRA <> " " AND T_TGRCODGRA <> "@"
+       THEN LET TS_TGRCODGRA = T_TGRCODGRA
+       ELSE IF TS_TGRCODGRA = " "
+            THEN LET TS_TGRCODGRA = "@"
+
+       IF T_IFCCLE    = " "
+       THEN LET T_IFCCLE = "@"
+       IF T_BLCCLE    = " "
+       THEN LET T_BLCCLE = "@"
+       IF T_BLCRED    = " "
+       THEN LET T_BLCRED = "@"
+       IF T_CLICLE    = " "
+       THEN LET T_CLICLE = "@"
+
+       IF TS_CATCLE    = " "
+       THEN LET TS_CATCLE    = "@"
+       IF TS_CLRCLE    = " "
+       THEN LET TS_CLRCLE    = "@"
+       IF TS_QLTCLE    = " "
+       THEN LET TS_QLTCLE    = "@"
+       IF TS_ETRCLE    = " "
+       THEN LET TS_ETRCLE    = "@"
+
+       FOR IFBLOC_EXPED
+       BEGIN
+         IF NOT DELETEDRECORD OF IFBLOC_EXPED
+         THEN BEGIN
+           IF OCCURRENCE OF IFBLOC_EXPED = 1
+           THEN LET T_NUM_BLOC_1 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + BLCRED OF IFBLOC_EXPED
+           IF OCCURRENCE OF IFBLOC_EXPED = 2
+           THEN LET T_NUM_BLOC_2 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + BLCRED OF IFBLOC_EXPED
+           IF OCCURRENCE OF IFBLOC_EXPED = 3
+           THEN LET T_NUM_BLOC_3 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + BLCRED OF IFBLOC_EXPED
+           IF OCCURRENCE OF IFBLOC_EXPED = 4
+           THEN LET T_NUM_BLOC_4 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + BLCRED OF IFBLOC_EXPED
+           IF OCCURRENCE OF IFBLOC_EXPED = 5
+           THEN LET T_NUM_BLOC_5 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + BLCRED OF IFBLOC_EXPED
+           IF OCCURRENCE OF IFBLOC_EXPED = 6
+           THEN LET T_NUM_BLOC_6 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + BLCRED OF IFBLOC_EXPED
+           IF OCCURRENCE OF IFBLOC_EXPED = 7
+           THEN LET T_NUM_BLOC_7 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + BLCRED OF IFBLOC_EXPED
+           IF OCCURRENCE OF IFBLOC_EXPED = 8
+           THEN LET T_NUM_BLOC_8 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + BLCRED OF IFBLOC_EXPED
+         END
+       END
+
+       RUN SCREEN if114 PASSING T_CIECLE    , &
+                                T_TGRCODGRA , &
+                                T_IFCCLE    , &
+                                T_BLCCLE    , &
+                                T_BLCRED    , &
+                                T_CLICLE    , &
+                                T_FOUCLE    , &
+                                T_IFLCLE    , &
+                                TS_TGRCODGRA, &
+                                TS_CATCLE   , &
+                                TS_CLRCLE   , &
+                                TS_QLTCLE   , &
+                                TS_ETRCLE   , &
+                                T_NUM_BLOC_1, &
+                                T_NUM_BLOC_2, &
+                                T_NUM_BLOC_3, &
+                                T_NUM_BLOC_4, &
+                                T_NUM_BLOC_5, &
+                                T_NUM_BLOC_6, &
+                                T_NUM_BLOC_7, &
+                                T_NUM_BLOC_8  &
+                        REFRESH 12 TO 23      &
+                        MODE F                &
+                        WINDOW WIDTH CONSTANT WHEN CALLING
+
+       LET FIELDTEXT = TRUNCATE(T_TGRCODGRA)
+
+       IF T_TGRCODGRA <> " "
+       THEN LET T_POPUP = 1
+       ELSE LET T_POPUP = 0
+
+       LET TS_TGRCODGRA = TO_TGRCODGRA
+
+       IF TS_TGRCODGRA = "@"
+       THEN LET TS_TGRCODGRA = " "
+       IF TS_CATCLE    = "@"
+       THEN LET TS_CATCLE    = " "
+       IF TS_CLRCLE    = "@"
+       THEN LET TS_CLRCLE    = " "
+       IF TS_QLTCLE    = "@"
+       THEN LET TS_QLTCLE    = " "
+       IF TS_ETRCLE    = "@"
+       THEN LET TS_ETRCLE    = " "
+
+       LET IFCCLE OF IFBLOC_EXPED = T_IFCCLE
+       LET BLCCLE OF IFBLOC_EXPED = T_BLCCLE
+       LET BLCRED OF IFBLOC_EXPED = T_BLCRED
+
+       LET T_NUM_BLOC_1 = " "
+       LET T_NUM_BLOC_2 = " "
+       LET T_NUM_BLOC_3 = " "
+       LET T_NUM_BLOC_4 = " "
+       LET T_NUM_BLOC_5 = " "
+       LET T_NUM_BLOC_6 = " "
+       LET T_NUM_BLOC_7 = " "
+       LET T_NUM_BLOC_8 = " "
+     END
+  END
+  IF 0 <> INDEX(FIELDTEXT,"**")
+  THEN BEGIN
+    IF ENTRYMODE
+    THEN BEGIN
+       LET T_TGRCODGRA =  FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+       RUN SCREEN if104 PASSING T_CIECLE   , &
+                                T_TGRCODGRA  &
+                        MODE F               &
+                        WINDOW WIDTH CONSTANT WHEN CALLING
+
+       LET FIELDTEXT = TRUNCATE(T_TGRCODGRA)
+     END
+  END
+
+  ; Complete le code de granit par des zeros
+  USE usinpgen NOLIST
+END
+
+;-----------------------------------------------------------------------------
+;
+; Pop-up sur la charte de bloc
+;
+PROCEDURE INPUT IFCCLE
+BEGIN
+  LET T_POPUP = 0
+
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    IF ENTRYMODE
+    THEN BEGIN
+       LET T_TGRCODGRA  = TGRCODGRA OF IFBLOC_EXPED
+       LET T_IFCCLE     = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+       LET T_BLCCLE     = " "
+       LET T_BLCRED     = " "
+       LET T_CLICLE     = CLICLE OF IFEXPEDITION
+       LET T_FOUCLE     = FOUCLE OF IFEXPEDITION
+       LET T_IFLCLE     = IFLCLE OF IFEXPEDITION
+
+       LET TO_TGRCODGRA = TS_TGRCODGRA
+       LET TS_TGRCODGRA = T_TGRCODGRA
+
+       IF T_BLCCLE    = " "
+       THEN LET T_BLCCLE = "@"
+       IF T_BLCRED    = " "
+       THEN LET T_BLCRED = "@"
+       IF T_CLICLE    = " "
+       THEN LET T_CLICLE = "@"
+
+       IF TS_CATCLE    = " "
+       THEN LET TS_CATCLE    = "@"
+       IF TS_CLRCLE    = " "
+       THEN LET TS_CLRCLE    = "@"
+       IF TS_QLTCLE    = " "
+       THEN LET TS_QLTCLE    = "@"
+       IF TS_ETRCLE    = " "
+       THEN LET TS_ETRCLE    = "@"
+
+       FOR IFBLOC_EXPED
+       BEGIN
+         IF NOT DELETEDRECORD OF IFBLOC_EXPED
+         THEN BEGIN
+           IF OCCURRENCE OF IFBLOC_EXPED = 1
+           THEN LET T_NUM_BLOC_1 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + BLCRED OF IFBLOC_EXPED
+           IF OCCURRENCE OF IFBLOC_EXPED = 2
+           THEN LET T_NUM_BLOC_2 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + BLCRED OF IFBLOC_EXPED
+           IF OCCURRENCE OF IFBLOC_EXPED = 3
+           THEN LET T_NUM_BLOC_3 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + BLCRED OF IFBLOC_EXPED
+           IF OCCURRENCE OF IFBLOC_EXPED = 4
+           THEN LET T_NUM_BLOC_4 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + BLCRED OF IFBLOC_EXPED
+           IF OCCURRENCE OF IFBLOC_EXPED = 5
+           THEN LET T_NUM_BLOC_5 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + BLCRED OF IFBLOC_EXPED
+           IF OCCURRENCE OF IFBLOC_EXPED = 6
+           THEN LET T_NUM_BLOC_6 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + BLCRED OF IFBLOC_EXPED
+           IF OCCURRENCE OF IFBLOC_EXPED = 7
+           THEN LET T_NUM_BLOC_7 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + BLCRED OF IFBLOC_EXPED
+           IF OCCURRENCE OF IFBLOC_EXPED = 8
+           THEN LET T_NUM_BLOC_8 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + BLCRED OF IFBLOC_EXPED
+         END
+       END
+
+       RUN SCREEN if114 PASSING T_CIECLE    , &
+                                T_TGRCODGRA , &
+                                T_IFCCLE    , &
+                                T_BLCCLE    , &
+                                T_BLCRED    , &
+                                T_CLICLE    , &
+                                T_FOUCLE    , &
+                                T_IFLCLE    , &
+                                TS_TGRCODGRA, &
+                                TS_CATCLE   , &
+                                TS_CLRCLE   , &
+                                TS_QLTCLE   , &
+                                TS_ETRCLE   , &
+                                T_NUM_BLOC_1, &
+                                T_NUM_BLOC_2, &
+                                T_NUM_BLOC_3, &
+                                T_NUM_BLOC_4, &
+                                T_NUM_BLOC_5, &
+                                T_NUM_BLOC_6, &
+                                T_NUM_BLOC_7, &
+                                T_NUM_BLOC_8  &
+                        REFRESH 12 TO 23      &
+                        MODE F                &
+                        WINDOW WIDTH CONSTANT WHEN CALLING
+
+       LET FIELDTEXT = TRUNCATE(T_IFCCLE)
+
+       IF T_IFCCLE <> " "
+       THEN LET T_POPUP = 1
+       ELSE LET T_POPUP = 0
+
+       LET TS_TGRCODGRA = TO_TGRCODGRA
+
+       IF TS_TGRCODGRA = "@"
+       THEN LET TS_TGRCODGRA = " "
+       IF TS_CATCLE    = "@"
+       THEN LET TS_CATCLE    = " "
+       IF TS_CLRCLE    = "@"
+       THEN LET TS_CLRCLE    = " "
+       IF TS_QLTCLE    = "@"
+       THEN LET TS_QLTCLE    = " "
+       IF TS_ETRCLE    = "@"
+       THEN LET TS_ETRCLE    = " "
+
+       LET BLCCLE OF IFBLOC_EXPED = T_BLCCLE
+       LET BLCRED OF IFBLOC_EXPED = T_BLCRED
+
+       LET T_NUM_BLOC_1 = " "
+       LET T_NUM_BLOC_2 = " "
+       LET T_NUM_BLOC_3 = " "
+       LET T_NUM_BLOC_4 = " "
+       LET T_NUM_BLOC_5 = " "
+       LET T_NUM_BLOC_6 = " "
+       LET T_NUM_BLOC_7 = " "
+       LET T_NUM_BLOC_8 = " "
+     END
+  END
+
+  IF 0 <> INDEX(FIELDTEXT,"**")
+  THEN BEGIN
+    LET T_CIECLE = T_CIECLE
+    LET T_IFCCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN if113 PASSING  T_CIECLE, &
+                              T_IFCCLE  &
+                     MODE F             &
+                     WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_IFCCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Complete le numero de bloc par des zeros
+;
+PROCEDURE INPUT BLCCLE
+BEGIN
+  LET T_POPUP = 0
+
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    IF ENTRYMODE
+    THEN BEGIN
+       LET T_TGRCODGRA  = TGRCODGRA OF IFBLOC_EXPED
+       LET T_IFCCLE     = IFCCLE    OF IFBLOC_EXPED
+       LET T_BLCCLE     = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+       LET T_BLCRED     = " "
+       LET T_CLICLE     = CLICLE OF IFEXPEDITION
+       LET T_FOUCLE     = FOUCLE OF IFEXPEDITION
+       LET T_IFLCLE     = IFLCLE OF IFEXPEDITION
+
+       LET TO_TGRCODGRA = TS_TGRCODGRA
+       LET TS_TGRCODGRA = T_TGRCODGRA
+
+       IF T_BLCRED    = " "
+       THEN LET T_BLCRED = "@"
+       IF T_CLICLE    = " "
+       THEN LET T_CLICLE = "@"
+
+       IF TS_CATCLE    = " "
+       THEN LET TS_CATCLE    = "@"
+       IF TS_CLRCLE    = " "
+       THEN LET TS_CLRCLE    = "@"
+       IF TS_QLTCLE    = " "
+       THEN LET TS_QLTCLE    = "@"
+       IF TS_ETRCLE    = " "
+       THEN LET TS_ETRCLE    = "@"
+
+       FOR IFBLOC_EXPED
+       BEGIN
+         IF NOT DELETEDRECORD OF IFBLOC_EXPED
+         THEN BEGIN
+           IF OCCURRENCE OF IFBLOC_EXPED = 1
+           THEN LET T_NUM_BLOC_1 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + BLCRED OF IFBLOC_EXPED
+           IF OCCURRENCE OF IFBLOC_EXPED = 2
+           THEN LET T_NUM_BLOC_2 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + BLCRED OF IFBLOC_EXPED
+           IF OCCURRENCE OF IFBLOC_EXPED = 3
+           THEN LET T_NUM_BLOC_3 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + BLCRED OF IFBLOC_EXPED
+           IF OCCURRENCE OF IFBLOC_EXPED = 4
+           THEN LET T_NUM_BLOC_4 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + BLCRED OF IFBLOC_EXPED
+           IF OCCURRENCE OF IFBLOC_EXPED = 5
+           THEN LET T_NUM_BLOC_5 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + BLCRED OF IFBLOC_EXPED
+           IF OCCURRENCE OF IFBLOC_EXPED = 6
+           THEN LET T_NUM_BLOC_6 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + BLCRED OF IFBLOC_EXPED
+           IF OCCURRENCE OF IFBLOC_EXPED = 7
+           THEN LET T_NUM_BLOC_7 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + BLCRED OF IFBLOC_EXPED
+           IF OCCURRENCE OF IFBLOC_EXPED = 8
+           THEN LET T_NUM_BLOC_8 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + BLCRED OF IFBLOC_EXPED
+         END
+       END
+
+       RUN SCREEN if114 PASSING T_CIECLE    , &
+                                T_TGRCODGRA , &
+                                T_IFCCLE    , &
+                                T_BLCCLE    , &
+                                T_BLCRED    , &
+                                T_CLICLE    , &
+                                T_FOUCLE    , &
+                                T_IFLCLE    , &
+                                TS_TGRCODGRA, &
+                                TS_CATCLE   , &
+                                TS_CLRCLE   , &
+                                TS_QLTCLE   , &
+                                TS_ETRCLE   , &
+                                T_NUM_BLOC_1, &
+                                T_NUM_BLOC_2, &
+                                T_NUM_BLOC_3, &
+                                T_NUM_BLOC_4, &
+                                T_NUM_BLOC_5, &
+                                T_NUM_BLOC_6, &
+                                T_NUM_BLOC_7, &
+                                T_NUM_BLOC_8  &
+                        REFRESH 12 TO 23      &
+                        MODE F                &
+                        WINDOW WIDTH CONSTANT WHEN CALLING
+
+       LET FIELDTEXT = TRUNCATE(T_BLCCLE)
+
+       IF T_BLCCLE <> " "
+       THEN LET T_POPUP = 1
+       ELSE LET T_POPUP = 0
+
+       LET TS_TGRCODGRA = TO_TGRCODGRA
+
+       IF TS_TGRCODGRA = "@"
+       THEN LET TS_TGRCODGRA = " "
+       IF TS_CATCLE    = "@"
+       THEN LET TS_CATCLE    = " "
+       IF TS_CLRCLE    = "@"
+       THEN LET TS_CLRCLE    = " "
+       IF TS_QLTCLE    = "@"
+       THEN LET TS_QLTCLE    = " "
+       IF TS_ETRCLE    = "@"
+       THEN LET TS_ETRCLE    = " "
+
+       LET BLCRED OF IFBLOC_EXPED = T_BLCRED
+
+       LET T_NUM_BLOC_1 = " "
+       LET T_NUM_BLOC_2 = " "
+       LET T_NUM_BLOC_3 = " "
+       LET T_NUM_BLOC_4 = " "
+       LET T_NUM_BLOC_5 = " "
+       LET T_NUM_BLOC_6 = " "
+       LET T_NUM_BLOC_7 = " "
+       LET T_NUM_BLOC_8 = " "
+     END
+  END
+
+  ; Complete le code de granit par des zeros
+  USE usinpgen2 NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+PROCEDURE PROCESS BLCCLE
+BEGIN
+  LET EXNADR1 OF IFEXPEDITION = RADADR1 OF MCREF_ADRESSE
+  LET EXNADR2 OF IFEXPEDITION = RADADR2 OF MCREF_ADRESSE
+  LET EXNADR3 OF IFEXPEDITION = RADADR3 OF MCREF_ADRESSE
+  LET EXNCP   OF IFEXPEDITION = RADCP   OF MCREF_ADRESSE
+
+  DISPLAY EXNADR1   OF IFEXPEDITION
+  DISPLAY EXNADR2   OF IFEXPEDITION
+  DISPLAY EXNADR3   OF IFEXPEDITION
+  DISPLAY EXNCP     OF IFEXPEDITION
+  DISPLAY FTRNUMFAC OF IFBLOC
+END
+
+;------------------------------------------------------------------------------
+;
+PROCEDURE INPUT BLCRED
+BEGIN
+  LET T_POPUP = 0
+
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    IF ENTRYMODE
+    THEN BEGIN
+       LET T_TGRCODGRA  = TGRCODGRA OF IFBLOC_EXPED
+       LET T_IFCCLE     = IFCCLE    OF IFBLOC_EXPED
+       LET T_BLCCLE     = BLCCLE    OF IFBLOC_EXPED
+       LET T_BLCRED     = " "
+       LET T_CLICLE     = CLICLE OF IFEXPEDITION
+       LET T_FOUCLE     = FOUCLE OF IFEXPEDITION
+       LET T_IFLCLE     = IFLCLE OF IFEXPEDITION
+
+       LET TO_TGRCODGRA = TS_TGRCODGRA
+       LET TS_TGRCODGRA = T_TGRCODGRA
+
+       IF T_CLICLE    = " "
+       THEN LET T_CLICLE = "@"
+
+       IF TS_CATCLE    = " "
+       THEN LET TS_CATCLE    = "@"
+       IF TS_CLRCLE    = " "
+       THEN LET TS_CLRCLE    = "@"
+       IF TS_QLTCLE    = " "
+       THEN LET TS_QLTCLE    = "@"
+       IF TS_ETRCLE    = " "
+       THEN LET TS_ETRCLE    = "@"
+
+       FOR IFBLOC_EXPED
+       BEGIN
+         IF NOT DELETEDRECORD OF IFBLOC_EXPED
+         THEN BEGIN
+           IF OCCURRENCE OF IFBLOC_EXPED = 1
+           THEN LET T_NUM_BLOC_1 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + "."
+           IF OCCURRENCE OF IFBLOC_EXPED = 2
+           THEN LET T_NUM_BLOC_2 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + "."
+           IF OCCURRENCE OF IFBLOC_EXPED = 3
+           THEN LET T_NUM_BLOC_3 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + "."
+           IF OCCURRENCE OF IFBLOC_EXPED = 4
+           THEN LET T_NUM_BLOC_4 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + "."
+           IF OCCURRENCE OF IFBLOC_EXPED = 5
+           THEN LET T_NUM_BLOC_5 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + "."
+           IF OCCURRENCE OF IFBLOC_EXPED = 6
+           THEN LET T_NUM_BLOC_6 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + "."
+           IF OCCURRENCE OF IFBLOC_EXPED = 7
+           THEN LET T_NUM_BLOC_7 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + "."
+           IF OCCURRENCE OF IFBLOC_EXPED = 8
+           THEN LET T_NUM_BLOC_8 = TGRCODGRA OF IFBLOC_EXPED + IFCCLE OF IFBLOC_EXPED + BLCCLE OF IFBLOC_EXPED + "."
+         END
+       END
+
+       RUN SCREEN if114 PASSING T_CIECLE    , &
+                                T_TGRCODGRA , &
+                                T_IFCCLE    , &
+                                T_BLCCLE    , &
+                                T_BLCRED    , &
+                                T_CLICLE    , &
+                                T_FOUCLE    , &
+                                T_IFLCLE    , &
+                                TS_TGRCODGRA, &
+                                TS_CATCLE   , &
+                                TS_CLRCLE   , &
+                                TS_QLTCLE   , &
+                                TS_ETRCLE   , &
+                                T_NUM_BLOC_1, &
+                                T_NUM_BLOC_2, &
+                                T_NUM_BLOC_3, &
+                                T_NUM_BLOC_4, &
+                                T_NUM_BLOC_5, &
+                                T_NUM_BLOC_6, &
+                                T_NUM_BLOC_7, &
+                                T_NUM_BLOC_8  &
+                        REFRESH 12 TO 23      &
+                        MODE F                &
+                        WINDOW WIDTH CONSTANT WHEN CALLING
+
+       LET FIELDTEXT = TRUNCATE(T_BLCRED)
+
+       IF T_BLCRED <> " "
+       THEN LET T_POPUP = 1
+       ELSE LET T_POPUP = 0
+
+       LET TS_TGRCODGRA = TO_TGRCODGRA
+
+       IF TS_TGRCODGRA = "@"
+       THEN LET TS_TGRCODGRA = " "
+       IF TS_CATCLE    = "@"
+       THEN LET TS_CATCLE    = " "
+       IF TS_CLRCLE    = "@"
+       THEN LET TS_CLRCLE    = " "
+       IF TS_QLTCLE    = "@"
+       THEN LET TS_QLTCLE    = " "
+       IF TS_ETRCLE    = "@"
+       THEN LET TS_ETRCLE    = " "
+
+       LET T_NUM_BLOC_1 = " "
+       LET T_NUM_BLOC_2 = " "
+       LET T_NUM_BLOC_3 = " "
+       LET T_NUM_BLOC_4 = " "
+       LET T_NUM_BLOC_5 = " "
+       LET T_NUM_BLOC_6 = " "
+       LET T_NUM_BLOC_7 = " "
+       LET T_NUM_BLOC_8 = " "
+     END
+  END
+
+  IF 0=SIZE(TRUNCATE(FIELDTEXT))
+  THEN LET FIELDTEXT = BLCRED OF IFBLOC_EXPED
+END
+
+;------------------------------------------------------------------------------
+;
+PROCEDURE EDIT T_SILENT1
+BEGIN
+  GET IFBLOC OPTIONAL
+
+  IF EXNCLE OF IFBLOC <> 0
+  THEN ERROR 3298 ; PD398 *E* Ce bloc est déjà expédié
+
+  IF IFLCLE OF IFEXPEDITION <> ' ' AND &
+     IFLCLE OF IFBLOC       <> ' ' AND &
+     IFLCLE OF IFEXPEDITION <> IFLCLE OF IFBLOC
+  THEN ERROR = "*E* Lot expédition du bloc (" + IFLCLE OF IFBLOC   &
+             + ") <> du lot d'expédition (" + IFLCLE OF IFEXPEDITION + ")"
+
+  IF CLICLE OF IFBLOC <> CLICLE OF IFEXPEDITION ; Validation à enlever si le code client dans l'exépdition devient optionnel
+  THEN ERROR 3300 ; PD400 *E* Un seul client par expédition est permis
+
+  IF CLICLE OF IFEXPEDITION <> ' ' AND &
+     CLICLE OF IFBLOC       <> ' ' AND &
+     CLICLE OF IFEXPEDITION <> CLICLE OF IFBLOC
+  THEN ERROR = "*E* Client associé au bloc (" + CLICLE OF IFBLOC   &
+             + ") <> du client du lot d'expédition (" + CLICLE OF IFEXPEDITION + ")"
+
+  IF FOUCLE OF IFEXPEDITION <> ' ' AND &
+     FOUCLE OF IFBLOC       <> ' ' AND &
+     FOUCLE OF IFEXPEDITION <> FOUCLE OF IFBLOC
+  THEN ERROR = "*E* Fournisseur du bloc (" + FOUCLE OF IFBLOC   &
+             + ") <> du fournisseur du lot d'expédition (" + FOUCLE OF IFEXPEDITION + ")"
+
+  IF PJTABR       OF IFBLOC = " "  OR &
+     PJTANN       OF IFBLOC = " "  OR &
+     COMNUMCOMINT OF IFBLOC = " "  OR &
+     DCINUMLIG    OF IFBLOC = " "
+  THEN ERROR 3295 ; PD395 *E* Ce bloc doit être assigné à une commande avant d'être expédié
+
+  IF FTRNUMFAC OF IFBLOC <> 0
+  THEN ERROR "PD401 *E* Sélection impossible...Ce bloc a déjà été facturé"
+END
+
+;------------------------------------------------------------------------------
+;
+PROCEDURE PROCESS T_SILENT1
+BEGIN
+  LET T_COMLGN = COMNUMCOMINT OF IFBLOC + " " + DCINUMLIG OF IFBLOC
+
+  DISPLAY FIELD T_COMLGN
+END
+
+;-------------------------------------------------------------------------------
+;
+PROCEDURE PROCESS EXNDAT
+BEGIN
+  IF NEWRECORD OF IFEXPEDITION
+  THEN LET EXNDATREC OF IFEXPEDITION = EXNDAT OF IFEXPEDITION
+END
+
+;------------------------------------------------------------------------------
+;
+; Appel du pop-up pour le numero de client
+;
+PROCEDURE INPUT CLICLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CLICLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd210n PASSING T_CIECLE, &
+                              T_CIENOM, &
+                              T_CLICLE  &
+                      MODE F            &
+                      WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_CLICLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Pour saisir et afficher les valeurs Oui/Non
+;
+PROCEDURE INPUT TS_OUI_NON
+BEGIN
+  USE usflginp NOLIST  ; Pour l'entr\351e d'un flag oui/non
+END
+
+;-------------------------------------------------------------------------------
+;
+; Pour afficher la valeur Oui/Non avec 3 caract\350res.
+;
+PROCEDURE OUTPUT TS_OUI_NON
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF IFEXPEDITION &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF IFEXPEDITION &
+     AND NOT NEWRECORD     OF IFEXPEDITION &
+     AND NOT DELETEDRECORD OF IFEXPEDITION &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+
+  ; Affectation de l'usager, de la date et de l'heure de creation
+  IF NEWRECORD OF IFEXPEDITION AND NOT DELETEDRECORD OF IFEXPEDITION
+  THEN BEGIN
+    LET EXNUSRCRE OF IFEXPEDITION = LOGONID
+    LET EXNDATCRE OF IFEXPEDITION = SYSDATE
+    LET EXNHRECRE OF IFEXPEDITION = SYSTIME / 10000
+  END
+
+  ; Affectation de l'usager, de la date et de l'heure de modification
+  IF NOT NEWRECORD OF IFEXPEDITION AND NOT DELETEDRECORD OF IFEXPEDITION
+  THEN BEGIN
+    LET EXNUSAGERMOD  OF IFEXPEDITION = LOGONID
+    LET EXNDATDERNMOD OF IFEXPEDITION = SYSDATE
+    LET EXNHREDERNMOD OF IFEXPEDITION = SYSTIME / 10000
+  END
+
+; -------------------------------------------------------
+; MP-00-03-22_D33.
+
+  LET TMP-TOT-M3 = 0
+
+  WHILE RETRIEVING A_VALID_BLE
+  BEGIN
+    GET A_VALID_BLC OPTIONAL
+
+    LET TMP-TOT-M3 = TMP-TOT-M3 + BLCM3TOT OF A_VALID_BLC
+  END
+  LET TMP-COU-M3 = ROUND(EXNCOUTOT OF IFEXPEDITION/TMP-TOT-M3,2) * 100
+
+; -------------------------------------------------------
+
+  LET TMP-M3-TOT = 0
+  LET TMP-M3-DEL = 0
+
+  IF NOT DELETEDRECORD OF IFEXPEDITION
+  THEN BEGIN
+    FOR IFBLOC_EXPED
+    BEGIN
+       IF NOT DELETEDRECORD OF IFBLOC_EXPED
+       THEN LET TMP-M3-TOT = TMP-M3-TOT + BLCM3TOT OF IFBLOC
+       ELSE IF DELETEDRECORD OF IFBLOC_EXPED AND NOT NEWRECORD OF IFBLOC_EXPED
+            THEN LET TMP-M3-DEL = TMP-M3-DEL + BLCM3TOT OF IFBLOC
+    END
+
+    IF TMP-M3-TOT <> EXNTOTAL OF IFEXPEDITION - TMP-M3-DEL
+    THEN ERROR 3277 ; *E* Les totaux ne correspondent pas
+  END
+
+
+  FOR IFBLOC_EXPED
+  BEGIN
+    IF EXNDATREC OF IFEXPEDITION <> 0 AND NOT &
+      (DELETEDRECORD OF IFBLOC_EXPED  OR  NEWRECORD OF IFBLOC_EXPED)
+    THEN BEGIN
+      GET PDDETAIL_C_I OPTIONAL
+      IF NOT ACCESSOK
+      THEN ERROR = "*E* Mauvaise ligne de commande pour le bloc: " + BLCCLE OF IFBLOC_EXPED
+      ELSE BEGIN
+        IF EXNDATREC OF IFEXPEDITION <> 0 AND BLCDATREC OF IFBLOC = 0
+        THEN BEGIN
+           LET DCIQTEEXP OF PDDETAIL_C_I = DCIQTEEXP OF PDDETAIL_C_I + (BLCM3TOT OF IFBLOC / 100)
+           PUT PDDETAIL_C_I RESET
+        END
+
+        LET BLCMNTEXPM3 OF IFBLOC = TMP-COU-M3                 ; MP-00-03-22_D33.
+        LET BLCDATREC   OF IFBLOC = EXNDATREC OF IFEXPEDITION
+
+        PUT IFBLOC
+      END
+    END
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+PROCEDURE UPDATE
+BEGIN
+  FOR IFBLOC_EXPED
+  BEGIN
+
+    IF DELETEDRECORD OF IFBLOC_EXPED AND NOT NEWRECORD OF IFBLOC_EXPED
+    THEN BEGIN
+      IF FTRNUMFAC OF IFBLOC <> 0
+      THEN ERROR 3297 ; *E* Destruction interdite car bloc déjà facturé
+      GET PDDETAIL_C_I OPTIONAL
+      IF ACCESSOK
+      THEN BEGIN
+        IF NOT DELETEDRECORD OF IFEXPEDITION
+        THEN BEGIN
+          LET EXNTOTAL OF IFEXPEDITION = EXNTOTAL OF IFEXPEDITION - BLCM3TOT OF IFBLOC
+          IF EXNDATREC OF IFEXPEDITION <> 0
+          THEN BEGIN
+            LET DCIQTEEXP OF PDDETAIL_C_I = DCIQTEEXP OF PDDETAIL_C_I - (BLCM3TOT OF IFBLOC / 100)
+            PUT PDDETAIL_C_I
+          END
+        END
+        ELSE BEGIN
+          LET DCIQTEEXP OF PDDETAIL_C_I = DCIQTEEXP OF PDDETAIL_C_I - (BLCM3TOT OF IFBLOC / 100)
+          PUT PDDETAIL_C_I
+        END
+      END
+      ELSE ERROR = "*E* mauvaise ligne de commande pour le bloc: " + BLCCLE OF IFBLOC_EXPED
+
+      LET EXNCLE    OF IFBLOC = 0
+      LET BLCDATREC OF IFBLOC = 0
+
+      IF BLCIFLORI  OF IFBLOC = '1'    ; Vérifier si le lot a été créé à l'origine via l'expédition
+      THEN LET IFLCLE OF IFBLOC = ' '
+
+      IF BLCFOUORI  OF IFBLOC = '1'    ; Vérifier si le fournisseur a été créé à l'origine via l'expédition
+      THEN LET FOUCLE OF IFBLOC = ' '
+
+      LET BLCMNTEXPM3 OF IFBLOC = 0 ; MP-00-03-22_D33.
+
+      PUT IFBLOC
+      PUT IFBLOC_EXPED
+    END
+    ELSE BEGIN
+      IF NEWRECORD OF IFBLOC_EXPED AND NOT DELETEDRECORD OF IFBLOC_EXPED
+      THEN BEGIN
+        GET PDDETAIL_C_I OPTIONAL
+        IF ACCESSOK
+        THEN BEGIN
+          IF EXNDATREC OF IFEXPEDITION <> 0
+          THEN BEGIN
+            LET DCIQTEEXP OF PDDETAIL_C_I = DCIQTEEXP OF PDDETAIL_C_I + (BLCM3TOT OF IFBLOC / 100)
+            PUT PDDETAIL_C_I
+          END
+        END
+        ELSE ERROR = "*E* Mauvaise ligne de commande pour le bloc: " + BLCCLE OF IFBLOC_EXPED
+
+        LET EXNCLE OF IFBLOC = EXNCLE OF IFEXPEDITION
+
+        IF IFLCLE OF IFBLOC = ' '
+        THEN BEGIN
+          LET IFLCLE    OF IFBLOC = IFLCLE OF IFEXPEDITION
+          LET BLCIFLORI OF IFBLOC = '1'  ; Indiquer que le lot a été créé à l'origine via l'expédition
+        END
+
+        IF FOUCLE OF IFBLOC = ' '
+        THEN BEGIN
+          LET FOUCLE    OF IFBLOC = FOUCLE OF IFEXPEDITION
+          LET BLCFOUORI OF IFBLOC = '1'  ; Indiquer que le fournisseur a été créé à l'origine via l'expédition
+        END
+
+        IF EXNDATREC OF IFEXPEDITION <> 0
+        THEN LET BLCDATREC OF IFBLOC = EXNDATREC OF IFEXPEDITION
+
+        LET BLCMNTEXPM3 OF IFBLOC = TMP-COU-M3       ; MP-00-03-22_D33.
+
+        PUT IFBLOC_EXPED
+        PUT IFBLOC
+      END
+    END
+  END
+
+  PUT IFEXPEDITION
+END
+
+;-------------------------------------------------------------------------------
+;
+PROCEDURE POSTUPDATE
+BEGIN
+  DISPLAY FIELD EXNTOTAL  OF IFEXPEDITION
+END
+
+;-------------------------------------------------------------------------------
+;
+PROCEDURE DETAIL POSTFIND
+BEGIN
+  DISPLAY FIELD EXNTOTAL OF IFEXPEDITION
+
+  FOR IFBLOC_EXPED
+  BEGIN
+    GET IFBLOC OPTIONAL
+
+    LET TMP-M3-TOT = BLCM3TOT OF IFBLOC
+    LET T_COMLGN   = COMNUMCOMINT OF IFBLOC + " " + DCINUMLIG OF IFBLOC
+  END
+
+  IF CAPCLE OF IFEXPEDITION <> ""  AND EXMMNT OF IFEXPEDITION_MNT <> 0
+  THEN LET EXNCOUTOT OF IFEXPEDITION = EXMMNT OF IFEXPEDITION_MNT ; MP-00-03-22_D33.
+END
+
+;-------------------------------------------------------------------------------
+;
+; Procédure générée modifiée pour fins de validations
+;
+PROCEDURE DELETE
+BEGIN
+; Validation en cas de destruction
+
+  WHILE RETRIEVING A_VALID_BLE
+  BEGIN
+    GET A_VALID_BLC OPTIONAL
+
+    IF FTRNUMFAC OF A_VALID_BLC <> 0
+    THEN ERROR 3279 ; PD379 *E* Impossible... Des blocs facturés sont associés à cette expédition
+  END
+
+  DELETE IFEXPEDITION
+
+  FOR IFBLOC_EXPED
+  BEGIN
+    IF NOT DELETEDRECORD OF IFBLOC_EXPED
+    THEN BEGIN
+      DELETE IFBLOC_EXPED
+
+      DISPLAY FIELD BLCVENDULONG OF IFBLOC
+      DISPLAY FIELD BLCVENDUHAU  OF IFBLOC
+      DISPLAY FIELD BLCVENDULAR  OF IFBLOC
+      DISPLAY FIELD BLCM3TOT     OF IFBLOC
+      DISPLAY FIELD CATCLE       OF IFBLOC
+      DISPLAY FIELD CLRCLE       OF IFBLOC
+      DISPLAY FIELD QLTCLE       OF IFBLOC
+      DISPLAY FIELD ETRCLE       OF IFBLOC
+      DISPLAY FIELD PJTABR       OF IFBLOC
+      DISPLAY FIELD PJTANN       OF IFBLOC
+      DISPLAY FIELD T_COMLGN
+      DISPLAY FIELD FTRNUMFAC    OF IFBLOC
+    END
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Procédure générée récupérée puisque la procédure DELETE a été modifiée
+;
+PROCEDURE DETAIL DELETE
+BEGIN
+  IF FTRNUMFAC OF IFBLOC <> 0
+  THEN ERROR 3297 ; *E* Destruction interdite car bloc déjà facturé
+
+  DELETE IFBLOC_EXPED
+
+  DISPLAY FIELD BLCVENDULONG OF IFBLOC
+  DISPLAY FIELD BLCVENDUHAU  OF IFBLOC
+  DISPLAY FIELD BLCVENDULAR  OF IFBLOC
+  DISPLAY FIELD BLCM3TOT     OF IFBLOC
+  DISPLAY FIELD CATCLE       OF IFBLOC
+  DISPLAY FIELD CLRCLE       OF IFBLOC
+  DISPLAY FIELD QLTCLE       OF IFBLOC
+  DISPLAY FIELD ETRCLE       OF IFBLOC
+  DISPLAY FIELD PJTABR       OF IFBLOC
+  DISPLAY FIELD PJTANN       OF IFBLOC
+  DISPLAY FIELD T_COMLGN
+  DISPLAY FIELD FTRNUMFAC    OF IFBLOC
+END
+
+;-------------------------------------------------------------------------------
+;
+; Pop-up sur le type de granit
+;
+PROCEDURE INPUT TS_TGRCODGRA
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TGRCODGRA = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN if104 PASSING T_CIECLE   , &
+                             T_TGRCODGRA  &
+                     MODE F               &
+                     WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_TGRCODGRA)
+  END
+
+  ; Complete le code de granit par des zeros
+  USE usinpgen NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Validations sur le type de granit
+;
+PROCEDURE EDIT TS_TGRCODGRA
+BEGIN
+  IF FIELDTEXT <> " "
+  THEN BEGIN
+    GET A_SELEC_TGR VIA CIECLE      , &
+                        TGRCODGRA     &
+                  USING T_CIECLE    , &
+                        TS_TGRCODGRA  OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 3257 ; PD357 Ce type de granit est inexistant
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Pop-up sur la categorie
+;
+PROCEDURE INPUT TS_CATCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = T_CIECLE
+    LET T_CATCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN if106 PASSING  T_CIECLE, &
+                              T_CATCLE  &
+                     MODE F             &
+                     WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_CATCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Validations sur la categorie
+;
+PROCEDURE EDIT TS_CATCLE
+BEGIN
+  IF FIELDTEXT <> " "
+  THEN BEGIN
+    GET IFCATEGORIE VIA CIECLE   , &
+                        CATCLE     &
+                  USING T_CIECLE , &
+                        TS_CATCLE  OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 3261 ; PD361 Cette catégorie de granit est inexistante
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Pop-up sur la couleur
+;
+PROCEDURE INPUT TS_CLRCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = T_CIECLE
+    LET T_CLRCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN if108 PASSING  T_CIECLE, &
+                              T_CLRCLE  &
+                     MODE F             &
+                     WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_CLRCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Validations sur la couleur
+;
+PROCEDURE EDIT TS_CLRCLE
+BEGIN
+  IF FIELDTEXT <> " "
+  THEN BEGIN
+    GET IFCOULEUR VIA CIECLE   , &
+                      CLRCLE     &
+                USING T_CIECLE , &
+                      TS_CLRCLE  OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 3263 ; PD363E Cette couleur est inexistante
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Pop-up sur la qualite
+;
+PROCEDURE INPUT TS_QLTCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = T_CIECLE
+    LET T_QLTCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN if107 PASSING  T_CIECLE, &
+                              T_QLTCLE  &
+                     MODE F             &
+                     WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_QLTCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Validations sur la qualité
+;
+PROCEDURE EDIT TS_QLTCLE
+BEGIN
+  IF FIELDTEXT <> " "
+  THEN BEGIN
+    GET IFQUALITE VIA CIECLE   , &
+                      QLTCLE     &
+                USING T_CIECLE , &
+                      TS_QLTCLE  OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 3262 ; PD362E Ce code de qualité est inexistant
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Pop-up sur l'entrepôt
+;
+PROCEDURE INPUT TS_ETRCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = T_CIECLE
+    LET T_ETRCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN if105 PASSING  T_CIECLE, &
+                              T_ETRCLE  &
+                     MODE F             &
+                     WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_ETRCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Validations sur l'entrepôt
+;
+PROCEDURE EDIT TS_ETRCLE
+BEGIN
+  IF FIELDTEXT <> " "
+  THEN BEGIN
+    GET IFENTREPOT VIA CIECLE  , &
+                       ETRCLE    &
+                 USING T_CIECLE, &
+                       TS_ETRCLE OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 3260 ; PD360 Cet entrepôt est inexistant
+  END
+END
+
+;------------------------------------------------------------------------------
+;
+; Info pour oui/non associé au paramètre de sélection
+;
+PROCEDURE PROCESS T_SILENT2
+BEGIN
+  IF ENTRYMODE
+  THEN INFO 3293 ; PD393 *A* Pour sélectionner les paramètres de recherche, entrez Oui dans ce champ
+END
+
+;------------------------------------------------------------------------------
+;
+; Sous-ecran de verification
+;
+PROCEDURE DESIGNER D001
+BEGIN
+  IF ALTEREDRECORD OF IFEXPEDITION OR ALTEREDRECORD OF IFBLOC_EXPED
+  THEN ERROR 1390 ; Vous devez faire une mise a jour avant d'acceder
+                  ; le sous-ecran.
+
+   RUN SCREEN if002a PASSING IFEXPEDITION MODE F &
+                     WINDOW WIDTH CONSTANT WHEN CALLING
+END
+
+;------------------------------------------------------------------------------
+;
+; Appel de l'ecran if001
+;
+PROCEDURE DESIGNER D002
+BEGIN
+ LET T_TGRCODGRA_ORI = TGRCODGRA OF IFBLOC
+ LET T_IFCCLE_ORI    = IFCCLE    OF IFBLOC
+ LET T_BLCCLE_ORI    = BLCCLE    OF IFBLOC
+ LET T_BLCRED_ORI    = BLCRED    OF IFBLOC
+
+ RUN SCREEN if001 PASSING T_CIECLE       , &
+                          T_CIENOM       , &
+                          T_TGRCODGRA_ORI, &
+                          T_IFCCLE_ORI   , &
+                          T_BLCCLE_ORI   , &
+                          T_BLCRED_ORI     &
+                  MODE F
+END
+
+;------------------------------------------------------------------------------
+;
+; Modification de la facture et coût de transport
+;
+PROCEDURE DESIGNER 05
+BEGIN
+  ACCEPT CAPCLE OF IFEXPEDITION
+
+  IF 0<>SIZE(TRUNC(CAPCLE OF IFEXPEDITION))
+  THEN ACCEPT EXNCOUTOT OF IFEXPEDITION
+END
+;------------------------------------------------------------------------------
+;
+; Modification des paramètres de sélection
+;
+PROCEDURE DESIGNER 07
+BEGIN
+  ACCEPT TS_OUI_NON
+
+  IF TS_OUI_NON = '1'
+  THEN BEGIN
+    ACCEPT TS_TGRCODGRA
+    DISPLAY FIELD TGRDSCFRA001 OF A_SELEC_TGR
+
+    ACCEPT TS_CATCLE
+    DISPLAY FIELD CATDSCFRA    OF IFCATEGORIE
+
+    ACCEPT TS_CLRCLE
+    DISPLAY FIELD CLRDSCFRA    OF IFCOULEUR
+
+    ACCEPT TS_QLTCLE
+    DISPLAY FIELD QLTDSCFRA    OF IFQUALITE
+
+    ACCEPT TS_ETRCLE
+    DISPLAY FIELD ETRDSCFRA001 OF IFENTREPOT
+  END
+END
+
+;------------------------------------------------------------------------------
+;
+; Effacer l'affichage si le bloc expédié est détruit
+;
+PROCEDURE OUTPUT BLCVENDULONG OF IFBLOC
+BEGIN
+  IF DELETEDRECORD OF IFEXPEDITION OR DELETEDRECORD OF IFBLOC_EXPED
+  THEN LET FIELDTEXT = " "
+END
+
+PROCEDURE OUTPUT BLCVENDUHAU OF IFBLOC
+BEGIN
+  IF DELETEDRECORD OF IFEXPEDITION OR DELETEDRECORD OF IFBLOC_EXPED
+  THEN LET FIELDTEXT = " "
+END
+
+PROCEDURE OUTPUT BLCVENDULAR OF IFBLOC
+BEGIN
+  IF DELETEDRECORD OF IFEXPEDITION OR DELETEDRECORD OF IFBLOC_EXPED
+  THEN LET FIELDTEXT = " "
+END
+
+PROCEDURE OUTPUT BLCM3TOT OF IFBLOC
+BEGIN
+  IF DELETEDRECORD OF IFEXPEDITION OR DELETEDRECORD OF IFBLOC_EXPED
+  THEN LET FIELDTEXT = " "
+END
+
+PROCEDURE OUTPUT CATCLE OF IFBLOC
+BEGIN
+  IF DELETEDRECORD OF IFEXPEDITION OR DELETEDRECORD OF IFBLOC_EXPED
+  THEN LET FIELDTEXT = " "
+END
+
+PROCEDURE OUTPUT CLRCLE OF IFBLOC
+BEGIN
+  IF DELETEDRECORD OF IFEXPEDITION OR DELETEDRECORD OF IFBLOC_EXPED
+  THEN LET FIELDTEXT = " "
+END
+
+PROCEDURE OUTPUT QLTCLE OF IFBLOC
+BEGIN
+  IF DELETEDRECORD OF IFEXPEDITION OR DELETEDRECORD OF IFBLOC_EXPED
+  THEN LET FIELDTEXT = " "
+END
+
+PROCEDURE OUTPUT ETRCLE OF IFBLOC
+BEGIN
+  IF DELETEDRECORD OF IFEXPEDITION OR DELETEDRECORD OF IFBLOC_EXPED
+  THEN LET FIELDTEXT = " "
+END
+
+PROCEDURE OUTPUT PJTABR OF IFBLOC
+BEGIN
+  IF DELETEDRECORD OF IFEXPEDITION OR DELETEDRECORD OF IFBLOC_EXPED
+  THEN LET FIELDTEXT = " "
+END
+
+PROCEDURE OUTPUT PJTANN OF IFBLOC
+BEGIN
+  IF DELETEDRECORD OF IFEXPEDITION OR DELETEDRECORD OF IFBLOC_EXPED
+  THEN LET FIELDTEXT = " "
+END
+
+PROCEDURE OUTPUT T_COMLGN
+BEGIN
+  IF DELETEDRECORD OF IFEXPEDITION OR DELETEDRECORD OF IFBLOC_EXPED
+  THEN LET FIELDTEXT = " "
+END
+
+PROCEDURE OUTPUT FTRNUMFAC OF IFBLOC
+BEGIN
+  IF DELETEDRECORD OF IFEXPEDITION OR DELETEDRECORD OF IFBLOC_EXPED
+  THEN LET FIELDTEXT = " "
+END
+
+PROCEDURE OUTPUT TGRCODGRA OF IFBLOC_EXPED
+BEGIN
+  IF TGRCODGRA OF IFBLOC_EXPED = '@'
+  THEN LET FIELDTEXT = " "
+END
+
+PROCEDURE OUTPUT IFCCLE OF IFBLOC_EXPED
+BEGIN
+  IF IFCCLE OF IFBLOC_EXPED = '@'
+  THEN LET FIELDTEXT = " "
+END
+
+PROCEDURE OUTPUT BLCCLE OF IFBLOC_EXPED
+BEGIN
+  IF BLCCLE OF IFBLOC_EXPED = '@'
+  THEN LET FIELDTEXT = " "
+END
+
+PROCEDURE OUTPUT BLCRED OF IFBLOC_EXPED
+BEGIN
+  IF BLCRED OF IFBLOC_EXPED = '@'
+  THEN LET FIELDTEXT = " "
+END
+
+
+BUILD LIST DETAIL
+
+@IF FORMAT
+                                                                                                   1         1         1         1
+         1         2         3         4         5         6         7         8         9         0         1         2         3
+123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 01
+xxxx                                           xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                            x 02
+***************************************************** Gestion des expéditions ****************************************************** 03
+* No expédition.: xxxxx   Date expédition.: xxxxxxxxxx  Fournisseur..: xxxxxx xxxxxxxxxxxxxxxxxxxx  Lot expédition...: xxxxxxxxx   * 04
+* No client.....: xxxxxx  Transféré le....: xxxxxxxxxx  Via..........: xxxxxx xxxxxxxxxxxxxxxxxxxx  Transporté le....: xxxxxxxxxx  * 05
+* Expédié à.....: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  Facture CP...: xxxxxxxxxxxxxxx              Coûts transport..: xxxxxxxxxxx * 06
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                             * 07
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  Total M3.....: xxxxxxxxxx                                                  * 08
+*                 xxxxxxx                                                                                                          * 09
+*                               _____Type_____  ___Catégorie___  ____Couleur____  ____Qualité____  ________Entrepôt_________       * 10
+* Paramètres de sélection: xxx  xxx xxxxxxxxxx  xxx xxxxxxxxxxx  xxx xxxxxxxxxxx  xxx xxxxxxxxxxx  xxxx xxxxxxxxxxxxxxxxxxxx       * 11
+************************************************************************************************************************************ 12
+*                ____Dimensions____     M3                                                                                         * 13
+*    No bloc     Long   Haut   Larg   Total  ___Catégorie___ ____Couleur____ ____Qualité____ ____Entrepôt___ Commande  Lgn Facture * 14
+* xxxxx-xxxxxx-x xxxx x xxxx x xxxx  xxxxxx  xxx xxxxxxxxxxx xxx xxxxxxxxxxx xxx xxxxxxxxxxx xxxx xxxxxxxxxx xx-xx-xxxxxxx xxxxxxx * 15
+* xxxxx-xxxxxx-x xxxx x xxxx x xxxx  xxxxxx  xxx xxxxxxxxxxx xxx xxxxxxxxxxx xxx xxxxxxxxxxx xxxx xxxxxxxxxx xx-xx-xxxxxxx xxxxxxx * 16
+* xxxxx-xxxxxx-x xxxx x xxxx x xxxx  xxxxxx  xxx xxxxxxxxxxx xxx xxxxxxxxxxx xxx xxxxxxxxxxx xxxx xxxxxxxxxx xx-xx-xxxxxxx xxxxxxx * 17
+* xxxxx-xxxxxx-x xxxx x xxxx x xxxx  xxxxxx  xxx xxxxxxxxxxx xxx xxxxxxxxxxx xxx xxxxxxxxxxx xxxx xxxxxxxxxx xx-xx-xxxxxxx xxxxxxx * 18
+* xxxxx-xxxxxx-x xxxx x xxxx x xxxx  xxxxxx  xxx xxxxxxxxxxx xxx xxxxxxxxxxx xxx xxxxxxxxxxx xxxx xxxxxxxxxx xx-xx-xxxxxxx xxxxxxx * 19
+* xxxxx-xxxxxx-x xxxx x xxxx x xxxx  xxxxxx  xxx xxxxxxxxxxx xxx xxxxxxxxxxx xxx xxxxxxxxxxx xxxx xxxxxxxxxx xx-xx-xxxxxxx xxxxxxx * 20
+* xxxxx-xxxxxx-x xxxx x xxxx x xxxx  xxxxxx  xxx xxxxxxxxxxx xxx xxxxxxxxxxx xxx xxxxxxxxxxx xxxx xxxxxxxxxx xx-xx-xxxxxxx xxxxxxx * 21
+* xxxxx-xxxxxx-x xxxx x xxxx x xxxx  xxxxxx  xxx xxxxxxxxxxx xxx xxxxxxxxxxx xxx xxxxxxxxxxx xxxx xxxxxxxxxx xx-xx-xxxxxxx xxxxxxx * 23
+************************************************************************************************************************************ 24
+@ENDIF

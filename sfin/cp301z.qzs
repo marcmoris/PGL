@@ -1,0 +1,438 @@
+;/T/ Rapport de Vérification des paiements
+;
+;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur...: Chantal Martineau
+;    Date Création.: 16-juin-1993
+;
+;    Description...: Liste de Vérification des lots des paiements
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST   ; permet de faire les SET REPORT DEV....
+SET NOBLANK           ; Empêche l'impression de ligne blanche
+
+;
+; Subfile contenant les paiements à imprimer
+;
+
+ACCESS                      *WCP301A &
+
+  ;
+  ; Récupération de la référence à qui est destiné le paiement
+  ;
+
+  LINK REFCIECLE OF WCP301A , &
+       REFCLETYP OF WCP301A , &
+       REFCLENUM OF WCP301A , &
+       RADCLE    OF WCP301A   &
+    TO REFCIECLE            , &
+       REFCLETYP            , &
+       REFCLENUM            , &
+       RADCLE               OF MCREF_ADRESSE &
+  OPTIONAL &
+
+  ;
+  ; Lecture de la description du compte comptable imputé
+  ;
+
+  LINK CPTCLE    OF WCP301A &
+    TO CPTCLE               OF VCPT_DSC &
+  OPTIONAL &
+
+  ;
+  ; Lecture de la description de l'unité administrative imputée
+  ;
+
+  LINK CIECLE    OF WCP301A , &
+       UNACLE    OF WCP301A   &
+    TO CIECLE               , &
+       UNACLE               OF MCUNITE_ADM &
+  OPTIONAL &
+
+  ;
+  ; Lecture de la description du projet imputé
+  ;
+
+  LINK CIECLE    OF WCP301A , &
+       PRJCLE    OF WCP301A   &
+    TO CIECLE               , &
+       PRJCLE               OF GPPROJETS &
+  OPTIONAL &
+
+  ;
+  ; Lecture de la description de l'activité imputé
+  ;
+
+  LINK CIECLE    OF WCP301A , &
+       PRJCLE    OF WCP301A , &
+       PRACLE    OF WCP301A   &
+    TO CIECLE               , &
+       PRJCLE               , &
+       PRACLE               OF GPPRO_ACTIVITE OPTIONAL &
+  LINK CIECLE OF WCP301A  , &
+       IMMCLE OF WCP301A    &
+    TO CIECLE             , &
+       IMMCLE             OF IMIMMOBILISATION OPTIONAL &
+  LINK CIECLE OF WCP301A  , &
+       CLICLE OF WCP301A  &
+    TO CLICIECLE ,&
+       CLICLE OF CRCLIENT OPTIONAL
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_301A CHARACTER SIZE 5 = "1" + PECCLE OF WCP301A &
+         IF PECCLE OF WCP301A[1:1] < "8" &
+         ELSE "0" + PECCLE OF WCP301A
+
+SORT ON CIECLE    OF WCP301A, &
+        D_PECCLE_301A       , &
+        LCPCLE    OF WCP301A, &
+        REFCLETYP OF WCP301A, &
+        REFCLENUM OF WCP301A, &
+        LBQCPTENC OF WCP301A, &
+        PAMCLE    OF WCP301A, &
+        T_TYPDET  OF WCP301A, &
+        CAPCLE    OF WCP301A, &
+        CPCCLELIG OF WCP301A
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 & ; Premier titre du rapport
+@IF FRANCAIS
+        = "Vérification des paiements"
+@ELSE
+        = "%%%Vérification des paiements"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 & ; Deuxiemme titre du rapport
+        = " "
+
+DEFINE DZ_NUMRAP  CHARACTER SIZE 12 & ; numéro du rapport
+        = "CP301"
+
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 & ; Nom de la compagnie
+       = PARM
+
+USE usflgdet NOLIST ;Flag Bilingue (O/N)
+
+;
+;Indique si le lot est hors balance
+;
+DEFINE D_HRSBLC   CHARACTER SIZE 3 &
+        = DZ_FLGAFFO IF LCPNBRTRSERR OF WCP301A <> 0 ELSE &
+          DZ_FLGAFFN
+
+;
+;Indique si le chèque à été imprimé
+;
+DEFINE  D_PAMFLGIMP CHARACTER SIZE 3 &
+        = DZ_FLGAFFO IF PAMFLGIMP OF WCP301A <> "0" ELSE &
+          DZ_FLGAFFN
+
+;
+;Indique si le chèque à été annulé
+;
+DEFINE  D_PAMCODANN CHARACTER SIZE 3 &
+        = DZ_FLGAFFO IF PAMCODANN OF WCP301A <> "0" ELSE &
+          DZ_FLGAFFN
+
+;
+; Indique si le lot est journalisé
+;
+DEFINE  D_JOURNALISE CHAR SIZE 12 &
+@IF FRANCAIS
+        = "Journalisé" &
+@ELSE
+        = "Posted" &
+@ENDIF
+        IF LCPDATJOU OF WCP301A <> 0 ELSE ""
+
+;
+; Calcul de la différence entre le nombre de transactions réelles et le
+; nombre de transactions évalué
+;
+DEFINE  D_LCPNBRTRSDIF INTEGER SIZE 4 &
+        = LCPNBRTRSVER - LCPNBRTRS
+
+;
+; Calcul de la différence entre le montant total des transactions réelles
+; et le montant total des transactions évalué
+;
+DEFINE  D_LCPCUMMNTDIF FLOAT SIZE 8 &
+        = LCPCUMMNTVER - LCPCUMMNT
+
+;
+; Affichage d'une "*" en face de chaque transactions dont l'imputation comptable
+; ne balance pas avec le montant total.
+;
+DEFINE  D_BALANCE  CHARACTER SIZE 1 &
+        = "*" IF PAMMNT OF WCP301A <> PAMCUMMNT OF WCP301A ELSE ""
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+;
+; Titre de la ventilation suivant le type de ligne
+;
+DEFINE  D_TITVEN01 CHARACTER SIZE 170 &
+@IF FRANCAIS
+  =  "----------- Projet ---------- ----- Sous-projet ------ ------- Immobilisation -------- ----Unité administrative----- " &
+  +  "----------Compte----------- -------Montant  TF TP -----------TPS  -----------TVQ  Fac. ---------- Client ---------"    &
+@ELSE
+@ENDIF
+        IF T_TYPDET OF WCP301A = "2" ELSE &
+          "                                                                                       " &
+@IF FRANCAIS
+        + "    --Document-- No cédule  ---Mnt à payer  ------Mnt payé  --Mnt escompte" &
+@ELSE
+        + "%%%   Document-- No cédule  ---Mnt à payer  ------Mnt payé  --Mnt escompte" &
+@ENDIF
+        IF T_TYPDET OF WCP301A = "1" ELSE ""
+
+;
+; Si ce n'est pas une ligne de détail d'imputation comptable il faut effacer les titres
+;
+DEFINE  D_EFFLIGIMP VARCHAR SIZE 170 &
+  =  "                                                                                                    " &
+  +  "                                                                      "  &
+  IF T_TYPDET OF WCP301A <> "2" ELSE ""
+
+;
+; Si ce n'est pas une ligne de ventilation de facture il faut effacer les titres
+;
+DEFINE  D_EFFLIGFAC VARCHAR SIZE 170 &
+  = "                                                                                                    " &
+  + "                                                                      "  &
+  IF T_TYPDET OF WCP301A <> "1" ELSE ""
+
+;***********************
+; Pour le rendre à 20 caractères.
+;
+DEFINE D_PRJTIT    CHARACTER SIZE 20 = PRJDSC1 OF GPPROJETS
+
+DEFINE D_PRATIT    CHARACTER SIZE 20 = PRADSC1 OF GPPRO_ACTIVITE
+
+DEFINE D_IMMTIT    CHARACTER SIZE 18 = IMMDSC  OF IMIMMOBILISATION
+;***********************
+
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+USE ustit180 NOLIST  ; Titre standard pour l'application a 180
+SKIP 2 &
+@IF FRANCAIS
+    TAB 001 "Lot....: "   &
+@ELSE
+    TAB 001 "Batch..: "   &
+@ENDIF
+    TAB 011 LCPCLE OF WCP301A &
+    TAB 016 LCPDSC OF WCP301A &
+    TAB 060 D_JOURNALISE &
+  SKIP &
+@IF FRANCAIS
+    TAB 001 "Période: " &
+@ELSE
+    TAB 001 "Period.: " &
+@ENDIF
+    TAB 010 PECCLE OF WCP301A &
+  SKIP 2 &
+    TAB 001 "                                                                       Compte    No       No       " &
+    TAB 100 "        Date      Date       TPS/        CTI/" &
+  SKIP &
+    TAB 001 "*     Fournisseur/Employé              Adresse de paiement             banque  paiem.  pré-imp. Imp" &
+    TAB 100 ". Ann. paiement  Concil.     TVQ         RTI      Escompte       Montant" &
+  SKIP &
+    TAB 001 "- --------------------------- ---------------------------------------- ------- ------- -------- ---" &
+    TAB 100 "- ---- -------- -------- ----------- ----------- ----------- ---------------"
+
+HEADING AT PAMCLE &
+    TAB 001  D_BALANCE &
+    TAB 003  REFCLENUM   OF WCP301A &
+    TAB 010  RADNOMABR   OF MCREF_ADRESSE &
+    TAB 031  RADADR1     OF MCREF_ADRESSE &
+    TAB 072  LBQCPTENC   OF WCP301A &
+    TAB 080  PAMCLE      OF WCP301A &
+    TAB 088  PAMNUMPIM   OF WCP301A &
+    TAB 097  D_PAMFLGIMP           &
+    TAB 102  D_PAMCODANN           &
+    TAB 107  PAMDAT      OF WCP301A &
+    TAB 116  PAMCCLDAT   OF WCP301A &
+    TAB 125  PAMMNTTPS   OF WCP301A &
+    TAB 137  PAMMNTCTI   OF WCP301A &
+    TAB 149  PAMMNTESC   OF WCP301A PICTURE "^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+    TAB 162  PAMMNT      OF WCP301A PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+  SKIP &
+    TAB 031 RADADR2     OF MCREF_ADRESSE &
+    TAB 125  PAMMNTTVQ  OF WCP301A &
+    TAB 137  PAMMNTRTI  OF WCP301A &
+  SKIP &
+    TAB 031 RADADR3     OF MCREF_ADRESSE &
+  SKIP &
+    TAB 031 RADADR4     OF MCREF_ADRESSE &
+  SKIP &
+    TAB 031 RADCP       OF MCREF_ADRESSE &
+  SKIP &
+@IF FRANCAIS
+    TAB 003 "Description : " &
+@ELSE
+    TAB 003 "Description : " &
+@ENDIF
+    TAB 017 PAMDSC1     OF WCP301A &
+  SKIP &
+    TAB 017 PAMDSC2     OF WCP301A &
+  SKIP 2
+
+REPORT &
+    TAB 010 D_TITVEN01 PRINT AT T_TYPDET &
+  SKIP &
+    TAB 003 PRJCLE     OF WCP301A      &
+    TAB 012 D_PRJTIT   &
+    TAB 033 PRACLE     OF WCP301A      &
+    TAB 037 D_PRATIT   &
+    TAB 058 IMMCLE     OF WCP301A      &
+    TAB 071 D_IMMTIT   &
+    TAB 090 UNACLE     OF WCP301A      &
+    TAB 099 UNANOMABR  OF MCUNITE_ADM &
+    TAB 120 CPTCLE     OF WCP301A      &
+    TAB 127 CPTDSCABR  OF VCPT_DSC    &
+    TAB 148 CPIMNT     OF WCP301A       PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+    TAB 164 CPITAXCODTPS OF WCP301A    &
+    TAB 167 CPITAXCODTVQ OF WCP301A    &
+    TAB 170 CPIMNTTPS    OF WCP301A     PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+    TAB 186 CPIMNTTVQ    OF WCP301A     PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+    TAB 202 CPIFLGFAC    OF WCP301A      &
+    TAB 207 CLICLE       OF WCP301A      &
+    TAB 214 CLINOMABR    OF CRCLIENT     &
+    TAB 003 D_EFFLIGIMP &
+  SKIP &
+    TAB 101 CAPCLE    OF WCP301A &
+    TAB 119 CPCCLELIG OF WCP301A &
+    TAB 126 CPHMNTCAP OF WCP301A    PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+    TAB 142 CPHMNTPYE OF WCP301A    PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+    TAB 158 CPHMNTESC OF WCP301A    PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+    TAB 003 D_EFFLIGFAC
+
+FOOTING AT PAMCLE &
+    TAB 148 "---------------" &
+    TAB 170 "---------------" &
+    TAB 186 "---------------" &
+    TAB 003 D_EFFLIGIMP &
+  SKIP &
+    TAB 148 CPIMNT     OF WCP301A       SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+    TAB 170 CPIMNTTPS  OF WCP301A       SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+    TAB 186 CPIMNTTVQ  OF WCP301A       SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+    TAB 003 D_EFFLIGIMP &
+  SKIP &
+    TAB 126 "---------------" &
+    TAB 142 "---------------" &
+    TAB 158 "---------------" &
+    TAB 003 D_EFFLIGFAC &
+  SKIP &
+    TAB 126 CPHMNTCAP OF WCP301A SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+    TAB 142 CPHMNTPYE OF WCP301A SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+    TAB 158 CPHMNTESC OF WCP301A SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+    TAB 003 D_EFFLIGFAC &
+  SKIP &
+    TAB 001  "------------------------------------------------------------------------------------------------------------------" &
+    TAB 112  "---------------------------------------------------------------------"
+
+
+FOOTING AT LCPCLE &
+@IF FRANCAIS
+    TAB 108 "Total paiement :" &
+@ELSE
+    TAB 108 "%%%al paiement :" &
+@ENDIF
+    TAB 148 PAMMNT     OF WCP301A SUBTOTAL AT PAMCLE PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+    TAB 003 D_EFFLIGFAC &
+ SKIP &
+@IF FRANCAIS
+    TAB 108 "Total paiement :" &
+@ELSE
+    TAB 108 "%%%al paiement :" &
+@ENDIF
+    TAB 126 PAMMNT     OF WCP301A SUBTOTAL AT PAMCLE PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+    TAB 003 D_EFFLIGFAC &
+  SKIP 1 &
+    TAB 001  "------------------------------------------------------------------------------------------------------------------" &
+    TAB 112  "---------------------------------------------------------------------" &
+  SKIP &
+@IF FRANCAIS
+    TAB 050   "    Vérifiés         Cumulés             Ecart        Hors balance(*)" &
+@ELSE
+    TAB 050   "%%% Vérifiés         Cumulés             Ecart        Hors balance(*)" &
+@ENDIF
+  SKIP 1 &
+    TAB 050   "--------------    --------------    --------------    --------------- "&
+  SKIP &
+@IF FRANCAIS
+    TAB 023   "Montant total.........:" &
+@ELSE
+    TAB 023   "%%%tant total.........:" &
+@ENDIF
+    TAB 050 LCPCUMMNTVER OF WCP301A   PICTURE "^^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5 &
+    TAB 068 LCPCUMMNT    OF WCP301A   PICTURE "^^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5 &
+    TAB 087 D_LCPCUMMNTDIF            PICTURE "^^,^^^,^^^.^^ "     TRAILING SIGN "-" SIGNIFICANCE 5 &
+    TAB 109 D_HRSBLC &
+  SKIP &
+@IF FRANCAIS
+    TAB 023   "Nombre de transactions:" &
+@ELSE
+    TAB 023   "%%%bre de transactions:" &
+@ENDIF
+    TAB 056 LCPNBRTRSVER   OF WCP301A PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+    TAB 074 LCPNBRTRS      OF WCP301A PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+    TAB 092 D_LCPNBRTRSDIF            PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+  SKIP 1 &
+    TAB 001  "------------------------------------------------------------------------------------------------------------------" &
+    TAB 112  "---------------------------------------------------------------------" &
+  SKIP PAGE
+
+BUILD cp301z
+
+@IF FORMAT
+
+                                                                                                   1         1         1         1         1         1         1         1         1
+         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8
+123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+CP301                                                                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                             Page:9999
+99/99/99 HH:MM xxxxxxxxxxxx                                                  Vérification des paiements
+                                                            xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+Lot....: xxxx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+Période: 99-99
+
+                                                                       Compte    No       No               Date      Date       TPS/        CTI/
+*     Fournisseur/Employé              Adresse de paiement             banque  paiem.  pré-imp. Imp. Ann. paiement  Concil.     TVQ         RTI      Escompte       Montant
+- --------------------------- ---------------------------------------- ------- ------- -------- ---- ---- -------- -------- ----------- ----------- ----------- ---------------
+x 123456 xxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 123456  1234567 12345678 xxx  xxx  xx/xx/xx xx/xx/xx 999,999.99- 999,999.99- 999.999.99- 999,999,999.99-
+                              xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                      999,999.99- 999,999.99-
+                              xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+                              xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+                              xxx-xxx
+  Description : xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+  ----------- Projet ---------- ----- Sous-projet ------ -------- Equipement ----------- ----Unité administrative----- ----------Compte----------- -------Montant  TF TP -----------TPS  -----------TVQ  Fac. ---------- Client ---------
+  12345678 xxxxxxxxxxxxxxxxxxxx 123 xxxxxxxxxxxxxxxxxxxx 1212345678 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx xx 999,999,999.99- 999,999,999.99- xxx  123456 xxxxxxxxxxxxxxxxxxxx
+  12345678 xxxxxxxxxxxxxxxxxxxx 123 xxxxxxxxxxxxxxxxxxxx 1212345678 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx xx 999,999,999.99- 999,999,999.99- xxx  123456 xxxxxxxxxxxxxxxxxxxx
+  12345678 xxxxxxxxxxxxxxxxxxxx 123 xxxxxxxxxxxxxxxxxxxx 1212345678 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx xx 999,999,999.99- 999,999,999.99- xxx  123456 xxxxxxxxxxxxxxxxxxxx
+
+                                                                                                    --Document--  No cédule  ---Mnt à payer  ------Mnt payé  --Mnt escompte
+                                                                                                    123456789012      99     999,999,999.99- 999,999,999.99- 999,999,999.99-
+                                                                                                    123456789012      99     999,999,999.99- 999,999,999.99- 999,999,999.99-
+                                                                                                                             --------------- --------------- ---------------
+                                                                                                                             999,999,999.99- 999,999,999.99- 999,999,999.99-
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                                                            Total paiement :    999,999,999.99-
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                    Vérifiés         Cumulés             Ecart        Hors balance(*)
+                                                --------------    --------------    --------------    ---------------
+                      Montant total.........:   999,999,999.99    999,999,999.99    999,999,999.99-         xxx
+                      Nombre de transactions:         9,999             9,999             9,999-
+
+@ENDIF

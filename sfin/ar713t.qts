@@ -1,0 +1,391 @@
+;/T/ Génération de l'écriture de provision.
+;
+;/P/ Réalisé par...: Marc Poulin.
+;    Date..........: 22 février 2000.
+;
+;    Description...: Cette procédure permet de générer au Grand livre une écriture de type GLRV (écriture à renversée).
+;
+;    Particularités: Au préalable, l'usager devra créer un lot au niveau du Grand livre.
+;
+;    Paramètres....: Les six paramètres suivant devront être fournis au traitement:
+;
+;                        (1) Code d'usager (fourni par le système) ;
+;                        (2) Numéro de lot au niveau du Grand livre ;
+;                        (3) Numéro d'écriture à générer ;
+;                        (4) Période comptable courante ;
+;                        (5) Période comptable de renversement (période de destination) ;
+;                        (6) Numéro de compagnie (fourni par le système).
+;
+;    Référence.....: Stabilisation du module Achat/Réception Inventaire (point 24).
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date modification.: 29 août 2000
+;    Description.......: Ajustement du calcul des montants de provisions. Conversions selon la devise du Grand Livre.
+;
+;    Référence.........: Demande de changement 000086.
+;
+;    Signet............: MP-00-08-29_D86.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+USE ussetqts NOLIST ; Fichier de configuration standard.
+
+RUN ar713t ; Déclaration de l'exécutable
+
+; Variables de travail globales associées aux paramètres de traitement.
+
+GLOBAL TEMPORARY G_CIECLE_CD CHARACTER SIZE 4 PARM   ; Code de compagnie.
+GLOBAL TEMPORARY G_USAGER_CD CHARACTER SIZE 8 PARM   ; Code usager (logonid).
+GLOBAL TEMPORARY G_NUMLOT_GL CHARACTER SIZE 4 PARM   ; Numéro de lot inscrit au Grand livre.
+GLOBAL TEMPORARY G_NUMECR_RV CHARACTER SIZE 8 PARM   ; Numéro d'écriture à renversée.
+GLOBAL TEMPORARY G_PECCLE_CO CHARACTER SIZE 4 PARM   ; Période comptable courante.
+GLOBAL TEMPORARY G_PECCLE_RV CHARACTER SIZE 4 PARM   ; Période comptable destination (période de renversement).
+
+; Variables de travail globales associées à la validation des paramètres de traitement.
+
+GLOBAL TEMPORARY G_CODE_ERR  INTEGER   SIZE 2        ; Code d'erreur général.
+GLOBAL TEMPORARY G_CODE_ERR1 INTEGER   SIZE 2        ; Validation sur le lot.
+GLOBAL TEMPORARY G_CODE_ERR2 INTEGER   SIZE 2        ; Validation sur le lot.
+GLOBAL TEMPORARY G_CODE_ERR3 INTEGER   SIZE 2        ; Validation sur le lot.
+GLOBAL TEMPORARY G_CODE_ERR4 INTEGER   SIZE 2        ; Validation sur le lot.
+GLOBAL TEMPORARY G_CODE_ERR5 INTEGER   SIZE 2        ; Validation sur le lot.
+GLOBAL TEMPORARY G_CODE_ERR6 INTEGER   SIZE 2        ; Validation sur les périodes comptables courante et destination.
+GLOBAL TEMPORARY G_CODE_ERR7 INTEGER   SIZE 2        ; Validation sur l'écriture de provision.
+
+REQUEST VALIDATION_PARAMETRES
+;-----------------------------------------------------------------------------------------------------------------------------------
+; Validation des paramètres en fonction de la table des lots et de la table des écritures au Journal général.
+;
+ACCESS MCCOMPAGNIE LINK G_CIECLE_CD                    , &
+                        G_PECCLE_CO                    , &
+                        G_NUMLOT_GL                      &
+                     TO LGLCIECLE                      , &
+                        PECCLE                         , &
+                        LGLCLE     OF GLLOT         OPT  &
+
+                   LINK G_CIECLE_CD                    , &
+                        G_NUMECR_RV                      &
+                     TO ECJCIECLE                      , &
+                        ECJCLENUM  OF GLECRITURE_JG OPT
+
+CHOOSE CIECLE (G_CIECLE_CD) ; Code de compagnie
+
+; Redéfinition des périodes comptables en fonction de l'an 2000
+
+DEFINE D_PECCLE_CO CHARACTER SIZE 5 = "1" + G_PECCLE_CO  IF G_PECCLE_CO [1:1] < "8"  ELSE "0" + G_PECCLE_CO
+DEFINE D_PECCLE_RV CHARACTER SIZE 5 = "1" + G_PECCLE_RV  IF G_PECCLE_RV [1:1] < "8"  ELSE "0" + G_PECCLE_RV
+
+; Valider les paramètres de traitement fourni par l'usager demandeur.
+
+ITEM G_CODE_ERR1 = 1 IF NOT RECORD GLLOT EXIST                                   ; Le lot doit exister pour la compagnie et la période demandée.
+ITEM G_CODE_ERR2 = 2 IF RECORD GLLOT EXIST AND LGLUSR    OF GLLOT <> G_USAGER_CD ; Le lot doit appartenir à l'usager demandeur.
+ITEM G_CODE_ERR3 = 3 IF RECORD GLLOT EXIST AND LGLDATJOU OF GLLOT <> 0           ; Le lot ne doit pas être journalisé.
+ITEM G_CODE_ERR4 = 4 IF RECORD GLLOT EXIST AND LGLUSRATR OF GLLOT <> " "         ; Le lot ne doit pas être déjà autorisé.
+ITEM G_CODE_ERR5 = 5 IF RECORD GLLOT EXIST AND LGLTYPECR OF GLLOT <> "RV"        ; Le type de lot doit être égal à RV (écriture à renversée).
+ITEM G_CODE_ERR6 = 6 IF D_PECCLE_CO >= D_PECCLE_RV                               ; La période destination doit être supérieure à la période courante.
+ITEM G_CODE_ERR7 = 7 IF RECORD GLECRITURE_JG EXIST                               ; L'écriture de provision de type GLRV ne doit pas déjà exister.
+
+; Déterminer s'il y a eu des erreurs.
+
+ITEM G_CODE_ERR = 1 IF G_CODE_ERR1 = 1 OR G_CODE_ERR2 = 2 OR G_CODE_ERR3 = 3 OR &
+                       G_CODE_ERR4 = 4 OR G_CODE_ERR5 = 5 OR G_CODE_ERR6 = 6 OR G_CODE_ERR7 = 7
+
+REQUEST SELECT_RECEPTIONS_TRANSFEREES EXECUTE IF G_CODE_ERR = 0
+;-----------------------------------------------------------------------------------------------------------------------------------
+; Sélectionne seulement les réceptions transférées aux comptes payables (associées à un lot).
+;
+ACCESS ARRECEPTION LINK CIECLE OF ARRECEPTION , &
+                        PECCLE OF ARRECEPTION , &
+                        LARCLE OF ARRECEPTION   &
+                     TO CIECLE                , &
+                        PECCLE                , &
+                        LARCLE OF ARLOT         &
+
+                   LINK CIECLE OF ARRECEPTION , &
+                        RECCLE OF ARRECEPTION   &
+                     TO CIECLE                , &
+                        RECCLE OF ARREC_DETAIL  OPTIONAL
+
+CHOOSE CIECLE (G_CIECLE_CD), &  ; Code de compagnie.
+       RECSTU "S", "A"          ; Réception sélectionnée et approuvée.
+
+; Définition de variables de travail pour tenir compte de l'an 2000
+
+DEFINE D_PECCLE_REC  CHARACTER SIZE 5 = "1" + PECCLE OF ARRECEPTION       &
+                                     IF PECCLE OF ARRECEPTION[1:1] < "8"  &
+                                   ELSE "0" + PECCLE OF ARRECEPTION
+
+DEFINE D_PECCLE_PARM CHARACTER SIZE 5 = "1" + G_PECCLE_CO                 &
+                                     IF  G_PECCLE_CO [1:1] < "8"          &
+                                   ELSE "0" + G_PECCLE_CO
+
+; Ne pas traiter les items de réceptions annulés ou complétés
+
+SELECT IF D_PECCLE_REC <= D_PECCLE_PARM AND REDSTU OF ARREC_DETAIL <> "X" &
+                                        AND REDSTU OF ARREC_DETAIL <> "C"
+
+SORT ON CIECLE OF ARRECEPTION & ; Code de compagnie.
+     ON RECCLE OF ARRECEPTION   ; Numéro de réception.
+
+; Fichier de travail associé aux réceptions transférées aux comptes payables.
+
+SUBFILE WAR713A KEEP                                  &
+                INCLUDE CIECLE       OF ARRECEPTION , &
+                        PECCLE       OF ARRECEPTION , &
+                        RECCLE       OF ARRECEPTION , &
+                        DEVTAU       OF ARRECEPTION , & ; MP-00-08-29_D86.
+                        REDCLE       OF ARREC_DETAIL, &
+                        CPTCLE       OF ARREC_DETAIL, &
+                        UNACLE       OF ARREC_DETAIL, &
+                        REDMNTNET    OF ARREC_DETAIL
+
+; Fichier de travail associé aux réceptions transférées aux comptes payables et sélectionées par la consolidation.
+
+SUBFILE WAR713B KEEP AT RECCLE                        &
+                     IF RECSTU OF ARRECEPTION = "S"   &
+                INCLUDE CIECLE OF ARRECEPTION       , &
+                        RECCLE OF ARRECEPTION
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+; Cumuler la patie consolidée pour les réceptions "sélectionnées" (statut "S")
+;
+REQUEST CUMUL_PARTIE_CONSOLIDEE EXECUTE IF G_CODE_ERR = 0
+
+ACCESS *WAR713B LINK CIECLE    OF WAR713B   , &
+                     RECCLE    OF WAR713B     &
+                  TO FACCIECLE              , &
+                     RECCLE    OF ARDER_ITEM  ; Table de ventilation des items totalement ou partiellement consolidés.
+
+SORT ON CIECLE OF WAR713B  & ; Code de compagnie.
+     ON RECCLE OF WAR713B  & ; Numéro de réception.
+     ON DEICLE OF ARDER_ITEM ; Item ayant totalement ou partiellement consolidé.
+
+; Déclaration de variables de cumul.
+
+TEMPORARY T_DEIMNTNET FLOAT SIZE 8
+
+; Cumul du montant net
+
+ITEM T_DEIMNTNET SUBTOTAL DEIMNTNET OF ARDER_ITEM RESET AT DEICLE
+
+; Fichier de travail associé à la partie consolidée des réceptions "Sélectionées" (avec code de statut = "S").
+
+SUBFILE WAR713C KEEP AT DEICLE                &
+                INCLUDE CIECLE OF WAR713B   , &
+                        RECCLE OF WAR713B   , &
+                        DEICLE OF ARDER_ITEM, &
+                        T_DEIMNTNET           &
+                  INDEX WAR713B_IDX           &
+                SEGMENT CIECLE              , &
+                        RECCLE              , &
+                        DEICLE
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+; Soustraire la patie consolidée pour les réceptions "sélectionnées" (statut "S")
+;
+REQUEST MAJ_RECEPTIONS_QTE_MNT_CONSOLIDES EXECUTE IF G_CODE_ERR = 0
+
+ACCESS *WAR713A LINK CIECLE OF WAR713A , &
+                     RECCLE OF WAR713A , &
+                     REDCLE OF WAR713A   &
+                  TO CIECLE            , &
+                     RECCLE            , &
+                     DEICLE OF *WAR713C
+
+; Mise à jour du fichier de travail associé aux réceptions transférées aux comptes payables.
+
+OUTPUT WAR713A UPDATE
+  ITEM REDMNTNET OF WAR713A FINAL REDMNTNET OF WAR713A - T_DEIMNTNET OF WAR713C
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+; Cumul par compte et unité administrative
+;
+REQUEST CUMUL_COMPTE_UNITE EXECUTE IF G_CODE_ERR = 0
+
+ACCESS *WAR713A
+
+SORT ON CIECLE OF WAR713A & ; Code de compagnie.
+     ON UNACLE OF WAR713A & ; Unité administrative.
+     ON CPTCLE OF WAR713A   ; Compte.
+
+; Déclaration de variables de cumul.
+
+TEMPORARY T_RECMNTNET FLOAT   SIZE 8
+TEMPORARY T_RECMNTTOT FLOAT   SIZE 8
+TEMPORARY T_ECINUMLIG INTEGER SIZE 4
+
+temporary t_mntnetdev float   size 8                                  ; MP-00-08-29_D86.
+
+item t_mntnetdev    = round(redmntnet of WAR713A * devtau of WAR713A) ; MP-00-08-29_D86.
+
+; Cumul du montant net
+
+ITEM T_RECMNTNET SUBTOTAL t_mntnetdev RESET AT CPTCLE                 ; MP-00-08-29_D86.
+ITEM T_RECMNTTOT SUBTOTAL t_mntnetdev                                 ; MP-00-08-29_D86.
+ITEM T_ECINUMLIG COUNT AT CPTCLE
+
+; Fichier de travail associé cumul du montant net (par compte et unité administrative)
+
+SUBFILE WAR713D KEEP AT CPTCLE             &
+                INCLUDE CIECLE OF WAR713A, &
+                        RECCLE OF WAR713A, &
+                        UNACLE OF WAR713A, &
+                        CPTCLE OF WAR713A, &
+                        T_RECMNTNET      , &
+                        T_RECMNTTOT      , &
+                        T_ECINUMLIG
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+; Génération de l'écriure de provision (entête & imputation)
+;
+REQUEST GENERATION_ECRITURE_PROVISION EXECUTE IF G_CODE_ERR = 0
+
+ACCESS *WAR713D
+
+; Création de l'imputation associée à l'ériture de provision (montants débiteurs)
+
+OUTPUT GLIMPUTATION  ADD ALIAS A_DBT_GLIMPUT
+  ITEM ECJCIECLE    OF A_DBT_GLIMPUT INITIAL CIECLE OF WAR713D
+  ITEM ECJCLENUM    OF A_DBT_GLIMPUT INITIAL G_NUMECR_RV
+  ITEM ECJCLESEQ    OF A_DBT_GLIMPUT INITIAL " "
+  ITEM ECINUMLIG    OF A_DBT_GLIMPUT INITIAL T_ECINUMLIG OF WAR713D
+  ITEM PROCLE       OF A_DBT_GLIMPUT INITIAL " "
+  ITEM ACTCLE       OF A_DBT_GLIMPUT INITIAL " "
+  ITEM UNICAT       OF A_DBT_GLIMPUT INITIAL " "
+  ITEM UNICLE       OF A_DBT_GLIMPUT INITIAL " "
+  ITEM CPTCLE       OF A_DBT_GLIMPUT INITIAL CPTCLE OF WAR713D
+  ITEM CIECLE       OF A_DBT_GLIMPUT INITIAL CIECLE OF WAR713D
+  ITEM UNACLE       OF A_DBT_GLIMPUT INITIAL UNACLE OF WAR713D
+  ITEM ECICODDC     OF A_DBT_GLIMPUT INITIAL "D"
+  ITEM ECIMNT       OF A_DBT_GLIMPUT INITIAL T_RECMNTNET OF WAR713D
+  ITEM ECIFLGFAC    OF A_DBT_GLIMPUT INITIAL "0"
+  ITEM CLICIECLE    OF A_DBT_GLIMPUT INITIAL "----"
+  ITEM CLICLE       OF A_DBT_GLIMPUT INITIAL " "
+  ITEM PRJCLE       OF A_DBT_GLIMPUT INITIAL " "
+  ITEM PRACLE       OF A_DBT_GLIMPUT INITIAL " "
+  ITEM IMMCLE       OF A_DBT_GLIMPUT INITIAL " "
+
+; Création de l'imputation associée à l'ériture de provision (montant créditeur)
+
+OUTPUT GLIMPUTATION  ADD AT FINAL ALIAS A_CRT_GLIMPUT
+  ITEM ECJCIECLE    OF A_CRT_GLIMPUT INITIAL CIECLE OF WAR713D
+  ITEM ECJCLENUM    OF A_CRT_GLIMPUT INITIAL G_NUMECR_RV
+  ITEM ECJCLESEQ    OF A_CRT_GLIMPUT INITIAL " "
+  ITEM ECINUMLIG    OF A_CRT_GLIMPUT FINAL   T_ECINUMLIG OF WAR713D + 1
+  ITEM PROCLE       OF A_CRT_GLIMPUT INITIAL " "
+  ITEM ACTCLE       OF A_CRT_GLIMPUT INITIAL " "
+  ITEM UNICAT       OF A_CRT_GLIMPUT INITIAL " "
+  ITEM UNICLE       OF A_CRT_GLIMPUT INITIAL " "
+  ITEM CPTCLE       OF A_CRT_GLIMPUT INITIAL "203101"
+  ITEM CIECLE       OF A_CRT_GLIMPUT INITIAL CIECLE OF WAR713D
+  ITEM UNACLE       OF A_CRT_GLIMPUT INITIAL "0000"
+  ITEM ECICODDC     OF A_CRT_GLIMPUT INITIAL "C"
+  ITEM ECIMNT       OF A_CRT_GLIMPUT FINAL   T_RECMNTTOT OF WAR713D
+  ITEM ECIFLGFAC    OF A_CRT_GLIMPUT INITIAL "0"
+  ITEM CLICIECLE    OF A_CRT_GLIMPUT INITIAL "----"
+  ITEM CLICLE       OF A_CRT_GLIMPUT INITIAL " "
+  ITEM PRJCLE       OF A_CRT_GLIMPUT INITIAL " "
+  ITEM PRACLE       OF A_CRT_GLIMPUT INITIAL " "
+  ITEM IMMCLE       OF A_CRT_GLIMPUT INITIAL " "
+
+; Création d'une écriture de provision
+
+OUTPUT GLECRITURE_JG ADD AT FINAL
+  ITEM ECJCIECLE    OF GLECRITURE_JG INITIAL CIECLE OF WAR713D
+  ITEM ECJDATSTP    OF GLECRITURE_JG INITIAL SYSDATE
+  ITEM ECJUSRCRE    OF GLECRITURE_JG INITIAL G_USAGER_CD
+  ITEM ECJFLGINTCIE OF GLECRITURE_JG INITIAL "0"
+  ITEM PECCLE       OF GLECRITURE_JG INITIAL G_PECCLE_CO
+  ITEM LGLCLE       OF GLECRITURE_JG INITIAL G_NUMLOT_GL
+  ITEM ECJCLENUM    OF GLECRITURE_JG INITIAL G_NUMECR_RV
+  ITEM ECJCLESEQ    OF GLECRITURE_JG INITIAL " "
+  ITEM ECJTYPECR    OF GLECRITURE_JG INITIAL "RV"
+  ITEM ECJFLGANN    OF GLECRITURE_JG INITIAL "0"
+  ITEM ECJDAT       OF GLECRITURE_JG INITIAL SYSDATE
+  ITEM ECJDATJOU    OF GLECRITURE_JG INITIAL 0
+  ITEM ECJHREJOU    OF GLECRITURE_JG INITIAL 0
+  ITEM ECJDSC1      OF GLECRITURE_JG INITIAL "Écriture de provision générée par la"
+  ITEM ECJDSC2      OF GLECRITURE_JG INITIAL "procédure AR713 Génération de l'écriture"
+  ITEM ECJDSC3      OF GLECRITURE_JG INITIAL "de provision - (Module Achats/Réception)"
+  ITEM ECJCIEINT    OF GLECRITURE_JG INITIAL CIECLE OF WAR713D
+  ITEM ECJTRFUNA    OF GLECRITURE_JG INITIAL "0"
+  ITEM ECJNBRPERINI OF GLECRITURE_JG INITIAL 0
+  ITEM ECJNBRPERRES OF GLECRITURE_JG INITIAL 0
+  ITEM ECJPECDES    OF GLECRITURE_JG INITIAL G_PECCLE_RV
+  ITEM ECJMNTDBT    OF GLECRITURE_JG FINAL   T_RECMNTTOT OF WAR713D
+  ITEM ECJMNTCRT    OF GLECRITURE_JG FINAL   T_RECMNTTOT OF WAR713D
+  ITEM ECJNUMLIG    OF GLECRITURE_JG FINAL   T_ECINUMLIG OF WAR713D + 1
+  ITEM HISCLE       OF GLECRITURE_JG INITIAL 0
+  ITEM ECJUNAINT1   OF GLECRITURE_JG INITIAL " "
+  ITEM ECJUNAINT2   OF GLECRITURE_JG INITIAL " "
+  ITEM ECJUNANBR1   OF GLECRITURE_JG INITIAL 0
+  ITEM ECJUNANBR2   OF GLECRITURE_JG INITIAL 0
+
+REQUEST CREATION_FICHIER_ERREUR
+;-----------------------------------------------------------------------------------------------------------------------------------
+; Création du fichier d'erreur.
+;
+ACCESS MCCOMPAGNIE
+
+CHOOSE CIECLE (G_CIECLE_CD) ; Code de compagnie
+
+; Déclaration des variables de travail associées aux messages d'erreurs
+
+TEMPORARY T_MESG_ERR1 CHARACTER SIZE 115
+TEMPORARY T_MESG_ERR2 CHARACTER SIZE 115
+TEMPORARY T_MESG_ERR3 CHARACTER SIZE 115
+TEMPORARY T_MESG_ERR4 CHARACTER SIZE 115
+TEMPORARY T_MESG_ERR5 CHARACTER SIZE 115
+TEMPORARY T_MESG_ERR6 CHARACTER SIZE 115
+TEMPORARY T_MESG_ERR7 CHARACTER SIZE 115
+
+; Définition des messages d'erreurs
+
+ITEM T_MESG_ERR1 = "Le numéro de lot " + G_NUMLOT_GL + " n'existe pas pour la compagnie et la période demandée."      &
+                IF G_CODE_ERR1 = 1
+
+ITEM T_MESG_ERR2 = "Le numéro de lot " + G_NUMLOT_GL + " n'appartient pas à l'usager demandeur: " + G_USAGER_CD + "." &
+                IF G_CODE_ERR2 = 2
+
+ITEM T_MESG_ERR3 = "Le numéro de lot " + G_NUMLOT_GL + " ne doit pas être journalisé."                                &
+                IF G_CODE_ERR3 = 3
+
+ITEM T_MESG_ERR4 = "Le numéro de lot " + G_NUMLOT_GL + " ne doit pas être déjà autorisé."                             &
+                IF G_CODE_ERR4 = 4
+
+ITEM T_MESG_ERR5 = "Le type de lot doit être égal à RV (écriture à renversée)."                                       &
+                IF G_CODE_ERR5 = 5
+
+ITEM T_MESG_ERR6 = "La période destination (" + G_PECCLE_RV + ") doit être supérieure à la période courante (" +      &
+                   G_PECCLE_CO + ")."                                                                                 &
+                IF G_CODE_ERR6 = 6
+
+ITEM T_MESG_ERR7 = "L'écriture de provision (" + TRUNCATE(G_NUMECR_RV) + ") de type GLRV existe déjà."                &
+                IF G_CODE_ERR7 = 7
+
+; Fichier de travail associé à la validation des paramètres de traitement.
+
+SUBFILE WAR713E ALIAS A_WAR713E_1 KEEP APPEND IF G_CODE_ERR1 = 1 INCLUDE G_CODE_ERR1 ALIAS T_CODE_ERR, T_MESG_ERR1 ALIAS T_MESG_ERR
+SUBFILE WAR713E ALIAS A_WAR713E_2 KEEP APPEND IF G_CODE_ERR2 = 2 INCLUDE G_CODE_ERR2 ALIAS T_CODE_ERR, T_MESG_ERR2 ALIAS T_MESG_ERR
+SUBFILE WAR713E ALIAS A_WAR713E_3 KEEP APPEND IF G_CODE_ERR3 = 3 INCLUDE G_CODE_ERR3 ALIAS T_CODE_ERR, T_MESG_ERR3 ALIAS T_MESG_ERR
+SUBFILE WAR713E ALIAS A_WAR713E_4 KEEP APPEND IF G_CODE_ERR4 = 4 INCLUDE G_CODE_ERR4 ALIAS T_CODE_ERR, T_MESG_ERR4 ALIAS T_MESG_ERR
+SUBFILE WAR713E ALIAS A_WAR713E_5 KEEP APPEND IF G_CODE_ERR5 = 5 INCLUDE G_CODE_ERR5 ALIAS T_CODE_ERR, T_MESG_ERR5 ALIAS T_MESG_ERR
+SUBFILE WAR713E ALIAS A_WAR713E_6 KEEP APPEND IF G_CODE_ERR6 = 6 INCLUDE G_CODE_ERR6 ALIAS T_CODE_ERR, T_MESG_ERR6 ALIAS T_MESG_ERR
+SUBFILE WAR713E ALIAS A_WAR713E_7 KEEP APPEND IF G_CODE_ERR7 = 7 INCLUDE G_CODE_ERR7 ALIAS T_CODE_ERR, T_MESG_ERR7 ALIAS T_MESG_ERR
+
+; Fichier de travail associé à l'écriture de provision générée.
+
+SUBFILE WAR713F KEEP                        &
+                  IF G_CODE_ERR = 0         &
+             INCLUDE CIECLE OF MCCOMPAGNIE, &
+                     G_USAGER_CD          , &
+                     G_NUMLOT_GL          , &
+                     G_NUMECR_RV          , &
+                     G_PECCLE_CO          , &
+                     G_PECCLE_RV
+
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+BUILD

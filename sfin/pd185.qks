@@ -1,0 +1,1967 @@
+;/T/ 2.4.3 Enregistrer les opérations de surface
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1994-10-28
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   les opérations de surface pour les tranches.
+;
+;    Note.........: La procédure APPEND est identique à la procédure DESIGNER 40
+;
+;/M/ François Déry, 12 mai 1999
+;       Ajout du in dict sur la transaction des séquences.
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd185  ACTIONBAR                     &
+              MODE LABEL "" AT 2,80         &
+              NOACTION                      &
+              FIELDMARK RETAIN STARTUP      &
+              HELP POPUP FROM 4,9 TO 20,72  &
+              RECEIVING T_CIECLEMNU,        &
+                        T_CIENOM
+
+
+;-------------------------------------------------------------------------------
+;
+; Déclaration de la transaction pour donner un numéro séquentiel
+;
+
+TRANSACTION NO_SEQ READ WRITE &
+                   RESERVING FOR PROTECTED WRITE PDSEQ_OPER_SURF IN DICT
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD185"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+USE pd185.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Opérateurs                      " ACTION DESIGNER D001
+  MENUITEM LABEL "Arrêt opération surface         " ACTION DESIGNER D002
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%Opérateurs                   " ACTION DESIGNER D001
+  MENUITEM LABEL "%%%Arret operation surface      " ACTION DESIGNER D002
+@ENDIF
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Sert à valider les codes bilingue et pour les sous-écrans de consultation
+;
+DEFINE    D_QRTCODQRT CHARACTER SIZE 16 = "QRTCODQRT"
+TEMPORARY T_QRTCODQRT CHARACTER SIZE 04
+DEFINE    D_OSUSTU    CHARACTER SIZE 16 = "OSUSTU"
+TEMPORARY T_OSUSTU    CHARACTER SIZE 04
+
+TEMPORARY T_DTRTRANUMTRA002     CHARACTER SIZE 07
+TEMPORARY T_DTRCODDEF_OLD CHAR SIZE 2
+TEMPORARY T-T CHAR SIZE 2
+TEMPORARY T_DDTRCODDEF CHAR SIZE 2 RESET AT STARTUP
+TEMPORARY T_DTRCODDEF  CHAR SIZE 4
+;-------------------------------------------------------------------------------
+;
+; Clés de recherche pour les popup de consultations et les sous écrans
+;
+
+TEMPORARY T_MOPCODMAC        CHARACTER SIZE 04
+TEMPORARY T_TRANUMTRA002     CHARACTER SIZE 07
+TEMPORARY T_COD              INTEGER UNSIGNED SIZE 02
+TEMPORARY T_TYFCODFIN        CHARACTER SIZE 04
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables nécessaire au traitement
+;
+
+TEMPORARY T_SILENT           CHARACTER SIZE 01
+TEMPORARY T_NOLIG            INTEGER   SIZE 04 RESET AT STARTUP ; Pour no ligne automatique.
+TEMPORARY T_DOSCODFIN002_OLD CHARACTER SIZE 02
+
+
+;-------------------------------------------------------------------------------
+;
+; Dimension maximum et minimum des pièces de granit
+;
+
+USE usdimprd NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire pour le calcul d'un intervalle de temps
+;
+
+USE usdiftim NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du volume d'une pièce de granit
+;
+
+USE usvarvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Opération de surface
+;
+
+FILE PDOPERATION_SURF PRIMARY &
+                      NOITEM
+
+
+  ACCESS VIA     CIECLE,                              &
+                 OSUNUMRAP                            &
+         USING   T_CIECLEMNU,                         &
+                 OSUNUMRAP        OF PDOPERATION_SURF &
+         REQUEST OSUNUMRAP        OF PDOPERATION_SURF &
+         ORDERBY OSUNUMRAP
+
+
+  ACCESS VIA     CIECLE,                               &
+                 OSUDATPRD,                            &
+                 MOPCODMAC,                            &
+                 QRTCODQRT                             &
+         USING   T_CIECLEMNU,                          &
+                 OSUDATPRD        OF PDOPERATION_SURF, &
+                 MOPCODMAC        OF PDOPERATION_SURF, &
+                 QRTCODQRT        OF PDOPERATION_SURF  &
+         REQUEST OSUDATPRD        OF PDOPERATION_SURF, &
+                 MOPCODMAC        OF PDOPERATION_SURF, &
+                 QRTCODQRT        OF PDOPERATION_SURF  &
+         ORDERBY OSUNUMRAP
+
+
+  ACCESS VIA     CIECLE,                               &
+                 OSUDATPRD,                            &
+                 MOPCODMAC                             &
+         USING   T_CIECLEMNU,                          &
+                 OSUDATPRD        OF PDOPERATION_SURF, &
+                 MOPCODMAC        OF PDOPERATION_SURF  &
+         REQUEST OSUDATPRD        OF PDOPERATION_SURF, &
+                 MOPCODMAC        OF PDOPERATION_SURF  &
+         ORDERBY OSUNUMRAP
+
+
+  ACCESS VIA     CIECLE,                               &
+                 OSUDATPRD                             &
+         USING   T_CIECLEMNU,                          &
+                 OSUDATPRD        OF PDOPERATION_SURF  &
+         REQUEST OSUDATPRD        OF PDOPERATION_SURF  &
+         ORDERBY OSUNUMRAP
+
+
+  ACCESS VIA     CIECLE                                &
+         USING   T_CIECLEMNU                           &
+         ORDERBY OSUNUMRAP
+
+  ITEM CIECLE OF PDOPERATION_SURF INITIAL T_CIECLEMNU
+  ITEM OSUSTU OF PDOPERATION_SURF INITIAL "E" ; En cours
+
+
+;-------------------------------------------------------------------------------
+;
+; Détail opération surface
+;
+
+FILE PDDET_OPER_SURF DETAIL &
+                     NOITEM  &
+                     OCCURS 7
+
+  ACCESS VIA     CIECLE,         &
+                 OSUNUMRAP       &
+         USING   T_CIECLEMNU,                        &
+                 OSUNUMRAP       OF PDOPERATION_SURF &
+         ORDERBY OSUNUMRAP,      &
+                 DOSNUMLIG,      &
+                 DOSSTU
+
+
+  SELECT IF DOSSTU OF PDDET_OPER_SURF <> "M" &
+            AND &
+            DOSSTU OF PDDET_OPER_SURF <> "D"
+
+
+  ITEM CIECLE    OF PDDET_OPER_SURF INITIAL T_CIECLEMNU
+  ITEM OSUNUMRAP OF PDDET_OPER_SURF INITIAL OSUNUMRAP OF PDOPERATION_SURF FIXED
+  ITEM DOSSTU    OF PDDET_OPER_SURF INITIAL "E" ; En cours
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro séquentiel pour les opération de surface
+;
+
+FILE PDSEQ_OPER_SURF DESIGNER &
+                     TRANSACTION NO_SEQ
+
+;-------------------------------------------------------------------------------
+;
+; Opération de surface validation des plages horraire pour le rapport
+;
+
+FILE PDOPERATION_SURF DESIGNER ALIAS OSU_OPERATION_SURFACE
+
+  ACCESS VIA     CIECLE,                               &
+                 OSUDATPRD,                            &
+                 MOPCODMAC                             &
+         USING   T_CIECLEMNU,                          &
+                 OSUDATPRD        OF PDOPERATION_SURF, &
+                 MOPCODMAC        OF PDOPERATION_SURF
+
+  ;
+  ; Sélectionne si une des deux bornes du nouvel enregistrement se retrouve
+  ; parmis l'intervale déjà enregistré.
+  ;
+
+  SELECT IF ( (OSUDEP OF PDOPERATION_SURF >= OSUDEP OF OSU_OPERATION_SURFACE   &
+               AND                                                             &
+               OSUDEP OF PDOPERATION_SURF <= OSUARR OF OSU_OPERATION_SURFACE)  &
+             OR                                                                &
+              (OSUARR OF PDOPERATION_SURF >= OSUDEP OF OSU_OPERATION_SURFACE   &
+               AND                                                             &
+               OSUARR OF PDOPERATION_SURF <= OSUARR OF OSU_OPERATION_SURFACE)) &
+            OR                                                                 &
+              (OSUDEP OF PDOPERATION_SURF <= OSUDEP OF OSU_OPERATION_SURFACE   &
+               AND                                                             &
+               OSUARR OF PDOPERATION_SURF >= OSUARR OF OSU_OPERATION_SURFACE)
+
+
+FILE PDOPERATEURS_O_S DESIGNER ALIAS OOS_VALIDE
+
+  ACCESS VIA     CIECLE,          &
+                 OSUNUMRAP,       &
+                 OSUDATPRD        &
+         USING   T_CIECLEMNU,                          &
+                 OSUNUMRAP        OF PDOPERATION_SURF, &
+                 OSUDATPRD        OF PDOPERATION_SURF
+;-------------------------------------------------------------------------------
+
+FILE PDOPERATION_SURF DESIGNER ALIAS PDOPERATION_SURF_VALIDE
+ACCESS      VIA     CIECLE,             &
+             MOPCODMAC,          &
+             OSUDATPRD,              &
+             QRTCODQRT   &
+     USING   T_CIECLEMNU,                   &
+             MOPCODMAC OF PDOPERATION_SURF ,&
+             OSUDATPRD OF PDOPERATION_SURF ,&
+             QRTCODQRT OF PDOPERATION_SURF
+
+;-------------------------------------------------------------------------------
+;
+; Tranche
+;
+
+FILE PDTRANCHE REFERENCE &
+               ALIAS  TRA_AVANT &
+               OCCURS WITH FILE PDDET_OPER_SURF
+
+  ACCESS VIA   CIECLE,          &
+               TRANUMTRA002     &
+         USING T_CIECLEMNU,     &
+               TRANUMTRA002     OF PDDET_OPER_SURF
+
+
+;-------------------------------------------------------------------------------
+FILE PDTRANCHE_DEF DESIGNER &
+                 OCCURS WITH FILE PDDET_OPER_SURF
+
+
+
+  ACCESS VIA   CIECLE,          &
+               TRANUMTRA002,    &
+               OSUNUMRAP        &
+         USING T_CIECLEMNU,     &
+               TRANUMTRA002     OF PDDET_OPER_SURF , &
+               OSUNUMRAP        OF PDDET_OPER_SURF
+
+
+;-------------------------------------------------------------------------------
+
+; Détail opération surface (Avant modification)
+;
+
+FILE PDDET_OPER_SURF DESIGNER ALIAS DOS_OLD
+
+
+;-------------------------------------------------------------------------------
+;
+; Détail opération surface (Modification)
+;
+
+FILE PDDET_OPER_SURF DESIGNER ALIAS DOS_MAJ
+
+
+;-------------------------------------------------------------------------------
+;
+; Machine opération de surface
+;
+
+FILE PDMACH_OP_SURF  REFERENCE
+
+  ACCESS VIA     CIECLE,          &
+                 MOPCODMAC        &
+         USING   T_CIECLEMNU,     &
+                 MOPCODMAC        OF PDOPERATION_SURF
+
+
+;-------------------------------------------------------------------------------
+;
+; Code bilingue (Statut)
+;
+
+FILE VCBI_DSC  REFERENCE &
+               ALIAS A_CBI_OSUSTU
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_OSUSTU,                             &
+               OSUSTU           OF PDOPERATION_SURF
+
+
+;-------------------------------------------------------------------------------
+;
+; Code bilingue (quart de travail)
+;
+
+FILE VCBI_DSC  REFERENCE &
+               ALIAS A_CBI_QRTCODQRT
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_QRTCODQRT,                          &
+               QRTCODQRT        OF PDOPERATION_SURF
+
+
+;-------------------------------------------------------------------------------
+;
+; Type de granit
+;
+
+FILE PDTYPE_GRANIT DESIGNER
+
+
+;-------------------------------------------------------------------------------
+;
+; Type de fini
+;
+
+FILE PDTYPE_FINI DESIGNER
+
+;
+; Table des tranches
+;
+FILE PDTRANCHE DESIGNER ALIAS EFFACER_TRANCHE
+
+;-------------------------------------------------------------------------------
+;
+; Variables nécessaire au traitement
+;
+
+TEMPORARY T_FLGCHGTRA        CHARACTER SIZE 01 OCCURS WITH PDDET_OPER_SURF
+
+
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+
+SKIP
+
+
+TITLE &
+@IF FRANCAIS
+      " Opération de surface " &
+@ELSE
+      " %%%Opération de surface " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+
+ALIGN (2,3,19)
+
+
+FIELD OSUNUMRAP        OF PDOPERATION_SURF &
+label "Numéro rapport:"&
+        HIDDEN ID 05                       &
+        DISPLAY
+
+
+FIELD OSUDATPRD        OF PDOPERATION_SURF  FORMAT YYYYMMDD &
+PATTERN "####/##/##"&
+label "Date oper surf:"&
+        HIDDEN ID 10                       &
+        DEFAULT SYSDATE
+
+
+ALIGN (2,3,19) (,,24)
+
+
+FIELD MOPCODMAC        OF PDOPERATION_SURF &
+label "Code machine..:"&
+        HIDDEN ID 15                       &
+        REQUIRED                           &
+        LOOKUP ON PDMACH_OP_SURF           &
+          MESSAGE 2915 ; Ce code de machine n'existe pas
+
+
+FIELD MOPDSC001        OF PDMACH_OP_SURF   &
+        DISPLAY
+
+
+SKIP TO LINE 5
+
+
+ALIGN (41,42,58)
+
+
+FIELD OSUDEP           OF PDOPERATION_SURF &
+label "Heure départ..:"&
+        HIDDEN ID 20                       &
+        REQUIRED
+
+
+FIELD OSUARR           OF PDOPERATION_SURF &
+label "Heure arrêt...:"&
+        HIDDEN ID 25                       &
+        REQUIRED
+
+
+SKIP TO LINE 8
+
+
+ALIGN (2,3,19) (,,24)
+
+
+FIELD QRTCODQRT        OF PDOPERATION_SURF &
+label "Quart travail.:"&
+        HIDDEN ID 30                       &
+        REQUIRED
+
+
+FIELD CBIDSC           OF A_CBI_QRTCODQRT  &
+        DISPLAY
+
+
+ALIGN (,3,19) (,,24)
+
+
+FIELD OSUSTU           OF PDOPERATION_SURF &
+label "Statut........:"&
+        DISPLAY
+
+
+FIELD CBIDSC           OF A_CBI_OSUSTU     &
+        DISPLAY
+
+
+DRAW 11,2 TO 11,79
+
+
+SKIP TO LINE 11
+
+
+TITLE &
+@IF FRANCAIS
+      " Tranches / produit dimension " &
+@ELSE
+      " %%%Tranches / produit dimension " &
+@ENDIF
+      CENTERED AT ,1
+
+
+SKIP TO LINE 13
+
+TITLE &
+@IF FRANCAIS
+    "                                             Epai. Type   Type  fini" &
+@ELSE
+    "%%%                                          Epai. Type   Type  fini" &
+@ENDIF
+     AT ,2
+
+skip
+
+TITLE &
+@IF FRANCAIS
+    "    Lig  Tranche  Long. Haut.  Epai.  Qte    Res.  granit avant après Err  Def" &
+@ELSE
+    "%%% Lig  Tranche  Long. Haut.  Epai.  Qte    Res.  granit avant après Err  Def" &
+@ENDIF
+     AT ,2
+
+SKIP TO LINE 15
+
+
+ALIGN (03,03,04) (,,06) (,,12) (,,20) (,,26) (,,33) (,,38) (,,47) (,,54) (,,61) (,,67) (,,73)(,,77)
+
+
+CLUSTER OCCURS WITH PDDET_OPER_SURF  ID BASE 40
+
+
+FIELD DOSSTU           OF PDDET_OPER_SURF  &
+        HIDDEN                             &
+        LABEL " "                          &
+        DISPLAY
+
+
+FIELD DOSNUMLIG        OF PDDET_OPER_SURF  &
+        NOCHANGE                           &
+        LOOKUP NOTON PDDET_OPER_SURF       &
+               VIA     CIECLE,             &
+                       OSUNUMRAP,          &
+                       DOSNUMLIG           &
+               USING   T_CIECLEMNU,                   &
+                       OSUNUMRAP OF PDOPERATION_SURF, &
+                       DOSNUMLIG OF PDDET_OPER_SURF   &
+          MESSAGE 2921 ; Ce numéro de ligne existe déjà
+
+
+FIELD TRANUMTRA002     OF PDDET_OPER_SURF  &
+        NOCHANGE &
+        HIDDEN                             &
+        NUMERIC                            &
+        BWZ                                &
+        LOOKUP ON TRA_AVANT                &
+          MESSAGE 2940 , & ; Ce numéro de tranche n'existe pas
+               NOTON PDDET_OPER_SURF OPTIONAL &
+          VIA   CIECLE,                    &
+                OSUNUMRAP,                 &
+                TRANUMTRA002               &
+          USING T_CIECLEMNU,                      &
+                OSUNUMRAP    OF PDOPERATION_SURF, &
+                TRANUMTRA002 OF PDDET_OPER_SURF   &
+          MESSAGE 3119 ; Ce numéro de tranche existe déjà pour ce rapport
+
+
+FIELD DOSLON           OF PDDET_OPER_SURF  &
+        HIDDEN                             &
+        NOLABEL                            size 4
+
+
+FIELD DOSHAU           OF PDDET_OPER_SURF  &
+        HIDDEN                             &
+        NOLABEL  size 4
+
+
+FIELD DOSEPA           OF PDDET_OPER_SURF  &
+        HIDDEN                             &
+        NOLABEL        size 4
+
+
+FIELD DOSQTE           OF PDDET_OPER_SURF  &
+        HIDDEN                             &
+        NOLABEL                            &
+        DEFAULT 1 size 7
+
+
+FIELD DOSEPARES        OF PDDET_OPER_SURF  &
+        HIDDEN                             &
+        NOLABEL                            &
+        DUPLICATE                          size 4
+
+
+FIELD TGRCODGRA        OF PDDET_OPER_SURF  &
+        HIDDEN                             &
+        NUMERIC                            &
+        NOLABEL
+
+
+FIELD DOSCODFIN001     OF PDDET_OPER_SURF  &
+        HIDDEN                             &
+        NUMERIC                            &
+        NOLABEL
+
+
+FIELD DOSCODFIN002     OF PDDET_OPER_SURF  &
+        HIDDEN                             &
+        NOLABEL                            &
+        NUMERIC                            &
+        DUPLICATE
+
+
+FIELD T_SILENT                             &
+        SILENT
+
+
+FIELD DOSACCERR        OF PDDET_OPER_SURF  &
+        HIDDEN                             &
+        NOLABEL                            &
+        DUPLICATE
+
+
+FIELD DTRCODDEF OF PDTRANCHE_DEF &
+       HIDDEN                    &
+       NOLABEL                   &
+       LOOKUP NOTON FILE PDTRANCHE_DEF  &
+             VIA     CIECLE,                               &
+                     TRANUMTRA002,                         &
+                     DTRCODDEF                             &
+             USING   T_CIECLEMNU,                          &
+                     TRANUMTRA002    OF PDDET_OPER_SURF,     &
+                     DTRCODDEF       OF PDTRANCHE_DEF      &
+                  MESSAGE 2956 ; Ce code de défaut existe déjà pour cette tranche
+
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul du volume d'une pièce de granit
+;
+
+USE uscalvol NOLIST
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur pour le champs
+;
+
+PROCEDURE INPUT MOPCODMAC
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_MOPCODMAC = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd112 MODE F &
+                     PASSING T_MOPCODMAC,&
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_MOPCODMAC )
+
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que l'heure de début n'est pas dans un intervalle déjà enregistré
+;
+
+;PROCEDURE EDIT OSUDEP
+;BEGIN
+  ;
+  ; Fait le test seulement si l'heure de fin a déjà été saisie
+  ;
+;  IF OSUARR OF PDOPERATION_SURF <> 0
+;  THEN BEGIN
+;    GET OSU_OPERATION_SURFACE OPTIONAL
+;    IF ACCESSOK
+;    THEN BEGIN
+;      ERROR 3005 ; Cette plage horraire chevauche une plage déjà enregistrer
+;    END
+;  END
+;END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que l'heure de début est plus petite que l'heure de fin
+;
+
+PROCEDURE EDIT OSUARR
+BEGIN
+  IF OSUARR OF PDOPERATION_SURF < OSUDEP OF PDOPERATION_SURF
+  THEN BEGIN
+    ERROR 3007 ; L'heure de début doit être plus petite que l'heure de fin
+  END
+;  GET OSU_OPERATION_SURFACE OPTIONAL
+;  IF ACCESSOK
+;  THEN BEGIN
+;    ERROR 3005 ; Cette plage horraire chevauche une plage déjà enregistrer
+;  END
+END
+
+
+;----------------------------------------------------------------------
+;
+; Assigne une valeur par défaut pour le quart de travail
+;
+
+PROCEDURE INPUT QRTCODQRT
+BEGIN
+  IF 0 = SIZE(FIELDTEXT)
+  THEN BEGIN
+    LET FIELDTEXT = "J"
+
+  END
+END
+;------------------------------------------------------------------------
+PROCEDURE EDIT QRTCODQRT
+BEGIN
+GET PDOPERATION_SURF_VALIDE OPT
+ IF ACCESSOK
+ THEN WARNING ="ATTENTION:Machine,Quart,Date existant"
+END
+;------------------------------------------------------------------------
+;
+; Procédure permettant de générer le numéro de ligne automatique
+;
+
+PROCEDURE INPUT DOSNUMLIG
+BEGIN
+  IF 0 = SIZE(TRUNCATE(FIELDTEXT)) AND &
+     DOSNUMLIG OF PDDET_OPER_SURF = 0
+  THEN BEGIN
+    LET FIELDTEXT = ASCII( T_NOLIG + 1 )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure permettant de générer le numéro de ligne automatique
+;
+
+PROCEDURE EDIT DOSNUMLIG
+BEGIN
+  IF 0 = SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    ERROR 3044 ; Ce champ est requis
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure permettant de générer le numéro de ligne automatique
+;
+
+PROCEDURE PROCESS DOSNUMLIG
+BEGIN
+  LET T_NOLIG = DOSNUMLIG OF PDDET_OPER_SURF
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur (pop-up) pour le champ.
+;
+
+PROCEDURE INPUT TRANUMTRA002
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_COD          = 0 ; Toutes les tranches
+    LET T_TRANUMTRA002 = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd122 MODE F &
+                      PASSING T_TRANUMTRA002, &
+                             T_COD, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_TRANUMTRA002 )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que le numéro de tranche n'a pas été modifier
+;
+
+PROCEDURE EDIT TRANUMTRA002
+BEGIN
+  IF FIELDTEXT <> OLDVALUE(TRANUMTRA002 OF PDDET_OPER_SURF)
+  THEN BEGIN
+    LET T_FLGCHGTRA        = "1"
+  END
+  ELSE BEGIN
+    LET T_FLGCHGTRA        = "0"
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Initialise les dimensions pour affichage
+;
+
+PROCEDURE PROCESS TRANUMTRA002
+BEGIN
+  LET DOSLON           OF PDDET_OPER_SURF  = TRALON OF TRA_AVANT
+  LET DOSHAU           OF PDDET_OPER_SURF  = TRAHAU OF TRA_AVANT
+  LET DOSEPA           OF PDDET_OPER_SURF  = TRAEPA OF TRA_AVANT
+  LET TGRCODGRA        OF PDDET_OPER_SURF  = TGRCODGRA OF TRA_AVANT
+  LET DOSCODFIN001     OF PDDET_OPER_SURF  = TYFCODFIN OF TRA_AVANT
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que le champs à bien été saisie pour un produit de dimension
+;
+
+PROCEDURE INPUT DOSLON
+BEGIN
+  IF TPDTYPPRD OF PDDET_OPER_SURF = "PD" &
+     AND &
+     0 = SIZE(TRUNCATE(FIELDTEXT)) &
+     AND &
+     ENTRYMODE
+  THEN BEGIN
+    ERROR 3044 ; Ce champ est requis
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les dimensions
+;
+
+PROCEDURE EDIT DOSLON
+BEGIN
+  ;
+  ; Valide que le champ a été saisi lors de correction
+  ;
+  IF TPDTYPPRD OF PDDET_OPER_SURF = "PD" &
+     AND &
+     0 = SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    ERROR 3044 ; Ce champ est requis
+  END
+  ;
+  ; Valide les dimensions de produit de dimension
+  ;
+  IF TPDTYPPRD OF PDDET_OPER_SURF = "PD"
+  THEN BEGIN
+    IF DOSLON       OF PDDET_OPER_SURF > T_DIM_MAX_LAR_PD &
+       OR &
+       DOSLON       OF PDDET_OPER_SURF < T_DIM_MIN_LAR_PD
+    THEN BEGIN
+      ERROR 2962 ; Cette dimension est hors des limites
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que le champs à bien été saisie pour un produit de dimension
+;
+
+PROCEDURE INPUT DOSHAU
+BEGIN
+  IF TPDTYPPRD OF PDDET_OPER_SURF = "PD" &
+     AND &
+     0 = SIZE(TRUNCATE(FIELDTEXT)) &
+     AND &
+     ENTRYMODE
+  THEN BEGIN
+    ERROR 3044 ; Ce champ est requis
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les dimensions
+;
+
+PROCEDURE EDIT DOSHAU
+BEGIN
+  ;
+  ; Valide que le champ a été saisi lors de correction
+  ;
+  IF TPDTYPPRD OF PDDET_OPER_SURF = "PD" &
+     AND &
+     0 = SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    ERROR 3044 ; Ce champ est requis
+  END
+  ;
+  ; Valide les dimensions de produit de dimension
+  ;
+  IF TPDTYPPRD OF PDDET_OPER_SURF = "PD"
+  THEN BEGIN
+    IF DOSHAU       OF PDDET_OPER_SURF > T_DIM_MAX_HAU_PD &
+       OR &
+       DOSHAU       OF PDDET_OPER_SURF < T_DIM_MIN_HAU_PD
+    THEN BEGIN
+      ERROR 2962 ; Cette dimension est hors des limites
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que le champs à bien été saisie pour un produit de dimension
+;
+
+PROCEDURE INPUT DOSEPA
+BEGIN
+  IF TPDTYPPRD OF PDDET_OPER_SURF = "PD" &
+     AND &
+     0 = SIZE(TRUNCATE(FIELDTEXT)) &
+     AND &
+     ENTRYMODE
+  THEN BEGIN
+    ERROR 3044 ; Ce champ est requis
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les dimensions
+;
+
+PROCEDURE EDIT DOSEPA
+BEGIN
+  ;
+  ; Valide que le champ a été saisi lors de correction
+  ;
+  IF TPDTYPPRD OF PDDET_OPER_SURF = "PD" &
+     AND &
+     0 = SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    ERROR 3044 ; Ce champ est requis
+  END
+  ;
+  ; Valide les dimensions de produit de dimension
+  ;
+  IF TPDTYPPRD OF PDDET_OPER_SURF = "PD"
+  THEN BEGIN
+    IF DOSEPA       OF PDDET_OPER_SURF > T_DIM_MAX_EPA_PD &
+       OR &
+       DOSEPA       OF PDDET_OPER_SURF < T_DIM_MIN_EPA_PD
+    THEN BEGIN
+      ERROR 2962 ; Cette dimension est hors des limites
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les dimensions
+;
+
+PROCEDURE INPUT DOSEPARES
+BEGIN
+  IF 0 = SIZE(TRUNCATE(FIELDTEXT)) &
+     AND &
+     ENTRYMODE
+;;;NOT CHANGEMODE &
+;;;      OR &
+;;;      CORRECTMODE)
+  THEN BEGIN
+    LET FIELDTEXT = ASCII(DOSEPA OF PDDET_OPER_SURF,4)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Initialise la valeur du champ epaisseur résultante
+;
+
+PROCEDURE EDIT DOSEPARES
+BEGIN
+  ;
+  ; Si on modifi le numéro de tranche alors on doit mettre à jour les épaisseurs
+  ;
+  IF T_FLGCHGTRA = "1" AND CORRECTMODE
+  THEN BEGIN
+    LET FIELDVALUE                   = TRAEPA OF TRA_AVANT
+    LET DOSEPA    OF PDDET_OPER_SURF = TRAEPA OF TRA_AVANT
+  END
+  ;
+  ; Valide les dimension minimum et maximum
+  ;
+  IF TPDTYPPRD OF PDDET_OPER_SURF = "PD"
+  THEN BEGIN
+    IF FIELDVALUE > T_DIM_MAX_EPA_PD &
+       OR &
+       FIELDVALUE < T_DIM_MIN_EPA_PD
+    THEN BEGIN
+      ERROR 2962 ; Cette dimension est hors des limites
+    END
+  END
+  ELSE BEGIN
+    IF FIELDVALUE > T_DIM_MAX_EPA_TR &
+       OR &
+       FIELDVALUE < T_DIM_MIN_EPA_TR
+    THEN BEGIN
+      ERROR 2962 ; Cette dimension est hors des limites
+    END
+  END
+  ;
+  ; On s'assure que l'épaisseur résultante est plus petite ou égale à
+  ; l'épaisseur de départ
+  ;
+  IF FIELDVALUE > DOSEPA OF PDDET_OPER_SURF
+  THEN BEGIN
+    ERROR 3029 ; L'épaisseur résultante doit être plus petite ou égale a l'épaisseur de départ
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que le champs à bien été saisie pour un produit de dimension
+;
+
+PROCEDURE INPUT TGRCODGRA
+BEGIN
+  IF TPDTYPPRD OF PDDET_OPER_SURF = "PD" &
+     AND &
+     0 = SIZE(TRUNCATE(FIELDTEXT)) &
+     AND &
+     ENTRYMODE
+  THEN BEGIN
+    ERROR 3044 ; Ce champ est requis
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide le type de granit
+;
+
+PROCEDURE EDIT TGRCODGRA
+BEGIN
+  ;
+  ; Valide que la champ a bien été saisie
+  ;
+  IF TPDTYPPRD OF PDDET_OPER_SURF = "PD" &
+     AND &
+     0 = SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    ERROR 3044 ; Ce champ est requis
+  END
+  ;
+  ; Validation du type de granit
+  ;
+  GET PDTYPE_GRANIT OPTIONAL &
+    VIA   CIECLE,            &
+          TGRCODGRA          &
+    USING T_CIECLEMNU,       &
+          TGRCODGRA        OF PDDET_OPER_SURF
+  IF NOT ACCESSOK
+  THEN BEGIN
+    WARNING 2910 ; Ce type de granit n'existe pas
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que le champs à bien été saisie pour un produit de dimension
+;
+
+PROCEDURE INPUT DOSCODFIN001
+BEGIN
+  IF TPDTYPPRD OF PDDET_OPER_SURF = "PD" &
+     AND &
+     0 = SIZE(TRUNCATE(FIELDTEXT)) &
+     AND &
+     ENTRYMODE
+  THEN BEGIN
+    ERROR 3044 ; Ce champ est requis
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide le type de fini avant
+;
+
+PROCEDURE EDIT DOSCODFIN001
+BEGIN
+  ;
+  ; Valide que le champs à bien été saisie lors de modification
+  ;
+  IF TPDTYPPRD OF PDDET_OPER_SURF = "PD" &
+     AND &
+     0 = SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    ERROR 3044 ; Ce champ est requis
+  END
+  ;
+  ; Valide le type de fini
+  ;
+  GET PDTYPE_FINI OPTIONAL &
+    VIA   CIECLE,          &
+          TYFCODFIN        &
+    USING T_CIECLEMNU,     &
+          DOSCODFIN001     OF PDDET_OPER_SURF
+  IF NOT ACCESSOK
+  THEN BEGIN
+    WARNING 2911 ; Ce type de fini n'exsite pas
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur pour le champs.
+;
+
+PROCEDURE INPUT DOSCODFIN002
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TYFCODFIN = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd101 MODE F &
+                     PASSING T_TYFCODFIN, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_TYFCODFIN )
+  END
+  ;
+  ; Assignation des valeurs par defaut
+  ;
+  IF 0 = SIZE(TRUNCATE(FIELDTEXT)) &
+     AND &
+     ENTRYMODE
+  THEN BEGIN
+    ;
+    ; Assignation de la valeur par défaut si le code de machine est bruleur
+    ;
+    IF MOPCODMAC        OF PDOPERATION_SURF = "BRU"
+    THEN BEGIN
+      IF T_DOSCODFIN002_OLD = ""
+      THEN BEGIN
+        LET FIELDTEXT          = "01" ; Brulé
+        LET T_DOSCODFIN002_OLD = FIELDTEXT
+      END
+      ELSE BEGIN
+        LET FIELDTEXT          = T_DOSCODFIN002_OLD
+      END
+    END
+    ;
+    ; Assignation de la valeur par défaut si le code de machine est polisseur
+    ;
+    IF MOPCODMAC        OF PDOPERATION_SURF = "POL"
+    THEN BEGIN
+      IF T_DOSCODFIN002_OLD = ""
+      THEN BEGIN
+        LET FIELDTEXT          = "02" ; Poli
+        LET T_DOSCODFIN002_OLD = FIELDTEXT
+      END
+      ELSE BEGIN
+        LET FIELDTEXT          = T_DOSCODFIN002_OLD
+      END
+    END
+    ;
+    ; Assignation de la valeur par défaut si le code de machine est jet sable
+    ;
+    IF MOPCODMAC        OF PDOPERATION_SURF = "JET"
+    THEN BEGIN
+      IF T_DOSCODFIN002_OLD = ""
+      THEN BEGIN
+        LET FIELDTEXT          = "05" ; Jet de sable
+        LET T_DOSCODFIN002_OLD = FIELDTEXT
+      END
+      ELSE BEGIN
+        LET FIELDTEXT          = T_DOSCODFIN002_OLD
+      END
+    END
+    ;
+    ; Assignation de la valeur par défaut si le code de machine est guillotine
+    ;
+    IF MOPCODMAC        OF PDOPERATION_SURF = "GUI"
+    THEN BEGIN
+      IF T_DOSCODFIN002_OLD = ""
+      THEN BEGIN
+        LET FIELDTEXT          = "10" ; Guillotine
+        LET T_DOSCODFIN002_OLD = FIELDTEXT
+      END
+      ELSE BEGIN
+        LET FIELDTEXT          = T_DOSCODFIN002_OLD
+      END
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide le type de fini après
+;
+
+PROCEDURE EDIT DOSCODFIN002
+BEGIN
+  ;
+  ; Valide que le champs à bien été saisie lors de modification
+  ;
+  IF TPDTYPPRD OF PDDET_OPER_SURF = "PD" &
+     AND &
+     0 = SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    ERROR 3044 ; Ce champ est requis
+  END
+  ;
+  ; Valide le type de fini
+  ;
+  GET PDTYPE_FINI OPTIONAL &
+    VIA   CIECLE,          &
+          TYFCODFIN        &
+    USING T_CIECLEMNU,     &
+          DOSCODFIN002     OF PDDET_OPER_SURF
+  IF NOT ACCESSOK
+  THEN BEGIN
+    WARNING 2911 ; Ce type de fini n'exsite pas
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que le fini de surface ou l'epaisseur resultante ont été modifié
+;
+
+PROCEDURE EDIT T_SILENT
+BEGIN
+  IF TPDTYPPRD OF PDDET_OPER_SURF = "PD" &
+     AND &
+     (0 = DOSLON       OF PDDET_OPER_SURF &
+      OR &
+      0 = DOSHAU       OF PDDET_OPER_SURF &
+      OR &
+      0 = DOSEPA       OF PDDET_OPER_SURF &
+      OR &
+      0 = SIZE(TRUNCATE(TGRCODGRA    OF PDDET_OPER_SURF)) &
+      OR &
+      0 = SIZE(TRUNCATE(DOSCODFIN001 OF PDDET_OPER_SURF)))
+  THEN BEGIN
+    ERROR 3123 ; Il faut saisir un numéro de tranche ou de produit dimension
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour convertir OUI,NON en 1,0
+;
+
+PROCEDURE INPUT DOSACCERR
+BEGIN
+  USE usflginp NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour convertir 1,0 en OUI,NON
+;
+PROCEDURE OUTPUT DOSACCERR
+BEGIN
+  USE usflgout NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure APPEND identique à la procedure DESIGNER 40
+;
+
+PROCEDURE APPEND
+BEGIN
+  ;
+  ; Permet de modifier le numéro de ligne si ce n'est pas une ligne terminer
+  ;
+  IF DOSSTU OF PDDET_OPER_SURF = "T"
+  THEN BEGIN
+    NULL
+  END
+  ELSE BEGIN
+    ACCEPT DOSNUMLIG OF PDDET_OPER_SURF
+  END
+  DISPLAY DOSSTU OF PDDET_OPER_SURF
+  ACCEPT TRANUMTRA002 OF PDDET_OPER_SURF
+  IF 0 <> SIZE(TRUNCATE(TRANUMTRA002 OF PDDET_OPER_SURF))
+  THEN BEGIN
+    LET TPDTYPPRD OF PDDET_OPER_SURF = "TR"
+    DISPLAY DOSLON OF PDDET_OPER_SURF
+    DISPLAY DOSHAU OF PDDET_OPER_SURF
+    DISPLAY DOSEPA OF PDDET_OPER_SURF
+    ACCEPT  DOSEPARES OF PDDET_OPER_SURF
+    DISPLAY TGRCODGRA OF PDDET_OPER_SURF
+    DISPLAY DOSCODFIN001 OF PDDET_OPER_SURF
+    ACCEPT  DOSCODFIN002 OF PDDET_OPER_SURF
+  END
+  ELSE BEGIN
+    LET TPDTYPPRD OF PDDET_OPER_SURF = "PD"
+    ACCEPT DOSLON OF PDDET_OPER_SURF
+    ACCEPT DOSHAU OF PDDET_OPER_SURF
+    ACCEPT DOSEPA OF PDDET_OPER_SURF
+    ACCEPT DOSQTE OF PDDET_OPER_SURF
+    ACCEPT DOSEPARES OF PDDET_OPER_SURF
+    ACCEPT TGRCODGRA OF PDDET_OPER_SURF
+    ACCEPT DOSCODFIN001 OF PDDET_OPER_SURF
+    ACCEPT DOSCODFIN002 OF PDDET_OPER_SURF
+  END
+
+  EDIT T_SILENT
+
+  ACCEPT DOSACCERR OF PDDET_OPER_SURF
+    ACCEPT  DTRCODDEF    OF PDTRANCHE_DEF
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+  LET T_NOLIG = 0
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure ENTRY
+;
+
+PROCEDURE ENTRY
+BEGIN
+  DISPLAY OSUNUMRAP OF PDOPERATION_SURF
+  ACCEPT  OSUDATPRD OF PDOPERATION_SURF
+  ACCEPT  MOPCODMAC OF PDOPERATION_SURF
+  DISPLAY MOPDSC001 OF PDMACH_OP_SURF
+  ACCEPT  OSUDEP    OF PDOPERATION_SURF
+  ACCEPT  OSUARR    OF PDOPERATION_SURF
+  ACCEPT  QRTCODQRT OF PDOPERATION_SURF
+  DISPLAY CBIDSC    OF A_CBI_QRTCODQRT
+  DISPLAY OSUSTU    OF PDOPERATION_SURF
+  DISPLAY CBIDSC    OF A_CBI_OSUSTU
+  FOR PDDET_OPER_SURF
+  BEGIN
+    PERFORM APPEND
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Procédure DESIGNER 40 identique à la procedure APPEND
+;
+
+PROCEDURE DESIGNER 40
+BEGIN
+  ;
+  ; Permet de modifier le numéro de ligne si ce n'est pas une ligne terminer
+  ;
+  IF DOSSTU OF PDDET_OPER_SURF = "T"
+  THEN BEGIN
+    NULL
+  END
+  ELSE BEGIN
+    ACCEPT DOSNUMLIG OF PDDET_OPER_SURF
+  END
+  DISPLAY DOSSTU OF PDDET_OPER_SURF
+  ACCEPT TRANUMTRA002 OF PDDET_OPER_SURF
+  IF 0 <> SIZE(TRUNCATE(TRANUMTRA002 OF PDDET_OPER_SURF))
+  THEN BEGIN
+    LET TPDTYPPRD OF PDDET_OPER_SURF = "TR"
+    LET DOSQTE OF PDDET_OPER_SURF = 0
+    DISPLAY DOSLON OF PDDET_OPER_SURF
+    DISPLAY DOSHAU OF PDDET_OPER_SURF
+    DISPLAY DOSEPA OF PDDET_OPER_SURF
+    DISPLAY DOSQTE OF PDDET_OPER_SURF
+    ACCEPT  DOSEPARES OF PDDET_OPER_SURF
+    DISPLAY TGRCODGRA OF PDDET_OPER_SURF
+    DISPLAY DOSCODFIN001 OF PDDET_OPER_SURF
+    ACCEPT  DOSCODFIN002 OF PDDET_OPER_SURF
+  END
+  ELSE BEGIN
+    LET TPDTYPPRD OF PDDET_OPER_SURF = "PD"
+    ACCEPT DOSLON OF PDDET_OPER_SURF
+    ACCEPT DOSHAU OF PDDET_OPER_SURF
+    ACCEPT DOSEPA OF PDDET_OPER_SURF
+    ACCEPT DOSQTE OF PDDET_OPER_SURF
+    ACCEPT DOSEPARES OF PDDET_OPER_SURF
+    ACCEPT TGRCODGRA OF PDDET_OPER_SURF
+    ACCEPT DOSCODFIN001 OF PDDET_OPER_SURF
+    ACCEPT DOSCODFIN002 OF PDDET_OPER_SURF
+  END
+
+  EDIT T_SILENT
+
+  ACCEPT DOSACCERR OF PDDET_OPER_SURF
+    ACCEPT  DTRCODDEF    OF PDTRANCHE_DEF
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Opérateurs
+;
+
+PROCEDURE DESIGNER D001
+BEGIN
+  RUN SCREEN  pd185a &
+              PASSING T_CIECLEMNU,        &
+                      T_CIENOM,           &
+                      PDOPERATION_SURF    &
+              MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Arret opération surface
+;
+
+PROCEDURE DESIGNER D002
+BEGIN
+  RUN SCREEN  pd185b &
+              PASSING T_CIECLEMNU,        &
+                      T_CIENOM,           &
+                      PDOPERATION_SURF    &
+              MODE SAME
+END
+;-----------------------------------------------------------------------
+PROCEDURE INPUT DTRCODDEF OF PDTRANCHE_DEF
+BEGIN
+  LET T_DTRCODDEF_OLD   = DTRCODDEF OF PDTRANCHE_DEF
+  LET T_DTRTRANUMTRA002 = TRANUMTRA002 OF PDTRANCHE_DEF
+  LET T_DDTRCODDEF = FIELDTEXT
+  IF 0 <> SIZE(TRUNC(T_DDTRCODDEF)) AND 0 = SIZE(TRUNC(FIELDTEXT))
+  THEN LET FIELDTEXT = T_DDTRCODDEF
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_DTRCODDEF = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd116 MODE F &
+                     PASSING T_DTRCODDEF, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_DTRCODDEF )
+  END
+END
+;-------------------------------------------------------------------------------
+;
+; Recherche le dernier numéro de ligne utilisé
+;
+
+PROCEDURE POSTFIND
+BEGIN
+  GET DOS_OLD   OPTIONAL     &
+    VIA     CIECLE,          &
+            OSUNUMRAP        &
+    USING   T_CIECLEMNU,                         &
+            OSUNUMRAP        OF PDOPERATION_SURF &
+    ORDERBY OSUNUMRAP,       &
+            DOSNUMLIG        DESCENDING
+  IF ACCESSOK
+  THEN BEGIN
+    LET T_NOLIG = DOSNUMLIG OF DOS_OLD
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+
+PROCEDURE INTERNAL MAJ_LIGNE_TRANS
+BEGIN
+  LET DOSSTU OF PDDET_OPER_SURF = "E"
+  GET DOS_OLD   OPTIONAL     &
+    VIA     CIECLE,          &
+            OSUNUMRAP,       &
+            DOSNUMLIG        &
+    USING   T_CIECLEMNU,                          &
+            OSUNUMRAP        OF PDOPERATION_SURF, &
+            DOSNUMLIG        OF PDDET_OPER_SURF
+  IF ACCESSOK
+  THEN BEGIN
+    GET DOS_MAJ OPTIONAL       &
+      VIA     CIECLE,          &
+              OSUNUMRAP,       &
+              DOSNUMLIG,       &
+              DOSSTU           &
+      USING   T_CIECLEMNU,                          &
+              OSUNUMRAP        OF PDOPERATION_SURF, &
+              DOSNUMLIG        OF PDDET_OPER_SURF,  &
+              "M"
+    IF NOT ACCESSOK
+    THEN BEGIN
+      IF  T_FLGCHGTRA        = "1"
+      THEN BEGIN
+        ;
+        ; Remet la tranche précédante à son état initial
+        ;
+        LET CIECLE       OF DOS_MAJ = T_CIECLEMNU
+        LET OSUNUMRAP    OF DOS_MAJ = OSUNUMRAP    OF DOS_OLD
+        LET DOSNUMLIG    OF DOS_MAJ = DOSNUMLIG    OF DOS_OLD
+        LET DOSSTU       OF DOS_MAJ = "M"
+        LET TPDTYPPRD    OF DOS_MAJ = TPDTYPPRD    OF DOS_OLD
+        LET TRANUMTRA002 OF DOS_MAJ = TRANUMTRA002 OF DOS_OLD
+        LET DOSLON       OF DOS_MAJ = DOSLON       OF DOS_OLD
+        LET DOSHAU       OF DOS_MAJ = DOSHAU       OF DOS_OLD
+        LET DOSEPA       OF DOS_MAJ = DOSEPA       OF DOS_OLD
+        LET TGRCODGRA    OF DOS_MAJ = TGRCODGRA    OF DOS_OLD
+        LET DOSCODFIN001 OF DOS_MAJ = DOSCODFIN001 OF DOS_OLD
+        LET DOSCODFIN002 OF DOS_MAJ = DOSCODFIN001 OF DOS_OLD
+        LET DOSEPARES    OF DOS_MAJ = DOSEPA       OF DOS_OLD
+        LET DOSPRD       OF DOS_MAJ = DOSPRD       OF DOS_OLD
+        LET DOSHREDIS    OF DOS_MAJ = DOSHREDIS    OF DOS_OLD
+        LET DOSACCERR    OF DOS_MAJ = DOSACCERR    OF DOS_OLD
+      END
+      ELSE BEGIN
+        ;
+        ; modifie la tranche
+        ;
+        LET OSUNUMRAP    OF DOS_MAJ = OSUNUMRAP    OF DOS_OLD
+        LET DOSNUMLIG    OF DOS_MAJ = DOSNUMLIG    OF DOS_OLD
+        LET DOSSTU       OF DOS_MAJ = "M"
+        LET TPDTYPPRD    OF DOS_MAJ = TPDTYPPRD    OF DOS_OLD
+        LET TRANUMTRA002 OF DOS_MAJ = TRANUMTRA002 OF DOS_OLD
+        LET DOSLON       OF DOS_MAJ = DOSLON       OF DOS_OLD
+        LET DOSHAU       OF DOS_MAJ = DOSHAU       OF DOS_OLD
+        LET DOSEPA       OF DOS_MAJ = DOSEPA       OF DOS_OLD
+        LET TGRCODGRA    OF DOS_MAJ = TGRCODGRA    OF DOS_OLD
+        LET DOSCODFIN001 OF DOS_MAJ = DOSCODFIN001 OF DOS_OLD
+        LET DOSCODFIN002 OF DOS_MAJ = DOSCODFIN002 OF DOS_OLD
+        LET DOSEPARES    OF DOS_MAJ = DOSEPARES    OF DOS_OLD
+        LET DOSPRD       OF DOS_MAJ = DOSPRD       OF DOS_OLD
+        LET DOSHREDIS    OF DOS_MAJ = DOSHREDIS    OF DOS_OLD
+        LET DOSACCERR    OF DOS_MAJ = DOSACCERR    OF DOS_OLD
+      END
+      PUT DOS_MAJ
+    END
+  END
+  ELSE BEGIN
+    ERROR "PROBLÈME TECHNIQUE"
+  END
+END
+
+PROCEDURE INTERNAL VALIDE
+BEGIN
+  WHILE RETRIEVING OOS_VALIDE
+  BEGIN
+    IF (OSUDEP OF PDOPERATION_SURF <> OOSHREDEB OF OOS_VALIDE   &
+        AND                                                        &
+        OSUARR OF PDOPERATION_SURF <> OOSHREFIN OF OOS_VALIDE)
+    THEN BEGIN
+      IF ( (OSUDEP OF PDOPERATION_SURF >= OOSHREDEB OF OOS_VALIDE     &
+            AND                                                          &
+            OSUARR OF PDOPERATION_SURF <= OOSHREFIN OF OOS_VALIDE )   &
+          OR                                                             &
+           (OSUDEP OF PDOPERATION_SURF >= OOSHREDEB OF OOS_VALIDE     &
+            AND                                                          &
+            OSUARR OF PDOPERATION_SURF <= OOSHREFIN OF OOS_VALIDE ))  &
+         OR                                                              &
+           (OSUDEP OF PDOPERATION_SURF <= OOSHREDEB OF OOS_VALIDE     &
+            AND                                                          &
+            OSUARR OF PDOPERATION_SURF >= OOSHREFIN OF OOS_VALIDE )
+      THEN BEGIN
+        ERROR 3005 ; Cette plage horraire chevauche une plage déjà enregistrer
+       END
+    END
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDOPERATION_SURF &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDOPERATION_SURF &
+     AND NOT NEWRECORD     OF PDOPERATION_SURF &
+     AND NOT DELETEDRECORD OF PDOPERATION_SURF &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+  ;
+  ; Calcul de la durée du traitement pour l'opération de surface
+  ;
+  LET TZ_DATDEB   = OSUDATPRD        OF PDOPERATION_SURF
+  LET TZ_TMPDEB   = ASCII(OSUDEP     OF PDOPERATION_SURF,4) + "00"
+  LET TZ_DATFIN   = OSUDATPRD        OF PDOPERATION_SURF
+  LET TZ_TMPFIN   = ASCII(OSUARR     OF PDOPERATION_SURF,4) + "00"
+
+  LET OSUDURSEC OF PDOPERATION_SURF = DZ_DIFSECTOT
+
+;  DO INTERNAL VALIDE
+
+  FOR PDDET_OPER_SURF
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF PDDET_OPER_SURF &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF PDDET_OPER_SURF &
+       AND NOT NEWRECORD     OF PDDET_OPER_SURF &
+       AND NOT DELETEDRECORD OF PDDET_OPER_SURF &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+    ;
+    ;
+  END
+  ;
+  ; Valide les lignes de détail du rapport
+  ;
+  FOR PDDET_OPER_SURF
+  BEGIN
+    ;
+    ; Si la ligne à déjà été valider il faut revalider la ligne avant
+    ; d'effectuer la mise à jour de la pièce
+    ;
+    IF DOSSTU OF PDDET_OPER_SURF = "V"
+    THEN BEGIN
+      LET DOSSTU OF PDDET_OPER_SURF = "E"
+      IF OSUSTU OF PDOPERATION_SURF = "V"
+      THEN BEGIN
+        LET OSUSTU OF PDOPERATION_SURF = "E"
+        DISPLAY OSUSTU OF PDOPERATION_SURF
+        DISPLAY CBIDSC OF A_CBI_OSUSTU
+      END
+    END
+    ;
+    ; Si la ligne à déjà été transferrer il faut replacer la pièce dans
+    ; l'état initial avant de faire la nouvelle mise à jour
+    ;
+    IF DOSSTU OF PDDET_OPER_SURF = "T" &
+       AND &
+       ALTEREDRECORD OF PDDET_OPER_SURF
+    THEN BEGIN
+      DO INTERNAL MAJ_LIGNE_TRANS
+    END
+
+    IF ALTEREDRECORD OF PDDET_OPER_SURF
+    THEN BEGIN
+      ;
+      ; Si le rapport à déjà été valider il faut reprendre la validation
+      ;
+      IF OSUSTU OF PDOPERATION_SURF = "V"
+      THEN BEGIN
+        LET OSUSTU OF PDOPERATION_SURF = "E" ; En cours , il faut reprendre la validation
+        DISPLAY OSUSTU OF PDOPERATION_SURF
+        DISPLAY CBIDSC OF A_CBI_OSUSTU
+      END
+      ;
+      ; Si le rapport à été transferré il devient en correction
+      ;
+      IF OSUSTU OF PDOPERATION_SURF = "T"
+      THEN BEGIN
+        LET OSUSTU OF PDOPERATION_SURF = "C"  ; Correction après transfert
+        DISPLAY OSUSTU OF PDOPERATION_SURF
+        DISPLAY CBIDSC OF A_CBI_OSUSTU
+      END
+    END
+
+    IF NEWRECORD OF PDDET_OPER_SURF
+    THEN BEGIN
+      ;
+      ; Si le rapport à été transferré il devient en correction
+      ;
+      IF OSUSTU OF PDOPERATION_SURF = "T"
+      THEN BEGIN
+        LET OSUSTU OF PDOPERATION_SURF = "C"  ; Correction après transfert
+        DISPLAY OSUSTU OF PDOPERATION_SURF
+        DISPLAY CBIDSC OF A_CBI_OSUSTU
+      END
+    END
+
+  END
+  ;
+  ; Calcul de la durée du traitement pour l'opération de surface
+  ;
+  LET TZ_DATDEB   = OSUDATPRD        OF PDOPERATION_SURF
+  LET TZ_TMPDEB   = ASCII(OSUDEP     OF PDOPERATION_SURF,4) + "00"
+  LET TZ_DATFIN   = OSUDATPRD        OF PDOPERATION_SURF
+  LET TZ_TMPFIN   = ASCII(OSUARR     OF PDOPERATION_SURF,4) + "00"
+
+  LET OSUDURSEC OF PDOPERATION_SURF = DZ_DIFSECTOT
+
+  ;
+  ; Incrémentation du numéro de séquence
+  ;
+  IF 0 = OSUNUMRAP        OF PDOPERATION_SURF
+  THEN BEGIN
+    START TRANSACTION NO_SEQ
+    GET PDSEQ_OPER_SURF OPTIONAL        &
+      VIA   CIECLE                      &
+      USING T_CIECLEMNU
+    IF NOT ACCESSOK
+    THEN BEGIN
+      LET CIECLE OF PDSEQ_OPER_SURF = T_CIECLEMNU
+    END
+    LET SEONUMRAP     OF PDSEQ_OPER_SURF  = SEONUMRAP OF PDSEQ_OPER_SURF + 1
+    LET OSUNUMRAP     OF PDOPERATION_SURF = SEONUMRAP OF PDSEQ_OPER_SURF
+    PUT PDSEQ_OPER_SURF
+    DISPLAY OSUNUMRAP     OF PDOPERATION_SURF
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Cette procedure permet de ne pas effacer l'ecran après l'UPDATE
+;
+
+PROCEDURE POSTUPDATE
+BEGIN
+  IF CORRECTMODE OR ENTRYMODE
+  THEN BEGIN
+    DISPLAY OSUNUMRAP     OF PDOPERATION_SURF
+    WARNING = " "
+  END
+;  RUN SCREEN  pd185a &
+;              PASSING T_CIECLEMNU,        &
+;                      T_CIENOM,           &
+;                      PDOPERATION_SURF    &
+;              MODE SAME
+END
+
+PROCEDURE INTERNAL DESTRUCTION_PDTRANCHE
+BEGIN
+  GET EFFACER_TRANCHE VIA TRANUMTRA002, CIECLE USING TRANUMTRA002 OF &
+                      PDDET_OPER_SURF, T_CIECLEMNU OPT
+  IF ACCESSOK
+  THEN BEGIN
+         LET OSUDATPRD OF EFFACER_TRANCHE = 0
+         PUT EFFACER_TRANCHE RESET
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Validation avant destruction
+;
+
+PROCEDURE DELETE
+BEGIN
+  FOR PDDET_OPER_SURF
+  BEGIN
+    IF OSUSTU OF PDOPERATION_SURF = "E" &
+       OR &
+       OSUSTU OF PDOPERATION_SURF = "V"
+    THEN BEGIN
+      IF TPDTYPPRD OF PDDET_OPER_SURF = "TR"
+      THEN BEGIN
+          DO INTERNAL DESTRUCTION_PDTRANCHE
+          DELETE PDDET_OPER_SURF
+      END
+      ELSE BEGIN
+          DELETE PDDET_OPER_SURF
+      END
+    END
+
+
+    IF OSUSTU OF PDOPERATION_SURF = "T" &
+       OR &
+       OSUSTU OF PDOPERATION_SURF = "M" &
+       OR &
+       OSUSTU OF PDOPERATION_SURF = "C"
+    THEN BEGIN
+      IF TPDTYPPRD OF PDDET_OPER_SURF = "TR"
+      THEN BEGIN
+        IF DOSEPA OF PDDET_OPER_SURF = DOSEPARES OF PDDET_OPER_SURF &
+           AND &
+           DOSCODFIN001 OF PDDET_OPER_SURF = DOSCODFIN002 OF PDDET_OPER_SURF
+        THEN BEGIN
+          LET DOSSTU OF PDDET_OPER_SURF = "D"
+          LET OSUSTU OF PDOPERATION_SURF = "C"  ; Correction après transfert
+          DISPLAY OSUSTU OF PDOPERATION_SURF
+          DISPLAY CBIDSC OF A_CBI_OSUSTU
+        END
+        ELSE BEGIN
+         ERROR 3142 ; On ne peut détruire une ligne de détail qui modifie la tranche et qui est transférré
+        END
+      END
+      ELSE BEGIN
+        DO INTERNAL DESTRUCTION_PDTRANCHE
+        DELETE PDDET_OPER_SURF
+      END
+    END
+    DO INTERNAL DESTRUCTION_PDTRANCHE
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation avant destruction d'une ligne du rapport
+;
+
+PROCEDURE DETAIL DELETE
+BEGIN
+  IF OSUSTU OF PDOPERATION_SURF = "E" &
+     OR &
+     OSUSTU OF PDOPERATION_SURF = "V"
+  THEN BEGIN
+    IF TPDTYPPRD OF PDDET_OPER_SURF = "TR"
+    THEN BEGIN
+        DO INTERNAL DESTRUCTION_PDTRANCHE
+        DELETE PDDET_OPER_SURF
+        DELETE PDTRANCHE_DEF
+    END
+    ELSE BEGIN
+      DELETE PDDET_OPER_SURF
+    END
+  END
+
+
+  IF OSUSTU OF PDOPERATION_SURF = "T" &
+     OR &
+     OSUSTU OF PDOPERATION_SURF = "M" &
+     OR &
+     OSUSTU OF PDOPERATION_SURF = "C"
+  THEN BEGIN
+    IF TPDTYPPRD OF PDDET_OPER_SURF = "TR"
+    THEN BEGIN
+      IF DOSEPA OF PDDET_OPER_SURF = DOSEPARES OF PDDET_OPER_SURF &
+         AND &
+         DOSCODFIN001 OF PDDET_OPER_SURF = DOSCODFIN002 OF PDDET_OPER_SURF
+      THEN BEGIN
+        LET DOSSTU OF PDDET_OPER_SURF = "D"
+        LET OSUSTU OF PDOPERATION_SURF = "C"  ; Correction après transfert
+        DISPLAY OSUSTU OF PDOPERATION_SURF
+        DISPLAY CBIDSC OF A_CBI_OSUSTU
+      END
+      ELSE BEGIN
+       ERROR 3142 ; On ne peut détruire une ligne de détail qui modifie la tranche et qui est transférré
+      END
+    END
+    ELSE BEGIN
+      DO INTERNAL DESTRUCTION_PDTRANCHE
+      DELETE PDDET_OPER_SURF
+      DELETE PDTRANCHE_DEF
+    END
+  END
+END
+;----------------------------------------------
+ PROCEDURE DETAIL FIND
+   BEGIN
+     FOR MISSING PDDET_OPER_SURF
+       BEGIN
+         GET PDDET_OPER_SURF OPTIONAL
+         GET PDTRANCHE_DEF OPT
+       END
+  END
+;-------------------------------------------------------
+ PROCEDURE UPDATE
+   BEGIN
+     PUT PDOPERATION_SURF
+     FOR PDDET_OPER_SURF
+       BEGIN
+         PUT PDDET_OPER_SURF
+         LET T-T = DTRCODDEF OF PDTRANCHE_DEF
+         GET PDTRANCHE_DEF OPT
+           IF T-T <> ""
+           THEN BEGIN
+             LET CIECLE       OF PDTRANCHE_DEF = T_CIECLEMNU
+             LET TRANUMTRA002 OF PDTRANCHE_DEF = TRANUMTRA002 OF PDDET_OPER_SURF
+             LET OSUNUMRAP    OF PDTRANCHE_DEF = OSUNUMRAP OF PDDET_OPER_SURF
+             LET DTRCODDEF    OF PDTRANCHE_DEF = T-T
+             PUT PDTRANCHE_DEF
+            END
+;           THEN PUT PDTRANCHE_DEF
+      END
+  END
+
+
+BUILD DETAIL LIST
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+***************************** Opération de surface *****************************
+*                                                                              *
+* Numéro rapport: xxxxxxxxxxx            Heure départ..: xxxxx                 *
+* Date oper surf: xxxxxxxx               Heure arrêt...: xxxxx                 *
+* Code machine..: xxx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                *
+* Quart travail.: x    xxxxxxxxxxxxxxxxxxxxxxxxx                               *
+* Statut........: x    xxxxxxxxxxxxxxxxxxxxxxxxx                               *
+*                                                                              *
+************************* Tranches / produit dimension *************************
+*                                                                              *
+*                                                Epai. Type   Type fini        *
+*    Lig   Tranche   Long.  Haut. Epai.     Qte  Res. granit avant après Err Def  *
+*    xxx   xxxxxxx   xxxx   xxxx  xxxx  xxxxxxx  xxxx  xxx    xx    xx    x  xx  *
+*    xxx   xxxxxxx   xxxx   xxxx  xxxx  xxxxxxx  xxxx  xxx    xx    xx    x  xx  *
+*    xxx   xxxxxxx   xxxx   xxxx  xxxx  xxxxxxx  xxxx  xxx    xx    xx    x  xx  *
+*    xxx   xxxxxxx   xxxx   xxxx  xxxx  xxxxxxx  xxxx  xxx    xx    xx    x  xx *
+*    xxx   xxxxxxx   xxxx   xxxx  xxxx  xxxxxxx  xxxx  xxx    xx    xx    x  xx  *
+*    xxx   xxxxxxx   xxxx   xxxx  xxxx  xxxxxxx  xxxx  xxx    xx    xx    x  xx  *
+*    xxx   xxxxxxx   xxxx   xxxx  xxxx  xxxxxxx  xxxx  xxx    xx    xx    x  xx *
+*                                                                              *
+********************************************************************************
+@ENDIF

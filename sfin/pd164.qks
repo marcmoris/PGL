@@ -1,0 +1,265 @@
+;/T/ Opérateur (Pilotage)
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1994-07-14
+;
+;    Description..: Cette table contient les informations de base des
+;                   opérateurs.
+;
+;/M/ François Déry, 30 avril 1999
+;       Enlever le popup sur l'employé de paie car celui-ci pointait sur une
+;       table qui n'existait pas.
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd164 ACTIONBAR                    &
+             MODE LABEL "" AT 2,80        &
+             NOACTION                     &
+             FIELDMARK RETAIN STARTUP     &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU ,      &
+                       T_CIENOM
+
+
+;-------------------------------------------------------------------------------
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD164"
+
+
+;-------------------------------------------------------------------------------
+; Documentation de l'écran.
+;
+USE pd164.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Sert à l'appel des sous-écrans de consultation
+;
+
+TEMPORARY T_EMPLOYE_NUM   CHARACTER SIZE 06
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire au traitement
+;
+
+DEFINE D_EMPNO INTEGER SIZE 6 = NCONVERT(T_EMPLOYE_NUM)
+
+
+;-------------------------------------------------------------------------------
+;
+; Opérateur
+;
+
+FILE PDOPERATEUR PRIMARY NOITEM
+  ACCESS VIA     CIECLE,   &
+                 OPENUMEMP &
+         USING   T_CIECLEMNU,             &
+                 OPENUMEMP OF PDOPERATEUR &
+         REQUEST OPENUMEMP OF PDOPERATEUR &
+         ORDERBY CIECLE,   &
+                 OPENOM,   &
+                 OPEPNM
+
+  ACCESS VIA     CIECLE      &
+         USING   T_CIECLEMNU &
+         ORDERBY CIECLE,     &
+                 OPENOM,     &
+                 OPEPNM
+
+         ITEM CIECLE OF PDOPERATEUR INITIAL T_CIECLEMNU
+
+
+;-------------------------------------------------------------------------------
+;
+;
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Opérateur " &
+@ELSE
+      " %%%Opérateur " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+ALIGN (2,3,19)
+
+
+FIELD OPENUMEMP OF PDOPERATEUR                  &
+        HIDDEN ID 05                            &
+        REQUIRED NOCHANGE       ;                &
+ ;         MESSAGE 2913 ; Ce numéro d'employé n'existe pas.
+
+
+FIELD OPEPNM OF PDOPERATEUR                     &
+        HIDDEN ID 10
+
+
+FIELD OPENOM OF PDOPERATEUR                     &
+        HIDDEN ID 15
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour le champs OPENUMEMP
+;
+
+PROCEDURE INPUT OPENUMEMP
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_EMPLOYE_NUM   = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    ;
+    ;
+    ; Si on est en recherche (FINDMODE) alors on recherche parmie les ligne de
+    ; la table PDOPERATEUR.
+    ; Par contre si on est en création  alors on recherche dans le fichier de
+    ; correspondance entre la paie et la production.
+    ;
+    ;
+    RUN SCREEN pd110 MODE F &
+                     PASSING T_EMPLOYE_NUM, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_EMPLOYE_NUM  )
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide que le champ a été saisie
+;
+
+PROCEDURE EDIT OPEPNM
+BEGIN
+  IF 0 = SIZE(OPEPNM OF PDOPERATEUR )
+  THEN BEGIN
+    ERROR 3016 ; Ce champ est requis
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que le champ a été saisie
+;
+
+PROCEDURE EDIT OPENOM
+BEGIN
+  IF 0 = SIZE( OPENOM OF PDOPERATEUR )
+  THEN BEGIN
+    ERROR 3016 ; Ce champ est requis
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDOPERATEUR &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDOPERATEUR &
+     AND NOT NEWRECORD     OF PDOPERATEUR &
+     AND NOT DELETEDRECORD OF PDOPERATEUR &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+END
+
+BUILD
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+********************************** Opérateur ***********************************
+*                                                                              *
+* Numéro employé: xxxxxx                                                       *
+* Prénom........: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+* Nom...........: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+********************************************************************************
+@ENDIF

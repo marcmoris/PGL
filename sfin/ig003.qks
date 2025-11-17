@@ -1,0 +1,284 @@
+;/T/ Enregistrer les produits en cours (Diagrammes)
+;
+;/P/ Programmeur..: René Bonneau
+;    Date Création: 1996-03-28
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   l'inventaire physique de produits en cours (diagrammes)
+;                   tranches de granit de Granicor.
+;
+;/M/ François Déry, 12 mai 1999
+;       Correction du cluster, il dépassait l'écran.
+;       Prendre les use standard au lieu de tout codé manuellement.
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN ig003 ACTIONBAR                    &
+             MODE LABEL "" AT 2,80        &
+             NOACTION                     &
+             FIELDMARK RETAIN STARTUP     &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU ,      &
+                       T_CIENOM
+
+;-------------------------------------------------------------------------------
+; Variables pour la sécurité.
+;
+USE ussectmp NOLIST
+    "IG003"
+
+;-------------------------------------------------------------------------------
+; Documentation de l'écran.
+;
+USE ig003.hlp NOLIST
+;
+; Action Bar standard
+;
+USE usactecr NOLIST
+;-------------------------------------------------------------------------------
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+TEMPORARY T_COMPTEUR        INT SIZE 2
+TEMPORARY T_COMPTEUR_BOUCLE INT SIZE 2
+
+TEMPORARY T_HEURE           CHAR SIZE 4
+TEMPORARY T_HEURE_BOUCLE    CHAR SIZE 4
+TEMPORARY T_TEMPS           CHAR SIZE 8
+TEMPORARY T_VARIABLE        CHAR SIZE 6
+
+;-------------------------------------------------------------------------------
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+; Fichier utiliser dans le dans l'écran
+;
+FILE INDIAGRAMME PRIMARY OCCURS 18
+
+    ITEM CIECLE     OF INDIAGRAMME INITIAL T_CIECLEMNU
+    ITEM IDINUMPGE  OF INDIAGRAMME INIT FIRST(IDINUMPGE OF INDIAGRAMME)
+    ITEM IDIDATINV  OF INDIAGRAMME INIT SYSDATE
+;    ITEM IDIHREINV  OF INDIAGRAMME INIT SYSTIME
+
+FILE INDIAGRAMME DESIGNER ALIAS INDIAGRAMME_EXISTE
+;    SELECT IF CIECLE OF INDIAGRAMME_EXISTE = T_CIECLEMNU
+
+FILE INDIAGRAMME DESIGNER ALIAS INDIAGRAMME_BOUCLE
+
+FILE PDDIAGRAMME     DESIGNER
+
+FILE PDPROJET        REFERENCE OCCURS WITH INDIAGRAMME
+
+;-------------------------------------------------------------------------------
+;Variables temporaires
+;
+TEMPORARY T_COD              INTEGER UNSIGNED SIZE 02
+TEMPORARY T_PJTABR           CHARACTER SIZE 2
+TEMPORARY T_DIANUMDIA002     CHARACTER SIZE 5
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " INVENTAIRE DE DIAGRAMMES " &
+@ELSE
+      " %%%INVENTAIRE DE DIAGRAMMES " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST
+
+DRAW 3,01 TO 23,9
+
+SKIP TO LINE 4
+TITLE "PAGE" AT ,3
+
+SKIP
+ALIGN (,,2)
+FIELD IDINUMPGE OF INDIAGRAMME           &
+        REQUIRED
+
+SKIP TO LINE 4
+TITLE "LOCAL  PROJET  NO DIAG   QTE  COMMENTAIRE " AT ,14
+
+SKIP
+ALIGN(11,,14)(,,23)(,,30)(,,38)(,,46)
+CLUSTER OCCURS WITH INDIAGRAMME
+
+FIELD IDINUMLOC OF INDIAGRAMME &
+        PATTERN "##^<"                     &
+        REQUIRED DUPLICATE
+
+FIELD PJTABR OF INDIAGRAMME REQUIRED DUPLICATE &
+             LOOKUP ON PDPROJET &
+                VIA   PJTABR, &
+                      CIECLE  &
+                USING PJTABR OF INDIAGRAMME, &
+                      T_CIECLEMNU &
+                MESSAGE 1807 ; "CE CODE DE PROJET EST INEXISTANT..."
+
+FIELD DIANUMDIA002 OF INDIAGRAMME REQUIRED &
+              LOOKUP ON PDDIAGRAMME &
+                 VIA   CIECLE,      &
+                       PJTABR,      &
+                       DIANUMDIA002 &
+                 USING T_CIECLEMNU, &
+                       PJTABR,      &
+                       DIANUMDIA002 OPTIONAL &
+                MESSAGE 1808 ; "CE NUMERO DE DIAGRAMME N'EXISTE PAS..."
+
+FIELD IDIQTEINV OF INDIAGRAMME REQUIRED PICTURE "^^^^^" output scale 0
+
+FIELD IDIDESC OF INDIAGRAMME &
+        FOR 1,33
+
+CLUSTER
+
+;-------------------------------------------------------------------------------
+; Appel du dépisteur pour le champ.
+;
+PROCEDURE INPUT PJTABR
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PJTABR = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN ig100 MODE F &
+                     PASSING T_PJTABR,          &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_PJTABR )
+  END
+END
+
+;-------------------------------------------------------------------------------
+; Appel du dépisteur pour le champ.
+;
+PROCEDURE INPUT DIANUMDIA002
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PJTABR = PJTABR OF INDIAGRAMME
+    LET T_DIANUMDIA002 = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN ig101 MODE F &
+                     PASSING T_PJTABR,          &
+                             T_DIANUMDIA002,    &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_DIANUMDIA002 )
+  END
+END
+
+;------------------------------------------------------------------------------
+PROCEDURE PATH
+BEGIN
+  REQUEST IDINUMPGE OF INDIAGRAMME
+  IF PROMPTOK
+  THEN LET PATH = 1
+  IF PATH = 0
+  THEN BEGIN
+    REQUEST DIANUMDIA002 OF INDIAGRAMME
+    IF PROMPTOK
+    THEN LET PATH = 2
+    ELSE ERROR "UNE CLE EST REQUISE"
+  END
+END
+
+;-------------------------------------------------------------------------------
+PROCEDURE FIND
+BEGIN
+  FOR MISSING INDIAGRAMME
+  BEGIN
+    IF PATH = 1
+    THEN GET INDIAGRAMME VIA     CIECLE,           &
+                                     IDINUMPGE         &
+                             USING   T_CIECLEMNU,      &
+                                     IDINUMPGE       OPTIONAL
+
+    ELSE GET INDIAGRAMME VIA     CIECLE,           &
+                                     DIANUMDIA002      &
+                             USING   T_CIECLEMNU,      &
+                                     DIANUMDIA002    OPTIONAL
+
+  END
+END
+
+PROCEDURE INPUT IDINUMLOC
+BEGIN
+  IF 0 <> SIZE(TRUNC(FIELDTEXT))
+  THEN BEGIN
+    IF MATCHPATTERN(FIELDTEXT,"#^<")
+    THEN LET FIELDTEXT = "0" + FIELDTEXT
+  END
+END
+
+PROCEDURE APPEND
+  BEGIN
+    ACCEPT IDINUMLOC OF INDIAGRAMME
+    ACCEPT PJTABR OF INDIAGRAMME
+    ACCEPT DIANUMDIA002 OF INDIAGRAMME
+    ACCEPT IDIQTEINV OF INDIAGRAMME
+    ACCEPT IDIDESC OF INDIAGRAMME
+    END
+PROCEDURE ENTRY
+  BEGIN
+    ACCEPT IDINUMPGE OF INDIAGRAMME
+    FOR INDIAGRAMME
+      BEGIN
+        PERFORM APPEND
+        END
+    END
+PROCEDURE UPDATE
+  BEGIN
+    FOR INDIAGRAMME
+      BEGIN
+          PUT INDIAGRAMME
+        END
+    END
+
+PROCEDURE PREUPDATE
+BEGIN
+    LET T_COMPTEUR = 0
+    LET T_TEMPS    = ASCII(SYSTIME)
+    LET T_HEURE    = T_TEMPS[1:4]
+    LET T_COMPTEUR_BOUCLE = 0
+    WHILE RETRIEVING INDIAGRAMME_BOUCLE VIA CIECLE, IDINUMPGE &
+                     USING CIECLE    OF INDIAGRAMME, &
+                           IDINUMPGE OF INDIAGRAMME
+    BEGIN
+      LET T_HEURE_BOUCLE = ASCII(IDIHREINV OF INDIAGRAMME_BOUCLE)[1:4]
+      IF T_HEURE_BOUCLE = T_HEURE
+      THEN LET T_COMPTEUR_BOUCLE = &
+               NCONVERT(ASCII(IDIHREINV OF INDIAGRAMME_BOUCLE)[5:2]) + 25
+    END
+    LET T_COMPTEUR = T_COMPTEUR_BOUCLE
+    FOR INDIAGRAMME
+      BEGIN
+        IF NEWRECORD OF INDIAGRAMME
+        THEN BEGIN
+           LET T_COMPTEUR = T_COMPTEUR + 1
+           LET T_VARIABLE = T_HEURE + ASCII(T_COMPTEUR,2)
+           LET IDIHREINV  OF INDIAGRAMME = NCONVERT(T_VARIABLE) * 10000
+        END
+     END
+END
+
+PROCEDURE DELETE
+  BEGIN
+    DELETE INDIAGRAMME
+    END
+BUILD
+
+
+

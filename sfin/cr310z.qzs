@@ -1,0 +1,266 @@
+;/T/ Journal des comptes à recevoir
+;
+;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur...: Alain Côté
+;    Date Création.: 27 juillet 1993
+;
+;    Description...: Impression du journal des comptes à recevoir. Le journal
+;                    inclus les factures, les crédits, les notes de crédits et
+;                    les ajustements. On imprime que les transactions qui sont
+;                    journalisées.
+;
+;    Paramètres....: Compagnie
+;                    Periode CTB (Une, Plusieurs )
+;
+;
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST
+
+ACCESS CRCPT_A_REC &
+  ;
+  ; Pour avoir la description du compte comptable du compte à recevoir.
+  ;
+  LINK CARCPTCAR OF CRCPT_A_REC &
+    TO CPTCLE OF                 VCPT_DSC ALIAS A_CPT_CAR &
+  ;
+  ; Nom du client/divers.
+  ;
+  LINK REFCIECLE OF CRCPT_A_REC, &
+       REFCLETYP OF CRCPT_A_REC, &
+       REFCLENUM OF CRCPT_A_REC, &
+       RADCLE    OF CRCPT_A_REC  &
+    TO REFCIECLE          , &
+       REFCLETYP          , &
+       REFCLENUM          , &
+       RADCLE  OF                MCREF_ADRESSE OPTIONAL &
+  ;
+  ; On va chercher le numéro de pièce référé pour les N/C et les ajustements.
+  ;
+  LINK CIECLE    OF CRCPT_A_REC   , &
+       CARCLE    OF CRCPT_A_REC   , &
+       CARTYPECR OF CRCPT_A_REC   , &
+       CARTYPECR OF CRCPT_A_REC     &
+    TO CRHCLE1                    , &
+       CRHCLE2                    , &
+       CRHTYPECR                  , &
+       CRHTYPTRA                  OF CRCAR_HISTO OPTIONAL &
+  ;
+  ; Ecriture de la transaction.
+  ;
+  LINK HISCLE OF CRCPT_A_REC &
+    TO HISCLE OF                 MCHIS_ECR OPTIONAL &
+  ;
+  ; Description du compte venant de l'écriture.
+  ;
+  LINK CPTCLE OF MCHIS_ECR &
+    TO CPTCLE OF                 VCPT_DSC   OPTIONAL &
+  ;
+  ; Description de l'unité administrative venant de l'écriture.
+  ;
+  LINK CIECLE   OF MCHIS_ECR , &
+       UNACLE   OF MCHIS_ECR   &
+    TO CIECLE                , &
+       UNACLE OF                 MCUNITE_ADM OPTIONAL
+
+
+
+CHOOSE CIECLE PARM, & ; Compagnie du menu
+       PECCLE PARM     RANGE; Période ctb
+
+; Ajustement pour le changement de siècle
+DEFINE D_ANNSIE CHARACTER SIZE 4 = PARM
+
+
+SELECT CRCPT_A_REC IF CARDATJOU OF CRCPT_A_REC <> 0 AND &
+       PECCLE OF CRCPT_A_REC[1:2] = D_ANNSIE[3:2]
+
+
+
+
+
+;
+; Titre du rapport.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+       "Journal des comptes à recevoir"
+@ELSE
+       "%%%Journal des comptes à recevoir"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = " "
+
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE  7 = "CR310"
+;
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM
+
+;
+; Libellé de la description, on imprime le libellé s'il y a une description
+; pour la transaction.
+;
+DEFINE D_LIBDSC CHARACTER SIZE 12 = "Description:" &
+                                       IF    CARDSC1 OF CRCPT_A_REC <> "" &
+                                          OR CARDSC2 OF CRCPT_A_REC <> ""
+
+;
+; Libellé de la facture référée, on imprime le libellé s'il y a un numéro de
+; facture référé.
+;
+DEFINE D_LIBFAC CHARACTER SIZE 13 = &
+@IF FRANCAIS
+                                    "Fact. référé:" &
+@ELSE
+                                    "Invoice ref.:" &
+@ENDIF
+                                       IF CARCLE OF CRCAR_HISTO <> ""
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE CHARACTER SIZE 5 = "1" + PECCLE OF CRCPT_A_REC &
+         IF PECCLE OF CRCPT_A_REC[1:1] < "8" &
+         ELSE "0" + PECCLE OF CRCPT_A_REC
+
+SORT ON CIECLE    OF CRCPT_A_REC & ; Numéro de compagnie.
+     ON D_PECCLE_SIE & ; Période ctb.
+     ON CARCPTCAR OF CRCPT_A_REC & ; Compte à recevoir.
+     ON CARCLE    OF CRCPT_A_REC & ; Numéro de facture
+     ON CPTCLE    OF MCHIS_ECR   & ; Compte ctb
+     ON UNACLE    OF MCHIS_ECR
+
+;
+; Imression de l'en-tête.
+;
+USE ustit180 NOLIST
+SKIP 2&
+@IF FRANCAIS
+ TAB 001 "Période:"   &
+@ELSE
+ TAB 001 "Period :"   &
+@ENDIF
+ TAB 010 PECCLE OF CRCPT_A_REC &
+SKIP 1 &
+@IF FRANCAIS
+ TAB 001 "C.A.R..:" &
+@ELSE
+ TAB 001 "A / R..:" &
+@ENDIF
+ TAB 010 CARCPTCAR OF CRCPT_A_REC &
+ TAB 017 CPTDSC    OF A_CPT_CAR &
+SKIP 2 &
+ TAB 001 &
+@IF FRANCAIS
+"      No                                      Date" &
+@ELSE
+"%%%   No                                      Date" &
+@ENDIF
+SKIP &
+ TAB 001 &
+@IF FRANCAIS
+"    facture                Client           facture  Type Lot   Montant brut             Compte                 Unité administrative          Débit           Crédit" &
+@ELSE
+"%%% facture                Client           facture  Type Lot   Montant brut             Compte                 Unité administrative          Débit           Crédit" &
+@ENDIF
+SKIP &
+ TAB 001 &
+"--------------- --------------------------- -------- ---- ---- --------------  --------------------------- -----------------------------  --------------  --------------"
+
+
+REPORT &
+ TAB 001 CARCLE    OF CRCPT_A_REC   PRINT AT CARCLE &
+ TAB 017 REFCLENUM OF CRCPT_A_REC   PRINT AT CARCLE &
+ TAB 024 RADNOMABR OF MCREF_ADRESSE PRINT AT CARCLE &
+ TAB 045 CARDAT    OF CRCPT_A_REC   PRINT AT CARCLE &
+ TAB 055 CARTYPECR OF CRCPT_A_REC   PRINT AT CARCLE &
+ TAB 059 LCRCLE    OF CRCPT_A_REC   PRINT AT CARCLE &
+ TAB 064 CARMNT    OF CRCPT_A_REC   PRINT AT CARCLE &
+ TAB 080 CPTCLE    OF MCHIS_ECR &
+ TAB 087 CPTDSCABR OF VCPT_DSC  &
+ TAB 108 UNACLE    OF MCHIS_ECR &
+ TAB 117 UNANOMABR OF MCUNITE_ADM &
+ TAB 139 HECMNTDBT OF MCHIS_ECR &
+           BWZ &
+ TAB 155 HECMNTCRT OF MCHIS_ECR &
+           BWZ
+
+
+FOOTING AT CARCLE &
+  TAB 010 D_LIBDSC &
+  TAB 023 CARDSC1 OF CRCPT_A_REC &
+  TAB 066 D_LIBFAC &
+  TAB 080 CARCLE OF CRCAR_HISTO &
+  TAB 139 "--------------" &
+  TAB 155 "--------------" &
+SKIP &
+  TAB 023 CARDSC2 OF CRCPT_A_REC &
+  TAB 139 HECMNTDBT OF MCHIS_ECR SUBTOTAL &
+  TAB 155 HECMNTCRT OF MCHIS_ECR SUBTOTAL &
+SKIP 2
+
+
+FOOTING AT CARCPTCAR &
+  TAB 063 "---------------" &
+SKIP &
+  TAB 054 "Total :" &
+  TAB 063 CARMNT OF CRCPT_A_REC SUBTOTAL AT CARCLE &
+                                PICTURE "^^^,^^^,^^^.^^ " &
+  TAB 078 "/" &
+  TAB 079 DEVCLE OF A_CPT_CAR &
+SKIP &
+  TAB 063 "===============" &
+SKIP PAGE
+
+BUILD cr310z
+
+@IF FORMAT
+                                                                                                   1         1         1         1         1         1         1         1         1
+         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8
+123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+
+CR310                                                                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                             Page:9999
+99/99/99 HH:MM xxxxxxxxxxxx                                                Journal des comptes à recevoir
+                                                            xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+Période: 99-99
+C.A.R..: 123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+      No                                      Date
+    facture                Client           facture  Type Lot   Montant brut             Compte                 Unité administrative          Débit           Crédit
+--------------- --------------------------- -------- ---- ---- --------------  --------------------------- -----------------------------  --------------  --------------
+123456789012345 123456 xxxxxxxxxxxxxxxxxxxx xx/xx/xx  xx  xxxx 99,999,999.99-  123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx  99,999,999.99-  99,999,999.99-
+                                                                               123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx  99,999,999.99-  99,999,999.99-
+                                                                               123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx  99,999,999.99-  99,999,999.99-
+                                                                               123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx  99,999,999.99-  99,999,999.99-
+         Description: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   Fact. référé: 123456789012345                                            --------------  --------------
+                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                            99,999,999.99-  99,999,999.99-
+
+123456789012345 123456 xxxxxxxxxxxxxxxxxxxx xx/xx/xx  xx  xxxx 99,999,999.99-  123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx  99,999,999.99-  99,999,999.99-
+                                                                               123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx  99,999,999.99-  99,999,999.99-
+                                                                               123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx  99,999,999.99-  99,999,999.99-
+                                                                               123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx  99,999,999.99-  99,999,999.99-
+         Description: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   Fact. référé: 123456789012345                                            --------------  --------------
+                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                            99,999,999.99-  99,999,999.99-
+
+123456789012345 123456 xxxxxxxxxxxxxxxxxxxx xx/xx/xx  xx  xxxx 99,999,999.99-  123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx  99,999,999.99-  99,999,999.99-
+                                                                               123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx  99,999,999.99-  99,999,999.99-
+                                                                               123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx  99,999,999.99-  99,999,999.99-
+                                                                               123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx  99,999,999.99-  99,999,999.99-
+         Description: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   Fact. référé: 123456789012345                                            --------------  --------------
+                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                            99,999,999.99-  99,999,999.99-
+
+                                                              ---------------
+                                                     Total :  999,999,999.99-/XXX
+                                                              ===============
+
+@ENDIF

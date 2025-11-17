@@ -1,0 +1,276 @@
+;/T/ Liste des pièces à payer
+;
+;/P/ Programmeur...: Thomas BRENNEUR
+;    Date Création.: 11 Aout 1993
+;
+;    Description...: Consultation du résultat de la préparation des
+;                    paiements.
+;
+;    Paramètres....: Compagnie
+;                    Periode Comptable (Une)
+;                    No lot
+;
+;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;
+;/M/Programmeur..: Claudie Doyon
+;   Date.........: 1999/11/04
+;   Description..: Enlever le picture qui se trouvait sur le
+;                  TAB 049 CAPCLE    OF CPSEL_CAP      PRINT AT CAPCLE    &
+;                  PICTURE "^^^^^^^^^^^^"                       &
+;
+;-------------------------------------------------------------------------------
+
+ USE ussetqzs NOLIST   ; permet de faire les SET REPORT DEV....
+
+;
+; Recherche des lots de préparation de paiement
+;
+
+ACCESS CPLOT &
+
+  ;
+  ; Lecture de la liste des cédules sélectionnées par la préparation
+  ; des paiements
+  ;
+  LINK  CIECLE OF CPLOT, &
+        PECCLE OF CPLOT, &
+        LCPCLE OF CPLOT  &
+    TO  CIECLE, &
+        PECCLE, &
+        LCPCLE            OF CPSEL_CAP &
+
+  ;
+  ; On retrouve les informations de la cédule
+  ;
+
+  LINK  FOUCIECLE OF CPSEL_CAP, &
+        FOUCLE    OF CPSEL_CAP, &
+        CAPCLE    OF CPSEL_CAP, &
+        CPCCLELIG OF CPSEL_CAP  &
+    TO  FOUCIECLE, &
+        FOUCLE   , &
+        CAPCLE   , &
+        CPCCLELIG         OF CPCAP_CEDULE &
+
+  ;
+  ; Lecture du compte à payer correspondant à la cédule sélectionné
+  ;
+
+  LINK  FOUCIECLE OF CPCAP_CEDULE, &
+        FOUCLE    OF CPCAP_CEDULE, &
+        CAPCLE    OF CPCAP_CEDULE  &
+    TO  FOUCIECLE, &
+        FOUCLE   , &
+        CAPCLE            OF CPCPT_A_PAYER &
+  ;
+  ; Lecture de la description du compte comptable de compte à payer
+  ;
+
+  LINK  CAPCPTCAP OF CPCPT_A_PAYER &
+    TO  CPTCLE            OF VCPT_DSC &
+
+  ;
+  ; Et lecture de la référence de ce compte à payer (fournisseur ou employé)
+  ;
+
+  LINK  REFCIECLE OF CPCPT_A_PAYER, &
+        REFCLETYP OF CPCPT_A_PAYER, &
+        REFCLENUM OF CPCPT_A_PAYER, &
+        RADCLE    OF CPCPT_A_PAYER  &
+    TO  REFCIECLE, &
+        REFCLETYP, &
+        REFCLENUM, &
+        RADCLE            OF VRAD_01 &
+
+  ;
+  ; Lecture du solde pour valider le solde client.
+  ;
+  LINK  REFCIECLE OF CPCPT_A_PAYER, &
+        CAPCIECLE OF CPCPT_A_PAYER, &
+        REFCLENUM OF CPCPT_A_PAYER  &
+    TO  REFCIECLE, &
+        CIECLE   , &
+        FOUCLE            OF MCREF_SOLDE OPTIONAL
+
+
+CHOOSE  CIECLE    PARM, &       ; No compagnie
+        PECCLE    PARM, &       ; No période
+        LCPCLE    PARM, & ; No lot
+        LCPTYPECR "PP"    ; Type de lot : Préparation de paiements
+
+; Ajustement pour le changement de siècle
+DEFINE T_PECCLE_LOT CHARACTER SIZE 5 = "1" + PECCLE OF CPLOT &
+         IF PECCLE OF CPLOT[1:1] < "8" &
+         ELSE "0" + PECCLE OF CPLOT
+
+SORT ON T_PECCLE_LOT              , & ; Période
+        LCPCLE    OF CPLOT        , & ; Lot
+        CAPCPTCAP OF CPCPT_A_PAYER, & ; Compte du compte à payer
+        REFCLETYP OF CPCPT_A_PAYER, & ; Type de référence
+        REFCLENUM OF CPCPT_A_PAYER, & ; No Fournisseur / Employé
+        RADCLE    OF CPCPT_A_PAYER, &
+        CAPCLE    OF CPCPT_A_PAYER    ; No du compte à payer
+
+;-------------------------------------------------------------------------------
+
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = & ;titre1
+@IF FRANCAIS
+        "Liste des pièces à payer"
+@ELSE
+        "List of Items to Pay"
+@ENDIF
+
+ DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = "" ; titre2  du rapport
+
+ DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "CP305Z"        ; numéro du rapport
+ DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM           ; Nom de la compagnie
+
+;-------------------------------------------------------------------------------
+
+USE ustitstd NOLIST  ; Titre standard pour l'application
+  SKIP 2  &
+@IF FRANCAIS
+    TAB 001 "Période........:" &
+@ELSE
+    TAB 001 "Period.........:" &
+@ENDIF
+    TAB 018 PECCLE OF CPLOT &
+  SKIP &
+@IF FRANCAIS
+    TAB 001 "Lot............:" &
+@ELSE
+    TAB 001 "Batch..........:" &
+@ENDIF
+    TAB 018 LCPCLE OF CPLOT &
+  SKIP &
+@IF FRANCAIS
+    TAB 001 "Compte CAP.....:" &
+@ELSE
+    TAB 001 "%%%pte CAP.....:" &
+@ENDIF
+    TAB 018 CAPCPTCAP OF CPCPT_A_PAYER &
+    TAB 025 CPTDSC    OF VCPT_DSC      &
+@IF FRANCAIS
+    TAB 068 "Devise.........:" &
+@ELSE
+    TAB 068 "Currency.......:" &
+@ENDIF
+    TAB 085 DEVCLE    OF VCPT_DSC &
+  SKIP 2 &
+@IF FRANCAIS
+    TAB 001 "                                                   No         No    Daté      Dû       Montant du      Escompte            Solde" &
+@ELSE
+    TAB 001 "%%%                                                No         No    Daté      Dû       Montant du      Escompte" &
+@ENDIF
+  SKIP &
+@IF FRANCAIS
+    TAB 001 "Origine du document                              Document    Ligne   du       le        paiement        proposé           C.A.R." &
+@ELSE
+    TAB 001 "%%%gine du document                              Document    Ligne   du       le        paiement        proposé" &
+@ENDIF
+    TAB 001 "----------------------------------------------- ------------ ----- -------- -------- -------------- -------------- --------------"
+
+HEADING AT LCPCLE &
+  SKIP PAGE
+
+HEADING AT CAPCPTCAP &
+  SKIP PAGE
+
+REPORT &
+    TAB 001 REFCLENUM OF CPCPT_A_PAYER  PRINT AT RADCLE    &
+    TAB 008 RADNOM    OF VRAD_01        PRINT AT RADCLE    &
+    TAB 049 CAPCLE    OF CPSEL_CAP      PRINT AT CAPCLE    &
+    TAB 064 CPCCLELIG OF CPSEL_CAP                         &
+    TAB 068 CAPDAT    OF CPCPT_A_PAYER                     &
+    TAB 077 CPCDATDUE OF CPCAP_CEDULE                      &
+    TAB 086 SLCMNT    OF CPSEL_CAP                         &
+    TAB 101 SLCMNTESC OF CPSEL_CAP                         &
+    TAB 116 CLCSLDACJ OF MCREF_SOLDE
+
+FOOTING AT RADCLE &
+    TAB 086 "-------------- --------------" &
+  SKIP &
+    TAB 086 SLCMNT    OF CPSEL_CAP SUBTOTAL &
+    TAB 101 SLCMNTESC OF CPSEL_CAP SUBTOTAL &
+  SKIP 2
+
+FOOTING AT CAPCPTCAP &
+    TAB 001 " " &
+  SKIP 2 &
+    TAB 086 "-------------- --------------" &
+  SKIP &
+    TAB 071 "Total du CAP :"                &
+    TAB 086 SLCMNT    OF CPSEL_CAP SUBTOTAL &
+    TAB 101 SLCMNTESC OF CPSEL_CAP SUBTOTAL &
+  SKIP &
+    TAB 086 "============== =============="
+
+FOOTING AT LCPCLE &
+    TAB 001 " " &
+  SKIP 2 &
+    TAB 086 "-------------- --------------" &
+  SKIP &
+    TAB 071 "Total du lot :"                &
+    TAB 086 SLCMNT    OF CPSEL_CAP SUBTOTAL &
+    TAB 101 SLCMNTESC OF CPSEL_CAP SUBTOTAL &
+  SKIP &
+    TAB 086 "============== =============="
+
+FOOTING AT T_PECCLE_LOT &
+    TAB 001 " " &
+  SKIP 2 &
+    TAB 086 "-------------- --------------" &
+  SKIP &
+    TAB 064 "Total de la période :"         &
+    TAB 086 SLCMNT    OF CPSEL_CAP SUBTOTAL &
+    TAB 101 SLCMNTESC OF CPSEL_CAP SUBTOTAL &
+  SKIP &
+    TAB 086 "============== ==============" &
+  SKIP PAGE
+
+BUILD cp305z
+@IF FORMAT
+
+CP334A                                        xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                    Page: 9999
+99/99/99 HH:MM xxxxxxxxxxxx                          Liste des pièces à payer
+                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+Période........: 99-99
+Lot............: xxxx
+Compte CAP.....: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   Devise.........: xxx
+
+                                                   No         No    Daté      Dû       Montant du      Escompte           Solde
+Origine du document                              Document    Ligne   du       le        paiement        proposé          C.A.R.
+----------------------------------------------- ------------ ----- -------- -------- -------------- -------------- --------------
+xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxx   99  99/99/99 99/99/99 99,999,999.99- 99,999,999.99- 99,999,999.99-
+xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxx   99  99/99/99 99/99/99 99,999,999.99- 99,999,999.99- 99,999,999.99-
+xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxx   99  99/99/99 99/99/99 99,999,999.99- 99,999,999.99- 99,999,999.99-
+xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxx   99  99/99/99 99/99/99 99,999,999.99- 99,999,999.99- 99,999,999.99-
+xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxx   99  99/99/99 99/99/99 99,999,999.99- 99,999,999.99- 99,999,999.99-
+                                                                                     -------------- --------------
+                                                                                     99,999,999.99- 99,999,999.99-
+
+xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxx   99  99/99/99 99/99/99 99,999,999.99- 99,999,999.99- 99,999,999.99-
+xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxx   99  99/99/99 99/99/99 99,999,999.99- 99,999,999.99- 99,999,999.99-
+xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxx   99  99/99/99 99/99/99 99,999,999.99- 99,999,999.99- 99,999,999.99-
+                                                                                     -------------- --------------
+                                                                                     99,999,999.99- 99,999,999.99-
+
+                                                                                     -------------- --------------
+                                                                      Total du CAP : 99,999,999.99- 99,999,999.99-
+                                                                                     ============== ==============
+
+                                                                                     -------------- --------------
+                                                                      Total du lot : 99,999,999.99- 99,999,999.99-
+                                                                                     ============== ==============
+
+                                                                                     -------------- --------------
+                                                               Total de la période : 99,999,999.99- 99,999,999.99-
+                                                                                     ============== ==============
+@ENDIF

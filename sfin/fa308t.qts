@@ -1,0 +1,239 @@
+;/T/ Liste de validation du transfert des factures au niveau des CAR
+;
+;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur...: Marie-Josée Hamel
+;    Date Création.: 96.02.13
+;    Description...: Cette liste met le lot validé comme pour la liste de
+;                    validation des CAR.  Cela permet de ne pas avoir a sortir
+;                    deux listes pour rien.
+;
+;------------------------------------------------------------------------------
+
+USE ussetqts NOLIST   ; permet de faire les SET PROCESS NOLIMIT....
+
+RUN fa308t
+
+GLOBAL TEMPORARY G_PECCLE    CHARACTER SIZE 4 PARM
+GLOBAL TEMPORARY G_LOT       CHARACTER SIZE 4 PARM
+
+;-------------------------------------------
+;
+; Sélection des factures pour le transfert.
+;
+REQUEST SELECTION_FACTURE
+
+ACCESS FACPT_A_REC &
+  ; Pour le type de produits
+  LINK  CIECLE    OF FACPT_A_REC,  &
+        FARCLE    OF FACPT_A_REC   &
+    TO  CIECLE,   &
+        FARCLE                    OF FAFAR_DETAIL  &
+  ; Pour le compte d'escompte
+  LINK CIECLE OF FAFAR_DETAIL     , &
+       ETACLE OF FAFAR_DETAIL       &
+    TO CIECLE,    &
+       ETACLE                     OF FAELEMENT_TARIF OPTIONAL &
+  ; Pour mettre a jour la date de validation du lot
+  LINK CIECLE OF FACPT_A_REC        , &
+       G_PECCLE                     , &
+       G_LOT                          &
+   TO  CIECLE                       , &
+       PECCLE                       , &
+       LCRCLE                     OF CRLOT  OPTIONAL  &
+  ; Pour avoir le mode de taxation
+  LINK FFDTAXTYPTPS OF FAFAR_DETAIL, &
+       FFDTAXCODTPS OF FAFAR_DETAIL  &
+    TO TAXCLETYP, &
+       TAXCLECOD                  OF MCTAXE ALIAS A_TAX_TPS OPTIONAL &
+  ; Pour avoir le mode de taxation
+  LINK FFDTAXTYPTVQ OF FAFAR_DETAIL, &
+       FFDTAXCODTVQ OF FAFAR_DETAIL  &
+    TO TAXCLETYP, &
+       TAXCLECOD                  OF MCTAXE ALIAS A_TAX_TVQ OPTIONAL
+
+
+CHOOSE  CIECLE    PARM
+
+SELECT FACPT_A_REC IF PECCLE    OF FACPT_A_REC = G_PECCLE AND &
+                      LCRCLE    OF FACPT_A_REC = G_LOT    AND &
+                      FARSTU    OF FACPT_A_REC <> "X"
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE CHARACTER SIZE 5 = "1" + PECCLE OF FACPT_A_REC &
+         IF PECCLE OF FACPT_A_REC[1:1] < "8" &
+         ELSE "0" + PECCLE OF FACPT_A_REC
+
+SORT ON CIECLE       OF FACPT_A_REC  &
+     ON FARCLE       OF FACPT_A_REC  &
+     ON D_PECCLE_SIE                 &
+     ON PRJCLE       OF FAFAR_DETAIL &
+     ON PRACLE       OF FAFAR_DETAIL &
+     ON CPTCLE       OF FAFAR_DETAIL &
+     ON UNACLE       OF FAFAR_DETAIL &
+     ON FFDTAXCODTPS OF FAFAR_DETAIL &
+     ON FFDTAXCODTVQ OF FAFAR_DETAIL
+
+
+TEMPORARY T_TPS         FLOAT SIZE 8
+TEMPORARY T_TVQ         FLOAT SIZE 8
+TEMPORARY T_FFDMNTTOT   FLOAT SIZE 8
+TEMPORARY T_FFDMNTTOT2  FLOAT SIZE 8
+TEMPORARY T_FFDMNTTPS   FLOAT SIZE 8
+TEMPORARY T_FFDMNTTVQ   FLOAT SIZE 8
+
+TEMPORARY T_FCT         FLOAT SIZE 8
+TEMPORARY T_FFDMNTESC   FLOAT SIZE 8
+TEMPORARY T_ESCMNTTPS   FLOAT SIZE 8
+TEMPORARY T_ESCMNTTVQ   FLOAT SIZE 8
+
+
+ITEM T_TPS       = FFDMNTTPS OF FAFAR_DETAIL &
+                IF TAXMOD    OF A_TAX_TPS = "S" &
+              ELSE 0
+
+ITEM T_TVQ       = FFDMNTTVQ OF FAFAR_DETAIL &
+                IF TAXMOD    OF A_TAX_TVQ = "S" &
+              ELSE 0
+
+ITEM T_FFDMNTTOT2= (  FFDMNTTOT OF FAFAR_DETAIL   &
+                    - T_TPS - T_TVQ) * -1         &
+                IF FFDTYP OF FAFAR_DETAIL = "3"   &
+              ELSE (  FFDMNTTOT OF FAFAR_DETAIL &
+                    - T_TPS - T_TVQ)
+
+ITEM T_FFDMNTTOT = T_FFDMNTTOT  + T_FFDMNTTOT2  + FFDMNTESC OF FAFAR_DETAIL &
+                   RESET AT FFDTAXCODTVQ TO 0
+
+ITEM T_FCT =  ( T_FFDMNTTOT2 + FFDMNTESC OF FAFAR_DETAIL ) &
+            / T_FFDMNTTOT2 &
+          IF FFDMNTESC OF FAFAR_DETAIL <> 0 &
+        ELSE 1
+
+ITEM T_FFDMNTTPS = T_FFDMNTTPS  + ROUND( FFDMNTTPS OF FAFAR_DETAIL * T_FCT ) &
+                   RESET AT FFDTAXCODTVQ TO 0
+
+ITEM T_FFDMNTTVQ = T_FFDMNTTVQ  + ROUND( FFDMNTTVQ OF FAFAR_DETAIL * T_FCT ) &
+                   RESET AT FFDTAXCODTVQ TO 0
+
+ITEM T_FFDMNTESC = FFDMNTESC OF FAFAR_DETAIL * -1
+
+ITEM T_ESCMNTTPS = FFDMNTTPS OF FAFAR_DETAIL &
+                 - ROUND( FFDMNTTPS OF FAFAR_DETAIL * T_FCT ) &
+                   RESET AT FFDTAXCODTVQ TO 0
+
+ITEM T_ESCMNTTVQ = FFDMNTTVQ OF FAFAR_DETAIL &
+                 - ROUND( FFDMNTTVQ OF FAFAR_DETAIL * T_FCT ) &
+                   RESET AT FFDTAXCODTVQ TO 0
+
+;
+; Pour le rapport détaillé
+;
+SUBFILE WFA308FA KEEP AT FARCLE &
+INCLUDE &
+  CIECLE    OF FACPT_A_REC , &
+  FARCLE    OF FACPT_A_REC , &
+  PECCLE    OF FACPT_A_REC , &
+  LCRCLE    OF FACPT_A_REC , &
+  FARTYPECR OF FACPT_A_REC , &
+  REFCIECLE OF FACPT_A_REC , &
+  REFCLENUM OF FACPT_A_REC , &
+  REFCLETYP OF FACPT_A_REC , &
+  FARSTU    OF FACPT_A_REC , &
+  FARDAT    OF FACPT_A_REC , &
+  FARCLEREF OF FACPT_A_REC , &
+  FARCMDCLI OF FACPT_A_REC
+
+;
+; Pour le rapport de controle sommaire
+;
+SUBFILE WFA308IM KEEP AT FFDTAXCODTVQ &
+        INCLUDE &
+        CIECLE       OF FACPT_A_REC,            &
+        FARCLE       OF FACPT_A_REC,            &
+        PRJCLE       OF FAFAR_DETAIL,           &
+        PRACLE       OF FAFAR_DETAIL,           &
+        IMMCLE       OF FAFAR_DETAIL,           &
+        CPTCLE       OF FAFAR_DETAIL,           &
+        UNACLE       OF FAFAR_DETAIL,           &
+        T_FFDMNTTOT  ALIAS FFDMNTTOT,           &
+        T_FFDMNTTPS  ALIAS FFDMNTTPS,           &
+        T_FFDMNTTVQ  ALIAS FFDMNTTVQ,           &
+        G_PECCLE     ALIAS PECCLE,              &
+        G_LOT        ALIAS LCRCLE
+
+;
+; Pour créer les imputations d'escompte
+;
+SUBFILE WFA308A IF T_FFDMNTESC <> 0 INCLUDE &
+   CIECLE       OF FAFAR_DETAIL   , &
+   FARCLE       OF FAFAR_DETAIL   , &
+   PRJCLE       OF FAFAR_DETAIL   , &
+   PRACLE       OF FAFAR_DETAIL   , &
+   IMMCLE       OF FAFAR_DETAIL   , &
+   ETACPTESC    OF FAELEMENT_TARIF, &
+   UNACLE       OF FAFAR_DETAIL   , &
+   T_FFDMNTESC                    , &
+   T_ESCMNTTPS                    , &
+   T_ESCMNTTVQ
+
+;
+; Mise à jour de la date et de l'usager de vérification du lot si le lot
+; n'est pas journalisé.
+;
+OUTPUT CRLOT AT FINAL UPDATE &
+                       IF LCRDATJOU OF CRLOT = 0
+
+ ITEM LCRDATVAL OF CRLOT = SYSDATE
+ ITEM LCRUSRVAL OF CRLOT = LOGONID
+
+
+;-----------------------------------------------------------------------
+; On retrie pour ne faire qu'une ligne au niveau du compte d'escompte
+;
+REQUEST ESCOMPTE
+
+ACCESS *WFA308A
+
+
+SORT ON CIECLE       OF WFA308A &
+     ON FARCLE       OF WFA308A &
+     ON PRJCLE       OF WFA308A &
+     ON PRACLE       OF WFA308A &
+     ON ETACPTESC    OF WFA308A &
+     ON UNACLE       OF WFA308A
+
+
+TEMPORARY T_TOTMNTESC FLOAT SIZE 8
+TEMPORARY T_TOTMNTTPS FLOAT SIZE 8
+TEMPORARY T_TOTMNTTVQ FLOAT SIZE 8
+
+  ITEM T_TOTMNTESC  SUBTOTAL T_FFDMNTESC OF WFA308A RESET AT UNACLE
+  ITEM T_TOTMNTTPS  SUBTOTAL T_ESCMNTTPS OF WFA308A RESET AT UNACLE
+  ITEM T_TOTMNTTVQ  SUBTOTAL T_ESCMNTTVQ OF WFA308A RESET AT UNACLE
+
+
+;
+; Pour le rapport de controle sommaire
+;
+OUTPUT *WFA308IM ADD ALIAS A_WIM_ESC &
+                        AT UNACLE  NOITEMS
+  ITEM CIECLE       OF A_WIM_ESC FINAL CIECLE       OF WFA308A
+  ITEM FARCLE       OF A_WIM_ESC FINAL FARCLE       OF WFA308A
+  ITEM PRJCLE       OF A_WIM_ESC FINAL PRJCLE       OF WFA308A
+  ITEM PRACLE       OF A_WIM_ESC FINAL PRACLE       OF WFA308A
+  ITEM IMMCLE       OF A_WIM_ESC FINAL IMMCLE       OF WFA308A
+  ITEM CPTCLE       OF A_WIM_ESC FINAL ETACPTESC    OF WFA308A
+  ITEM UNACLE       OF A_WIM_ESC FINAL UNACLE       OF WFA308A
+  ITEM FFDMNTTOT    OF A_WIM_ESC FINAL T_TOTMNTESC
+  ITEM FFDMNTTPS    OF A_WIM_ESC FINAL T_TOTMNTTPS
+  ITEM FFDMNTTVQ    OF A_WIM_ESC FINAL T_TOTMNTTVQ
+  ITEM PECCLE       OF A_WIM_ESC FINAL G_PECCLE
+  ITEM LCRCLE       OF A_WIM_ESC FINAL G_LOT
+
+
+BUILD

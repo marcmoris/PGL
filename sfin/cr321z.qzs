@@ -1,0 +1,926 @@
+;/T/ Ages des comptes à recevoir sommaire/détaillé
+;
+;/P/ Programmeur...: Alain Côté
+;    Date Création.: 28 juillet 1993
+;
+;    Description...: Age des comptes à recevoir de type comptable, sert à avoir
+;                    une vision global des soldes à recevoir et de balancer
+;                    le compte ctb à recevoir avec le Grand Livre.
+;
+;                    Les transactions sont sélectionnées selon la période
+;                    demandée par l'usager, les soldes sont répartie dans la
+;                    bonne colonne selon la date due et la date de fin de
+;                    période.
+;
+;                    Les transactions doivent être journalisées.
+;
+;/M/ François Déry, 4 mai 1999
+;       Changer le ustitstd dans le dernier quiz pour mettre à 220 char.
+;       avant il était à 180 char.
+;
+;/M/ Programmeur...: Martin Bruyère
+;    Date modif....: 25 juin 1996
+;    Description...: Modifier selon demande du client (GRA01 9311 279)
+;
+;/M/ Programmeur...: Nancy Breton
+;    Date modif....: 15 décembre 1998
+;    Description...: Modifier le libellé Num. réf. client pour Nom projet
+;                    (sos #GRA01 9311 573)
+;-------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST
+
+
+ACCESS *WCR321 &
+  ;
+  ; Intervalle choisi par l'usager. Le code 1 identifie que c'est un age
+  ; des comptes.
+  ;
+  LINK ( CIECLE OF WCR321, &
+         "1"             , &
+         G_ITVCOD )        &
+    TO CIECLE , &
+       ITVTYP , &
+       ITVCOD OF             CRINTERVALLE &
+  ;
+  ; Compte ctb à recevoir, pour avoir la description et la devise.
+  ;
+  LINK CARCPTCAR OF WCR321 &
+    TO CPTCLE OF             VCPT_DSC
+
+
+;
+; Titre du rapport.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+             "Ages des comptes à recevoir / sommaire"
+@ELSE
+             "Accounts receivable aging - summary"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = ITVDSC OF CRINTERVALLE
+
+;
+; Numéro du raport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "CR321A"
+
+;
+; Nom de la compagnie du menu.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM
+
+;
+; On calcul le nombre de jours entre la date de facturation et
+;                                    la date de fin de période.
+;
+DEFINE D_DIF_DAT INTEGER SIZE 4 = DAYS(G_DATFIN) - DAYS(CARDAT OF WCR321) ; <-- MB960625
+
+;
+; Solde non dû, c'est les factures dont la date due est supérieure à la date
+; de fin de période. Exemple, si on demande un âge pour le mois de mai, alors
+; les factures due en juin, juillet... sont non dûe.
+;
+DEFINE D_SLD_NON_DU FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF D_DIF_DAT < ITVDEB1 OF CRINTERVALLE
+
+;
+; Répartition du solde dans la bonne colonne selon les intervalles de la
+; table CRINTERVALLE.
+;
+DEFINE D_SLD_01     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF D_DIF_DAT <= ITVFIN1 OF CRINTERVALLE ; <-- MB960625
+;
+DEFINE D_SLD_02     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= ITVDEB2 OF CRINTERVALLE &
+                                      AND D_DIF_DAT <= ITVFIN2 OF CRINTERVALLE
+;
+DEFINE D_SLD_03     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= ITVDEB3 OF CRINTERVALLE &
+                                      AND D_DIF_DAT <= ITVFIN3 OF CRINTERVALLE
+;
+DEFINE D_SLD_04     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= ITVDEB4 OF CRINTERVALLE &
+                                      AND D_DIF_DAT <= ITVFIN4 OF CRINTERVALLE
+;
+DEFINE D_SLD_05     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= ITVDEB5 OF CRINTERVALLE
+
+
+
+SORTED ON CIECLE    OF WCR321 , & ; No compagnie
+          CARCPTCAR OF WCR321 , & ; Compte ctb à recevoir
+          REFCLENUM OF WCR321 , & ; Numéro de client
+          CARCMDCLI OF WCR321     ; Numéro de référence client (PROJET)<-- MB960625
+
+
+
+;
+; Impression de l'en-tête.
+;
+USE ustitstd NOLIST
+ SKIP &
+  TAB 061 &
+@IF FRANCAIS
+          "au" &
+@ELSE
+          "at" &
+@ENDIF
+  TAB 064 G_DATFIN &
+ SKIP 2 &
+
+  TAB 001 &
+@IF FRANCAIS
+          "Compte CAR.....:" &
+@ELSE
+          "Account recev..:" &
+@ENDIF
+  TAB 018 CARCPTCAR OF WCR321 &
+  TAB 025 CPTDSC OF VCPT_DSC  &
+  TAB 068 &
+@IF FRANCAIS
+          "Devise.........:"  &
+@ELSE
+          "Currency.......:"  &
+@ENDIF
+  TAB 085 DEVCLE OF VCPT_DSC &
+ SKIP 2 &
+
+  TAB 001 &
+@IF FRANCAIS
+"           Client            Cat.   Solde total     Mnt total" & ; <-- MB960625
+@ELSE
+"%%%        Client            Cat.   Tot balance   Total amond" & ; <-- MB960625
+@ENDIF
+  TAB 065 ITVCOLTIT1 OF CRINTERVALLE &
+  TAB 079 ITVCOLTIT2 OF CRINTERVALLE &
+  TAB 093 ITVCOLTIT3 OF CRINTERVALLE &
+  TAB 107 ITVCOLTIT4 OF CRINTERVALLE &
+  TAB 121 ITVCOLTIT5 OF CRINTERVALLE &
+ SKIP &
+  TAB 001 &
+"---------------------------  ----  ------------- ------------- ------------- ------------- ------------- ------------- -------------"
+
+
+FOOTING AT REFCLENUM &
+  TAB 001 REFCLENUM OF WCR321 &
+  TAB 008 RADNOMABR OF WCR321 &
+  TAB 030 CLICAT    OF WCR321 &
+  TAB 036 T_SLD_TOT SUBTOTAL        &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 050 CARMNT OF WCR321 SUBTOTAL & ; <-- MB960625
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 064 D_SLD_01     SUBTOTAL     &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 078 D_SLD_02     SUBTOTAL     &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 092 D_SLD_03     SUBTOTAL     &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 106 D_SLD_04     SUBTOTAL     &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 120 D_SLD_05     SUBTOTAL     &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5
+
+
+FOOTING AT CARCPTCAR &
+SKIP 2 &
+ TAB 035 "--------------" &
+ TAB 050 "-------------"  &
+ TAB 064 "-------------"  &
+ TAB 078 "-------------"  &
+ TAB 092 "-------------"  &
+ TAB 106 "-------------"  &
+ TAB 120 "-------------"  &
+SKIP 1 &
+  TAB 035 T_SLD_TOT    SUBTOTAL      &
+            PICTURE "^^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 0050 CARMNT OF WCR321 SUBTOTAL & ; <-- MB960625
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 064 D_SLD_01     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 078 D_SLD_02     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 092 D_SLD_03     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 106 D_SLD_04     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 120 D_SLD_05     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+SKIP &
+ TAB 035 "==============" &
+ TAB 050 "============="  &
+ TAB 064 "============="  &
+ TAB 078 "============="  &
+ TAB 092 "============="  &
+ TAB 106 "============="  &
+ TAB 120 "============="  &
+ SKIP PAGE
+
+
+BUILD cr321za
+
+
+;-------------------------------------------------------------------------------
+;
+; Ages des comptes à recevoir / détaillé
+;
+;
+ACCESS *WCR321 &
+  ;
+  ; Intervalle choisi par l'usager.
+  ;
+  LINK ( CIECLE OF WCR321, &
+         "1"             , &
+         G_ITVCOD )        &
+    TO CIECLE , &
+       ITVTYP , &
+       ITVCOD OF             CRINTERVALLE &
+  ;
+  ; Compte ctb à recevoir, pour avoir la description et la devise.
+  ;
+  LINK CARCPTCAR OF WCR321 &
+    TO CPTCLE OF             VCPT_DSC &
+  ;
+  ; Catégorie, pour avoir la description.
+  ;
+  LINK ("CLICAT" , &
+        CLICAT ) &
+    TO XELNOM , &
+       CBICLE OF             VCBI_DSC OPTIONAL
+
+
+;
+; Titre du rapport.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+             "Ages des comptes à recevoir / détaillé"
+@ELSE
+             "Accounts receivable aging - detailed"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = ITVDSC OF CRINTERVALLE
+
+;
+; Numéro du raport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "CR321B"
+
+;
+; Nom de la compagnie du menu.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM
+
+;
+; On calcul le nombre de jours entre la date due et la date de fin de période.
+;
+DEFINE D_DIF_DAT INTEGER SIZE 4 = DAYS(G_DATFIN) - DAYS(CARDAT OF WCR321) ; <-- MB960625
+
+;
+; Solde non dû, c'est les factures dont la date due est supérieure à la date
+; de fin de période. Exemple, si on demande un âge pour le mois de mai, alors
+; les factures due en juin, juillet... sont non dûe.
+;
+DEFINE D_SLD_NON_DU FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF D_DIF_DAT < ITVDEB1 OF CRINTERVALLE
+
+;
+; Répartition du solde dans la bonne colonne selon les intervalles de la
+; table CRINTERVALLE.
+;
+DEFINE D_SLD_01     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF D_DIF_DAT <= ITVFIN1 OF CRINTERVALLE ; <-- MB960625
+;
+DEFINE D_SLD_02     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= ITVDEB2 OF CRINTERVALLE &
+                                      AND D_DIF_DAT <= ITVFIN2 OF CRINTERVALLE
+;
+DEFINE D_SLD_03     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= ITVDEB3 OF CRINTERVALLE &
+                                      AND D_DIF_DAT <= ITVFIN3 OF CRINTERVALLE
+;
+DEFINE D_SLD_04     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= ITVDEB4 OF CRINTERVALLE &
+                                      AND D_DIF_DAT <= ITVFIN4 OF CRINTERVALLE
+;
+DEFINE D_SLD_05     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= ITVDEB5 OF CRINTERVALLE
+
+
+
+SORTED ON CIECLE    OF WCR321 , & ; No compagnie
+          CARCPTCAR OF WCR321 , & ; Compte ctb à recevoir
+          REFCLENUM OF WCR321 , & ; Numéro de client
+          CARCMDCLI OF WCR321 , & ; Numéro ref client   <-- MB960625
+          CARDAT    OF WCR321 , & ; Date de la facture
+          CARCLE    OF WCR321 , & ; No facture
+          CCDCLELIG OF WCR321     ; No Cédule
+
+
+
+;
+; Impression de l'en-tête.
+;
+USE ustitstd NOLIST
+ SKIP &
+  TAB 061 &
+@IF FRANCAIS
+          "au" &
+@ELSE
+          "at" &
+@ENDIF
+  TAB 064 G_DATFIN &
+ SKIP 2 &
+
+  TAB 001 &
+@IF FRANCAIS
+          "Compte CAR.....:" &
+@ELSE
+          "Account recev..:" &
+@ENDIF
+  TAB 018 CARCPTCAR OF WCR321 &
+  TAB 025 CPTDSC OF VCPT_DSC  &
+  TAB 068 &
+@IF FRANCAIS
+          "Devise.........:"  &
+@ELSE
+          "Currency.......:"  &
+@ENDIF
+  TAB 085 DEVCLE OF VCPT_DSC &
+ SKIP 2 &
+
+  TAB 001 &
+@IF FRANCAIS
+"                  Date     Date" &
+@ELSE
+"                  Date     Date" &
+@ENDIF
+ SKIP &
+
+  TAB 001 &
+@IF FRANCAIS
+"   No facture   facture    Due      Solde total     Mnt total" &
+@ELSE
+"%%%No facture   facture    Due      Solde total   Total amond" &
+@ENDIF
+  TAB 065 ITVCOLTIT1 OF CRINTERVALLE &
+  TAB 079 ITVCOLTIT2 OF CRINTERVALLE &
+  TAB 093 ITVCOLTIT3 OF CRINTERVALLE &
+  TAB 107 ITVCOLTIT4 OF CRINTERVALLE &
+  TAB 121 ITVCOLTIT5 OF CRINTERVALLE &
+ SKIP &
+  TAB 001 &
+"--------------- -------- --------  ------------- ------------- ------------- ------------- ------------- ------------- -------------"
+
+
+HEADING AT CARCMDCLI &
+  TAB 001 " " &
+ SKIP 1 &
+  TAB 001 "Client:"           &
+  TAB 009 REFCLENUM OF WCR321 &
+  TAB 016 RADNOMABR OF WCR321 &
+  TAB 038 &
+@IF FRANCAIS
+          "Catégorie:" &
+@ELSE
+          "Category.:" &
+@ENDIF
+  TAB 049 CLICAT OF WCR321   &
+  TAB 054 &                                                ; <-- SEBCHA960910
+@IF FRANCAIS                                               ; <-- SEBCHA960910
+          "Tél..:" &                                       ; <-- SEBCHA960910
+@ELSE                                                      ; <-- SEBCHA960910
+          "Phone:" &                                       ; <-- SEBCHA960910
+@ENDIF                                                     ; <-- SEBCHA960910
+  TAB 061 RADTEL OF WCR321 &                               ; <-- SEBCHA960910
+  TAB 077 &
+@IF FRANCAIS
+          "Nom Projet:" &
+@ELSE
+          "%%% Projet:" &
+@ENDIF
+  TAB 089 CARCMDCLI OF WCR321 &
+ SKIP 2
+
+
+REPORT &
+  TAB 001 CARCLE    OF WCR321 &
+  TAB 017 CARDAT    OF WCR321 &
+  TAB 026 CCDDATDUE OF WCR321 &
+  TAB 036 T_SLD_TOT SUBTOTAL        &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 050 CARMNT OF WCR321 SUBTOTAL &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 064 D_SLD_01     SUBTOTAL     &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 078 D_SLD_02     SUBTOTAL     &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 092 D_SLD_03     SUBTOTAL     &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 106 D_SLD_04     SUBTOTAL     &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 120 D_SLD_05     SUBTOTAL     &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5
+
+
+
+FOOTING AT REFCLENUM &
+ TAB 035 "--------------" &
+ TAB 050 "-------------"  &
+ TAB 064 "-------------"  &
+ TAB 078 "-------------"  &
+ TAB 092 "-------------"  &
+ TAB 106 "-------------"  &
+ TAB 120 "-------------"  &
+SKIP 1 &
+  TAB 001 "Client:"                  &
+  TAB 009 REFCLENUM OF WCR321        &
+  TAB 016 RADNOMABR OF WCR321        &
+  TAB 035 T_SLD_TOT    SUBTOTAL      &
+            PICTURE "^^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 0050 CARMNT OF WCR321 SUBTOTAL &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 064 D_SLD_01     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 078 D_SLD_02     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 092 D_SLD_03     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 106 D_SLD_04     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 120 D_SLD_05     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+ SKIP 2
+
+FOOTING AT CARCMDCLI &
+SKIP 2 &
+ TAB 035 "--------------" &
+ TAB 050 "-------------"  &
+ TAB 064 "-------------"  &
+ TAB 078 "-------------"  &
+ TAB 092 "-------------"  &
+ TAB 106 "-------------"  &
+ TAB 120 "-------------"  &
+SKIP 1 &
+  TAB 035 T_SLD_TOT    SUBTOTAL      &
+            PICTURE "^^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 0050 CARMNT OF WCR321 SUBTOTAL &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 064 D_SLD_01     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 078 D_SLD_02     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 092 D_SLD_03     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 106 D_SLD_04     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 120 D_SLD_05     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+SKIP &
+ TAB 035 "==============" &
+ TAB 050 "============="  &
+ TAB 064 "============="  &
+ TAB 078 "============="  &
+ TAB 092 "============="  &
+ TAB 106 "============="  &
+ TAB 120 "============="  &
+ SKIP 2
+
+
+FOOTING AT CARCPTCAR &
+SKIP 2 &
+ TAB 035 "--------------" &
+ TAB 050 "-------------"  &
+ TAB 064 "-------------"  &
+ TAB 078 "-------------"  &
+ TAB 092 "-------------"  &
+ TAB 106 "-------------"  &
+ TAB 120 "-------------"  &
+SKIP 1 &
+  TAB 035 T_SLD_TOT    SUBTOTAL      &
+            PICTURE "^^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 0050 CARMNT OF WCR321 SUBTOTAL &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 064 D_SLD_01     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 078 D_SLD_02     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 092 D_SLD_03     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 106 D_SLD_04     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 120 D_SLD_05     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+SKIP &
+ TAB 035 "==============" &
+ TAB 050 "============="  &
+ TAB 064 "============="  &
+ TAB 078 "============="  &
+ TAB 092 "============="  &
+ TAB 106 "============="  &
+ TAB 120 "============="  &
+ SKIP PAGE
+
+
+BUILD cr321zb
+
+ACCESS *WCR321 &
+  ;
+  ; Intervalle choisi par l'usager. Le code 1 identifie que c'est un age
+  ; des comptes.
+  ;
+  LINK ( CIECLE OF WCR321, &
+         "1"             , &
+         G_ITVCOD )        &
+    TO CIECLE , &
+       ITVTYP , &
+       ITVCOD OF             CRINTERVALLE &
+  ;
+  ; Compte ctb à recevoir, pour avoir la description et la devise.
+  ;
+  LINK CARCPTCAR OF WCR321 &
+    TO CPTCLE OF             VCPT_DSC
+
+
+;
+; Titre du rapport.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+             "Ages des comptes à recevoir / sommaire"
+@ELSE
+             "Accounts receivable aging - summary"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = ITVDSC OF CRINTERVALLE
+
+;
+; Numéro du raport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "CR321C"
+
+;
+; Nom de la compagnie du menu.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM
+
+;
+; On calcul le nombre de jours entre la date due et la date de fin de période.
+;
+DEFINE D_DIF_DAT INTEGER SIZE 4 = DAYS(G_DATFIN) - DAYS(CCDDATDUE OF WCR321)
+
+;
+; Solde non dû, c'est les factures dont la date due est supérieure à la date
+; de fin de période. Exemple, si on demande un âge pour le mois de mai, alors
+; les factures due en juin, juillet... sont non dûe.
+;
+DEFINE D_SLD_NON_DU FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF D_DIF_DAT < ITVDEB1 OF CRINTERVALLE
+
+;
+; Répartition du solde dans la bonne colonne selon les intervalles de la
+; table CRINTERVALLE.
+;
+DEFINE D_SLD_01     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= ITVDEB1 OF CRINTERVALLE &
+                                      AND D_DIF_DAT <= ITVFIN1 OF CRINTERVALLE
+;
+DEFINE D_SLD_02     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= ITVDEB2 OF CRINTERVALLE &
+                                      AND D_DIF_DAT <= ITVFIN2 OF CRINTERVALLE
+;
+DEFINE D_SLD_03     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= ITVDEB3 OF CRINTERVALLE &
+                                      AND D_DIF_DAT <= ITVFIN3 OF CRINTERVALLE
+;
+DEFINE D_SLD_04     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= ITVDEB4 OF CRINTERVALLE &
+                                      AND D_DIF_DAT <= ITVFIN4 OF CRINTERVALLE
+;
+DEFINE D_SLD_05     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= ITVDEB5 OF CRINTERVALLE
+
+DEFINE D_ECT        FLOAT SIZE 8 = CLCLIMCRT OF WCR321 - &
+                                   T_TOT_REF OF WCR321
+
+SORTED ON CIECLE    OF WCR321 , & ; No compagnie
+          CARCPTCAR OF WCR321 , & ; Compte ctb à recevoir
+          REFCLENUM OF WCR321     ; Numéro de client
+
+
+
+;
+; Impression de l'en-tête.
+;
+USE ustit220 NOLIST
+ SKIP &
+  TAB 115 &
+@IF FRANCAIS
+          "au" &
+@ELSE
+          "at" &
+@ENDIF
+  TAB 118 G_DATFIN &
+ SKIP 2 &
+
+  TAB 001 &
+@IF FRANCAIS
+          "Compte CAR.....:" &
+@ELSE
+          "Account recev..:" &
+@ENDIF
+  TAB 018 CARCPTCAR OF WCR321 &
+  TAB 025 CPTDSC OF VCPT_DSC  &
+  TAB 068 &
+@IF FRANCAIS
+          "Devise.........:"  &
+@ELSE
+          "Currency.......:"  &
+@ENDIF
+  TAB 085 DEVCLE OF VCPT_DSC &
+ SKIP 2 &
+
+  TAB 001 &
+@IF FRANCAIS
+"           Client            Cat.Stu.      Limit crédit  Solde total         Écart  Solde non dû                                                                        Contact              Téléphone" &
+@ELSE
+"%%%        Client            Cat.Stu.      Top of cred. Tot balance    Difference  Bal. not due" &
+@ENDIF
+  TAB 100 ITVCOLTIT1 OF CRINTERVALLE &
+  TAB 114 ITVCOLTIT2 OF CRINTERVALLE &
+  TAB 128 ITVCOLTIT3 OF CRINTERVALLE &
+  TAB 142 ITVCOLTIT4 OF CRINTERVALLE &
+  TAB 156 ITVCOLTIT5 OF CRINTERVALLE &
+ SKIP &
+  TAB 001 &
+"---------------------------  --------  ---------------- ------------- ------------- ------------- ------------- ------------- ------------- ------------- ------------- -------------------- -------------"
+
+
+FOOTING AT REFCLENUM &
+  TAB 001 REFCLENUM OF WCR321 &
+  TAB 008 RADNOMABR OF WCR321 &
+  TAB 030 CLICAT    OF WCR321 &
+  TAB 035 CLISTU    OF WCR321 &
+  TAB 040 CLCLIMCRT OF WCR321 &
+            PICTURE "^^^,^^^,^^^ "  &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 2          &
+  TAB 057 T_SLD_TOT SUBTOTAL        &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 071 D_ECT                     &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 085 D_SLD_NON_DU SUBTOTAL     &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 099 D_SLD_01     SUBTOTAL     &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 113 D_SLD_02     SUBTOTAL     &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 127 D_SLD_03     SUBTOTAL     &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 141 D_SLD_04     SUBTOTAL     &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 155 D_SLD_05     SUBTOTAL     &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 169 CCTNOM      OF WCR321     &
+  TAB 190 CCTTEL      OF WCR321
+
+FOOTING AT CARCPTCAR &
+SKIP 2 &
+ TAB 040 "---------------" &
+ TAB 056 "--------------" &
+ TAB 071 "-------------"  &
+ TAB 085 "-------------"  &
+ TAB 099 "-------------"  &
+ TAB 113 "-------------"  &
+ TAB 127 "-------------"  &
+ TAB 141 "-------------"  &
+ TAB 155 "-------------"  &
+SKIP 1 &
+  TAB 040 CLCLIMCRT OF WCR321 SUBTOTAL &
+            PICTURE "^^^,^^^,^^^,^^^ "  &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 2          &
+  TAB 056 T_SLD_TOT    SUBTOTAL      &
+            PICTURE "^^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 071 D_ECT SUBTOTAL            &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 085 D_SLD_NON_DU SUBTOTAL     &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 099 D_SLD_01     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 113 D_SLD_02     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 127 D_SLD_03     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 141 D_SLD_04     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 155 D_SLD_05     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+SKIP &
+ TAB 040 "===============" &
+ TAB 056 "==============" &
+ TAB 071 "============="  &
+ TAB 085 "============="  &
+ TAB 099 "============="  &
+ TAB 113 "============="  &
+ TAB 127 "============="  &
+ TAB 141 "============="  &
+ TAB 155 "============="  &
+ SKIP PAGE
+
+
+BUILD cr321zc
+
+
+@IF FORMAT
+
+CR321A                                        xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                    Page: 9999
+99/99/99 HH:MM xxxxxxxxxxxx                        Ages des comptes /  sommaire
+                                    XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                                                            au 99/99/99
+
+Compte CAR.....: XXXXXX XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX   Devise.........: xxx
+
+           Client            Cat.   Solde total  Solde non dû   xxxxxxxxxxx   xxxxxxxxxxx   xxxxxxxxxxx   xxxxxxxxxxx   xxxxxxxxxxx
+---------------------------  ----  ------------- ------------- ------------- ------------- ------------- ------------- -------------
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+                                  -------------- ------------- ------------- ------------- ------------- ------------- -------------
+                                  999999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+                                  ============== ============= ============= ============= ============= ============= =============
+
+CR321B                                        xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                    Page: 9999
+99/99/99 HH:MM xxxxxxxxxxxx                         Ages des comptes / détaillé
+                                    XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                                                            au 99/99/99
+
+Compte CAR.....: XXXXXX XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX   Devise.........: xxx
+
+                  Date     Date
+   No facture   facture    Due      Solde total   Mnt. total    xxxxxxxxxxx   xxxxxxxxxxx   xxxxxxxxxxx   xxxxxxxxxxx   xxxxxxxxxxx
+--------------- -------- --------  ------------- ------------- ------------- ------------- ------------- ------------- -------------
+
+Client: 123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  Catégorie: xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  Num.réf.client: xxxxxxxxxxxxxxx
+
+123456789012345 99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456789012345 99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456789012345 99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456789012345 99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456789012345 99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456789012345 99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456789012345 99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456789012345 99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456789012345 99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456789012345 99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+                                  -------------- ------------- ------------- ------------- ------------- ------------- -------------
+                                  999999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+
+
+Client: 123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  Catégorie: xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  Num.réf.client: xxxxxxxxxxxxxxx
+
+123456789012345 99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456789012345 99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+                                  -------------- ------------- ------------- ------------- ------------- ------------- -------------
+                                  999999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+
+
+Client: 123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  Catégorie: xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  Num.réf.client: xxxxxxxxxxxxxxx
+
+123456789012345 99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456789012345 99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+                                  -------------- ------------- ------------- ------------- ------------- ------------- -------------
+                                  999999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+
+                                  -------------- ------------- ------------- ------------- ------------- ------------- -------------
+                                  999999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+                                  ============== ============= ============= ============= ============= ============= =============
+@ENDIF

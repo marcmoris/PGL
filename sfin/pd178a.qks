@@ -1,0 +1,1327 @@
+;/T/ 2.1.1 Enregistrer la carte de bloc (redimension de bloc)
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1994-09-07
+;
+;    Description..: Le but de cette unité de traitement est de redimensionner
+;                   un bloc.
+;
+;/M/ Programmeur : Francois Richard
+;    Date        : 1999-05-11
+;    Description : En insertion amène le prix au mètre cube inscrit lors
+;                  de la réception d'un bloc
+;/M/ François Déry, 12 mai 1999
+;       Ajout de la transaction NO_SEQ car elle était référée sans être déclaré
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd178a ACTIONBAR                   &
+             MODE LABEL "" AT 2,80        &
+             NOACTION                     &
+             FIELDMARK RETAIN STARTUP     &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU ,      &
+                       T_CIENOM ,         &
+                       PDREDIM_BLOC,      &
+                       PDBLOC
+
+
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+USE ustrasse  NOLIST
+
+TRANSACTION NO_SEQ READ WRITE &
+                   RESERVING FOR PROTECTED WRITE PDSEQ_REDIM_BLOC IN DICT
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD178A"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+USE pd178a.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Défaut de bloc                  " ACTION DESIGNER D001
+  MENUITEM LABEL "Vérification                    " ACTION DESIGNER D002
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%Défaut de bloc               " ACTION DESIGNER D001
+  MENUITEM LABEL "%%%Vérification                 " ACTION DESIGNER D002
+@ENDIF
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Dimension maximun et minimum
+;
+USE usdimprd NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du volume d'une pièce de granit
+;
+USE usvarvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire à l'appel des dépisteurs
+;
+temporary d_t_tot_vol_bru float size 8
+temporary d_blovolmc3bru float size 8
+
+TEMPORARY T_BLONUMGRA001APR  CHARACTER SIZE 04
+TEMPORARY T_BLONUMGRA002APR  CHARACTER SIZE 05
+TEMPORARY T_BLORECAPR        CHARACTER SIZE 01
+TEMPORARY T_CHAMP            INTEGER UNSIGNED SIZE 01
+
+TEMPORARY T_COD              INTEGER UNSIGNED SIZE 02
+TEMPORARY T_STU              CHARACTER SIZE 1
+
+
+;-------------------------------------------------------------------------------
+;
+; Redimesion de bloc
+;
+
+FILE PDREDIM_BLOC MASTER
+
+;-------------------------------------------------------------------------------
+;
+; Bloc
+;
+
+FILE PDBLOC MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro séquentiel pour les bons de commande
+;
+
+FILE PDSEQ_REDIM_BLOC DESIGNER &
+                      TRANSACTION NO_SEQ
+
+
+;-------------------------------------------------------------------------------
+;
+; Bloc inscription du/des nouveaux blocs
+;
+
+FILE PDBLOC PRIMARY &
+            NOITEM  &
+            ALIAS BLO_NEW
+
+  ACCESS VIA     CIECLE,                               &
+                 BLONUMGRA001AVT,                      &
+                 BLONUMGRA002AVT,                      &
+                 BLORECAVT                             &
+         USING   T_CIECLEMNU,                          &
+                 BLONUMGRA001APR OF PDBLOC,            &
+                 BLONUMGRA002APR OF PDBLOC,            &
+                 BLORECAPR       OF PDBLOC             &
+         ORDERBY CIECLE,                               &
+                 BLONUMGRA001APR,                      &
+                 BLONUMGRA002APR,                      &
+                 BLORECAPR
+
+  ITEM CIECLE           OF BLO_NEW INITIAL T_CIECLEMNU
+  ITEM BLONUMGRA001AVT  OF BLO_NEW INITIAL BLONUMGRA001APR  OF PDBLOC
+  ITEM BLONUMGRA002AVT  OF BLO_NEW INITIAL BLONUMGRA002APR  OF PDBLOC
+  ITEM BLORECAVT        OF BLO_NEW INITIAL BLORECAPR        OF PDBLOC
+  ITEM BLONUMBLOAVT     OF BLO_NEW INITIAL BLONUMGRA001APR  OF PDBLOC + &
+                                           BLONUMGRA002APR  OF PDBLOC + &
+                                           BLORECAPR        OF PDBLOC
+
+  ITEM BLONUMGRA001APR  OF BLO_NEW INITIAL BLONUMGRA001APR  OF PDBLOC
+  ITEM BLONUMGRA002APR  OF BLO_NEW INITIAL BLONUMGRA002APR  OF PDBLOC
+
+  ITEM BLONUMBLOAPR     OF BLO_NEW FINAL   BLONUMGRA001APR  OF BLO_NEW + &
+                                           BLONUMGRA002APR  OF BLO_NEW + &
+                                           BLORECAPR        OF BLO_NEW
+
+  ITEM BLOCODCOU        OF BLO_NEW INITIAL BLOCODCOU        OF PDBLOC
+
+  ITEM BLODATCRE        OF BLO_NEW INITIAL SYSDATE
+  ITEM BLOHRECRE        OF BLO_NEW INITIAL SYSTIME / 10000
+  ITEM BLOUSRCRE        OF BLO_NEW INITIAL LOGONID
+
+  ITEM TGRCODGRA        OF BLO_NEW INITIAL TGRCODGRA        OF PDBLOC
+ ; ITEM REBPRIMC3        OF BLO_NEW INITIAL REBPRIMC3    OF PDREDIM_BLOC
+ ; ITEM REBPRIMC3VEN     OF BLO_NEW INITIAL REBPRIMC3VEN OF PDREDIM_BLOC
+
+;-------------------------------------------------------------------------------
+;
+; Bloc vérification du volume total du/des nouveaux blocs
+;
+
+FILE PDBLOC DESIGNER &
+            ALIAS BLO_VALI
+
+
+;-------------------------------------------------------------------------------
+;
+; Type de granit
+;
+
+FILE PDTYPE_GRANIT REFERENCE
+
+  ACCESS VIA     CIECLE,                         &
+                 TGRCODGRA                       &
+         USING   T_CIECLEMNU,                    &
+                 TGRCODGRA OF BLO_NEW
+
+
+;-------------------------------------------------------------------------------
+;
+; Détail réception bloc
+;
+
+FILE PDRECEPTION_BLOC REFERENCE
+
+  ACCESS VIA     CIECLE,                               &
+                 BLONUMGRA001APR,                      &
+                 BLONUMGRA002APR,                      &
+                 BLORECAPR                             &
+         USING   T_CIECLEMNU,                          &
+                 BLONUMGRA001APR OF PDBLOC,            &
+                 BLONUMGRA002APR OF PDBLOC,            &
+                 BLORECAPR       OF PDBLOC             &
+         ORDERBY CIECLE,                               &
+                 RCTNUMREC,                            &
+                 BLONUMGRA001APR,                      &
+                 BLONUMGRA002APR,                      &
+                 BLORECAPR
+
+
+;-------------------------------------------------------------------------------
+;
+; Réception
+;
+
+FILE PDRECEPTION REFERENCE
+
+  ACCESS VIA     CIECLE,                               &
+                 RCTNUMREC                             &
+         USING   T_CIECLEMNU,                          &
+                 RCTNUMREC OF PDRECEPTION_BLOC         &
+         ORDERBY CIECLE,                               &
+                 RCTNUMREC,                            &
+                 BCMNUMBCM
+
+
+;-------------------------------------------------------------------------------
+;
+; Bon de commande
+;
+
+FILE PDBON_COMMANDE REFERENCE
+
+  ACCESS VIA     CIECLE,   &
+                 BCMNUMBCM &
+         USING   T_CIECLEMNU, &
+                 BCMNUMBCM OF PDRECEPTION
+
+
+;-------------------------------------------------------------------------------
+;
+; Détail du bon de commande
+;
+
+FILE PDDET_BON_COMMAN REFERENCE
+
+  ACCESS VIA     CIECLE,                         &
+                 BCMNUMBCM,                      &
+                 PODNUMLIG                       &
+         USING   T_CIECLEMNU,                    &
+                 BCMNUMBCM OF PDBON_COMMANDE,    &
+                 PODNUMLIG OF PDRECEPTION_BLOC
+
+
+;-------------------------------------------------------------------------------
+;
+; Fournisseurs
+;
+
+FILE VFOC_FOU REFERENCE
+
+  ACCESS VIA     FOUCLE,                      &
+                 FOCCIECLE                    &
+         USING   FOUCLE    OF PDBON_COMMANDE, &
+                 T_CIECLEMNU
+
+;-------------------------------------------------------------------------------
+;
+; Prix au mètres cube à la reception
+FILE PDRECEPTION_BLOC ALIAS A_PDRECEPTION_BLOC DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+TEMPORARY T_TOT_VOL_BRU FLOAT SIZE 8 RESET AT STARTUP ; Volume total redimensionner
+TEMPORARY T_TOT_VOL_NET FLOAT SIZE 8 RESET AT STARTUP ; Volume total redimensionner
+TEMPORARY T_TOT_VOL_PYE FLOAT SIZE 8 RESET AT STARTUP ; Volume total redimensionner
+
+TEMPORARY T_VOL_PERE_BRU FLOAT SIZE 8 RESET AT STARTUP ; Volume total du bloc père
+TEMPORARY T_VOL_PERE_NET FLOAT SIZE 8 RESET AT STARTUP ; Volume total du bloc père
+TEMPORARY T_VOL_PERE_PYE FLOAT SIZE 8 RESET AT STARTUP ; Volume total du bloc père
+
+TEMPORARY T_IND_BLO      INTEGER UNSIGNED SIZE 01      ; Indique si un nouveau bloc redimensionne
+
+;-------------------------------------------------------------------------------
+;
+;
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Redimensionnement de bloc " &
+@ELSE
+      " %%%Redimensionnement de bloc " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+TITLE "-" AT 5,23
+
+
+TITLE "-" AT 5,29
+
+
+SKIP TO LINE 5
+
+
+ALIGN (,3,19)(,,24)(,,30)(,53,69)
+
+
+FIELD BLONUMGRA001APR OF PDBLOC               &
+        DISPLAY                               &
+        FIXED
+
+
+FIELD BLONUMGRA002APR OF PDBLOC               &
+        DISPLAY                               &
+        FIXED
+
+
+FIELD BLORECAPR       OF PDBLOC               &
+        DISPLAY                               &
+        FIXED
+
+
+FIELD BLOSTU          OF PDBLOC               &
+        DISPLAY
+
+SKIP TO LINE 6
+
+
+ALIGN (,3,19) (,28,44) (,53,69)
+
+
+FIELD BLOLONBRU OF PDBLOC                     &
+        DISPLAY                               &
+        FIXED
+
+
+FIELD BLOHAUBRU OF PDBLOC                     &
+        DISPLAY                               &
+        FIXED
+
+
+FIELD BLOLARBRU OF PDBLOC                     &
+        DISPLAY                               &
+        FIXED
+
+
+ALIGN (,3,19) (,53,69)
+
+
+FIELD BLOVOLMC3BRU     OF PDBLOC              &
+        DISPLAY                               &
+        FIXED
+
+
+FIELD RCTNUMREC OF PDRECEPTION                &
+        DISPLAY                               &
+        FIXED
+
+
+ALIGN (,3,19) (,,28)
+
+
+FIELD FOUCLE OF VFOC_FOU                      &
+        DISPLAY                               &
+        FIXED                                 &
+        LABEL "Fournisseur...:"
+
+
+FIELD FOUNOM OF VFOC_FOU                      &
+        DISPLAY                               &
+        FIXED
+
+
+DRAW 10,1 TO 10,80
+
+
+SKIP TO LINE 10
+
+
+TITLE &
+@IF FRANCAIS
+      " Nouveau bloc " &
+@ELSE
+      " %%%Nouveau bloc " &
+@ENDIF
+      CENTERED AT ,1
+
+
+SKIP TO LINE 12
+
+
+ALIGN (2,3,19)(,23,24)(29,29,30)(52,53,69)
+
+
+FIELD BLONUMGRA001APR OF BLO_NEW              &
+        HIDDEN ID 45                          &
+        DISPLAY                               &
+        NUMERIC                               &
+        BWZ
+
+
+FIELD BLONUMGRA002APR OF BLO_NEW              &
+        DISPLAY                               &
+        LABEL "-"                             &
+        NUMERIC                               &
+        BWZ
+
+
+FIELD BLORECAPR       OF BLO_NEW              &
+        HIDDEN ID 50                          &
+        LABEL "-"                             &
+        REQUIRED NOCHANGE                     &
+        LOOKUP NOTON BLO_NEW                  &
+          VIA     CIECLE,                     &
+                  BLONUMGRA001APR,            &
+                  BLONUMGRA002APR,            &
+                  BLORECAPR                   &
+          USING   T_CIECLEMNU,                &
+                  BLONUMGRA001APR OF BLO_NEW, &
+                  BLONUMGRA002APR OF BLO_NEW, &
+                  BLORECAPR                   &
+          MESSAGE 2941 ; Ce numéro de recoupement existe déjà
+
+
+FIELD BLOSTU          OF BLO_NEW              &
+        HIDDEN ID 55                          &
+        DEFAULT "I"
+
+
+;280199
+
+ALIGN (,3,19) (,43,59)
+
+FIELD REBPRIMC3 OF PDREDIM_BLOC           &
+label "Prix m3.......:" &
+DISPLAY
+
+
+FIELD REBPRIMC3VEN OF PDREDIM_BLOC        &
+label "Prix m3 vent..:" &
+DISPLAY
+
+SKIP TO LINE 14
+
+
+ALIGN (,3,19)(,,25)
+
+
+FIELD TGRCODGRA OF BLO_NEW                    &
+        HIDDEN ID 60                          &
+        DISPLAY
+
+
+FIELD TGRDSCFRA001 OF PDTYPE_GRANIT           &
+        DISPLAY
+
+
+SKIP TO LINE 16
+
+
+ALIGN (2,3,19)
+
+
+FIELD BLONUMCARBLO OF BLO_NEW                 &
+        HIDDEN ID 65                          &
+        REQUIRED                              &
+        LOOKUP NOTON BLO_NEW                  &
+          VIA   CIECLE,                       &
+                BLONUMCARBLO                  &
+          USING T_CIECLEMNU,                  &
+                BLONUMCARBLO     OF BLO_NEW   &
+          MESSAGE 3127 ; Ce numéro de carte de bloc existe déjà
+
+
+
+SKIP TO LINE 17
+
+
+ALIGN (2,3,19)
+
+
+FIELD BLOLONBRU OF BLO_NEW                    &
+        HIDDEN ID 70                          &
+        REQUIRED
+
+
+FIELD BLOHAUBRU OF BLO_NEW                    &
+        HIDDEN ID 73                          &
+        REQUIRED
+
+
+FIELD BLOLARBRU OF BLO_NEW                    &
+        HIDDEN ID 75                          &
+        REQUIRED
+
+
+ALIGN (,3,19)
+
+
+FIELD BLOVOLMC3BRU     OF BLO_NEW             &
+        DISPLAY
+
+
+SKIP TO LINE 17
+
+
+ALIGN (28,29,45)
+
+
+FIELD BLOLONNET OF BLO_NEW                    &
+        HIDDEN ID 80                          &
+        REQUIRED
+
+
+FIELD BLOHAUNET OF BLO_NEW                    &
+        HIDDEN ID 83                          &
+        REQUIRED
+
+
+FIELD BLOLARNET OF BLO_NEW                    &
+        HIDDEN ID 85                          &
+        REQUIRED
+
+
+ALIGN (,29,45)
+
+
+FIELD BLOVOLMC3NET     OF BLO_NEW             &
+        DISPLAY
+
+
+SKIP TO LINE 17
+
+
+ALIGN (54,55,71)
+
+
+FIELD BLOLONPYE OF BLO_NEW                    &
+        HIDDEN ID 90                          &
+        REQUIRED
+
+
+FIELD BLOHAUPYE OF BLO_NEW                    &
+        HIDDEN ID 93                          &
+        REQUIRED
+
+
+FIELD BLOLARPYE OF BLO_NEW                    &
+        HIDDEN ID 95                          &
+        REQUIRED
+
+
+ALIGN (,55,71)
+
+
+FIELD BLOVOLMC3PYE     OF BLO_NEW             &
+        DISPLAY
+
+
+;-------------------------------------------------------------------------------
+;
+; Procedure pour le calcul du volume d'une pièce de granit
+;
+
+USE uscalvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel dépisteur No bloc (attemtion cet appel est particulier)
+;
+
+PROCEDURE INPUT BLONUMGRA001APR OF BLO_NEW
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_BLONUMGRA001APR  = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_BLONUMGRA002APR  = ""
+    LET T_BLORECAPR        = ""
+    LET T_CHAMP            = 1
+    LET T_COD              = 2
+    LET T_STU              = ""
+    RUN SCREEN pd121 MODE F &
+                     PASSING T_BLONUMGRA001APR, &
+                             T_BLONUMGRA002APR, &
+                             T_BLORECAPR,       &
+                             T_CHAMP,           &
+                             T_COD,             &
+                             T_STU,             &
+                             T_CIECLEMNU
+    LET FIELDTEXT                 = TRUNCATE( T_BLONUMGRA001APR )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel dépisteur No bloc (attemtion cet appel est particulier)
+;
+
+PROCEDURE INPUT BLONUMGRA002APR OF BLO_NEW
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_BLONUMGRA001APR  = BLONUMGRA001APR OF BLO_NEW
+    LET T_BLONUMGRA002APR  = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_BLORECAPR        = ""
+    LET T_CHAMP            = 2
+    LET T_COD              = 2
+    LET T_STU              = ""
+    RUN SCREEN pd121 MODE F &
+                     PASSING T_BLONUMGRA001APR, &
+                             T_BLONUMGRA002APR, &
+                             T_BLORECAPR,       &
+                             T_CHAMP,           &
+                             T_COD,             &
+                             T_STU,             &
+                             T_CIECLEMNU
+    LET BLONUMGRA001APR OF BLO_NEW = TRUNCATE( T_BLONUMGRA001APR )
+    LET FIELDTEXT                  = TRUNCATE( T_BLONUMGRA002APR )
+  END
+  IF 0 <> SIZE( TRUNCATE( T_BLONUMGRA002APR ) ) AND &
+     0 =  SIZE( TRUNCATE( FIELDTEXT) )
+  THEN BEGIN
+    LET FIELDTEXT                  = TRUNCATE( T_BLONUMGRA002APR )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel dépisteur No bloc (attemtion cet appel est particulier)
+;
+
+PROCEDURE INPUT BLORECAPR OF BLO_NEW
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_BLONUMGRA001APR  = BLONUMGRA001APR OF BLO_NEW
+    LET T_BLONUMGRA002APR  = BLONUMGRA001APR OF BLO_NEW
+    LET T_BLORECAPR        = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_CHAMP            = 3
+    LET T_COD              = 2
+    LET T_STU              = ""
+    RUN SCREEN pd121 MODE F &
+                     PASSING T_BLONUMGRA001APR, &
+                             T_BLONUMGRA002APR, &
+                             T_BLORECAPR,       &
+                             T_CHAMP,           &
+                             T_COD,             &
+                             T_STU,             &
+                             T_CIECLEMNU
+    LET BLONUMGRA001APR OF BLO_NEW = TRUNCATE( T_BLONUMGRA001APR )
+    LET BLONUMGRA002APR OF BLO_NEW = TRUNCATE( T_BLONUMGRA002APR )
+    LET FIELDTEXT                  = TRUNCATE( T_BLORECAPR )
+  END
+  IF 0 <> SIZE( TRUNCATE( T_BLORECAPR ) ) AND &
+     0 = SIZE( TRUNCATE( FIELDTEXT) )
+  THEN BEGIN
+    LET FIELDTEXT                  = TRUNCATE( T_BLORECAPR )
+  END
+
+  ; Prix au centimètre cube à la reception
+  GET A_PDRECEPTION_BLOC               &
+    VIA   CIECLE,                      &
+          BLONUMGRA001APR,             &
+          BLONUMGRA002APR              &
+    USING T_CIECLEMNU,                 &
+          BLONUMGRA001APR OF BLO_NEW , &
+          BLONUMGRA002APR OF BLO_NEW
+
+  LET REBPRIMC3    OF PDREDIM_BLOC = REBPRIMC3    OF A_PDRECEPTION_BLOC
+  LET REBPRIMC3VEN OF PDREDIM_BLOC = REBPRIMC3VEN OF A_PDRECEPTION_BLOC
+  LET REBPRIMC3        OF BLO_NEW = REBPRIMC3    OF PDREDIM_BLOC
+  LET REBPRIMC3VEN     OF BLO_NEW = REBPRIMC3VEN OF PDREDIM_BLOC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procedure permettant de valider les dimensions brut du bloc
+; N.B.: on ne peut pas avoir de bloc plus petit que 500 mm. et plus grand que
+;       4500 mm.
+
+PROCEDURE EDIT BLOLONBRU
+BEGIN
+  IF FIELDVALUE < T_DIM_MIN_LAR_BL OR &
+     FIELDVALUE > T_DIM_MAX_LAR_BL
+  THEN BEGIN
+    ERROR 2947 ; Cette dimension hors des dimensions limites
+  END
+  IF FIELDVALUE < BLOLONNET OF BLO_NEW
+  THEN BEGIN
+    ERROR 3124 ; Cette dimension est plus petite que la dimension net
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du volume brut
+;
+
+PROCEDURE PROCESS BLOLONBRU
+BEGIN
+  LET TZ_LARGEUR   = BLOLONBRU OF BLO_NEW
+  LET TZ_HAUTEUR   = BLOHAUBRU OF BLO_NEW
+  LET TZ_EPAISSEUR = BLOLARBRU OF BLO_NEW
+  DO INTERNAL CALVOL
+  LET BLOVOLMC3BRU OF BLO_NEW = TZ_VOLUME
+  DISPLAY BLOVOLMC3BRU OF BLO_NEW
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procedure permettant de valider les dimensions brut du bloc
+; N.B.: on ne peut pas avoir de bloc plus petit que 500 mm. et plus grand que
+;       4500 mm.
+;
+
+PROCEDURE EDIT BLOHAUBRU
+BEGIN
+  IF FIELDVALUE < T_DIM_MIN_HAU_BL OR &
+     FIELDVALUE > T_DIM_MAX_HAU_BL
+  THEN BEGIN
+    ERROR 2947 ; Cette dimension hors des dimensions limites
+  END
+  IF FIELDVALUE < BLOHAUNET OF BLO_NEW
+  THEN BEGIN
+    ERROR 3124 ; Cette dimension est plus petite que la dimension net
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du volume brut
+;
+
+PROCEDURE PROCESS BLOHAUBRU
+BEGIN
+  LET TZ_LARGEUR   = BLOLONBRU OF BLO_NEW
+  LET TZ_HAUTEUR   = BLOHAUBRU OF BLO_NEW
+  LET TZ_EPAISSEUR = BLOLARBRU OF BLO_NEW
+  DO INTERNAL CALVOL
+  LET BLOVOLMC3BRU OF BLO_NEW = TZ_VOLUME
+  DISPLAY BLOVOLMC3BRU OF BLO_NEW
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procedure permettant de valider les dimensions brut du bloc
+; N.B.: on ne peut pas avoir de bloc plus petit que 500 mm. et plus grand que
+;       4500 mm.
+;
+
+PROCEDURE EDIT BLOLARBRU
+BEGIN
+  IF FIELDVALUE < T_DIM_MIN_EPA_BL OR &
+     FIELDVALUE > T_DIM_MAX_EPA_BL
+  THEN BEGIN
+    ERROR 2947 ; Cette dimension hors des dimensions limites
+  END
+  IF FIELDVALUE < BLOLARNET OF BLO_NEW
+  THEN BEGIN
+    ERROR 3124 ; Cette dimension est plus petite que la dimension net
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du volume brut
+;
+
+PROCEDURE PROCESS BLOLARBRU
+BEGIN
+  LET TZ_LARGEUR   = BLOLONBRU OF BLO_NEW
+  LET TZ_HAUTEUR   = BLOHAUBRU OF BLO_NEW
+  LET TZ_EPAISSEUR = BLOLARBRU OF BLO_NEW
+  DO INTERNAL CALVOL
+  LET BLOVOLMC3BRU OF BLO_NEW = TZ_VOLUME
+  DISPLAY BLOVOLMC3BRU OF BLO_NEW
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la dimension net
+;
+
+PROCEDURE EDIT BLOLONNET
+BEGIN
+  IF FIELDVALUE > BLOLONBRU OF BLO_NEW
+  THEN BEGIN
+    ERROR 2933 ; Cette dimension est plus grande que la dimension brut
+  END
+  IF FIELDVALUE < BLOLONPYE OF BLO_NEW
+  THEN BEGIN
+    ERROR 3125 ; Cette dimension est plus petite que la dimension à payer
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du volume net
+;
+
+PROCEDURE PROCESS BLOLONNET
+BEGIN
+  LET TZ_LARGEUR   = BLOLONNET OF BLO_NEW
+  LET TZ_HAUTEUR   = BLOHAUNET OF BLO_NEW
+  LET TZ_EPAISSEUR = BLOLARNET OF BLO_NEW
+  DO INTERNAL CALVOL
+  LET BLOVOLMC3NET OF BLO_NEW = TZ_VOLUME
+  DISPLAY BLOVOLMC3NET OF BLO_NEW
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la dimension net
+;
+
+PROCEDURE EDIT BLOHAUNET
+BEGIN
+  IF FIELDVALUE > BLOHAUBRU OF BLO_NEW
+  THEN BEGIN
+    ERROR 2933 ; Cette dimension est plus grande que la dimension brut
+  END
+  IF FIELDVALUE < BLOHAUPYE OF BLO_NEW
+  THEN BEGIN
+    ERROR 3125 ; Cette dimension est plus petite que la dimension à payer
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du volume net
+;
+
+PROCEDURE PROCESS BLOHAUNET
+BEGIN
+  LET TZ_LARGEUR   = BLOLONNET OF BLO_NEW
+  LET TZ_HAUTEUR   = BLOHAUNET OF BLO_NEW
+  LET TZ_EPAISSEUR = BLOLARNET OF BLO_NEW
+  DO INTERNAL CALVOL
+  LET BLOVOLMC3NET OF BLO_NEW = TZ_VOLUME
+  DISPLAY BLOVOLMC3NET OF BLO_NEW
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la dimension net
+;
+
+PROCEDURE EDIT BLOLARNET
+BEGIN
+  IF FIELDVALUE > BLOLARBRU OF BLO_NEW
+  THEN BEGIN
+    ERROR 2933 ; Cette dimension est plus grande que la dimension brut
+  END
+  IF FIELDVALUE < BLOLARPYE OF BLO_NEW
+  THEN BEGIN
+    ERROR 3125 ; Cette dimension est plus petite que la dimension à payer
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du volume net
+;
+
+PROCEDURE PROCESS BLOLARNET
+BEGIN
+  LET TZ_LARGEUR   = BLOLONNET OF BLO_NEW
+  LET TZ_HAUTEUR   = BLOHAUNET OF BLO_NEW
+  LET TZ_EPAISSEUR = BLOLARNET OF BLO_NEW
+  DO INTERNAL CALVOL
+  LET BLOVOLMC3NET OF BLO_NEW = TZ_VOLUME
+  DISPLAY BLOVOLMC3NET OF BLO_NEW
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procedure permettant de valider les dimensions à payer du bloc
+; N.B.: on ne peut pas avoir de dimension à payer plus grande que les dimensions
+;       nettes.
+;
+
+PROCEDURE EDIT BLOLONPYE
+BEGIN
+  IF FIELDVALUE > BLOLONNET OF BLO_NEW
+  THEN BEGIN
+    ERROR 2934 ; Cette dimension est plus grande que la dimension net
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du volume net
+;
+
+PROCEDURE PROCESS BLOLONPYE
+BEGIN
+  ;
+  ; Calcul de volume
+  ;
+  LET TZ_LARGEUR   = BLOLONPYE OF BLO_NEW
+  LET TZ_HAUTEUR   = BLOHAUPYE OF BLO_NEW
+  LET TZ_EPAISSEUR = BLOLARPYE OF BLO_NEW
+  DO INTERNAL CALVOL
+  LET BLOVOLMC3PYE OF BLO_NEW = TZ_VOLUME
+  DISPLAY BLOVOLMC3PYE OF BLO_NEW
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procedure permettant de valider les dimensions à payer du bloc
+; N.B.: on ne peut pas avoir de dimension à payer plus grande que les dimensions
+;       nettes.
+;
+
+PROCEDURE EDIT BLOHAUPYE
+BEGIN
+  IF FIELDVALUE > BLOHAUNET OF BLO_NEW
+  THEN BEGIN
+    ERROR 2934 ; Cette dimension est plus grande que la dimension net
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du volume net
+;
+
+PROCEDURE PROCESS BLOHAUPYE
+BEGIN
+  ;
+  ; Calcul de volume
+  ;
+  LET TZ_LARGEUR   = BLOLONPYE OF BLO_NEW
+  LET TZ_HAUTEUR   = BLOHAUPYE OF BLO_NEW
+  LET TZ_EPAISSEUR = BLOLARPYE OF BLO_NEW
+  DO INTERNAL CALVOL
+  LET BLOVOLMC3PYE OF BLO_NEW = TZ_VOLUME
+  DISPLAY BLOVOLMC3PYE OF BLO_NEW
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procedure permettant de valider les dimensions à payer du bloc
+; N.B.: on ne peut pas avoir de dimension à payer plus grande que les dimensions
+;       nettes.
+;
+
+PROCEDURE EDIT BLOLARPYE
+BEGIN
+  IF FIELDVALUE > BLOLARNET OF BLO_NEW
+  THEN BEGIN
+    ERROR 2934 ; Cette dimension est plus grande que la dimension net
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du volume net
+;
+
+PROCEDURE PROCESS BLOLARPYE
+BEGIN
+  ;
+  ; Calcul de volume
+  ;
+  LET TZ_LARGEUR   = BLOLONPYE OF BLO_NEW
+  LET TZ_HAUTEUR   = BLOHAUPYE OF BLO_NEW
+  LET TZ_EPAISSEUR = BLOLARPYE OF BLO_NEW
+  DO INTERNAL CALVOL
+  LET BLOVOLMC3PYE OF BLO_NEW = TZ_VOLUME
+  DISPLAY BLOVOLMC3PYE OF BLO_NEW
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+  ;
+  ; Affiche le statut du bloc père après la première mise à jour
+  ;
+  DISPLAY BLOSTU OF PDBLOC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+
+PROCEDURE POSTFIND
+BEGIN
+  LET T_TOT_VOL_BRU = 0
+  LET T_TOT_VOL_NET = 0
+  LET T_TOT_VOL_PYE = 0
+  LET T_IND_BLO     = 0
+
+  WHILE RETRIEVING BLO_VALI                       &
+    VIA     CIECLE,                               &
+            BLONUMGRA001AVT,                      &
+            BLONUMGRA002AVT,                      &
+            BLORECAVT                             &
+    USING   T_CIECLEMNU,                          &
+            BLONUMGRA001APR OF PDBLOC,            &
+            BLONUMGRA002APR OF PDBLOC,            &
+            BLORECAPR       OF PDBLOC
+  BEGIN
+    ;
+    ; Calcul du volume brut des blocs déjà dans la base de donnée
+    ;
+    LET TZ_LARGEUR   = BLOLONBRU OF BLO_VALI
+    LET TZ_HAUTEUR   = BLOHAUBRU OF BLO_VALI
+    LET TZ_EPAISSEUR = BLOLARBRU OF BLO_VALI
+    DO INTERNAL CALVOL
+    LET T_TOT_VOL_BRU = T_TOT_VOL_BRU + TZ_VOLUME
+    ;
+    ; Calcul du volume net des blocs déjà dans la base de donnée
+    ;
+    LET TZ_LARGEUR   = BLOLONNET OF BLO_VALI
+    LET TZ_HAUTEUR   = BLOHAUNET OF BLO_VALI
+    LET TZ_EPAISSEUR = BLOLARNET OF BLO_VALI
+    DO INTERNAL CALVOL
+    LET T_TOT_VOL_NET = T_TOT_VOL_NET + TZ_VOLUME
+    ;
+    ; Calcul du volume à payer des blocs déjà dans la base de donnée
+    ;
+    LET TZ_LARGEUR   = BLOLONPYE OF BLO_VALI
+    LET TZ_HAUTEUR   = BLOHAUPYE OF BLO_VALI
+    LET TZ_EPAISSEUR = BLOLARPYE OF BLO_VALI
+    DO INTERNAL CALVOL
+    LET T_TOT_VOL_PYE = T_TOT_VOL_PYE + TZ_VOLUME
+  END
+  IF T_TOT_VOL_BRU >= 0.90 * BLOVOLMC3BRU OF PDBLOC &
+     OR &
+     T_TOT_VOL_NET >= 0.90 * BLOVOLMC3NET OF PDBLOC &
+     OR &
+     T_TOT_VOL_PYE >= 0.90 * BLOVOLMC3PYE OF PDBLOC
+  THEN BEGIN
+    WARNING 2952 ; Le bloc est déjà traité
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF BLO_NEW &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF BLO_NEW &
+     AND NOT NEWRECORD     OF BLO_NEW &
+     AND NOT DELETEDRECORD OF BLO_NEW &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  ;
+  ; Évaluation du poids estimé du bloc
+  ;
+  LET BLOPOIEST       OF BLO_NEW = BLOVOLMC3BRU OF BLO_NEW * TGRPOI OF PDTYPE_GRANIT
+  ;
+  ; On valide que le total du volume des fils de dépasse pas le volume du père
+  ;
+  LET T_TOT_VOL_BRU = 0
+  LET T_TOT_VOL_NET = 0
+  LET T_TOT_VOL_PYE = 0
+  LET T_IND_BLO     = 0
+
+  WHILE RETRIEVING BLO_VALI                       &
+    VIA     CIECLE,                               &
+            BLONUMGRA001AVT,                      &
+            BLONUMGRA002AVT,                      &
+            BLORECAVT                             &
+    USING   T_CIECLEMNU,                          &
+            BLONUMGRA001APR OF PDBLOC,            &
+            BLONUMGRA002APR OF PDBLOC,            &
+            BLORECAPR       OF PDBLOC
+  BEGIN
+    ;
+    ; Indique qu'il y a au moins un nouveau bloc
+    ;
+    LET T_IND_BLO = 1
+    IF BLONUMBLOAPR OF BLO_NEW <> BLONUMBLOAPR OF BLO_VALI
+    THEN BEGIN
+      ;
+      ; Calcul du volume brut des nouveaux blocs déjà dans la base de donnée
+      ;
+      LET TZ_LARGEUR   = BLOLONBRU OF BLO_VALI
+      LET TZ_HAUTEUR   = BLOHAUBRU OF BLO_VALI
+      LET TZ_EPAISSEUR = BLOLARBRU OF BLO_VALI
+      DO INTERNAL CALVOL
+      LET T_TOT_VOL_BRU = T_TOT_VOL_BRU + TZ_VOLUME
+      ;
+      ; Calcul du volume net des nouveaux blocs déjà dans la base de donnée
+      ;
+      LET TZ_LARGEUR   = BLOLONNET OF BLO_VALI
+      LET TZ_HAUTEUR   = BLOHAUNET OF BLO_VALI
+      LET TZ_EPAISSEUR = BLOLARNET OF BLO_VALI
+      DO INTERNAL CALVOL
+      LET T_TOT_VOL_NET = T_TOT_VOL_NET + TZ_VOLUME
+      ;
+      ; Calcul du volume à payer des nouveaux blocs déjà dans la base de donnée
+      ;
+      LET TZ_LARGEUR   = BLOLONPYE OF BLO_VALI
+      LET TZ_HAUTEUR   = BLOHAUPYE OF BLO_VALI
+      LET TZ_EPAISSEUR = BLOLARPYE OF BLO_VALI
+      DO INTERNAL CALVOL
+      LET T_TOT_VOL_PYE = T_TOT_VOL_PYE + TZ_VOLUME
+    END
+  END
+  ;
+  ; Calcul du volume brut du bloc en traitement
+  ;
+  LET TZ_LARGEUR   = BLOLONBRU OF BLO_NEW
+  LET TZ_HAUTEUR   = BLOHAUBRU OF BLO_NEW
+  LET TZ_EPAISSEUR = BLOLARBRU OF BLO_NEW
+  DO INTERNAL CALVOL
+  LET T_TOT_VOL_BRU = T_TOT_VOL_BRU + TZ_VOLUME
+  ;
+  ; Calcul du volume net du bloc en traitement
+  ;
+  LET TZ_LARGEUR   = BLOLONNET OF BLO_NEW
+  LET TZ_HAUTEUR   = BLOHAUNET OF BLO_NEW
+  LET TZ_EPAISSEUR = BLOLARNET OF BLO_NEW
+  DO INTERNAL CALVOL
+  LET T_TOT_VOL_NET = T_TOT_VOL_NET + TZ_VOLUME
+  ;
+  ; Calcul du volume à payer du bloc en traitement
+  ;
+  LET TZ_LARGEUR   = BLOLONPYE OF BLO_NEW
+  LET TZ_HAUTEUR   = BLOHAUPYE OF BLO_NEW
+  LET TZ_EPAISSEUR = BLOLARPYE OF BLO_NEW
+  DO INTERNAL CALVOL
+  LET T_TOT_VOL_PYE = T_TOT_VOL_PYE + TZ_VOLUME
+  ;
+  ; Valide que le volume brut des nouveau bloc ne dépassa pas le
+  ; volume brut du bloc père
+  ;
+; valider a 4 chiffre seulement
+ let d_t_tot_vol_bru  = round(T_TOT_VOL_BRU,4)
+ let d_blovolmc3bru =  round(BLOVOLMC3BRU OF PDBLOC,4)
+  IF d_T_TOT_VOL_BRU > d_BLOVOLMC3BRU
+  THEN BEGIN
+    ERROR 2944 ; Le volume BRUT des blocs redimensionner est plus grand que le volume du bloc de départ
+  END
+  ;
+  ; Valide que le volume net des nouveau bloc ne dépassa pas le
+  ; volume net du bloc père
+  ;
+;nathalie desrochers a demander de ne plus faire cette validation
+;  IF round(T_TOT_VOL_NET,4) > round(BLOVOLMC3NET OF PDBLOC,4)
+;  THEN BEGIN
+;    ERROR 2945 ; Le volume NET des blocs redimensionner est plus grand que le volume du bloc de départ
+;  END
+  ;
+  ; Évaluation des champs indiquant une mise à jour du bloc.
+  ;
+  IF NOT NEWRECORD OF BLO_NEW AND &
+     ALTEREDRECORD OF BLO_NEW
+  THEN BEGIN
+    LET BLODATDERMAJ     OF BLO_NEW = SYSDATE
+    LET BLOHREDERMAJ     OF BLO_NEW = SYSTIME / 10000
+    LET BLOUSRDERMAJ     OF BLO_NEW = LOGONID
+  END
+  ;
+  ; Mise à jour du statut du bloc père si au moins un nouveau bloc est trouvé
+  ;
+  IF T_TOT_VOL_BRU > 0.00 OR &
+     T_TOT_VOL_NET > 0.00 OR &
+     T_TOT_VOL_PYE > 0.00
+  THEN BEGIN
+    LET BLOSTU OF PDBLOC = "T"
+    DISPLAY BLOSTU OF PDBLOC
+  END
+  ;
+  ; Incrémentation du numéro de séquence
+  ;
+  IF 0 = RDBNUMRED OF PDREDIM_BLOC
+  THEN BEGIN
+    START TRANSACTION NO_SEQ
+    GET PDSEQ_REDIM_BLOC OPTIONAL       &
+      VIA   CIECLE                      &
+      USING T_CIECLEMNU
+    IF NOT ACCESSOK
+    THEN BEGIN
+      LET CIECLE OF PDSEQ_REDIM_BLOC = T_CIECLEMNU
+    END
+    LET RBQNUM    OF PDSEQ_REDIM_BLOC = RBQNUM    OF PDSEQ_REDIM_BLOC + 1
+    LET RDBNUMRED OF PDREDIM_BLOC     = RBQNUM    OF PDSEQ_REDIM_BLOC
+    PUT PDSEQ_REDIM_BLOC
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Défauts de bloc
+;
+
+PROCEDURE DESIGNER D001
+BEGIN
+  RUN SCREEN  pd176e &
+              PASSING   T_CIECLEMNU,    &
+                        T_CIENOM,       &
+                        BLO_NEW         &
+              MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Vérification
+;
+
+PROCEDURE DESIGNER D002
+BEGIN
+  RUN SCREEN  pd178b &
+              PASSING   T_CIECLEMNU,    &
+                        T_CIENOM,       &
+                        BLO_NEW         &
+              MODE F
+END
+
+BUILD
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+************************** Redimensionnement de bloc ***************************
+*                                                                              *
+* No bloc 1 ap..: xxxxx-xxxxx-x                     Statut........: x          *
+* Largeur brut..: xxxxx    Hauteur brut..: xxxxx    Longueur brut.: xxxxx      *
+* Volume brut...: xxxxxxx                           No. réception.: xxxxxxxxx  *
+* Fournisseur...: xxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            *
+*                                                                              *
+********************************* Nouveau bloc *********************************
+*                                                                              *
+* No bloc 1 ap..: xxxxx-xxxxx-x                     Statut........: x          *
+*                                                                              *
+* Code granit...: xxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx               *
+*                                                                              *
+* Largeur brut..: xxxxx     largeur nette.: xxxxx     Largeur payer.: xxxxx    *
+* Hauteur brut..: xxxxx     Hauteur nette.: xxxxx     Hauteur payer.: xxxxx    *
+* Longueur brut.: xxxxx     Longueur nette: xxxxx     Longueur payer: xxxxx    *
+* Total m3 brut.: xxxxxxx   Total m3 nette: xxxxxxx   Total m3 payer: xxxxxxx  *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+********************************************************************************
+@ENDIF

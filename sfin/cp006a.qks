@@ -1,0 +1,1058 @@
+;/T/ Paiements automatiques - Imputation
+;
+;/P/ Programmeur..: Thomas BRENNEUR
+;    Date Création: 18 Juin 1993
+;
+;    Description..: Saisie de l'imputation pour un paiement automatique.
+;                   Attention : pour un paiement automatique on ne saisis
+;                   pas de montant. On ne rentre qu'un pourcentage de
+;                   répartition qui sera appliqué sur le montant de la
+;                   cédule lors du paiement. Le total du pourcentage de
+;                   répartition de toutes les lignes de l'imputation
+;                   doit toujours être de 100.00%.
+;
+;/M/ François Déry, 30 avril 1999
+;       Modifier l'accèss au fichier de séquence des paiements auto. car il a
+;       été converti en format interbase au lieu d'indexé.
+;
+;/M/ Adatation....: Marc Morissette 22 Octobre 1993
+;
+;    Description..: Ajout du flg Facturable Oui/non et du numéro de client
+;                   Ajout du code d'équipement
+;                   Modification de l'ordre de saisie des champs
+;/A/ Adaptation : Nancy Marceau, 24 mars 1994
+;
+;    Description: Afficher les valeurs par défaut du projet, du sous-projet et
+;                 de l'équipement qui ont été définis dans la maintenance des
+;                 paramètres du Prix de revient.
+;
+;/M/ Modifié par: Guy Chabot le 12 Avril 1994
+;    Impact.....: Prendre par défaut l'équipement mentionné dans la table
+;                 GPPROJETS selon le projet saisie.
+;-------------------------------------------------------------------------------
+;/V/ 3.00.02    Guy Chabot 12-mai-1994 (197).
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cp006a ACTIONBAR &
+              MODE LABEL "" AT 2,80 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              FROM 8,1 TO 23,80 &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING CPCPT_A_PAYER
+
+USE ussectmp   NOLIST
+    "CP006A"
+
+USE cp006a.hlp NOLIST
+
+USE usactecr   NOLIST
+
+;
+; Ouverture d'une transaction QUERY indépendante de l'écran maitre.
+; pour ne pas rompre la chaine de lecture.
+;
+USE ustrasse   NOLIST
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE CPPAIE_AUTO_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+
+TEMPORARY T_CLICIECLE CHARACTER SIZE 4 RESET AT STARTUP ; Compagnie du client.
+
+;-------------------------------------------------------------------------------
+;
+; COMPTE À PAYER
+;
+
+FILE CPCPT_A_PAYER    MASTER
+
+;-------------------------------------------------------------------------------
+;
+; IMPUTATION EN POURCENTAGE
+;
+FILE CPCAP_IMPUTATION PRIMARY  &
+                      OCCURS 9 &
+                      NOITEMS
+
+  ACCESS  VIA     FOUCIECLE, &
+                  FOUCLE   , &
+                  CAPCLE     &
+          USING   FOUCIECLE OF CPCPT_A_PAYER, &
+                  FOUCLE    OF CPCPT_A_PAYER, &
+                  CAPCLE    OF CPCPT_A_PAYER  &
+          ORDERBY FOUCIECLE, &
+                  FOUCLE   , &
+                  CAPCLE   , &
+                  CCITIMSTP
+
+  ITEM FOUCIECLE  OF CPCAP_IMPUTATION INITIAL FOUCIECLE OF CPCPT_A_PAYER
+  ITEM FOUCLE     OF CPCAP_IMPUTATION INITIAL FOUCLE    OF CPCPT_A_PAYER
+  ITEM CAPCLE     OF CPCAP_IMPUTATION FINAL   CAPCLE    OF CPCPT_A_PAYER
+  ITEM CCITIMSTP  OF CPCAP_IMPUTATION INITIAL SYSDATE * 1000000 + &
+                                              ROUND(SYSTIME / 100)
+  ITEM CCICODDC   OF CPCAP_IMPUTATION INITIAL "D"
+  ITEM CLICIECLE  OF CPCAP_IMPUTATION INITIAL T_CLICIECLE
+;-------------------------------------------------------------------------------
+;
+; Notion de charte de compte et pour avoir la devise du G/L.
+;
+FILE MCHOLDING        REFERENCE
+
+  ACCESS  VIA   CIENMC &
+          USING "1"
+
+;-------------------------------------------------------------------------------
+;
+; Validation de la charte de compte.
+;
+FILE MCCHARTE_UNA     REFERENCE
+
+  ACCESS  VIA   CPTCLE, &
+                CIECLE, &
+                UNACLE &
+          USING CPTCLE OF CPCAP_IMPUTATION, &
+                CAPCIECLE OF CPCPT_A_PAYER, &
+                UNACLE OF CPCAP_IMPUTATION
+
+;-------------------------------------------------------------------------------
+;
+; Validation de l'unité administrative.
+;
+FILE MCUNITE_ADM      REFERENCE &
+                      OCCURS WITH CPCAP_IMPUTATION
+
+  ACCESS  VIA   CIECLE, &
+                UNACLE &
+          USING CAPCIECLE OF CPCPT_A_PAYER   , &
+                UNACLE    OF CPCAP_IMPUTATION
+
+;-------------------------------------------------------------------------------
+;
+; Validation du compte comptable.
+;
+FILE VCPT_DSC         REFERENCE &
+                      OCCURS WITH CPCAP_IMPUTATION
+
+  ACCESS  VIA   CPTCLE &
+          USING CPTCLE OF CPCAP_IMPUTATION
+
+;-------------------------------------------------------------------------------
+;
+; Validation des codes de taxes fédéral.
+;
+FILE MCTAXE           REFERENCE &
+                      ALIAS A_TAX_TPS
+
+  ACCESS  VIA   TAXCLETYP, &
+                TAXCLECOD &
+          USING CCITAXTYPTPS OF CPCAP_IMPUTATION, &
+                CCITAXCODTPS OF CPCAP_IMPUTATION
+
+;-------------------------------------------------------------------------------
+;
+; Validation des codes de taxes provincial.
+;
+FILE MCTAXE           REFERENCE &
+                      ALIAS A_TAX_TVP
+
+  ACCESS  VIA   TAXCLETYP, &
+                TAXCLECOD &
+          USING CCITAXTYPTVQ OF CPCAP_IMPUTATION, &
+                CCITAXCODTVQ OF CPCAP_IMPUTATION
+
+;-------------------------------------------------------------------------------
+;
+; Pour avoir les codes de taxes de défaut du fournisseur, le type de
+; fournisseur et la devise du fournisseur.
+;
+FILE VFOC_FOU         REFERENCE
+
+  ACCESS  VIA   FOUCIECLE, &
+                FOUCLE   , &
+                FOCCIECLE  &
+          USING REFCIECLE OF CPCPT_A_PAYER, &
+                REFCLENUM OF CPCPT_A_PAYER, &
+                CAPCIECLE OF CPCPT_A_PAYER
+
+;-------------------------------------------------------------------------------
+;
+; Validation du projet.
+;
+FILE GPPROJETS         REFERENCE &
+                      OCCURS WITH CPCAP_IMPUTATION
+
+  ACCESS  VIA   CIECLE, &
+                PRJCLE  &
+          USING CAPCIECLE OF CPCPT_A_PAYER, &
+                PRJCLE    OF CPCAP_IMPUTATION
+
+;-------------------------------------------------------------------------------
+;
+; Validation de l'activité.
+;
+FILE GPPRO_ACTIVITE       REFERENCE
+
+  ACCESS  VIA   CIECLE, &
+                PRJCLE, &
+                PRACLE  &
+          USING CAPCIECLE OF CPCPT_A_PAYER, &
+                PRJCLE OF CPCAP_IMPUTATION, &
+                PRACLE OF CPCAP_IMPUTATION
+
+;-------------------------------------------------------------------------------
+; Valeurs par défaut à utiliser pour le projet, sous-projet et équipement.
+;
+FILE GPPARAMETRE REFERENCE &
+                 OCCURS WITH CPCAP_IMPUTATION
+
+  ACCESS VIA   CIECLE &
+         USING CAPCIECLE OF CPCPT_A_PAYER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide l'immobilisation et affiche la description.
+;
+TEMPORARY T_IMMCLE CHARACTER SIZE 12 ; Popup sur les immobilisations.
+
+FILE IMIMMOBILISATION REFERENCE
+
+  ACCESS  VIA   CIECLE, &
+                IMMCLE &
+          USING CAPCIECLE OF CPCPT_A_PAYER , &
+                IMMCLE OF CPCAP_IMPUTATION
+
+  SELECT IF IMMSTU OF IMIMMOBILISATION = "A"
+
+
+
+
+;
+; Validation du numéro de client et on a besoin de certaines informations sur
+; le client , comme les termes d'encaissements, le statut, le type...
+;
+FILE VCLC_CLI         REFERENCE
+  ACCESS VIA CLICIECLE, &
+             CLICLE   , &
+             CIECLE     &
+         USING T_CLICIECLE,&
+               CLICLE OF CPCAP_IMPUTATION, &
+               CAPCIECLE OF CPCPT_A_PAYER
+
+TEMPORARY T_CLICLE    CHARACTER SIZE  6 ; Popup sur les clients
+
+;-------------------------------------------------------------------------------
+;
+; Paramètres des comptes à payer permettant de retrouver l'identifiant des
+; paiements automatiques
+;
+FILE CPPARAMETRE REFERENCE
+
+  ACCESS  VIA   CIENMC &
+          USING "1"
+
+;-------------------------------------------------------------------------------
+;
+; Numérotation du numéro de paiement
+;
+FILE CPPAIE_AUTO_SEQ DESIGNER &
+                     TRANSACTION GEN_NUM_SEQ
+
+  ACCESS VIA    CIECLE &
+         USING  CAPCIECLE OF CPCPT_A_PAYER
+
+  ITEM CIECLE OF CPPAIE_AUTO_SEQ INITIAL CAPCIECLE OF CPCPT_A_PAYER
+
+;-------------------------------------------------------------------------------
+;
+; Calcul de l'écart entre le 100% demandé et la sommation de l'imputation.
+;
+DEFINE D_ECART FLOAT SIZE 8 = 10000 - CAPCUMMNT OF CPCPT_A_PAYER
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de compagnie du menu.
+TEMPORARY T_CIECLE    CHARACTER SIZE 4
+
+TEMPORARY T_CPTCLE    CHARACTER SIZE 6 ; Popup sur les comptes
+TEMPORARY T_PECCLE    CHARACTER SIZE 4 ; Popup sur les comptes et unité adm.
+TEMPORARY T_CPTTYPPAT CHARACTER SIZE 1 ; Popup sur les comptes
+TEMPORARY T_CPTCATPAT CHARACTER SIZE 8 ; Popup sur les comptes
+
+TEMPORARY T_UNACLE    CHARACTER SIZE 8 ; Popup sur les unités adm.
+
+TEMPORARY T_PRJCLE    CHARACTER SIZE 8 ; Popup sur les projets.
+TEMPORARY T_PRJSTUPAT CHARACTER SIZE 8 ; Popup sur les projets.
+
+TEMPORARY T_PRACLE    CHARACTER SIZE 3 ; Popup sur les PRAivités.
+TEMPORARY T_PRASTUPAT CHARACTER SIZE 5 ; Popup sur les activités.
+
+TEMPORARY T_TAXCLETYP CHARACTER SIZE 1 ; Popup sur les codes de taxes
+TEMPORARY T_TAXCLECOD CHARACTER SIZE 2 ; Popup sur les codes de taxes
+TEMPORARY T_TAXMODPAT CHARACTER SIZE 5 ; Popup sur les codes de taxes
+
+TEMPORARY T_FLGMOD       CHARACTER SIZE 1 OCCURS WITH CPCAP_IMPUTATION
+                                       ; Flag pour déceler s'il y eu modif.
+
+;-------------------------------------------------------------------------------
+
+USE ushilite NOLIST
+DRAW FROM  2, 1 TO  2,79
+DRAW FROM  2, 1 TO 16, 1
+DRAW FROM  3,80 TO 16,80
+DRAW FROM 16, 1 TO 16,80
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+      " Imputation " &
+@ELSE
+      " Charge " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST
+
+
+ALIGN (,3,19)
+
+FIELD D_ECART &
+      DISPLAY &
+      PREDISPLAY &
+@IF FRANCAIS
+      LABEL "Solde à vent..:" &
+@ELSE
+      LABEL "Balance.......:" &
+@ENDIF
+      PICTURE "^^^.^^ %" &
+      TRAILING SIGN "-" &
+      SIGNIFICANCE 6
+
+SKIP
+
+DRAW ,1 TO ,80
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+      "Pourcentage de" &
+@ELSE
+      "%%%%%%%%%%% %%" &
+@ENDIF
+  AT ,47
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      "Projet SSpro Immobilis.   Unité    Compte répartition    TF  TP Fac Client"&
+@ELSE
+      "%%%%%%  %%%%%      %%%%%%%%%%%    %%  %%  %%%%%%  %%%%%%%%           " &
+@ENDIF
+  AT ,6
+
+
+
+;                                             Pourcentage de
+;    Projet SSpro Immobilis.   Unité    Compte répartition    TF  TP
+;    xxxxxxxx xxx xxxxxxxxxxxx xxxxxxxx xxxxxx   xxxxxx       xx  xx xxx xxxxxx
+ALIGN (6,5,6) (,,15) (,,19) (,,32) (,,41) (,,50) (,,63)(,,67)(,,70)(,,74)
+
+CLUSTER OCCURS WITH CPCAP_IMPUTATION ID BASE 05
+
+FIELD PRJCLE       OF CPCAP_IMPUTATION &
+        HIDDEN LABEL " "
+
+FIELD PRACLE       OF CPCAP_IMPUTATION
+
+FIELD IMMCLE       OF CPCAP_IMPUTATION &
+        LOOKUP ON IMIMMOBILISATION &
+            MESSAGE 491 ; Cette immobilisation n'existe pas ou est inactive.
+
+FIELD UNACLE OF CPCAP_IMPUTATION &
+      DEFAULT PRAUNADEP OF GPPRO_ACTIVITE &
+      LOOKUP ON MCUNITE_ADM &
+        MESSAGE 472 ; Ce numéro d'unité administrative n'existe pas.
+
+FIELD CPTCLE OF CPCAP_IMPUTATION &
+      REQUIRED &
+      LOOKUP ON VCPT_DSC  &
+        MESSAGE 411 ; Ce compte est inexistant.
+
+
+FIELD CCIPCTREP OF CPCAP_IMPUTATION &
+      REQUIRED
+
+FIELD CCITAXCODTPS OF CPCAP_IMPUTATION &
+      DUPLICATE
+
+FIELD CCITAXCODTVQ OF CPCAP_IMPUTATION &
+      DUPLICATE
+
+FIELD CCIFLGFAC    OF CPCAP_IMPUTATION SIZE 3
+
+FIELD CLICLE       OF CPCAP_IMPUTATION REQUIRED &
+        LOOKUP ON VCLC_CLI &
+          MESSAGE 624  ; Ce client n'existe pas.
+
+
+
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+
+  IF HLDCHTCLI OF MCHOLDING = "1"
+  THEN LET T_CLICIECLE = CAPCIECLE OF CPCPT_A_PAYER
+  ELSE LET T_CLICIECLE = HLDCHRSUB OF MCHOLDING
+
+END
+
+;-------------------------------------------------------------------------------
+
+PROCEDURE EXIT
+BEGIN
+  IF 10000 <> CAPCUMMNT OF CPCPT_A_PAYER
+  THEN WARNING 493 ; L'imputation doit être répartie sur 100%.
+END
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION ET VALIDATION DU COMPTE
+;
+;
+PROCEDURE INPUT CPTCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_CPTTYPPAT = "R"
+    LET T_CPTCATPAT = "@"
+    LET T_PECCLE    = PECCLE OF CPCPT_A_PAYER
+    RUN SCREEN mc103 MODE F PASSING T_CPTCLE, &
+                                    T_CPTTYPPAT, &
+                                    T_CPTCATPAT, &
+                                    T_PECCLE &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNCATE(T_CPTCLE)
+  END
+  ;
+  ; Force l'éxécution du LOOKUP.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(CPTCLE OF CPCAP_IMPUTATION))
+  THEN LET FIELDTEXT = CPTCLE OF CPCAP_IMPUTATION
+END
+
+PROCEDURE EDIT CPTCLE
+BEGIN
+  IF CPTTYP OF VCPT_DSC <> "R"
+  THEN ERROR 474 ; On ne peut pas utliser ce compte dans une imputation.
+
+  IF     DEVCLE OF VCPT_DSC <> DEVCLE OF VFOC_FOU  &
+     AND DEVCLE OF VCPT_DSC <> DEVCLE OF MCHOLDING
+  THEN ERROR 578 ; Compte interdit due à la devise du compte.
+
+  IF HLDCHTCPT OF MCHOLDING = "1"
+  THEN BEGIN
+    GET MCCHARTE_UNA OPTIONAL
+    ;
+    ; Si la charte est incluse, le lien est obligatoire.
+    ;
+    IF NOT ACCESSOK
+    THEN BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN ERROR 475 ; La combinaison compte/unité adm n'existe pas.
+    END
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION & VALIDATION DE L'UNITÉ ADMINISTRATIVE
+;
+;
+PROCEDURE INPUT UNACLE
+BEGIN
+  ;
+  ; Popup sur les unités administrative.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = CAPCIECLE OF CPCPT_A_PAYER
+    LET T_CPTCLE = CPTCLE OF CPCAP_IMPUTATION
+    LET T_PECCLE = PECCLE OF CPCPT_A_PAYER
+    LET T_UNACLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc104 MODE F PASSING T_CIECLE , T_UNACLE &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNCATE(T_UNACLE)
+  END
+  ;
+  ; Force l'éxécution du LOOKUP.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(UNACLE OF CPCAP_IMPUTATION))
+  THEN LET FIELDTEXT = UNACLE OF CPCAP_IMPUTATION
+END
+
+PROCEDURE INPUT IMMCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLEMNU = CAPCIECLE OF CPCPT_A_PAYER
+    LET T_IMMCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN im102 MODE F &
+                     PASSING T_CIECLEMNU, &
+                             T_IMMCLE  WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE( T_IMMCLE )
+  END
+  ;
+  ; Par défaut on utilise la catégorie définie dans GPPARAMETRE. S'il n'y en a pas
+  ; on force la validation.
+  ;
+  IF     0 = SIZE( FIELDTEXT ) &
+     AND 0 = SIZE(TRUNCATE(IMMCLE OF CPCAP_IMPUTATION))
+  THEN BEGIN
+     IF 0 <> SIZE(TRUNCATE(PRAIMMCLE OF GPPRO_ACTIVITE))
+     THEN LET FIELDTEXT = PRAIMMCLE OF GPPRO_ACTIVITE
+     ELSE LET FIELDTEXT = IMMCLE OF CPCAP_IMPUTATION
+  END
+
+END
+
+
+PROCEDURE EDIT IMMCLE
+BEGIN
+   IF IMMTYP OF IMIMMOBILISATION <> "E"
+   THEN ERROR 1503
+END
+
+;-------------------------------------------------------------------------------
+;
+; MISE À JOUR DU CUMULATIF DE L'IMPUTATION.
+;
+PROCEDURE EDIT CCIPCTREP
+BEGIN
+  ;
+  ; Valide la partie décimale (float). On ne peut pas utiliser le USEFILE
+  ; USVALDEC car, le pourcentage est conservé avec un point réel pour ne pas le
+  ; convertir lors du calcul de répartition.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,".")
+  THEN BEGIN
+    IF 100 < ABS(NCO(FIELDTEXT[INDEX(FIELDTEXT,".") + 1:SIZE(FIELDTEXT)]))
+    THEN ERROR 15 ; Il y a trop de position décimale.
+  END
+
+
+  LET CAPCUMMNT OF CPCPT_A_PAYER &
+      = ROUND( CAPCUMMNT OF CPCPT_A_PAYER                &
+      - OLDVALUE(CCIPCTREP OF CPCAP_IMPUTATION) * 10000  &
+      + FIELDVALUE                              * 10000 )
+  ;
+  ; Initialise le flag à Oui dans la procédure EDIT. Car si l'usager saisie
+  ; une valeur la procédure EDIT est exécuté.
+  ;
+  LET T_FLGMOD = "1"
+END
+
+;
+; Affiche l'écart.
+;
+PROCEDURE PROCESS CCIPCTREP
+BEGIN
+  DISPLAY D_ECART
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; CONSULTATION ET VALIDATION DU CODE DE TAXE FÉDÉRALE
+;
+;
+PROCEDURE INPUT CCITAXCODTPS
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TAXCLETYP = CCITAXTYPTPS OF CPCAP_IMPUTATION
+    LET T_TAXCLECOD = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_TAXMODPAT = "@"
+    RUN SCREEN mc111 MODE F PASSING T_TAXCLETYP, &
+                                    T_TAXCLECOD, &
+                                    T_TAXMODPAT &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNCATE(T_TAXCLECOD)
+  END
+  ;
+  ; Par defaut on utilise le code de taxe de TPS du fournisseur.
+  ;
+  IF     0 = SIZE( FIELDTEXT ) &
+     AND NEWRECORD OF CPCAP_IMPUTATION &
+     AND CCITAXCODTPS OF CPCAP_IMPUTATION = "" &
+     AND FOCTAXCODTPS OF VFOC_FOU <> ""
+  THEN LET FIELDTEXT = FOCTAXCODTPS OF VFOC_FOU
+
+  ;
+  ; On force la procédure EDIT pour valider le code de taxe
+  ;
+  IF     0 = SIZE( FIELDTEXT ) &
+     AND NOT FINDMODE
+  THEN LET FIELDTEXT = CCITAXCODTPS OF CPCAP_IMPUTATION
+END
+
+;
+; Validation du code de taxe fédéral.
+;
+PROCEDURE EDIT CCITAXCODTPS
+BEGIN
+  IF 0 <> SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    GET A_TAX_TPS OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 421 ; Ce code de taxe est inexistant.
+    IF TAXMOD OF A_TAX_TPS = "S"
+    THEN ERROR 479 ; Seuls les modes de taxation "inclus" et "exempt" sont permis.
+  END
+
+  ;
+  ; Initialise le flag à Oui dans la procédure EDIT. Car si l'usager saisie
+  ; une valeur on doit exécuter la procédure EDIT du champs CCITAXCODTVQ
+  ;
+  LET T_FLGMOD = "1"
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; CONSULTATION ET VALIDATION DU CODE DE TAXE PROVINCIALE
+;
+;
+PROCEDURE INPUT CCITAXCODTVQ
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TAXCLETYP = CCITAXTYPTVQ OF CPCAP_IMPUTATION
+    LET T_TAXCLECOD = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_TAXMODPAT = "@"
+    RUN SCREEN mc111 MODE F PASSING T_TAXCLETYP, &
+                                    T_TAXCLECOD, &
+                                    T_TAXMODPAT &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNCATE(T_TAXCLECOD)
+  END
+  ;
+  ; Par defaut on utilise le code de taxe de TVQ du fournisseur.
+  ;
+  IF     0 = SIZE( FIELDTEXT ) &
+     AND NEWRECORD OF CPCAP_IMPUTATION &
+     AND CCITAXCODTVQ OF CPCAP_IMPUTATION = "" &
+     AND FOCTAXCODTVQ OF VFOC_FOU <> ""
+  THEN LET FIELDTEXT = FOCTAXCODTVQ OF VFOC_FOU
+  ;
+  ; Force l'éxécution de la procédure edit, car il y a inter-relation entre
+  ; deux champs(taxe).
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     T_FLGMOD = "1"
+  THEN LET FIELDTEXT = CCITAXCODTVQ OF CPCAP_IMPUTATION
+END
+
+;
+; Validation du code de taxe provincial
+;
+PROCEDURE EDIT CCITAXCODTVQ
+BEGIN
+  IF 0 <> SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    GET A_TAX_TVP OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 421 ; Ce code de taxe est inexistant.
+    IF TAXMOD OF A_TAX_TVP = "S"
+    THEN ERROR 479 ; Seuls les modes de taxation "inclus" et "exempt" sont permis.
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION & VALIDATION DU CODE DE PROJET
+;
+;
+PROCEDURE INPUT PRJCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE    = CAPCIECLE OF CPCPT_A_PAYER
+    LET T_PRJSTUPAT = "A"
+    LET T_PRJCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gp104 MODE F PASSING T_CIECLE   , &
+                                    T_PRJCLE   , &
+                                    T_PRJSTUPAT &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNCATE(T_PRJCLE)
+  END
+  ;
+  ; Par défaut on utilise le PRJjet défini dans GPPARAMETRE. S'il n'y en a pas
+  ; on force la validation.
+  ;
+  IF     0 = SIZE( FIELDTEXT ) &
+     AND PRJCLE    OF CPCAP_IMPUTATION = ""
+  THEN BEGIN
+    IF PROCLE    OF GPPARAMETRE <> ""
+    THEN LET FIELDTEXT = PROCLE OF GPPARAMETRE
+    ELSE LET FIELDTEXT = PRJCLE OF CPCAP_IMPUTATION
+  END
+
+
+END
+
+;
+; Validation du projet, le projet est optionel dans l'imputation.
+;
+PROCEDURE EDIT PRJCLE
+BEGIN
+  GET GPPROJETS OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 512 ; Ce projet n'existe pas.
+
+  IF PRJSTU OF GPPROJETS <> "A"
+  THEN ERROR 514 ; Ce projet n'est pas actif.
+END
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION & VALIDATION DU CODE D'ACTIVITÉ
+;
+;
+PROCEDURE INPUT PRACLE
+BEGIN
+  ;
+  ; Popup sur les activités.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE    = CAPCIECLE OF CPCPT_A_PAYER
+    LET T_PRJCLE    = PRJCLE OF CPCAP_IMPUTATION
+    LET T_PRASTUPAT = "A"
+    LET T_PRACLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gp108 MODE F PASSING T_CIECLE   , &
+                                    T_PRJCLE   , &
+                                    T_PRACLE   , &
+                                    T_PRASTUPAT &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNCATE(T_PRACLE)
+  END
+  ;
+  ; Par défaut on utilise le sous-projet défini dans GPPARAMETRE. S'il n'y en a pas
+  ; on force la validation.
+  ;
+  IF     0 = SIZE( FIELDTEXT ) &
+     AND PRACLE    OF CPCAP_IMPUTATION = ""
+  THEN BEGIN
+     IF ACTCLE    OF GPPARAMETRE <> ""
+     THEN LET FIELDTEXT = ACTCLE OF GPPARAMETRE
+     ELSE LET FIELDTEXT = PRACLE OF CPCAP_IMPUTATION
+  END
+
+  ;
+  ; Force la validation de l'activité, car l'usager peut modifier le numéro de
+  ; projet sur la ligne.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(PRACLE OF CPCAP_IMPUTATION))
+  THEN LET FIELDTEXT = PRACLE OF CPCAP_IMPUTATION
+END
+
+;
+; Validation de l'activité, l'activité est optionel dans l'imputation.
+;
+PROCEDURE EDIT PRACLE
+BEGIN
+  GET GPPRO_ACTIVITE OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 471 ; Cette activité n'existe pas.
+
+  IF PRASTU OF GPPRO_ACTIVITE <> "A"
+  THEN ERROR 520 ; Cette activité est inactive.
+END
+
+PROCEDURE INPUT CCIFLGFAC
+BEGIN
+  USE usflginp NOLIST
+END
+
+PROCEDURE PROCESS CCIFLGFAC
+BEGIN
+  IF CCIFLGFAC = "0"
+  THEN BEGIN
+    LET CLICLE OF CPCAP_IMPUTATION = ""
+    DISPLAY CLICLE
+  END
+END
+
+PROCEDURE OUTPUT CCIFLGFAC
+BEGIN
+  USE usflgout3 NOLIST
+END
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les client.
+;
+;
+PROCEDURE INPUT CLICLE
+BEGIN
+
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = CAPCIECLE OF CPCPT_A_PAYER
+    LET T_CLICLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cr102 MODE F PASSING T_CLICIECLE, T_CIECLE, T_CLICLE &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNC(T_CLICLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du client.
+;
+;
+PROCEDURE EDIT CLICLE
+BEGIN
+  IF CLISTU OF VCLC_CLI = "I"
+  THEN ERROR 632 ; Le client est inactif.
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE APPEND
+BEGIN
+  ;
+  USE ussecent NOLIST
+  ;
+  ; Si notion de projet.
+  ;
+  IF HLDNTNPRO OF MCHOLDING = "1"
+  THEN BEGIN
+    ACCEPT PRJCLE    OF CPCAP_IMPUTATION
+    INFORMATION = PRJDSC1 OF GPPROJETS
+    ACCEPT PRACLE    OF CPCAP_IMPUTATION
+    INFORMATION = PRADSC1 OF GPPRO_ACTIVITE
+    ACCEPT IMMCLE    OF CPCAP_IMPUTATION
+    INFORMATION = IMMDSC  OF IMIMMOBILISATION
+  END
+  ELSE BEGIN
+    LET PRJCLE OF CPCAP_IMPUTATION = " "
+    LET PRACLE OF CPCAP_IMPUTATION = " "
+    LET IMMCLE OF CPCAP_IMPUTATION = " "
+  END
+  ACCEPT UNACLE    OF CPCAP_IMPUTATION
+  INFORMATION = UNANOM OF MCUNITE_ADM
+  EDIT UNACLE    OF CPCAP_IMPUTATION
+
+  ACCEPT CPTCLE    OF CPCAP_IMPUTATION
+  INFORMATION = CPTDSCABR OF VCPT_DSC
+
+
+  ACCEPT CCIPCTREP    OF CPCAP_IMPUTATION
+  ACCEPT CCITAXCODTPS OF CPCAP_IMPUTATION
+  ACCEPT CCITAXCODTVQ OF CPCAP_IMPUTATION
+
+  ACCEPT CCIFLGFAC    OF CPCAP_IMPUTATION
+  IF CCIFLGFAC    OF CPCAP_IMPUTATION = "1"
+  THEN BEGIN
+    ACCEPT CLICLE OF CPCAP_IMPUTATION
+    INFORMATION = CLINOM OF VCLC_CLI
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; La procédure entry est généré car la procédure append est généré.
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  FOR CPCAP_IMPUTATION
+  BEGIN
+    PERFORM APPEND
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Cette procédure est identique à la procédure APPEND.
+;
+;
+PROCEDURE DESIGNER 05
+BEGIN
+  ;
+  ; Si notion de projet.
+  ;
+  IF HLDNTNPRO OF MCHOLDING = "1"
+  THEN BEGIN
+    ACCEPT PRJCLE    OF CPCAP_IMPUTATION
+    INFORMATION = PRJDSC1 OF GPPROJETS
+    ACCEPT PRACLE    OF CPCAP_IMPUTATION
+    INFORMATION = PRADSC1 OF GPPRO_ACTIVITE
+    ACCEPT IMMCLE    OF CPCAP_IMPUTATION
+    INFORMATION = IMMDSC  OF IMIMMOBILISATION
+  END
+  ELSE BEGIN
+    LET PRJCLE OF CPCAP_IMPUTATION = " "
+    LET PRACLE OF CPCAP_IMPUTATION = " "
+    LET IMMCLE OF CPCAP_IMPUTATION = " "
+  END
+
+  ACCEPT UNACLE    OF CPCAP_IMPUTATION
+  INFORMATION = UNANOM OF MCUNITE_ADM
+  EDIT UNACLE    OF CPCAP_IMPUTATION
+
+  ACCEPT CPTCLE    OF CPCAP_IMPUTATION
+  INFORMATION = CPTDSCABR OF VCPT_DSC
+
+
+  ACCEPT CCIPCTREP    OF CPCAP_IMPUTATION
+  ACCEPT CCITAXCODTPS OF CPCAP_IMPUTATION
+  ACCEPT CCITAXCODTVQ OF CPCAP_IMPUTATION
+
+  ACCEPT CCIFLGFAC    OF CPCAP_IMPUTATION
+  IF CCIFLGFAC    OF CPCAP_IMPUTATION = "1"
+  THEN BEGIN
+    ACCEPT CLICLE OF CPCAP_IMPUTATION
+    INFORMATION = CLINOM OF VCLC_CLI
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR CPCAP_IMPUTATION
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF CPCAP_IMPUTATION &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF CPCAP_IMPUTATION &
+       AND NOT NEWRECORD     OF CPCAP_IMPUTATION &
+       AND NOT DELETEDRECORD OF CPCAP_IMPUTATION &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+    ;
+    ; Mise à jour du timbre de modification si l'usager change l'imputation
+    ;
+    IF    NOT NEWRECORD OF CPCPT_A_PAYER &
+      AND ALTEREDRECORD OF CPCAP_IMPUTATION
+    THEN BEGIN
+      LET CAPDATMOD OF CPCPT_A_PAYER = SYSDATE
+      LET CAPHREMOD OF CPCPT_A_PAYER = SYSTIME / 10000
+      LET CAPUSRMOD OF CPCPT_A_PAYER = LOGONID
+    END
+  END
+
+  IF 10000 <> CAPCUMMNT OF CPCPT_A_PAYER
+  THEN WARNING 493 ; L'imputation doit être répartie sur 100%.
+
+  ;
+  ; Numérotation du numéro de paiement.
+  ;
+  IF 0 = SIZE(TRUNCATE(CAPCLE OF CPCPT_A_PAYER))
+  THEN BEGIN
+    GET CPPARAMETRE OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 541 ; Mise à jour impossible, les paramètres des C.A.P. n'ont pas étés définis.
+    IF 0 = SIZE(TRUNCATE(CPPCODPAU OF CPPARAMETRE))
+    THEN ERROR 539 ; Mise à jour impossible, le code de paiement automatique n'est pas défini.
+
+    START TRANSACTION GEN_NUM_SEQ
+    GET CPPAIE_AUTO_SEQ OPTIONAL
+    LET CPANUMSEQ OF CPPAIE_AUTO_SEQ  = CPANUMSEQ OF CPPAIE_AUTO_SEQ + 1
+    LET CAPCLE    OF CPCPT_A_PAYER    = CPPCODPAU OF CPPARAMETRE &
+                                      + ASCII(CPANUMSEQ OF CPPAIE_AUTO_SEQ,6)
+    PUT CPPAIE_AUTO_SEQ
+    COMMIT TRANSACTION GEN_NUM_SEQ
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Met à jour les cumulatifs dans la facture.
+;
+;
+PROCEDURE DELETE
+BEGIN
+  IF NOT DELETEDRECORD OF CPCAP_IMPUTATION
+  THEN LET CAPCUMMNT OF CPCPT_A_PAYER &
+        = ROUND(CAPCUMMNT OF CPCPT_A_PAYER      &
+        - CCIPCTREP OF CPCAP_IMPUTATION * 10000)
+  DELETE CPCAP_IMPUTATION
+  DISPLAY D_ECART
+END
+
+BUILD
+@IF FORMAT
+        CP006A    ;/T/ Paiements automatiques - Imputation    93-10-22
+
+        ********************************** Imputation *********************************x
+        * Reste à vent..: xxxxxxxx                                                     *
+        ********************************************************************************
+        *                                             Pourcentage de                   *
+        *    Projet SSpro Équipement Unité    Compte   répartition    TF  TP           *
+        *    xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx     xxxxxx       xx  xx           *
+        *    xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx     xxxxxx       xx  xx           *
+        *    xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx     xxxxxx       xx  xx           *
+        *    xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx     xxxxxx       xx  xx           *
+        *    xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx     xxxxxx       xx  xx           *
+        *    xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx     xxxxxx       xx  xx           *
+        *    xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx     xxxxxx       xx  xx           *
+        *    xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx     xxxxxx       xx  xx           *
+        *    xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx     xxxxxx       xx  xx           *
+        ********************************************************************************
+@ENDIF

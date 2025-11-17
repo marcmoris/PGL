@@ -1,0 +1,505 @@
+;/T/ Sélection par colonnes
+;
+;/P/ Programmeur..: Thomas BRENNEUR
+;    Date Création: 8 Mars 1993
+;
+;/V3.00.02/ Alain Côté, 9 mars 1994, 197
+;
+;    Description..: Permet de d'indiquer quelles données prendre
+;                   en compte pour les colonnes. Chaque sélection
+;                   s'applique à une colonne d'un état financier.
+;                   Cette sélection peut être differente
+;                   suivant les lignes de cédule.
+;
+;/M/ Modifié par..: Guy Chabot le 18 octobre 1994
+;            but..: Retirer dans la procédure APPEND l'affectation du centre par
+;                   défaut car le centre est un regroupement d'unité et si l'ont
+;                   modifie le centre dans l'unité l'état sort à 0.
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+;
+SCREEN gl012b NOMODE NOACTION FIELDMARK &
+             FROM 11,40 TO 23,80 &
+             RECEIVING  T_ECECIECLE , &
+                        T_ECECLE    , &
+                        T_ECDNUMLIG , &
+                        T_EFICIECLE , &
+                        T_EFICLE    , &
+                        T_CIECLE    , &
+                        T_UNACLE    , &
+                        T_CENCLE
+
+
+USE gl012b.hlp NOLIST
+
+USE ussectmp NOLIST
+    "GL012B"
+
+;------------------------------------------------------------------------------
+; Données provenant de l'écran appelant
+;
+
+TEMPORARY T_ECECIECLE CHARACTER SIZE 4
+TEMPORARY T_ECECLE    CHARACTER SIZE 4
+TEMPORARY T_ECDNUMLIG INTEGER   SIZE 2
+TEMPORARY T_EFICIECLE CHARACTER SIZE 4
+TEMPORARY T_EFICLE    CHARACTER SIZE 4
+TEMPORARY T_CIECLE    CHARACTER SIZE 4
+TEMPORARY T_UNACLE    CHARACTER SIZE 8
+TEMPORARY T_CENCLE    CHARACTER SIZE 4
+
+;------------------------------------------------------------------------------
+; Colonnes de l'état financier demandé dans la cédule
+
+TEMPORARY T_EFCNUMCOL INTEGER SIZE 1 RESET AT STARTUP
+TEMPORARY T_NOMCOL    CHAR SIZE 1
+
+FILE GLEFI_COLONNE PRIMARY NOITEMS
+
+  ACCESS VIA      EFICIECLE, EFICLE, EFCNUMCOL &
+         USING    T_EFICIECLE, T_EFICLE, T_EFCNUMCOL &
+         REQUEST  T_NOMCOL
+
+  ACCESS VIA      EFICIECLE, EFICLE &
+         USING    T_EFICIECLE, T_EFICLE
+
+  SELECT IF         0 <> SIZE(TRUNCATE(EFCTYPCOL OF GLEFI_COLONNE)) &
+           AND "CALC" <> EFCTYPCOL OF GLEFI_COLONNE &
+           AND "ECAR" <> EFCTYPCOL OF GLEFI_COLONNE &
+           AND "RAT " <> EFCTYPCOL OF GLEFI_COLONNE
+
+;------------------------------------------------------------------------------
+; Sélection par colonnes
+
+FILE GLECD_SEL_COL DETAIL OCCURS 8 NOITEMS
+
+  ACCESS  VIA   ECECIECLE,ECECLE,ECDNUMLIG,ESCNUMCOL &
+          USING T_ECECIECLE, T_ECECLE, T_ECDNUMLIG,EFCNUMCOL OF GLEFI_COLONNE
+
+  ITEM ECECIECLE OF GLECD_SEL_COL INITIAL T_ECECIECLE
+  ITEM ECECLE    OF GLECD_SEL_COL INITIAL T_ECECLE
+  ITEM ECDNUMLIG OF GLECD_SEL_COL INITIAL T_ECDNUMLIG
+  ITEM ESCNUMCOL OF GLECD_SEL_COL INITIAL EFCNUMCOL OF GLEFI_COLONNE
+
+;------------------------------------------------------------------------------
+; Validation des compagnies
+
+FILE VSEC_USR REFERENCE OCCURS WITH GLECD_SEL_COL
+
+;------------------------------------------------------------------------------
+; Validation des unités
+
+FILE MCUNITE_ADM REFERENCE OCCURS WITH GLECD_SEL_COL
+
+;------------------------------------------------------------------------------
+; Validation des centres
+
+FILE MCCENTRE REFERENCE OCCURS WITH GLECD_SEL_COL
+
+;------------------------------------------------------------------------------
+; Traitement des colonnes
+;
+TEMPORARY T_CODASC      INT  SIZE 1 ; Code ascii de la lettre (A À P)
+TEMPORARY T_TABCOL      CHAR SIZE 48 INITIAL &
+                        "A01B02C03D04E05F06G07H08I09J10K11L12M13N14O15P16"
+
+TEMPORARY T_TMPCIECLE   CHARACTER SIZE 4
+TEMPORARY T_TMPUNACLE   CHARACTER SIZE 8
+TEMPORARY T_TMPCENCLE   CHARACTER SIZE 4
+
+;------------------------------------------------------------------------------
+
+USE ushilite NOLIST
+USE usdrwfnd NOLIST
+
+TITLE &
+@IF FRANCAIS
+      " Sélections par colonnes " &
+@ELSE
+      " Selection by columns " &
+@ENDIF
+      CENTERED AT 1,1
+
+USE ustitoff NOLIST
+
+;------------------------------------------------------------------------------
+
+ALIGN(3,3,13) (,,15) (,,20)
+
+FIELD T_NOMCOL &
+@IF FRANCAIS
+      LABEL "Colonne.:" &
+      HELP "Entrez la lettre correspondant à la colonne désirée." &
+@ELSE
+      LABEL "Column..:" &
+      HELP "Enter the letter of the required column." &
+@ENDIF
+      UPSHIFT &
+      VALUES "A" TO "P" &
+      HIDDEN ID 10
+
+FIELD EFCTYPCOL OF GLEFI_COLONNE &
+      DISPLAY
+
+FIELD EFCENTCOL OF GLEFI_COLONNE &
+      DISPLAY &
+      FOR 1,19
+
+SKIP
+
+DRAW FROM ,1 TO ,40
+
+SKIP 1
+
+@IF FRANCAIS
+  TITLE "    Compagnie    Unité     Centre" AT ,2
+@ELSE
+  TITLE "     Company      Unit     Center" AT ,2
+@ENDIF
+
+SKIP
+
+ALIGN(8,6,8) (,,18) (,,30)
+
+CLUSTER OCCURS WITH GLECD_SEL_COL ID BASE 20
+
+FIELD CIECLE  OF GLECD_SEL_COL &
+      HIDDEN LABEL " "
+
+FIELD UNACLE  OF GLECD_SEL_COL
+
+FIELD CENCLE  OF GLECD_SEL_COL
+
+CLUSTER
+
+;------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès pour l'écran par son code.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;------------------------------------------------------------------------------
+; Correspondance des lettres avec le numéro de colonne
+;
+PROCEDURE INPUT T_NOMCOL
+BEGIN
+  IF 0 <> INDEX (FIELDTEXT,"*")
+  THEN
+    BEGIN
+      LET T_EFCNUMCOL = 0
+      RUN SCREEN gl111 PASSING T_EFICIECLE,T_EFICLE,T_EFCNUMCOL MODE F
+      ;
+      ; Le code ASCII pour la lettre A est 65, c'est pour cette raison que je
+      ; part avec le code ascii 64.
+      ;
+      LET T_CODASC = 64 + T_EFCNUMCOL
+      LET FIELDTEXT = CHAR(T_CODASC)
+    END
+  ELSE
+    IF 0 <> SIZE (TRUNCATE(FIELDTEXT))
+    THEN BEGIN
+      LET T_EFCNUMCOL = NCONVERT(T_TABCOL[INDEX(T_TABCOL,FIELDTEXT[1:1])+1:2])
+    END
+END
+
+PROCEDURE EDIT T_NOMCOL
+BEGIN
+  GET GLEFI_COLONNE &
+      VIA     EFICIECLE,EFICLE,EFCNUMCOL &
+      USING   T_EFICIECLE, T_EFICLE, T_EFCNUMCOL &
+      OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 273 ; Code de colonne invalide
+  IF     "CALC" = EFCTYPCOL OF GLEFI_COLONNE &
+      OR "ECAR" = EFCTYPCOL OF GLEFI_COLONNE &
+      OR "RAT " = EFCTYPCOL OF GLEFI_COLONNE
+  THEN ERROR 328 ; Vous ne pouvez pas faire de sélection avec ce type de colonne
+END
+
+;------------------------------------------------------------------------------
+; Consultation des compagnies
+;
+
+PROCEDURE INPUT CIECLE
+BEGIN
+  ;
+  ; Validation de la sécuritée sur l'entrée de données, mode APPEND.
+  ;
+  USE ussecent NOLIST
+
+  IF     NOT FINDMODE &
+     AND 0 <> SIZE (TRUNCATE(T_CIECLE)) &
+     AND 0 =  SIZE (TRUNCATE(FIELDTEXT))
+  THEN LET FIELDTEXT = T_CIECLE
+
+  IF    0 <> INDEX(FIELDTEXT,"*") &
+    AND 0 =  INDEX(FIELDTEXT,"#")
+  THEN BEGIN
+    LET T_TMPCIECLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc106 MODE F PASSING T_TMPCIECLE
+    LET FIELDTEXT = TRUNC(T_TMPCIECLE)
+  END
+
+  IF    NOT FINDMODE &
+    AND 0 <> SIZE (TRUNCATE(T_CIECLE)) &
+    AND 0 <> SIZE (TRUNCATE(FIELDTEXT)) &
+    AND FIELDTEXT <> T_CIECLE
+  THEN WARNING 330 ; Cette compagnie est differente de celle demandé dans la cédule
+
+END
+
+PROCEDURE EDIT CIECLE
+BEGIN
+  IF    0 <> IND(UNACLE OF GLECD_SEL_COL,"*") &
+    AND 0 <> IND(UNACLE OF GLECD_SEL_COL,"#")
+  THEN ERROR 327 ; Le popup de consultation n'est pas accessible si vous utilisez un '#'
+
+  IF 0 = IND(FIELDTEXT,"#")
+  THEN BEGIN
+    GET VSEC_USR &
+      VIA   CIECLE &
+      USING CIECLE OF GLECD_SEL_COL &
+      OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 207; Cette compagnie n'est pas définie
+  END
+END
+
+;------------------------------------------------------------------------------
+; Consultation des unités administratives
+;
+
+PROCEDURE INPUT UNACLE
+BEGIN
+  IF    0 <> INDEX(FIELDTEXT,"*") &
+    AND 0 =  INDEX(FIELDTEXT,"#")
+  THEN BEGIN
+    IF 0 <> SIZE(TRUNCATE(CIECLE OF GLECD_SEL_COL))
+    THEN LET T_TMPCIECLE = CIECLE OF GLECD_SEL_COL
+    ELSE LET T_TMPCIECLE = "@"
+    LET T_TMPUNACLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc104 MODE F PASSING T_TMPCIECLE,T_TMPUNACLE
+    LET FIELDTEXT = TRUNC(T_TMPUNACLE)
+  END
+
+  IF    NOT FINDMODE &
+    AND 0 <> SIZE (TRUNCATE(T_UNACLE)) &
+    AND 0 <> SIZE (TRUNCATE(FIELDTEXT)) &
+    AND FIELDTEXT <> T_UNACLE
+  THEN WARNING 331 ; Cette unité est differente de celle demandé dans la cédule
+END
+
+PROCEDURE EDIT UNACLE
+BEGIN
+  IF    0 <> IND(UNACLE OF GLECD_SEL_COL,"*") &
+    AND 0 <> IND(UNACLE OF GLECD_SEL_COL,"#")
+  THEN ERROR 327 ; Le popup de consultation n'est pas accessible si vous utilisez un '#'
+
+  IF 0 = IND(FIELDTEXT,"#")
+  THEN BEGIN
+    IF 0 <> SIZE(TRUNCATE(CIECLE OF GLECD_SEL_COL))
+    THEN BEGIN
+      GET MCUNITE_ADM &
+        VIA   UNACLE,CIECLE &
+        USING UNACLE OF GLECD_SEL_COL, CIECLE OF GLECD_SEL_COL &
+        OPTIONAL
+      END
+    ELSE BEGIN
+      GET MCUNITE_ADM &
+        VIA   UNACLE &
+        USING UNACLE OF GLECD_SEL_COL &
+        OPTIONAL
+      END
+    IF NOT ACCESSOK
+    THEN ERROR 220; Cette unité administrative est inexistante.
+  END
+END
+
+;------------------------------------------------------------------------------
+; Consultation des centres
+;
+
+PROCEDURE INPUT CENCLE
+BEGIN
+  IF    0 <> INDEX(FIELDTEXT,"*") &
+    AND 0 =  INDEX(FIELDTEXT,"#")
+  THEN BEGIN
+    LET T_TMPCENCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc114 MODE F PASSING T_TMPCENCLE
+    LET FIELDTEXT = TRUNC(T_TMPCENCLE)
+  END
+
+  IF    NOT FINDMODE &
+    AND 0 <> SIZE (TRUNCATE(T_CENCLE)) &
+    AND 0 <> SIZE (TRUNCATE(FIELDTEXT)) &
+    AND FIELDTEXT <> T_CENCLE
+  THEN WARNING 332 ; Ce centre est different de celui demandé dans la cédule
+
+END
+
+PROCEDURE EDIT CENCLE
+BEGIN
+  IF    0 <> IND(CENCLE OF GLECD_SEL_COL,"*") &
+    AND 0 <> IND(CENCLE OF GLECD_SEL_COL,"#")
+  THEN ERROR 327 ; Le popup de consultation n'est pas accessible si vous utilisez un '#'
+
+  IF 0 = IND(FIELDTEXT,"#")
+  THEN BEGIN
+    IF 0 <> SIZE(TRUNCATE(CIECLE OF GLECD_SEL_COL))
+    THEN
+      BEGIN
+        GET MCUNITE_ADM &
+          VIA   CIECLE,CENCLE &
+          USING CIECLE OF GLECD_SEL_COL, CENCLE OF GLECD_SEL_COL &
+          OPTIONAL
+        IF NOT ACCESSOK
+        THEN ERROR 329; Il n'y a pas d'unité administrative pour cette combinaison compagnie/centre
+      END
+    ELSE
+      BEGIN
+        GET MCCENTRE &
+          VIA   CENCLE &
+          USING CENCLE OF GLECD_SEL_COL &
+          OPTIONAL
+        IF NOT ACCESSOK
+        THEN ERROR 226 ; Ce centre n'est pas défini
+      END
+  END
+END
+
+;------------------------------------------------------------------------------
+; La procédure normale d'entrée à été ré-écrite pour ne pas créer de nouvelle
+; colonne lorsque l'usager fait la commande "ENTRY". Ceci est dû à la façon
+; d'utiliser le PRIMARY/DETAIL entre GLEFI_COLONNE et GLECD_SEL_COL.
+;
+
+PROCEDURE APPEND
+BEGIN
+  ACCEPT CIECLE OF GLECD_SEL_COL
+  ACCEPT UNACLE OF GLECD_SEL_COL
+
+  IF 0 <> SIZE (TRUNCATE(UNACLE OF GLECD_SEL_COL))
+  THEN NULL
+;    BEGIN
+;      LET CENCLE OF GLECD_SEL_COL = CENCLE OF MCUNITE_ADM
+;      DISPLAY CENCLE OF GLECD_SEL_COL
+;    END
+  ELSE ACCEPT CENCLE OF GLECD_SEL_COL
+END
+
+PROCEDURE PREENTRY
+BEGIN
+  ;
+  ; Validation de la sécuritée sur l'entrée de données
+  ;
+  USE ussecent NOLIST
+END
+
+PROCEDURE ENTRY
+BEGIN
+  ACCEPT T_NOMCOL
+  DISPLAY EFCTYPCOL OF GLEFI_COLONNE
+  DISPLAY EFCENTCOL OF GLEFI_COLONNE
+  FOR GLECD_SEL_COL
+  BEGIN
+    PERFORM APPEND
+  END
+END
+
+;-------------------------------------------------------------------------------
+; Procédure de modification de la ligne
+;
+PROCEDURE DESIGNER 20
+BEGIN
+  ACCEPT CIECLE OF GLECD_SEL_COL
+  ACCEPT UNACLE OF GLECD_SEL_COL
+
+  IF 0 <> SIZE (TRUNCATE(UNACLE OF GLECD_SEL_COL))
+  THEN
+    BEGIN
+      LET CENCLE OF GLECD_SEL_COL = CENCLE OF MCUNITE_ADM
+      DISPLAY CENCLE OF GLECD_SEL_COL
+    END
+  ELSE ACCEPT CENCLE OF GLECD_SEL_COL
+END
+
+;------------------------------------------------------------------------------
+; Affichage du nom de la colonne
+;
+PROCEDURE POSTFIND
+BEGIN
+    LET T_CODASC = 64 + EFCNUMCOL OF GLEFI_COLONNE
+    LET T_NOMCOL = CHAR(T_CODASC)
+END
+
+;------------------------------------------------------------------------------
+; Valide les traitements permis par écran et par usager.
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR GLECD_SEL_COL
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF    DELETEDRECORD OF GLECD_SEL_COL &
+      AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF GLECD_SEL_COL &
+       AND NOT NEWRECORD     OF GLECD_SEL_COL &
+       AND NOT DELETEDRECORD OF GLECD_SEL_COL &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+  END
+END
+
+;------------------------------------------------------------------------------
+; Les procédures UPDATE et DELETE on aussi été ré-écrites pour ne pas
+; mettre à jour la définition des colonnes de l'état financier.
+;
+PROCEDURE UPDATE
+BEGIN
+  FOR GLECD_SEL_COL
+  BEGIN
+    PUT GLECD_SEL_COL
+  END
+END
+
+PROCEDURE DELETE
+BEGIN
+  FOR GLECD_SEL_COL
+  BEGIN
+    DELETE GLECD_SEL_COL
+  END
+END
+
+PROCEDURE DETAIL DELETE
+BEGIN
+  DELETE GLECD_SEL_COL
+END
+
+BUILD
+@IF FORMAT
+
+******** Sélections par colonnes ********
+* Colonne.: x xxxx xxxxxxxxxxxxxxxxxxx  *
+*****************************************
+*    Compagnie    Unité     Centre      *
+*      xxxx      xxxxxxxx    xxxx       *
+*      xxxx      xxxxxxxx    xxxx       *
+*      xxxx      xxxxxxxx    xxxx       *
+*      xxxx      xxxxxxxx    xxxx       *
+*      xxxx      xxxxxxxx    xxxx       *
+*      xxxx      xxxxxxxx    xxxx       *
+*      xxxx      xxxxxxxx    xxxx       *
+*      xxxx      xxxxxxxx    xxxx       *
+*****************************************
+@ENDIF

@@ -1,0 +1,307 @@
+;/T/ Catalogue des produits non-inventoriés
+;
+;/P/ Programmeur..: Patrick Langlois
+;    Date Création: 16 Juillet 1999
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin.
+;    Date..............: 15 mars 2000.
+;    Description.......: Vérifier si une commande approuvée peut-être détruite. Oui, mais il y a avait un problème de synchronisation
+;                        dans l'exécution de cette opération (la transaction associée à l'opération n'est pas visible immédiatement). 
+;                        Le problème a été solutionné par le biais d'une retour automatique sur la commande suite à l'annulation d'un 
+;                        ou de plusieurs items. 
+;
+;    Référence.........: Demande directe.
+;    
+;    Signet............: MP-00-03-15_DD999999.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+SCREEN ar016  ACTIONBAR &
+              MODE LABEL "" AT 2,132  &
+              FROM 1,1 TO 23,132 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              RECEIVING T_CIECLEMNU  , &
+                        T_CIENOM     , &
+                        T_PECCLEMNU  , &
+                        T_FOUCIECLE    &
+              ACTIVITIES FIND
+
+
+USE ussectmp NOLIST     ; Variable pour la sécurité
+    "AR016"             ; Nom de l'écran
+
+USE ar016.hlp  NOLIST   ; Use servant à la documentation de l'écran
+
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-écrans
+
+USE ustrasse NOLIST
+
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 04 ; Numéro de la compagnie
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie
+TEMPORARY T_PECCLEMNU CHARACTER SIZE 04 ; Période du menu
+TEMPORARY T_FOUCIECLE CHARACTER SIZE 04 ; Compagnie fournisseur
+TEMPORARY T_CMDSTUOLD CHARACTER SIZE 1 INITIAL "C" ; Ancien statut de la commande
+TEMPORARY T_CDECLEFND CHARACTER SIZE 1 INITIAL "1" ; Pour recherche détail de commande
+TEMPORARY T_CDECLE    INTEGER   SIZE 4  ; Pour recherche détail de commande
+
+;-------------------------------------------------------------------------------
+; Temporaire associée la numérotation des items
+
+TEMPORARY T_ITEM_COMPT INTEGER   SIZE 04  RESET AT STARTUP
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_FLG_ANN    INTEGER   SIZE 02  RESET AT STARTUP ; MP-00-03-15_DD999999.
+
+;-------------------------------------------------------------------------------
+
+DEFINE    DZ_CIECLE   CHARACTER SIZE 04 = T_CIECLEMNU
+DEFINE    DZ_CIENOM   CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+;
+; Table primaire.
+;
+FILE VREFFOU PRIMARY &
+                        OCCURS 16 TIME &
+                        NOITEM
+
+
+  ACCESS VIA    CIECLE  , &
+                PRDCLE  , &
+                cdereffou  , &
+                FOUCLE    &
+         USING  T_CIECLEMNU          , &
+                PRDCLE OF VREFFOU, &
+                cdereffou OF VREFFOU, &
+                FOUCLE OF VREFFOU  &
+        REQUEST PRDCLE  , &
+                cdereffou  , &
+                FOUCLE    &
+        ORDERBY CIECLE  , &
+                PRDCLE  , &
+                cdereffou  , &
+                CDEDSCPRD, &
+                FOUCLE
+ 
+  ACCESS VIA    CIECLE  , &
+                cdereffou  , &
+                FOUCLE    &
+         USING  T_CIECLEMNU          , &
+                cdereffou OF VREFFOU, &
+                FOUCLE OF VREFFOU  &
+        REQUEST cdereffou  , &
+                FOUCLE         &
+        ORDERBY CIECLE  , &
+                cdereffou  , &
+                CDEDSCPRD, &
+                FOUCLE
+
+  ACCESS VIA    CIECLE  , &
+                cdereffou    &
+         USING  T_CIECLEMNU          , &
+                cdereffou OF VREFFOU  &
+        REQUEST cdereffou   &
+        ORDERBY CIECLE  , &
+                cdereffou  , &
+                CDEDSCPRD, &
+                FOUCLE
+
+  ACCESS VIA    CIECLE   , &
+                CDEDSCPRD, &
+                FOUCLE     &
+         USING  T_CIECLEMNU             , &
+                CDEDSCPRD OF VREFFOU, &
+                FOUCLE    OF VREFFOU  &
+        REQUEST CDEDSCPRD, &
+                FOUCLE     &
+        ORDERBY CIECLE   , &
+                cdereffou   , &
+                CDEDSCPRD, &
+                FOUCLE
+
+  ACCESS VIA    CIECLE   , &
+                CDEDSCPRD  &
+         USING  T_CIECLEMNU             , &
+                CDEDSCPRD OF VREFFOU  &
+        REQUEST CDEDSCPRD  &
+        ORDERBY CIECLE   , &
+                cdereffou   , &
+                CDEDSCPRD, &
+                FOUCLE
+
+
+  ACCESS VIA    CIECLE   , &
+                FOUCLE     &
+         USING  T_CIECLEMNU, &
+                FOUCLE OF VREFFOU &
+         REQUEST FOUCLE     &
+         ORDERBY CIECLE   , &
+                 cdereffou   , &
+                 CDEDSCPRD, &
+                 FOUCLE
+
+  ACCESS VIA    CIECLE      &
+         USING  T_CIECLEMNU &
+         ORDERBY CIECLE   , &
+                 cdereffou   , &
+                 CDEDSCPRD, &
+                 FOUCLE
+
+
+;
+; Pour sous-écran détail commande
+;
+FILE ARCOMMANDE  REFERENCE OCCURS WITH VREFFOU
+  ACCESS VIA   CIECLE,                &
+               CMDCLE,                &
+               CMDAJT                 &
+         USING T_CIECLEMNU,           &
+               CMDCLE OF VREFFOU, &
+               CMDAJT OF VREFFOU
+
+;
+; Pour sous-écran détail commande
+;
+FILE ARCMD_HISTO REFERENCE OCCURS WITH VREFFOU
+  ACCESS  VIA   CMHCLE1  , &
+                CMHCLE2  , &
+                CMHCLE3    &
+          USING CIECLE OF ARCOMMANDE , &
+                CMDCLE OF ARCOMMANDE , &
+                CMDAJT OF ARCOMMANDE
+
+
+FILE CPFOURNISSEUR REFERENCE OCCURS WITH VREFFOU
+  ACCESS VIA   FOUCLE     , &
+               FOUCIECLE    &
+         USING FOUCLE OF VREFFOU, &
+               "----"
+               
+USE usvarprd NOLIST ; Variable servant à la saisie de prdcle
+
+USE usdrw132 NOLIST     ; Draw pour les écrans
+
+USE ustitstd132 NOLIST     ; En-tête pour les écrans
+USE ushilite NOLIST     ; Hilite pour tous les écrans
+
+SKIP
+
+TITLE " Catalogue des produits divers "            &
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP 1
+
+TITLE &
+  " No produit   No pièce fourn. Description                 Fourn. Nom                  #Commande   Date       Quantité  Prix unit." &
+  AT ,2
+
+
+;-------------------------------------------------------------------------------
+
+SKIP 1
+
+ALIGN (3,2,3) (,,16)(,,32) (,,60) (,,67) (,,88) (,,98) (,,109) (,,120)
+
+
+;
+; No produit   No pièce fourn. Description                 Fourn. Nom                  #Commande   Date       Quantité  Prix unit.
+;                                                                                        
+; XXXXXXXXXXXX XXXXXXXXXXXXXXX XXXXXXXXXXXXXXXXXXXXXXXXXXX XXXXXX XXXXXXXXXXXXXXXXXXXX XXXXXXXXX 9999/99/99 99,999.999 99,999.9999
+;
+
+CLUSTER OCCURS WITH VREFFOU
+
+FIELD PRDCLE OF VREFFOU &
+        HIDDEN &
+        numeric bwz & ; UPSHIFT &
+        LABEL " " &
+        DISPLAY 
+
+FIELD cdereffou OF VREFFOU &
+      DISPLAY
+
+FIELD CDEDSCPRD OF VREFFOU &
+        DISPLAY SIZE 27
+
+FIELD FOUCLE OF VREFFOU &
+        DISPLAY
+
+FIELD FOUNOM OF CPFOURNISSEUR &
+        DISPLAY SIZE 20
+
+FIELD CMDCLE OF VREFFOU
+
+FIELD CMDDAT OF ARCOMMANDE format yyyymmdd
+
+FIELD CDEQTECOM OF VREFFOU &
+      PICTURE "^^,^^^.^^^"
+
+FIELD CDEPRIUNI OF VREFFOU   &
+      PICTURE "^^^,^^^.^^^^" &
+      signif 6
+
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-----------------------------------------------------------------------------
+;
+; Saisie de prdcle
+;
+PROCEDURE INPUT PRDCLE
+BEGIN
+  use usinpprd NOLIST
+END
+
+;-----------------------------------------------------------------------------
+;
+; Saisie de cmdcle
+;
+PROCEDURE INPUT CMDCLE
+BEGIN
+  USE usinpcmd NOLIST
+END
+
+PROCEDURE DESIGNER 1
+BEGIN
+  LET T_FLG_ANN = 0                    ; MP-00-03-15_DD999999.
+  LET T_CDECLE  = CDECLE OF VREFFOU
+
+  RUN SCREEN ar007a &
+               PASSING T_CIECLEMNU , &
+                       T_CIENOM    , &
+                       T_CMDSTUOLD , &
+                       T_PECCLEMNU , &
+                       ARCOMMANDE  , &
+                       ARCMD_HISTO , &
+                       T_CDECLEFND , &
+                       T_CDECLE    , &
+                       T_ITEM_COMPT, &
+                       T_FLG_ANN     & ; MP-00-03-15_DD999999.
+               MODE F
+END
+
+
+
+
+BUILD
+@IF FORMAT   
+
+@ENDIF

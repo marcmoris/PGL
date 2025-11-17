@@ -1,0 +1,280 @@
+;/T/ Listes, rapports et procédures Gestion bloc
+;
+;/P/ Programmeur..: François Déry
+;    Date Création: 18 mai 1999
+;
+;    Description..: Menu pour la présentation des choix de
+;                   listes et rapports ou de procédures.
+;
+;
+;/V/ Écran vérifier pour le passage à l'an 2000
+;-------------------------------------------------------------------------------
+SCREEN ifm90 &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             NOMODE NOACTION FIELDMARK RETAIN STARTUP &
+             ACTIVITIES FIND &
+             RECEIVING D_XMOCOD , &
+                       T_CIECLEMNU, &
+                       T_CIENOM
+
+USE ussectmp NOLIST ; Variables pour la sécurité
+    "IFM90"
+
+USE ifm90.hlp NOLIST
+
+DEFINE    D_XMOCOD    CHARACTER SIZE 4  ; Code pour rapports ou procédures
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4
+TEMPORARY T_CIENOM    CHARACTER SIZE 40
+
+;-------------------------------------------------------------------------------
+;
+; Code de module.
+;
+FILE GSMODULE         PRIMARY
+
+
+;
+; Programmes liés au code de module.
+;
+FILE GSPROGRAMME      DETAIL &
+                      NOITEM &
+                      OCCURS 15
+
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_XMONUM INTEGER   SIZE 2 RESET AT STARTUP INIT 0 ; Ordre des rapports
+;
+; Nom de la compagnie centrée.
+;
+DEFINE D_CIENOM CHARACTER SIZE 40 = CENTER(T_CIENOM)
+;
+; Titre du code de module.
+;
+DEFINE D_XMOTIT    CHARACTER SIZE 70 = &
+@IF FRANCAIS
+                                      XMOTITFRA OF GSMODULE
+@ELSE
+                                      XMOTITANG OF GSMODULE
+@ENDIF
+
+;
+; Pour passer le le code du programme à l'écran paramètre.
+;
+DEFINE D_XPRNOM CHARACTER SIZE 7 = XPRNOM OF GSPROGRAMME
+
+;
+; Liste des paramètres.
+;
+DEFINE D_LISPAR char      size 204 =  &
+  "F_CIECLEMNU     |F_CIENOM        |"
+
+DEFINE D_INDLON CHARACTER SIZE 112 =  &
+  "001004|005040"
+
+DEFINE D_LISVAL CHARACTER SIZE 300 = T_CIECLEMNU &
+                                   + D_CIENOM
+
+;-------------------------------------------------------------------------------
+;
+USE ushilite NOLIST
+
+DRAW 2,1  TO 2,19
+DRAW 2,62 TO 2,80
+DRAW 1,19 TO 3,62
+
+DRAW 2,1  TO 5,1
+DRAW 5,1  TO 5,80
+DRAW 2,80 TO 5,80
+
+DRAW 7, 1 TO 23,1
+DRAW 7,80 TO 23,80
+DRAW 23,1 TO 23,80
+
+
+TITLE &
+      "G E S T I O N   D E   B L O C" &
+      CENTERED AT 2,1
+
+USE ustitoff NOLIST
+
+HILITE DISPLAY HALFTONE
+
+FIELD D_CIENOM &
+        FIXED NOLABEL DATA AT 4,21
+
+SKIP 1
+
+USE ushilite NOLIST
+
+SKIP TO 6
+
+ALIGN(,,2)(,,5)
+
+FIELD T_XMONUM &
+        DISPLAY &
+        PICTURE "^^"
+
+FIELD D_XMOTIT &
+        DISPLAY
+
+SKIP TO 8
+
+HILITE DISPLAY HALFTONE
+
+ALIGN (7,4,7) (,,69)
+
+CLUSTER OCCURS WITH GSPROGRAMME ID BASE 01
+@IF FRANCAIS
+FIELD XPRDSCFRA OF GSPROGRAMME HIDDEN LABEL " "
+@ELSE
+FIELD XPRDSCANG OF GSPROGRAMME HIDDEN LABEL " "
+@ENDIF
+
+FIELD XPRNOM    OF GSPROGRAMME
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les codes de modules.
+;
+;
+PROCEDURE INPUT T_XMONUM
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    RUN SCREEN gs105 MODE F &
+                     PASSING D_XMOCOD , &
+                             T_XMONUM
+    LET FIELDTEXT = ASCII(T_XMONUM)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Pour centrer le titre du module, regroupement de rapports.
+;
+;
+PROCEDURE OUTPUT D_XMOTIT
+BEGIN
+  LET FIELDTEXT = CENTER(FIELDTEXT)
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE DESIGNER 1
+BEGIN
+  IF XPRNOM OF GSPROGRAMME <> ""
+  THEN BEGIN
+    RUN SCREEN gs090 MODE E PASSING D_XPRNOM, &
+                                    D_LISPAR, &
+                                    D_INDLON, &
+                                    D_LISVAL
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE PATH
+BEGIN
+  ;
+  ; Lorsqu'on arrive dans l'écran la première fois le numéro de module
+  ; est zéro.
+  ;
+  IF T_XMONUM = 0
+  THEN LET PATH = 2
+  ELSE BEGIN
+    REQUEST T_XMONUM
+    IF PROMPTOK
+    THEN LET PATH = 1
+  END
+  IF PATH = 0
+  THEN LET PATH = 2
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE FIND
+BEGIN
+  ;
+  ; Recherche sur un numéro de sous-module.
+  ;
+  IF PATH = 1
+  THEN GET GSMODULE VIA XMOCOD, &
+                        XMONUM  &
+                    USING D_XMOCOD, &
+                          T_XMONUM  &
+                    ORDERED
+  ;
+  ; Recherche sur un module.
+  ;
+  IF PATH = 2
+  THEN GET GSMODULE VIA XMOCOD &
+                    USING D_XMOCOD &
+                    ORDERBY XMOCOD, &
+                            XMONUM
+  ;
+  ; On met une valeur dans cette variable, pour que quand l'usager
+  ; fait une recherche on lui demande un numéro de module.
+  ;
+  LET T_XMONUM = XMONUM OF GSMODULE
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE DETAIL FIND
+BEGIN
+  FOR MISSING GSPROGRAMME
+  BEGIN
+    GET GSPROGRAMME VIA     XMOCOD &
+                    USING   XMOCOD OF GSMODULE &
+                    ORDERBY XPRRNG &
+                    OPTIONAL
+  END
+END
+
+BUILD
+@IF FORMAT
+                  ********************************************
+*******************      G E S T I O N   D E   B L O C       *******************
+*                 ********************************************                 *
+*                   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   *
+********************************************************************************
+ xx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+*                                                                              *
+*     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxx    *
+*     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxx    *
+*     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxx    *
+*     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxx    *
+*     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxx    *
+*     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxx    *
+*     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxx    *
+*     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxx    *
+*     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxx    *
+*     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxx    *
+*     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxx    *
+*     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxx    *
+*     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxx    *
+*     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxx    *
+*     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxx    *
+********************************************************************************
+@ENDIF

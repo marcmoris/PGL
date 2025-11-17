@@ -1,0 +1,135 @@
+;/T/ Liste des réceptions / Détaillée
+;
+;/P/ Programmeur...: Remy Demers
+;    Date Création.: 21 oct 1999
+;
+;    Description...: mise a jour du flag imression de la reception 
+;
+;    Paramètres....: Compagnie
+;                    Numéro reception    (Borne de début, <retour>=tous)
+;                    Numéro reception    (Borne de fin)
+;                    imprimer oui / non
+;
+;/M/672/Marc Trudel/1999-10-22
+;  Etat..........: Termine
+;  Description...: GRA01
+;                  Creation d'un subfile afin de conserver la quantite recue
+;                  a date dans le but de pouvoir calculer la quantite a recevoir
+;                  pour chaque commande.
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST
+
+RUN ar324t
+
+;
+; Selection des receptions a imprimer demandees par l'utilisateur.
+;
+REQUEST UPDATE_ARRFLGIMP
+
+ACCESS ARRECEPTION
+
+CHOOSE CIECLE PARM,       &  ; Compagnie du menu
+       RECCLE PARM,       &  ; RECEPTION
+       ARRFLGIMP PARM
+
+SORT ON CMDCLE, &
+        RECCLE
+
+OUTPUT ARRECEPTION UPDATE IF ARRFLGIMP OF ARRECEPTION = "0"
+ITEM ARRFLGIMP OF ARRECEPTION FINAL "1"
+
+SUBFILE WAR324 KEEP INCLUDE &
+  CIECLE          OF ARRECEPTION      , &
+  CMDCLE          OF ARRECEPTION      , &
+  ENTCLE          OF ARRECEPTION      , &
+  FOUCIECLE       OF ARRECEPTION      , &
+  FOUCLE          OF ARRECEPTION      , &
+  REFCLETYP       OF ARRECEPTION      , &
+  RADCLE          OF ARRECEPTION      , &
+  RECSTU          OF ARRECEPTION      , &
+  RECCLE          OF ARRECEPTION      , &
+  RECDATJOU       OF ARRECEPTION      , &
+  RECDAT          OF ARRECEPTION      , &
+  RECNBRITE       OF ARRECEPTION      , &
+  PECCLE          OF ARRECEPTION      , &
+  LARCLE          OF ARRECEPTION      , &
+  RECMNTTOT       OF ARRECEPTION      , &
+  RECNUMLISEMB    OF ARRECEPTION      , &
+  RECNUMLISEMB2   OF ARRECEPTION      , &
+  RECNUMLISEMB3   OF ARRECEPTION      , &
+  RECNUMLISEMB4   OF ARRECEPTION      , &
+  RECTRP          OF ARRECEPTION      , &
+  RECNUMCON       OF ARRECEPTION      , &
+  RECCOM          OF ARRECEPTION
+
+
+; Subfile pour garder une seule fois le numero de commande meme si on demande
+; l'impression de plusieures receptions d'une meme commande.  Ce subfile servira
+; pour le rechercher toutes les receptions existantes pour une commande.
+;
+SUBFILE WAR324A KEEP AT CMDCLE INCLUDE &
+  CIECLE          OF ARRECEPTION, &
+  CMDCLE          OF ARRECEPTION
+
+
+;
+; Selection des receptions (incluant les receptions anterieures concernant
+; une meme commande) afin d'avoir la quantite recue a date.
+;
+REQUEST TROUVE_REC_ANTERIEURE  
+
+ACCESS *WAR324A &
+  LINK CIECLE OF WAR324A, &
+       CMDCLE OF WAR324A  &
+    TO CIECLE           , &
+       CMDCLE             OF ARRECEPTION  
+
+SORT ON CMDCLE OF WAR324A, &
+        RECCLE OF ARRECEPTION
+
+SUBFILE WAR324B KEEP INCLUDE &
+  CIECLE          OF ARRECEPTION, &
+  CMDCLE          OF ARRECEPTION, &
+  RECCLE          OF ARRECEPTION
+
+
+;
+; Creation du subfile pour avoir la quantite recue a date pour chaque item
+; d'une commande et ce pour chacune des receptions.
+;
+REQUEST TROUVE_QTE_RECUE_A_DATE
+
+ACCESS *WAR324B &
+  LINK CIECLE OF WAR324B     , & 
+       RECCLE OF WAR324B       &
+    TO CIECLE                , &
+       RECCLE OF ARREC_DETAIL 
+
+SORT ON CIECLE, &
+        CMDCLE, &
+        REDCLE, &
+        RECCLE
+
+TEMPORARY T_REC_A_DATE FLOAT SIZE 8
+
+ITEM T_REC_A_DATE = T_REC_A_DATE + REDQTEREC OF ARREC_DETAIL &
+                    RESET AT REDCLE OF ARREC_DETAIL
+
+;
+; Subfile qui conserve les numero de commande, de reception et des numeros
+; de la commande avec la quantite recue de chacun des items de la commande.
+; Le subfile sera trie par commande, reception, item de la commande.
+;
+SUBFILE WAR324C KEEP INCLUDE &
+  CIECLE          OF WAR324B      , &
+  CMDCLE          OF WAR324B      , &
+  RECCLE          OF ARREC_DETAIL , &
+  REDCLE          OF ARREC_DETAIL , &
+  T_REC_A_DATE                      &
+INDEX AR324_U01 SEGMENT CIECLE, CMDCLE, RECCLE, REDCLE
+
+
+BUILD
+

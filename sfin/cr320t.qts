@@ -1,0 +1,195 @@
+;/T/ Ages des comptes à recevoir sommaire/détaillé
+;
+;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur...: Alain Côté
+;    Date Création.: 27 juillet 1993
+;
+;    Description...: Age des comptes à recevoir de type comptable, sert à avoir
+;                    une vision global des soldes à recevoir et de balancer
+;                    le compte ctb à recevoir avec le Grand Livre.
+;
+;                    Les transactions sont sélectionnées selon la période
+;                    demandée par l'usager, les soldes sont répartie dans la
+;                    bonne colonne selon la date due et la date de fin de
+;                    période.
+;
+;                    Les transactions doivent être journalisées.
+;
+;    Paramètres....: Compte ctb à recevoir  un, plusieur
+;                    Client                 Une, plusieurs ou tous
+;                    Periode Comptable      Jusqu'à
+;
+;
+;    Particularités: Le QTP sert à préparer un sous-fichier contenant les
+;                    factures qui restent un solde.
+;
+;/M/ Programmeur...: Sebastien Chabot
+;    Date modif....: 10 Septembre 1996
+;    Description...: Modifier selon la demande du client (gra01 9311 315)
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST
+
+RUN cr320t
+
+
+GLOBAL TEMPORARY G_PECFIN    CHARACTER SIZE 4 ; Période de fin de sélection
+GLOBAL TEMPORARY G_DATFIN    DATE             ; Date de fin de la période.
+GLOBAL TEMPORARY G_ITVCOD    CHARACTER SIZE 1 PARM
+                                              ; Code identifiant l'interval
+                                              ; choisi pour les colonnes.
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Lecture de la période de référence pour obtenir la date de fin de cette
+; periode. Cette date de fin va servir pour la répartition des soldes.
+;
+;
+REQUEST DATE_FIN_PERIODE
+
+ACCESS MCPERIODE_CTB
+
+
+
+CHOOSE PECCLE PARM
+
+
+ITEM G_PECFIN = PECCLE    OF MCPERIODE_CTB
+ITEM G_DATFIN = PECDATFIN OF MCPERIODE_CTB
+
+
+
+;-------------------------------------------------------------------------------
+
+REQUEST AGES_COMPTE_CAR
+
+ACCESS CRCPT_A_REC &
+  ;
+  ; Client de la facture, pour avoir la catégorie...
+  ;
+  LINK REFCIECLE OF CRCPT_A_REC, &
+       REFCLENUM OF CRCPT_A_REC  &
+    TO CLICIECLE, &
+       CLICLE OF                 CRCLIENT &
+  ;
+  ; Nom du client/divers.
+  ;
+  LINK REFCIECLE OF CRCPT_A_REC, &
+       REFCLETYP OF CRCPT_A_REC, &
+       REFCLENUM OF CRCPT_A_REC, &
+       RADCLE    OF CRCPT_A_REC  &
+    TO REFCIECLE , &
+       REFCLETYP , &
+       REFCLENUM , &
+       RADCLE OF                 MCREF_ADRESSE OPTIONAL &
+ ;
+ ; Cédule d'encaissement, date due, montant à recevoir.
+ ;
+ LINK CIECLE OF CRCPT_A_REC, &
+      CARCLE OF CRCPT_A_REC  &
+   TO CIECLE , &
+      CARCLE OF                  CRCAR_CEDULE &
+ ;
+ ; Transactions associées à la cédule(ajust., encaissement...)
+ ;
+ LINK CIECLE    OF CRCAR_CEDULE, &
+      CARCLE    OF CRCAR_CEDULE, &
+      CCDCLELIG OF CRCAR_CEDULE  &
+   TO CIECLE , &
+      CARCLE , &
+      CCDCLELIG OF               CRCAR_HISTO OPTIONAL
+
+
+CHOOSE CIECLE    PARM, &  ; Compagnie du menu.
+       CARCPTCAR PARM, &  ; Compte ctb à recevoir.
+       REFCLENUM PARM     ; Numéro de clien.
+
+
+; Ajustement pour le changement de siècle
+DEFINE T_PECCLE_SIE1 CHARACTER SIZE 5 = "1" + PECCLE OF CRCPT_A_REC &
+         IF PECCLE OF CRCPT_A_REC[1:1] < "8" &
+         ELSE "0" + PECCLE OF CRCPT_A_REC
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE2 CHARACTER SIZE 5 = "1" + G_PECFIN &
+         IF G_PECFIN[1:1] < "8" &
+         ELSE "0" + G_PECFIN
+
+SELECT CRCPT_A_REC IF     (    CARTYPECR OF CRCPT_A_REC = "FA" &
+                            OR CARTYPECR OF CRCPT_A_REC = "CR" &
+                            OR CARTYPECR OF CRCPT_A_REC = "NA" ) &
+                      AND T_PECCLE_SIE1 <= D_PECCLE_SIE2 &
+                      AND CARDATJOU OF CRCPT_A_REC <> 0
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE3 CHARACTER SIZE 5 = "1" + PECCLE OF CRCAR_HISTO &
+         IF PECCLE OF CRCAR_HISTO[1:1] < "8" &
+         ELSE "0" + PECCLE OF CRCAR_HISTO
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE4 CHARACTER SIZE 5 = "1" + G_PECFIN &
+         IF G_PECFIN[1:1] < "8" &
+         ELSE "0" + G_PECFIN
+
+SELECT CRCAR_HISTO IF     CRHDATJOU OF CRCAR_HISTO <> 0 &
+                      AND D_PECCLE_SIE3 <= D_PECCLE_SIE4
+
+
+TEMPORARY T_CRHMNT  FLOAT SIZE 8 ; Sommation des trs. associées.
+TEMPORARY T_SLD_TOT FLOAT SIZE 8 ; Solde de la ligne de cédule.
+
+
+
+SORT ON CIECLE    OF CRCPT_A_REC , & ; No compagnie
+        CARCPTCAR OF CRCPT_A_REC , & ; Compte ctb à recevoir
+        REFCLENUM OF CRCPT_A_REC , & ; Numéro de client
+        CARCMDCLI OF CRCPT_A_REC , & ; Num. ref. client    <-- SEBCHA960910
+        CARDAT    OF CRCPT_A_REC , & ; Date de la facture
+        CARCLE    OF CRCPT_A_REC , & ; No facture
+        CCDCLELIG OF CRCAR_CEDULE    ; No Cédule
+
+;
+; Si c'est un encaissement ou une mauvaise créance il faut soustraire
+; le montant du montant brut.
+;
+ITEM T_CRHMNT = 0 - CRHMNTCAR OF CRCAR_HISTO &
+                         IF    CRHTYPTRA OF CRCAR_HISTO = "EN" &
+                            OR CRHTYPTRA OF CRCAR_HISTO = "MC" &
+           ELSE CRHMNTCAR OF CRCAR_HISTO
+
+;
+; Solde de la cédule.
+;
+ITEM T_SLD_TOT SUBTOTAL T_CRHMNT &
+               RESET AT CCDCLELIG TO CCDMNT OF CRCAR_CEDULE
+
+
+SUBFILE WCR320 KEEP &
+               AT CCDCLELIG &
+               IF T_SLD_TOT <> 0 &
+INCLUDE CIECLE    OF CRCPT_A_REC   , &
+        CARCLE    OF CRCPT_A_REC   , &
+        CARCPTCAR OF CRCPT_A_REC   , &
+        CARDAT    OF CRCPT_A_REC   , &
+        REFCLENUM OF CRCPT_A_REC   , &
+        CARMNT    OF CRCPT_A_REC   , & ;                   <-- SEBCHA960910
+        CARCMDCLI OF CRCPT_A_REC   , & ;                   <-- SEBCHA960910
+        RADTEL    OF MCREF_ADRESSE , & ;                   <-- SEBCHA960910
+        RADNOM    OF MCREF_ADRESSE , &
+        RADNOMABR OF MCREF_ADRESSE , &
+        CLICAT    OF CRCLIENT      , &
+        CCDCLELIG OF CRCAR_CEDULE  , &
+        CCDDATDUE OF CRCAR_CEDULE  , &
+        G_DATFIN                   , &
+        T_SLD_TOT                  , &
+        G_ITVCOD
+
+
+BUILD cr320t

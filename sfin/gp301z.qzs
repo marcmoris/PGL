@@ -1,0 +1,695 @@
+
+
+;/T/ Suivi des disponibilité par compte par unité - (sous-projet)
+;
+;/P/ Programmeur...: Steeve Duguay
+;    Date Création.: 1995-03-13
+;
+;    Description...: Le Rapport Budget Suivis des disponibilité par compte
+;                    par Unité
+;
+;
+;    Particularités: Le pourcentage de Consommation se définit de la facon
+;                    suivante : Reel + Engament
+;                               ---------------
+;                               Budget revisé
+;
+;                    Le calcul de l'écart se définit de la facon
+;                    suivant : Revisé - reel - engagement
+;
+;-------------------------------------------------------------------------------
+
+ USE ussetqzs NOLIST   ; permet de faire les SET PROCESS NOLIMIT....
+ SET NOBLANK           ; Empêche l'impression de ligne blanche
+
+
+ACCESS GPPAC_ANNEE   &
+
+  LINK CIECLE OF GPPAC_ANNEE,           &
+       PRJCLE OF GPPAC_ANNEE            &
+    TO CIECLE,                          &
+       PRJCLE OF GPPROJETS              &
+
+  LINK CIECLE OF GPPAC_ANNEE,           &
+       PRJCLE OF GPPAC_ANNEE,           &
+       PRACLE OF GPPAC_ANNEE            &
+    TO CIECLE,                          &
+       PRJCLE,                          &
+       PRACLE OF GPPRO_ACTIVITE         &
+
+  LINK CIECLE OF GPPAC_ANNEE,           &
+       PRJCLE OF GPPAC_ANNEE,           &
+       PRACLE OF GPPAC_ANNEE,           &
+       CPTCLE OF GPPAC_ANNEE,           &
+       UNACLE OF GPPAC_ANNEE            &
+    TO CIECLE,                          &
+       PRJCLE,                          &
+       PRACLE,                          &
+       CPTCLE,                          &
+       UNACLE OF GPPRA_BDG_CTB          &
+
+  LINK CPTCLE OF GPPAC_ANNEE            &
+    TO CPTCLE OF VCPT_DSC      OPTIONAL &
+
+  LINK NACCLE OF VCPT_DSC               &
+    TO NACCLE OF VNAC_DSC OPTIONAL      &
+
+  LINK CIECLE OF GPPAC_ANNEE,           &
+       UNACLE OF GPPAC_ANNEE            &
+    TO CIECLE                 ,         &
+       UNACLE OF MCUNITE_ADM   OPTIONAL
+
+
+CHOOSE CIECLE PARM, &                    ; Compagnie
+       PAAANN PARM, &                    ; Année financière
+       PRJCLE PARM RANGE, &              ; Projet
+       PRACLE PARM RANGE, &              ; Sous-projet
+       CPTCLE PARM RANGE, &              ; Compte
+       UNACLE PARM                       ; Unité
+
+ DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &               ; titre1  du rapport
+@IF FRANCAIS
+   "Suivi des disponibilités par compte par unité (Détaillé)"
+@ELSE
+   "Available Funds Monitoring by Account by Unit adm."
+@ENDIF
+ DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = " "             ; titre2  du rapport
+ DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "GP301"         ; numéro du rapport
+ DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM            ; Nom de la compagnie
+
+;
+; Libellé du budget selon l'approbation ou non
+;
+DEFINE D_BUDLIBFRA CHARACTER SIZE 14 = "Bud. courant.:" &
+                                  IF PRAPACUSRAPP OF GPPRO_ACTIVITE <> "" ELSE &
+                                       "Bud. initial.:"
+
+DEFINE D_BUDLIBANG CHARACTER SIZE 14 = "%%%. courant.:" &
+                                  IF PRAPACUSRAPP OF GPPRO_ACTIVITE <> "" ELSE &
+                                       "%%%. initial.:"
+
+
+;
+; Total budget revisé annuel (prendre note qu'on doit divisé les montants
+; des budgets revisés par cent car au niveau de l'énoncé REPORT ils sont arrondi.)
+;
+DEFINE D_TOTMNTBDG FLOAT SIZE 8 = (ROUND(PACMNTBDGREV OF GPPRA_BDG_CTB/100)) &
+                               IF PRAPACUSRAPP OF GPPRO_ACTIVITE <> ""     &
+                             ELSE (ROUND(PACMNTBDG    OF GPPRA_BDG_CTB/100))
+
+;
+; Total budget réel annuel (prendre note qu'on doit divisé les montants
+; des budgets réel par cent car au niveau de l'énoncé REPORT ils sont arrondi.)
+;
+DEFINE D_TOTPAAMNTREE FLOAT SIZE 8 = ROUND(PAAMNTREE1  OF GPPAC_ANNEE/100) + &
+                                     ROUND(PAAMNTREE2  OF GPPAC_ANNEE/100) + &
+                                     ROUND(PAAMNTREE3  OF GPPAC_ANNEE/100) + &
+                                     ROUND(PAAMNTREE4  OF GPPAC_ANNEE/100) + &
+                                     ROUND(PAAMNTREE5  OF GPPAC_ANNEE/100) + &
+                                     ROUND(PAAMNTREE6  OF GPPAC_ANNEE/100) + &
+                                     ROUND(PAAMNTREE7  OF GPPAC_ANNEE/100) + &
+                                     ROUND(PAAMNTREE8  OF GPPAC_ANNEE/100) + &
+                                     ROUND(PAAMNTREE9  OF GPPAC_ANNEE/100) + &
+                                     ROUND(PAAMNTREE10 OF GPPAC_ANNEE/100) + &
+                                     ROUND(PAAMNTREE11 OF GPPAC_ANNEE/100) + &
+                                     ROUND(PAAMNTREE12 OF GPPAC_ANNEE/100) + &
+                                     ROUND(PAAMNTREE13 OF GPPAC_ANNEE/100) + &
+                                     ROUND(PAAMNTREE14 OF GPPAC_ANNEE/100)
+
+;
+; Total cumulaqtif engagement annuel (prendre note qu'on doit divisé les montants
+; des budgets engagement annuel par cent car au niveau de l'énoncé REPORT
+; ils sont arrondi.)
+;
+DEFINE D_TOTPAAMNTENG FLOAT SIZE 8 = ROUND(PAAMNTENG1  OF GPPAC_ANNEE/100) + &
+                                     ROUND(PAAMNTENG2  OF GPPAC_ANNEE/100) + &
+                                     ROUND(PAAMNTENG3  OF GPPAC_ANNEE/100) + &
+                                     ROUND(PAAMNTENG4  OF GPPAC_ANNEE/100) + &
+                                     ROUND(PAAMNTENG5  OF GPPAC_ANNEE/100) + &
+                                     ROUND(PAAMNTENG6  OF GPPAC_ANNEE/100) + &
+                                     ROUND(PAAMNTENG7  OF GPPAC_ANNEE/100) + &
+                                     ROUND(PAAMNTENG8  OF GPPAC_ANNEE/100) + &
+                                     ROUND(PAAMNTENG9  OF GPPAC_ANNEE/100) + &
+                                     ROUND(PAAMNTENG10 OF GPPAC_ANNEE/100) + &
+                                     ROUND(PAAMNTENG11 OF GPPAC_ANNEE/100) + &
+                                     ROUND(PAAMNTENG12 OF GPPAC_ANNEE/100) + &
+                                     ROUND(PAAMNTENG13 OF GPPAC_ANNEE/100) + &
+                                     ROUND(PAAMNTENG14 OF GPPAC_ANNEE/100)
+
+DEFINE D_TOTCALECART  FLOAT SIZE 8 = D_TOTMNTBDG    - &
+                                     D_TOTPAAMNTREE - &
+                                     D_TOTPAAMNTENG
+
+DEFINE D_TOTPRCCONSOM FLOAT SIZE 8 = &
+       ROUND(((D_TOTPAAMNTREE + D_TOTPAAMNTENG) / D_TOTMNTBDG) *100)
+
+DEFINE D_TOTPRCCONREE FLOAT SIZE 8 = D_TOTPAAMNTREE + D_TOTPAAMNTENG
+
+SORT ON CIECLE OF GPPAC_ANNEE,    &
+        PRJCLE OF GPPAC_ANNEE,    &
+        PRACLE OF GPPAC_ANNEE,    &
+        NACCLE OF VCPT_DSC,       &
+        CPTCLE OF GPPAC_ANNEE,    &
+        UNACLE OF GPPAC_ANNEE
+
+
+ USE ustit180 NOLIST  ; Titre standard pour l'application
+SKIP 2&
+ TAB 001 "Année       : " &
+ TAB 016 PAAANN OF GPPAC_ANNEE &
+SKIP  &
+ TAB 001 "Projet      : " &
+ TAB 016 PRJCLE  OF GPPROJETS &
+ TAB 025 PRJDSC1 OF GPPROJETS &
+SKIP &
+ TAB 001 "Sous-projet : " &
+ TAB 016 PRACLE  OF GPPRO_ACTIVITE &
+ TAB 025 PRADSC1 OF GPPRO_ACTIVITE &
+ SKIP &
+ TAB 015 "    01         02         03         04         05         06    "&
+ TAB 081 "    07         08         09         10         11         12    "&
+ TAB 147 "    13         14       Annuel"&
+SKIP 1 &
+ TAB 015 "---------- ---------- ---------- ---------- ---------- ----------"&
+ TAB 081 "---------- ---------- ---------- ---------- ---------- ----------"&
+ TAB 147 "---------- ---------- -----------"&
+SKIP 2
+
+HEADING AT UNACLE &
+  TAB 001 "Compte: " &
+  TAB 009 CPTCLE OF GPPAC_ANNEE &
+  TAB 016 CPTDSC OF VCPT_DSC &
+  TAB 054 "Unité administrative.:" &
+  TAB 078 UNACLE OF GPPAC_ANNEE &
+  TAB 087 UNANOM OF MCUNITE_ADM &
+SKIP 2
+
+
+REPORT &
+  TAB 001 D_BUDLIBFRA &
+  TAB 169 D_TOTMNTBDG &
+          TRAILING SIGN "-" PICTURE "^^^,^^^,^^^ " SIGNIFICANCE 2 &
+  SKIP  &
+  TAB 001 "Réel.........:" &
+  TAB 015 PAAMNTREE1  OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 026 PAAMNTREE2  OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 037 PAAMNTREE3  OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 048 PAAMNTREE4  OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 059 PAAMNTREE5  OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 070 PAAMNTREE6  OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 081 PAAMNTREE7  OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 092 PAAMNTREE8  OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 103 PAAMNTREE9  OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 114 PAAMNTREE10 OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 125 PAAMNTREE11 OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 136 PAAMNTREE12 OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 147 PAAMNTREE13 OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 158 PAAMNTREE14 OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 169 D_TOTPAAMNTREE &
+          TRAILING SIGN "-" PICTURE "^^^,^^^,^^^ " SIGNIFICANCE 2 &
+  SKIP  &
+  TAB 001 "Engagement...:" &
+  TAB 015 PAAMNTENG1  OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 026 PAAMNTENG2  OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 037 PAAMNTENG3  OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 048 PAAMNTENG4  OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 059 PAAMNTENG5  OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 070 PAAMNTENG6  OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 081 PAAMNTENG7  OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 092 PAAMNTENG8  OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 103 PAAMNTENG9  OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 114 PAAMNTENG10 OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 125 PAAMNTENG11 OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 136 PAAMNTENG12 OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 147 PAAMNTENG13 OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 158 PAAMNTENG14 OF GPPAC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 169 D_TOTPAAMNTENG &
+          TRAILING SIGN "-" PICTURE "^^^,^^^,^^^ " SIGNIFICANCE 2 &
+  SKIP  &
+  TAB 001 "Ecart........:" &
+  TAB 169 D_TOTCALECART &
+          TRAILING SIGN "-" PICTURE "^^^,^^^,^^^ " SIGNIFICANCE 2 &
+  SKIP &
+  TAB 001 "%consommation:" &
+  TAB 175 D_TOTPRCCONSOM &
+          LEADING SIGN "-"   PICTURE " ^^^%" SIGNIFICANCE 2 &
+SKIP 1
+
+FOOTING AT UNACLE &
+  TAB 001 "-------------------------------------------------------------------------------------------------------------------"&
+  TAB 116 "-----------------------------------------------------------------" &
+ SKIP 2
+
+
+FOOTING AT NACCLE &
+ SKIP 2 &
+  TAB 001 "Total pour la nature comptable :" &
+  TAB 034 NACDSC OF VNAC_DSC &
+  SKIP 2 &
+  TAB 001 D_BUDLIBFRA &
+  TAB 169 D_TOTMNTBDG SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^^,^^^,^^^ " SIGNIFICANCE 2 &
+SKIP 1 &
+  TAB 001 "Réel.........:" &
+  TAB 015 PAAMNTREE1  OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 026 PAAMNTREE2  OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 037 PAAMNTREE3  OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 048 PAAMNTREE4  OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 059 PAAMNTREE5  OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 070 PAAMNTREE6  OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 081 PAAMNTREE7  OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 092 PAAMNTREE8  OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 103 PAAMNTREE9  OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 114 PAAMNTREE10 OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 125 PAAMNTREE11 OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 136 PAAMNTREE12 OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 147 PAAMNTREE13 OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 158 PAAMNTREE14 OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 169 D_TOTPAAMNTREE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^^,^^^,^^^ " SIGNIFICANCE 2 &
+SKIP 1 &
+  TAB 001 "Engagement...:" &
+  TAB 015 PAAMNTENG1  OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 026 PAAMNTENG2  OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 037 PAAMNTENG3  OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 048 PAAMNTENG4  OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 059 PAAMNTENG5  OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 070 PAAMNTENG6  OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 081 PAAMNTENG7  OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 092 PAAMNTENG8  OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 103 PAAMNTENG9  OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 114 PAAMNTENG10 OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 125 PAAMNTENG11 OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 136 PAAMNTENG12 OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 147 PAAMNTENG13 OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 158 PAAMNTENG14 OF GPPAC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 169 D_TOTPAAMNTENG SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^^,^^^,^^^ " SIGNIFICANCE 2 &
+SKIP 1 &
+  TAB 001 "Ecart........:" &
+  TAB 169 D_TOTCALECART SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^^,^^^,^^^ " SIGNIFICANCE 2 &
+SKIP 1 &
+  TAB 001 "%consommation:" &
+  TAB 175 D_TOTPRCCONREE RATIO D_TOTMNTBDG &
+          LEADING SIGN "-"   PICTURE " ^^^%" OUTPUT SCALE 2 SIGNIFICANCE 2 &
+SKIP PAGE
+
+
+BUILD gp301za
+
+;/T/ Suivi des disponibilité par compte par unité (projet)
+;
+;/P/ Programmeur...: Steeve Duguay
+;    Date Création.: 1995-03-13
+;
+;    Description...: Le Rapport Budget Suivis des disponibilité par compte
+;                    par Unité
+;
+;
+;    Particularités: Le pourcentage de Consommation se définit de la facon
+;                    suivante : Reel + Engament
+;                               ---------------
+;                               Budget revisé
+;
+;                    Le calcul de l'écart se définit de la facon
+;                    suivant : Revisé - reel - engagement
+;
+;-------------------------------------------------------------------------------
+
+ USE ussetqzs NOLIST   ; permet de faire les SET PROCESS NOLIMIT....
+ SET NOBLANK           ; Empêche l'impression de ligne blanche
+
+
+ACCESS GPPBC_ANNEE   &
+
+  LINK CIECLE OF GPPBC_ANNEE,           &
+       PRJCLE OF GPPBC_ANNEE            &
+    TO CIECLE,                          &
+       PRJCLE OF GPPROJETS              &
+
+  LINK CIECLE OF GPPBC_ANNEE,           &
+       PRJCLE OF GPPBC_ANNEE,           &
+       CPTCLE OF GPPBC_ANNEE,           &
+       UNACLE OF GPPBC_ANNEE            &
+    TO CIECLE,                          &
+       PRJCLE,                          &
+       CPTCLE,                          &
+       UNACLE OF GPPRO_BDG_CTB          &
+
+  LINK CPTCLE OF GPPBC_ANNEE            &
+    TO CPTCLE OF VCPT_DSC      OPTIONAL &
+
+  LINK NACCLE OF VCPT_DSC               &
+    TO NACCLE OF VNAC_DSC OPTIONAL      &
+
+  LINK CIECLE OF GPPBC_ANNEE,           &
+       UNACLE OF GPPBC_ANNEE            &
+    TO CIECLE                 ,         &
+       UNACLE OF MCUNITE_ADM   OPTIONAL
+
+
+CHOOSE CIECLE PARM, &                    ; Compagnie
+       PBAANN PARM, &                    ; Année financière
+       PRJCLE PARM RANGE, &              ; Projet
+       CPTCLE PARM RANGE, &              ; Compte
+       UNACLE PARM                       ; Unité
+
+ DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &               ; titre1  du rapport
+@IF FRANCAIS
+   "Suivi des disponibilités par compte par unité (Sommaire)"
+@ELSE
+   "Available Funds Monitoring by Account by Unit adm."
+@ENDIF
+ DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = " "             ; titre2  du rapport
+ DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "GP301"         ; numéro du rapport
+ DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM            ; Nom de la compagnie
+
+;
+; Libellé du budget selon l'approbation ou non
+;
+DEFINE D_BUDLIBFRA CHARACTER SIZE 14 = "Bud. courant.:" &
+                                  IF PRJPBCUSRAPP OF GPPROJETS <> "" ELSE &
+                                       "Bud. initial.:"
+
+DEFINE D_BUDLIBANG CHARACTER SIZE 14 = "%%%. courant.:" &
+                                  IF PRJPBCUSRAPP OF GPPROJETS <> "" ELSE &
+                                       "%%%. initial.:"
+
+
+;
+; Total budget revisé annuel (prendre note qu'on doit divisé les montants
+; des budgets revisés par cent car au niveau de l'énoncé REPORT ils sont arrondi.)
+;
+DEFINE D_TOTMNTBDG FLOAT SIZE 8 = (ROUND(PBCMNTBDGREV OF GPPRO_BDG_CTB/100)) &
+                               IF PRJPBCUSRAPP OF GPPROJETS <> ""     &
+                             ELSE (ROUND(PBCMNTBDG    OF GPPRO_BDG_CTB/100))
+
+;
+; Total budget réel annuel (prendre note qu'on doit divisé les montants
+; des budgets réel par cent car au niveau de l'énoncé REPORT ils sont arrondi.)
+;
+DEFINE D_TOTPBAMNTREE FLOAT SIZE 8 = ROUND(PBAMNTREE1  OF GPPBC_ANNEE/100) + &
+                                     ROUND(PBAMNTREE2  OF GPPBC_ANNEE/100) + &
+                                     ROUND(PBAMNTREE3  OF GPPBC_ANNEE/100) + &
+                                     ROUND(PBAMNTREE4  OF GPPBC_ANNEE/100) + &
+                                     ROUND(PBAMNTREE5  OF GPPBC_ANNEE/100) + &
+                                     ROUND(PBAMNTREE6  OF GPPBC_ANNEE/100) + &
+                                     ROUND(PBAMNTREE7  OF GPPBC_ANNEE/100) + &
+                                     ROUND(PBAMNTREE8  OF GPPBC_ANNEE/100) + &
+                                     ROUND(PBAMNTREE9  OF GPPBC_ANNEE/100) + &
+                                     ROUND(PBAMNTREE10 OF GPPBC_ANNEE/100) + &
+                                     ROUND(PBAMNTREE11 OF GPPBC_ANNEE/100) + &
+                                     ROUND(PBAMNTREE12 OF GPPBC_ANNEE/100) + &
+                                     ROUND(PBAMNTREE13 OF GPPBC_ANNEE/100) + &
+                                     ROUND(PBAMNTREE14 OF GPPBC_ANNEE/100)
+
+;
+; Total cumulaqtif engagement annuel (prendre note qu'on doit divisé les montants
+; des budgets engagement annuel par cent car au niveau de l'énoncé REPORT
+; ils sont arrondi.)
+;
+DEFINE D_TOTPBAMNTENG FLOAT SIZE 8 = ROUND(PBAMNTENG1  OF GPPBC_ANNEE/100) + &
+                                     ROUND(PBAMNTENG2  OF GPPBC_ANNEE/100) + &
+                                     ROUND(PBAMNTENG3  OF GPPBC_ANNEE/100) + &
+                                     ROUND(PBAMNTENG4  OF GPPBC_ANNEE/100) + &
+                                     ROUND(PBAMNTENG5  OF GPPBC_ANNEE/100) + &
+                                     ROUND(PBAMNTENG6  OF GPPBC_ANNEE/100) + &
+                                     ROUND(PBAMNTENG7  OF GPPBC_ANNEE/100) + &
+                                     ROUND(PBAMNTENG8  OF GPPBC_ANNEE/100) + &
+                                     ROUND(PBAMNTENG9  OF GPPBC_ANNEE/100) + &
+                                     ROUND(PBAMNTENG10 OF GPPBC_ANNEE/100) + &
+                                     ROUND(PBAMNTENG11 OF GPPBC_ANNEE/100) + &
+                                     ROUND(PBAMNTENG12 OF GPPBC_ANNEE/100) + &
+                                     ROUND(PBAMNTENG13 OF GPPBC_ANNEE/100) + &
+                                     ROUND(PBAMNTENG14 OF GPPBC_ANNEE/100)
+
+DEFINE D_TOTCALECART  FLOAT SIZE 8 = D_TOTMNTBDG    - &
+                                     D_TOTPBAMNTREE - &
+                                     D_TOTPBAMNTENG
+
+DEFINE D_TOTPRCCONSOM FLOAT SIZE 8 = &
+       ROUND(((D_TOTPBAMNTREE + D_TOTPBAMNTENG) / D_TOTMNTBDG) *100)
+
+DEFINE D_TOTPRCCONREE FLOAT SIZE 8 = D_TOTPBAMNTREE + D_TOTPBAMNTENG
+
+SORT ON CIECLE OF GPPBC_ANNEE,    &
+        PRJCLE OF GPPBC_ANNEE,    &
+        NACCLE OF VCPT_DSC,       &
+        CPTCLE OF GPPBC_ANNEE,    &
+        UNACLE OF GPPBC_ANNEE
+
+
+ USE ustit180 NOLIST  ; Titre standard pour l'application
+SKIP 2&
+ TAB 001 "Année       : " &
+ TAB 016 PBAANN OF GPPBC_ANNEE &
+SKIP  &
+ TAB 001 "Projet      : " &
+ TAB 016 PRJCLE  OF GPPROJETS &
+ TAB 025 PRJDSC1 OF GPPROJETS &
+ SKIP &
+ TAB 015 "    01         02         03         04         05         06    "&
+ TAB 081 "    07         08         09         10         11         12    "&
+ TAB 147 "    13         14       Annuel"&
+SKIP 1 &
+ TAB 015 "---------- ---------- ---------- ---------- ---------- ----------"&
+ TAB 081 "---------- ---------- ---------- ---------- ---------- ----------"&
+ TAB 147 "---------- ---------- -----------"&
+SKIP 2
+
+HEADING AT UNACLE &
+  TAB 001 "Compte: " &
+  TAB 009 CPTCLE OF GPPBC_ANNEE &
+  TAB 016 CPTDSC OF VCPT_DSC &
+  TAB 054 "Unité administrative.:" &
+  TAB 078 UNACLE OF GPPBC_ANNEE &
+  TAB 087 UNANOM OF MCUNITE_ADM &
+SKIP 2
+
+
+REPORT &
+  TAB 001 D_BUDLIBFRA &
+  TAB 169 D_TOTMNTBDG &
+          TRAILING SIGN "-" PICTURE "^^^,^^^,^^^ " SIGNIFICANCE 2 &
+  SKIP  &
+  TAB 001 "Réel.........:" &
+  TAB 015 PBAMNTREE1  OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 026 PBAMNTREE2  OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 037 PBAMNTREE3  OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 048 PBAMNTREE4  OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 059 PBAMNTREE5  OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 070 PBAMNTREE6  OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 081 PBAMNTREE7  OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 092 PBAMNTREE8  OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 103 PBAMNTREE9  OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 114 PBAMNTREE10 OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 125 PBAMNTREE11 OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 136 PBAMNTREE12 OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 147 PBAMNTREE13 OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 158 PBAMNTREE14 OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 169 D_TOTPBAMNTREE &
+          TRAILING SIGN "-" PICTURE "^^^,^^^,^^^ " SIGNIFICANCE 2 &
+  SKIP  &
+  TAB 001 "Engagement...:" &
+  TAB 015 PBAMNTENG1  OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 026 PBAMNTENG2  OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 037 PBAMNTENG3  OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 048 PBAMNTENG4  OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 059 PBAMNTENG5  OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 070 PBAMNTENG6  OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 081 PBAMNTENG7  OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 092 PBAMNTENG8  OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 103 PBAMNTENG9  OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 114 PBAMNTENG10 OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 125 PBAMNTENG11 OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 136 PBAMNTENG12 OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 147 PBAMNTENG13 OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 158 PBAMNTENG14 OF GPPBC_ANNEE &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 169 D_TOTPBAMNTENG &
+          TRAILING SIGN "-" PICTURE "^^^,^^^,^^^ " SIGNIFICANCE 2 &
+  SKIP  &
+  TAB 001 "Ecart........:" &
+  TAB 169 D_TOTCALECART &
+          TRAILING SIGN "-" PICTURE "^^^,^^^,^^^ " SIGNIFICANCE 2 &
+  SKIP &
+  TAB 001 "%consommation:" &
+  TAB 175 D_TOTPRCCONSOM &
+          LEADING SIGN "-"   PICTURE " ^^^%" SIGNIFICANCE 2 &
+SKIP 1
+
+FOOTING AT UNACLE &
+  TAB 001 "-------------------------------------------------------------------------------------------------------------------"&
+  TAB 116 "-----------------------------------------------------------------" &
+ SKIP 2
+
+
+FOOTING AT NACCLE &
+ SKIP 2 &
+  TAB 001 "Total pour la nature comptable :" &
+  TAB 034 NACDSC OF VNAC_DSC &
+  SKIP 2 &
+  TAB 001 D_BUDLIBFRA &
+  TAB 169 D_TOTMNTBDG SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^^,^^^,^^^ " SIGNIFICANCE 2 &
+SKIP 1 &
+  TAB 001 "Réel.........:" &
+  TAB 015 PBAMNTREE1  OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 026 PBAMNTREE2  OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 037 PBAMNTREE3  OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 048 PBAMNTREE4  OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 059 PBAMNTREE5  OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 070 PBAMNTREE6  OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 081 PBAMNTREE7  OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 092 PBAMNTREE8  OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 103 PBAMNTREE9  OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 114 PBAMNTREE10 OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 125 PBAMNTREE11 OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 136 PBAMNTREE12 OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 147 PBAMNTREE13 OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 158 PBAMNTREE14 OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 169 D_TOTPBAMNTREE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^^,^^^,^^^ " SIGNIFICANCE 2 &
+SKIP 1 &
+  TAB 001 "Engagement...:" &
+  TAB 015 PBAMNTENG1  OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 026 PBAMNTENG2  OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 037 PBAMNTENG3  OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 048 PBAMNTENG4  OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 059 PBAMNTENG5  OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 070 PBAMNTENG6  OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 081 PBAMNTENG7  OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 092 PBAMNTENG8  OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 103 PBAMNTENG9  OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 114 PBAMNTENG10 OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 125 PBAMNTENG11 OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 136 PBAMNTENG12 OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 147 PBAMNTENG13 OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 158 PBAMNTENG14 OF GPPBC_ANNEE SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^,^^^,^^^ " OUTPUT SCALE -2 SIGNIFICANCE 2 &
+  TAB 169 D_TOTPBAMNTENG SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^^,^^^,^^^ " SIGNIFICANCE 2 &
+SKIP 1 &
+  TAB 001 "Ecart........:" &
+  TAB 169 D_TOTCALECART SUBTOTAL &
+          TRAILING SIGN "-" PICTURE "^^^,^^^,^^^ " SIGNIFICANCE 2 &
+SKIP 1 &
+  TAB 001 "%consommation:" &
+  TAB 175 D_TOTPRCCONREE RATIO D_TOTMNTBDG &
+          LEADING SIGN "-"   PICTURE " ^^^%" OUTPUT SCALE 2 SIGNIFICANCE 2 &
+SKIP PAGE
+
+
+BUILD gp301zb
+

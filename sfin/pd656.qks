@@ -1,0 +1,263 @@
+;/T/ Liste de débitage par commande interne
+;
+;/P/ Programmeur..: Rémy demers
+;    Date création: 1997-12-02
+;    Paticularité.: LE SUBFILE WPD656-PARAM DOIT EXISTER DANS [EXF]
+;                   AFFIN DE COMPILER,VOUS POUVER LE SUPPRIMER ENSUITE
+;
+;/M/ François Déry, 6 mai 1999
+;       Remplacer le subfile de paramètre à transmettre au quick par un fichier
+;       séquentiel du dictionnaire.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date..............: 11 septembre 2000
+;    Description.......: Correction au niveau du calcul des quantités à emballer restantes. Ajustement du calcul lorsque un site 
+;                        d'emballage diffère d'un site d'entreposage pour un ou des caissons donnés.
+;
+;    Référence.........: Demande de changement 000089.
+;
+;    Signet............: MP-00-09-11_D89.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+SCREEN pd656 MENU
+
+;-------------------------------------------------------------------------------
+;
+; Variables reçu en paramètres
+;
+TEMPORARY T_CIECLE    CHARACTER SIZE 4 RESET AT STARTUP
+TEMPORARY T_DIANUM002 CHARACTER SIZE 7 RESET AT STARTUP
+TEMPORARY T_SUMREJET  INTEGER   SIZE 4 RESET AT STARTUP
+TEMPORARY T_COMNUMCOM CHARACTER SIZE 7 RESET AT STARTUP
+TEMPORARY T_DIAGRAMME CHARACTER SIZE 7 RESET AT STARTUP
+
+
+;-------------------------------------------------------------------------------
+;
+FILE PDEMBAL_DIAG IN DICT DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+FILE PDDIAGRAMME IN DICT DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+FILE PDTEMPO_EMBAL DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+FILE PDPARAM_TMP DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+FILE PDCAISSON DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+FILE MCCOMPAGNIE DESIGNER
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables de travail
+;
+TEMPORARY T_PDGQTEPLACPEGRA INTEGER SIZE 4 RESET AT STARTUP
+TEMPORARY T_EMDQTEPRD       INTEGER SIZE 4 RESET AT STARTUP
+TEMPORARY T_DDEQTEFAB       INTEGER SIZE 4 RESET AT STARTUP
+TEMPORARY T_DIAQTEEMB       INTEGER SIZE 4 RESET AT STARTUP
+TEMPORARY T_DIAQTEDBT       INTEGER SIZE 4 RESET AT STARTUP
+TEMPORARY T_DIAQTEREJ       INTEGER SIZE 4 RESET AT STARTUP
+TEMPORARY T_DIADBTREJ       INTEGER SIZE 4 RESET AT STARTUP
+TEMPORARY T_DIAEMBREJ       INTEGER SIZE 4 RESET AT STARTUP
+TEMPORARY T_DIAQTECMD       INTEGER SIZE 4 RESET AT STARTUP
+TEMPORARY T_REJSUM          INTEGER SIZE 4 RESET AT STARTUP
+TEMPORARY T_SOMDDEQTEFAB    INTEGER SIZE 4 RESET AT STARTUP
+TEMPORARY T_SOMEMDQTEPRD    INTEGER SIZE 4 RESET AT STARTUP
+temporary t_diffemb         integer size 4 reset at startup
+temporary t_tempo_diaqteemb integer size 4 reset at startup
+temporary t_diffdbt         integer size 4 reset at startup
+temporary t_tempo_diaqtedbt integer size 4 reset at startup
+temporary t_prdrej          integer size 4 reset at startup
+temporary t_fabrej          integer size 4 reset at startup
+TEMPORARY T_FLGSC CHAR SIZE 1
+TEMPORARY T_DIFFSC INTEGER SIZE 4 RESET AT STARTUP
+
+
+;-------------------------------------------------------------
+;
+PROCEDURE INTERNAL PRIORITE
+BEGIN
+  WHILE RETRIEVING PDTEMPO_EMBAL VIA DIANUM002 USING T_DIANUM002
+  BEGIN
+    IF  PRICODPRI OF PDEMBAL_DIAG <= PRICODPRI OF PDTEMPO_EMBAL     &
+                            AND 0 <  T_EMDQTEPRD                    &
+                            AND 0 <  PDGQTEPLACPEGRA OF PDTEMPO_EMBAL
+    THEN BEGIN
+      LET T_PDGQTEPLACPEGRA = PDGQTEPLACPEGRA OF PDTEMPO_EMBAL - T_EMDQTEPRD
+
+      IF T_PDGQTEPLACPEGRA < 0
+      THEN BEGIN
+        LET T_SUM OF PDTEMPO_EMBAL = TEMDIAQTEDBT OF PDTEMPO_EMBAL
+        LET T_EMDQTEPRD = T_EMDQTEPRD - PDGQTEPLACPEGRA OF PDTEMPO_EMBAL
+        LET PDGQTEPLACPEGRA OF PDTEMPO_EMBAL = 0
+        PUT PDTEMPO_EMBAL
+        DO INTERNAL PRIORITE
+      END
+      ELSE BEGIN
+        LET T_SUM OF PDTEMPO_EMBAL = (T_SUM OF PDTEMPO_EMBAL + T_EMDQTEPRD)
+        LET PDGQTEPLACPEGRA OF PDTEMPO_EMBAL = PDGQTEPLACPEGRA OF PDTEMPO_EMBAL &
+                                             - T_EMDQTEPRD
+        IF T_SUM OF PDTEMPO_EMBAL >= D_PDGQTE OF PDTEMPO_EMBAL
+        THEN BEGIN
+          LET T_SUM OF PDTEMPO_EMBAL = D_PDGQTE OF PDTEMPO_EMBAL
+          PUT PDTEMPO_EMBAL
+          BREAK
+        END
+        ELSE BEGIN
+          LET T_EMDQTEPRD = 0
+          PUT PDTEMPO_EMBAL
+        END
+      END
+
+    END
+  END
+
+END
+
+
+;---------------------------------------------------------------
+;
+PROCEDURE INTERNAL BOUCLE
+BEGIN
+  WHILE RETRIEVING PDEMBAL_DIAG   VIA DIANUM002   ,   CIECLE &
+                                USING T_DIANUM002 , T_CIECLE &
+                              ORDERBY DIANUM002 , CIECLE , PRICODPRI
+  BEGIN
+    GET PDCAISSON OPT &
+      VIA    CIECLE       , &
+             CAINUMCAI      &
+      USING  T_CIECLE     , &
+             CAINUMCAI      OF PDEMBAL_DIAG
+    IF ACCESSOK
+    THEN BEGIN
+      GET MCCOMPAGNIE OPT &
+        VIA    CIECLE &
+        USING  T_CIECLE
+      IF ACCESSOK
+      THEN BEGIN
+        IF CAISITEMB OF PDCAISSON = CIESITENT OF MCCOMPAGNIE
+        THEN LET T_EMDQTEPRD = EMDQTEPRD OF PDEMBAL_DIAG
+        ELSE LET T_EMDQTEPRD = 0
+      END
+      DO INTERNAL PRIORITE
+    END
+  END
+END
+
+
+;---------------------------------------------------------------------------
+;
+PROCEDURE INTERNAL SOMEMDQTEPRD
+BEGIN
+  LET T_FLGSC = "0"
+  LET T_SOMEMDQTEPRD = 0
+
+  WHILE RETRIEVING PDEMBAL_DIAG   VIA   DIANUM002 ,   CIECLE &
+                                USING T_DIANUM002 , T_CIECLE
+  BEGIN
+    GET PDCAISSON OPTIONAL  &
+      VIA    CIECLE       , &
+             CAINUMCAI      &
+      USING  T_CIECLE     , &
+             CAINUMCAI      OF PDEMBAL_DIAG
+    IF ACCESSOK
+    THEN BEGIN
+      GET MCCOMPAGNIE OPT &
+        VIA    CIECLE &
+        USING  T_CIECLE
+      IF ACCESSOK
+      THEN BEGIN
+        let t_flgsc = "0" ; MP-00-09-11_D89.
+
+        IF CAISITEMB OF PDCAISSON = CIESITENT OF MCCOMPAGNIE
+        THEN LET T_SOMEMDQTEPRD = T_SOMEMDQTEPRD + EMDQTEPRD OF PDEMBAL_DIAG
+        ELSE LET T_FLGSC = "1"
+      END
+    END
+    ELSE LET T_FLGSC = "1"
+  END
+END
+
+
+;---------------------------------------------------------------
+;
+PROCEDURE INTERNAL MISE_A_JOUR_EMBAL
+BEGIN
+  WHILE RETRIEVING PDTEMPO_EMBAL VIA DIANUM002 USING T_DIANUM002
+  BEGIN
+    IF T_FLGSC = "1"
+    THEN BEGIN
+      LET T_SUM = 0
+      PUT PDTEMPO_EMBAL
+    END
+    ELSE DO INTERNAL BOUCLE
+  END
+END
+
+
+;-----------------------------------------------------------------------------
+;
+PROCEDURE INTERNAL FAIT
+BEGIN
+  WHILE RETRIEVING PDTEMPO_EMBAL VIA DIANUM002 USING T_DIANUM002
+  BEGIN
+    LET T_SUM = T_DIAQTECMD
+    PUT PDTEMPO_EMBAL
+  END
+END
+
+
+;----------------------------------------------------------------------------
+;
+PROCEDURE INITIALIZE
+BEGIN
+  WHILE RETRIEVING PDPARAM_TMP SEQUENTIAL
+  BEGIN
+    LET T_CIECLE    = CIECLE    OF PDPARAM_TMP
+    LET T_DIANUM002 = DIANUM002 OF PDPARAM_TMP
+    LET T_COMNUMCOM = COMNUMCOM OF PDPARAM_TMP
+
+    GET PDDIAGRAMME     &
+      VIA   CIECLE    , &
+            DIANUM002   &
+      USING T_CIECLE  , &
+            T_DIANUM002
+
+    LET T_DIAQTEEMB = DIAQTEEMB OF PDDIAGRAMME
+    LET T_DIAQTECMD = DIAQTECMD OF PDDIAGRAMME
+
+    IF T_DIAQTEEMB >= T_DIAQTECMD
+    THEN DO INTERNAL FAIT
+    ELSE BEGIN
+      IF T_DIAQTEEMB <> 0
+      THEN BEGIN
+        DO INTERNAL SOMEMDQTEPRD
+        IF T_SOMEMDQTEPRD < T_DIAQTEEMB  ; SI IL Y A DES QTE SC OU US
+        THEN DO INTERNAL MISE_A_JOUR_EMBAL
+        ELSE DO INTERNAL BOUCLE
+      END
+    END
+  END
+
+  RETURN
+
+END
+
+
+BUILD
+

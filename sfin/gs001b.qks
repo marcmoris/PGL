@@ -1,0 +1,136 @@
+;/T/ Gestion de la sécurité usagers / Compagnies
+;
+;/P/ Programmeur..: Lyne Ferland
+;    Date Création: 27-Feb-1992
+;
+;    Description..: Cet écran permet de restreindre l'accès à certaines
+;                   compagnies et centres par usagers (Si l'option sécurité
+;                   compagnie et centre = O au niveau du holding)
+;
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN gs001b ACTIONBAR NOMODE NOACTION FIELDMARK RETAIN STARTUP &
+              FROM 8,1 TO 23,80 &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              TRANSACTION MODE DUAL &
+              RECEIVING GSUSAGER
+
+USE usactecr NOLIST
+
+FILE GSUSAGER      MASTER NODELETE
+
+FILE GSSEC_USR PRIMARY OCCURS 11 NOITEMS
+  ACCESS VIA USRCLE , CIECLE &
+  USING      USRCLE OF GSUSAGER, &
+             CIECLE OF GSSEC_USR &
+  REQUEST    CIECLE
+
+  ACCESS VIA USRCLE USING USRCLE OF GSUSAGER
+  ACCESS VIAINDEX SUS_U01 SEQUENTIAL
+  ITEM USRCLE OF GSSEC_USR INIT USRCLE OF GSUSAGER
+
+FILE MCCOMPAGNIE REFERENCE  OCCURS WITH GSSEC_USR
+  ACCESS VIA CIECLE USING CIECLE OF GSSEC_USR
+
+USE ussectmp NOLIST
+"GS001B"
+
+TEMPORARY T_CIECLE CHARACTER SIZE 4 ; Permet de ramener la compagnie
+                                    ; d'un écran de consultation
+
+@IF FRANCAIS
+DEFINE D_TITECR CHARACTER SIZE 27 = &
+       " Sécurité Compagnie "
+@ELSE
+DEFINE D_TITECR CHARACTER SIZE 27 = &
+       " Security Company "
+@ENDIF
+
+USE ushilite NOLIST
+
+DRAW 2,1 TO 16,80
+
+HILITE DISPLAY HALFTONE
+
+FIELD D_TITECR HIDDEN NOID NOLABEL DATA AT 2,22 DISPLAY PREDISPLAY FIXED
+
+HILITE DISPLAY HALFTONE UNDERLINE
+
+SKIP
+
+USE ustitoff NOLIST
+
+;           1         2         3         4         5         6         7
+; 123456768901234567890123456789012345678901234567890123456789012345678901234567
+;              Cie  Nom abrégé            Centre   Nom abrégé
+;              xx   xxxxxxxxxxxxxxxxxxxx   xxxx    xxxxxxxxxxxxxxxxxxxx
+@IF FRANCAIS
+TITLE "Cie"         AT ,13
+TITLE "Nom abrégé " AT ,18
+@ELSE
+TITLE "Co."         AT ,13
+TITLE "Abbr. Name"  AT ,18
+@ENDIF
+
+SKIP 1
+
+ALIGN(12,12,13) (,,18) (,,41) (,,49)
+CLUSTER OCCURS WITH GSSEC_USR
+
+FIELD CIECLE    OF GSSEC_USR   HIDDEN REQUIRED NOCHANGE LABEL " " &
+       LOOKUP ON MCCOMPAGNIE VIA CIECLE USING CIECLE OF GSSEC_USR &
+       MESSAGE 10
+                ; Cette compagnie n'est pas définie
+FIELD CIENOMABR OF MCCOMPAGNIE DISPLAY
+
+CLUSTER
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+PROCEDURE INPUT CIECLE
+BEGIN
+ ;
+ ; Pour la sécurité de saisie
+ ;
+ USE ussecent NOLIST
+
+ IF 0 <> IND(FIELDTEXT,"*")
+ THEN BEGIN
+   LET T_CIECLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+   RUN SCREEN mc105 PASSING T_CIECLE MODE F
+   LET FIELDTEXT = TRUNC(T_CIECLE)
+ END
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNC(CIECLE OF GSSEC_USR))
+  THEN LET FIELDTEXT = CIECLE OF GSSEC_USR
+END
+
+PROCEDURE PREUPDATE
+BEGIN
+  FOR GSSEC_USR
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF GSSEC_USR &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD OF GSSEC_USR &
+       AND NOT NEWRECORD OF GSSEC_USR &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+  END
+END
+
+BUILD

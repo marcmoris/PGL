@@ -1,0 +1,362 @@
+;/T/ 2.5.7 FTRturation commande interne. (Commentaire produit de dimension)
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1995-03-22
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   les commentaires pour la facturation des commandes internes
+;                   de produits de dimension.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd215g ACTIONBAR                     &
+              MODE LABEL "" AT 2,80         &
+              NOACTION                      &
+              FIELDMARK RETAIN STARTUP      &
+              HELP POPUP FROM 4,9 TO 20,72  &
+              RECEIVING T_CIECLEMNU,        &
+                        T_CIENOM,           &
+                        PDFACTURE,          &
+                        PDPROD_FACTURE
+
+
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+
+USE ussectmp  NOLIST
+    "PD215G"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+
+USE pd215g.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire au traitement
+;
+
+TEMPORARY T_SILENT           CHARACTER SIZE 01
+
+
+;-------------------------------------------------------------------------------
+;
+; Facture
+;
+
+FILE PDFACTURE MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Produit dimension facture
+;
+
+FILE PDPROD_FACTURE MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Commentaire facture
+;
+
+FILE PDCOMMEN_PROD PRIMARY OCCURS 11 TIMES
+
+  ACCESS VIA     CIECLE,           &
+                 FTRNUMFAC,        &
+                 TGRCODGRA,        &
+                 TYFCODFIN,        &
+                 PDILON,           &
+                 PDIHAU,           &
+                 PDIEPA            &
+         USING   T_CIECLEMNU,                           &
+                 FTRNUMFAC         OF PDPROD_FACTURE,   &
+                 TGRCODGRA         OF PDPROD_FACTURE,   &
+                 TYFCODFIN         OF PDPROD_FACTURE,   &
+                 PDILON            OF PDPROD_FACTURE,   &
+                 PDIHAU            OF PDPROD_FACTURE,   &
+                 PDIEPA            OF PDPROD_FACTURE   &
+         ORDERBY CIECLE,           &
+                 FTRNUMFAC,        &
+                 TGRCODGRA,        &
+                 TYFCODFIN,        &
+                 PDILON,           &
+                 PDIHAU,           &
+                 PDIEPA,           &
+                 COPNUMLIG
+
+  ITEM CIECLE OF PDCOMMEN_PROD INITIAL T_CIECLEMNU
+
+;-------------------------------------------------------------------------------
+;
+; Client
+;
+
+FILE VCLC_CLI        REFERENCE
+
+  ACCESS VIA     CLICIECLE,        &
+                 CLICLE,           &
+                 CIECLE            &
+         USING   "----",                                &
+                 CLICLE            OF PDFACTURE,        &
+                 T_CIECLEMNU
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable servant au traitement
+;
+
+TEMPORARY T_NOLIG INT SIZE 04 RESET AT STARTUP ; Pour no ligne automatique.
+
+
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+
+SKIP
+
+
+TITLE &
+@IF FRANCAIS
+      " Facturation commande interne " &
+@ELSE
+      " %%%Facturation commande interne " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+
+ALIGN (,3,19)
+
+
+FIELD FTRNUMFAC        OF PDPROD_FACTURE   &
+        DISPLAY                            &
+        FIXED
+
+
+ALIGN (,3,19) (,,28)
+
+
+FIELD CLICLE           OF PDFACTURE        &
+        DISPLAY                            &
+        FIXED
+
+
+FIELD CLINOM           OF VCLC_CLI         &
+        DISPLAY                            &
+        FIXED
+
+
+DRAW 8,2 TO 8,79
+
+
+SKIP TO LINE 8
+
+
+TITLE &
+@IF FRANCAIS
+      " Commentaire " &
+@ELSE
+      " %%%Commentaire " &
+@ENDIF
+      CENTERED AT ,1
+
+
+SKIP TO LINE 10
+
+
+TITLE &
+@IF FRANCAIS
+      "    Lig.   Description                                Imp. " &
+@ELSE
+      "%%% Lig.   Description                                Imp. " &
+@ENDIF
+      AT ,2
+
+
+ALIGN (05,05,06) (,,13) (,,57)
+
+
+CLUSTER OCCURS WITH PDCOMMEN_PROD ID BASE 90
+
+
+FIELD COPNUMLIG        OF PDCOMMEN_PROD    &
+        HIDDEN                             &
+        LABEL " "
+
+
+FIELD COPCOM           OF PDCOMMEN_PROD    &
+        HIDDEN
+
+
+FIELD COPFLGIMP        OF PDCOMMEN_PROD    &
+        HIDDEN
+
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procedure permettant de générer le numéro de ligne automatique
+;
+
+PROCEDURE INPUT COPNUMLIG
+BEGIN
+  IF 0 = SIZE(FIELDTEXT ) AND &
+     COPNUMLIG OF PDCOMMEN_PROD    = 0
+  THEN BEGIN
+    LET FIELDTEXT = ASCII( T_NOLIG + 1 )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure permettant de générer le numéro de ligne automatique
+;
+
+PROCEDURE PROCESS COPNUMLIG
+BEGIN
+  LET T_NOLIG = COPNUMLIG OF PDCOMMEN_PROD
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour convertir OUI,NON en 1,0
+;
+
+PROCEDURE INPUT COPFLGIMP
+BEGIN
+  USE usflginp NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour convertir 1,0 en OUI,NON
+;
+
+PROCEDURE OUTPUT COPFLGIMP
+BEGIN
+  USE usflgout NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDCOMMEN_PROD    &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDCOMMEN_PROD    &
+     AND NOT NEWRECORD     OF PDCOMMEN_PROD    &
+     AND NOT DELETEDRECORD OF PDCOMMEN_PROD    &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+END
+
+
+BUILD
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+************************* Facturation commande interne *************************
+*                                                                              *
+* No. facture...: xxxxxxxxx                                                    *
+* Client........: xxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            *
+*                                                                              *
+********************************* Commentaire **********************************
+*                                                                              *
+*    Lig.   Description                                Imp.                    *
+*    xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    x                      *
+*    xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    x                      *
+*    xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    x                      *
+*    xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    x                      *
+*    xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    x                      *
+*    xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    x                      *
+*    xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    x                      *
+*    xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    x                      *
+*    xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    x                      *
+*    xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    x                      *
+*    xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    x                      *
+*                                                                              *
+********************************************************************************
+@ENDIF

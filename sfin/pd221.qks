@@ -1,0 +1,344 @@
+;/T/ 2.1.5. Enregistrer les rejets.
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1994-08-06
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   Les rejets de tranche ou de diagramme.
+;
+;/M/François Déry, 12 mai 1999
+;       Ajout du in dict sur la transaction pour unix.
+;       Enlever l'affectation du # de rejet au call du sous-écran a et b car la
+;       gestion de ce numéro est déjà présente dans le sous-écran.
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd221  ACTIONBAR                    &
+              MODE LABEL "" AT 2,80        &
+              NOACTION                     &
+              ACTIVITIES CHANGE,FIND,ENTRY &
+              FIELDMARK RETAIN STARTUP     &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU ,      &
+                        T_CIENOM
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Déclaration de la transaction pour donner un numéro séquentiel
+;
+
+TRANSACTION NO_SEQ READ WRITE &
+                   RESERVING FOR PROTECTED WRITE PDSEQ_REJET IN DICT
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD221"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+USE pd221.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Tranche                         " ACTION DESIGNER D001
+  MENUITEM LABEL "Diagramme                       " ACTION DESIGNER D002
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%Tranche                      " ACTION DESIGNER D001
+  MENUITEM LABEL "%%%Diagramme                    " ACTION DESIGNER D002
+@ENDIF
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Rapport de montage
+;
+
+FILE PDREJET          PRIMARY &
+                      NOITEM &
+                      NODELETE
+
+  ACCESS VIA     CIECLE,          &
+                 REJNUMREJ        &
+         USING   T_CIECLEMNU,                         &
+                 REJNUMREJ        OF PDREJET          &
+         REQUEST REJNUMREJ        OF PDREJET          &
+         ORDERBY CIECLE,          &
+                 REJNUMREJ
+
+  ACCESS VIA     CIECLE           &
+         USING   T_CIECLEMNU      &
+         ORDERBY CIECLE,          &
+                 REJNUMREJ
+
+
+  ITEM CIECLE    OF PDREJET INITIAL T_CIECLEMNU
+  ITEM REJDATCRE OF PDREJET INITIAL SYSDATE
+  ITEM REJHRECRE OF PDREJET INITIAL SYSTIME / 10000
+  ITEM REJUSRCRE OF PDREJET INITIAL LOGONID
+
+  ITEM REJDATMAJ OF PDREJET FINAL   SYSDATE &
+                                    IF NOT NEWRECORD OF PDREJET &
+                                       AND &
+                                       ALTEREDRECORD OF PDREJET
+
+  ITEM REJHREMAJ OF PDREJET FINAL   SYSTIME / 10000 &
+                                    IF NOT NEWRECORD OF PDREJET &
+                                       AND &
+                                       ALTEREDRECORD OF PDREJET
+
+  ITEM REJUSRMAJ OF PDREJET FINAL   LOGONID &
+                                    IF NOT NEWRECORD OF PDREJET &
+                                       AND &
+                                       ALTEREDRECORD OF PDREJET
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro séquentiel pour les factures
+;
+
+FILE PDSEQ_REJET   DESIGNER &
+                   TRANSACTION NO_SEQ
+
+
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Rejet " &
+@ELSE
+      " %%%Rejet " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+
+ALIGN (2,3,19) (49,50,66)
+
+
+FIELD REJNUMREJ        OF PDREJET          &
+label "No rejet......:"&
+        HIDDEN ID 05                       &
+        DISPLAY                            &
+        REFRESH
+
+
+FIELD REJDATREJ        OF PDREJET           FORMAT YYYYMMDD &
+PATTERN "####/##/##"&
+label "Date rejet....:"&
+        HIDDEN ID 10                       &
+        DEFAULT SYSDATE
+
+
+ALIGN (2,3,19)
+
+
+FIELD REJDSC001        OF PDREJET          &
+label "Description...:"&
+        HIDDEN ID 15
+
+
+ALIGN (,,19)
+
+
+FIELD REJDSC002        OF PDREJET          &
+        ID SAME
+
+
+
+FIELD REJDSC003        OF PDREJET          &
+        ID SAME
+
+
+DRAW 10,2 TO 10,79
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Rejet tranche
+;
+
+PROCEDURE DESIGNER D001
+BEGIN
+  RUN SCREEN  pd221a &
+              PASSING T_CIECLEMNU,        &
+                      T_CIENOM,           &
+                      PDREJET             &
+              MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Rejet diagramme
+;
+
+PROCEDURE DESIGNER D002
+BEGIN
+
+   RUN SCREEN  pd221b &
+              PASSING T_CIECLEMNU,        &
+                      T_CIENOM,           &
+                      PDREJET             &
+              MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDREJET &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDREJET &
+     AND NOT NEWRECORD     OF PDREJET &
+     AND NOT DELETEDRECORD OF PDREJET &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  ;
+  ; Incrémentation du numéro de séquence
+  ;
+  IF 0 = REJNUMREJ OF PDREJET
+  THEN BEGIN
+    START TRANSACTION NO_SEQ
+    GET PDSEQ_REJET OPTIONAL            &
+      VIA   CIECLE                      &
+      USING T_CIECLEMNU
+    IF NOT ACCESSOK
+    THEN BEGIN
+      LET CIECLE OF PDSEQ_REJET = T_CIECLEMNU
+    END
+    LET SRJNUMSEQ        OF PDSEQ_REJET      = SRJNUMSEQ        OF PDSEQ_REJET      + 1
+    LET REJNUMREJ        OF PDREJET          = SRJNUMSEQ        OF PDSEQ_REJET
+    PUT PDSEQ_REJET
+    DISPLAY REJNUMREJ OF PDREJET
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Permet de faire afficher le numéro de séquence
+;
+
+PROCEDURE POSTUPDATE
+BEGIN
+  IF CORRECTMODE
+  THEN BEGIN
+    DISPLAY REJNUMREJ OF PDREJET
+    WARNING = " "
+  END
+END
+
+
+BUILD
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+************************************ Rejet *************************************
+*                                                                              *
+* No rejet......: xxxxxxxxx                      Date rejet....: xxxxxxxx      *
+* Description...: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                                                                              *
+********************************************************************************
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+********************************************************************************
+@ENDIF

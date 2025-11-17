@@ -1,0 +1,211 @@
+;/T/ Rapports de dépenses - Histo. des transactions
+;
+;/P/ Programmeur..: Alain Côté / Adapté pour les C.P. par Thomas BRENNEUR
+;    Date Création: 15 JUIN 1993
+;
+;    Description..: Affiche les transactions qui affecte le rapport de dépense.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cp005b MODE LABEL "" AT 1,80 &
+              NOACTION FIELDMARK RETAIN &
+              FROM 2,1 TO 15,80 &
+              MESSAGE ON 24 &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              ACTIVITIES FIND &
+              RECEIVING CPCPT_A_PAYER
+
+USE ussectmp  NOLIST
+    "CP005B"
+
+USE cp005b.hlp NOLIST
+
+;-------------------------------------------------------------------------------
+
+FILE CPCPT_A_PAYER      MASTER
+
+FILE CPCAP_HISTO      PRIMARY &
+                      NOITEM  &
+                      OCCURS 9
+
+  ACCESS VIA      FOUCIECLE, &
+                  FOUCLE   , &
+                  CAPCLE     &
+         USING    FOUCIECLE OF CPCPT_A_PAYER, &
+                  FOUCLE    OF CPCPT_A_PAYER, &
+                  CAPCLE    OF CPCPT_A_PAYER  &
+         ORDERBY  FOUCIECLE, &
+                  FOUCLE   , &
+                  CAPCLE   , &
+                  CPHTIMSTP
+
+;-------------------------------------------------------------------------------
+;
+; Pour afficher le type de transaction(BILINGUE).
+;
+DEFINE    D_CPHTYPECR CHAR SIZE 16 = "CPHTYPECR"
+;
+FILE VCBI_DSC         REFERENCE &
+                      OCCURS WITH CPCAP_HISTO
+
+  ACCESS VIA    XELNOM, &
+                CBICLE  &
+         USING  D_CPHTYPECR, &
+                CPHTYPECR OF CPCAP_HISTO
+
+
+;-------------------------------------------------------------------------------
+;
+; Définition du signe qui affecte le compte à payer.
+; Il y a deux posibilités, soit une transaction qui augmente(+) le rapport de
+; dépense, ou soit une transaction qui diminue(-) le rapport de dépense.
+;
+; Ceux qui augmentent le rapport de dépense :
+;   - un ajustement positif.
+;   - un chèque annulé.
+;
+; Ceux qui diminuent le rapport de dépense :
+;   - un ajustement négatif.
+;   - un paiement.
+;
+DEFINE D_SGN CHARACTER SIZE 1 = "+" IF (     CPHTYPECR OF CPCAP_HISTO = "AR" &
+                                         AND CPHMNTCAP OF CPCAP_HISTO > 0 &
+                                       ) OR &
+                                       (     CPHTYPECR OF CPCAP_HISTO = "CH" &
+                                         AND CPHMNTCAP OF CPCAP_HISTO < 0 &
+                                       ) &
+                           ELSE "-"
+
+;
+; Le montant doit être positif, car le signe est affiché séparément.
+;
+DEFINE D_CPHMNT    FLOAT SIZE 8 = ABSOLUTE(CPHMNTCAP OF CPCAP_HISTO) &
+                                  IF CPHTYPECR OF CPCAP_HISTO <> "CH" &
+                                  ELSE ABSOLUTE(CPHMNTPYE OF CPCAP_HISTO)
+;
+DEFINE D_CPHMNTESC FLOAT SIZE 8 = 0 &
+                                 IF CPHTYPECR OF CPCAP_HISTO <> "CH" &
+                          ELSE ABSOLUTE(CPHMNTESC OF CPCAP_HISTO)
+
+;-------------------------------------------------------------------------------
+
+DRAW 01,01 TO 01,79
+DRAW 01,01 TO 14,01
+DRAW 14,01 TO 14,80
+DRAW 02,80 TO 14,80
+
+USE ushilite NOLIST
+
+TITLE &
+@IF FRANCAIS
+      " Historique des transactions " &
+@ELSE
+      " Transaction History " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST
+
+SKIP
+
+ALIGN (,3,19)
+
+FIELD CAPCLE OF CPCPT_A_PAYER &
+        FIXED &
+@IF FRANCAIS
+        LABEL "Rapport dép...:"
+@ELSE
+        LABEL "Exp. report...:"
+@ENDIF
+
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      "Date" &
+@ELSE
+      "Post" &
+@ENDIF
+      AT ,21
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+ "Type             Journ.    Référence       Céd  +/-    Montant    Escompte" &
+@ELSE
+ "Type            posting    Reference       Sch  +/-     Amount       Discount" &
+@ENDIF
+    AT ,3
+
+ALIGN (3,2,3) (,,19) (,,30) (,,46) (,,52) (,,54) (,,68)
+
+CLUSTER OCCURS WITH CPCAP_HISTO ID BASE 05
+
+FIELD CBIDSC OF VCBI_DSC HIDDEN LABEL " " &
+        DISPLAY &
+        SIZE 15
+
+FIELD CPHDATJOU OF CPCAP_HISTO  FORMAT YYYYMMDD PATTERN "####/##/##"&
+        DISPLAY
+
+FIELD CPHCLE3   OF CPCAP_HISTO &
+        DISPLAY
+
+FIELD CPCCLELIG OF CPCAP_HISTO &
+        DISPLAY
+
+@IF VAXVMS
+HILITE DISPLAY HALFTONE
+@ENDIF
+
+FIELD D_SGN &
+        DISPLAY
+
+USE ushilite NOLIST
+
+FIELD D_CPHMNT &
+        PICTURE "^^,^^^,^^^.^^" &
+        SIGNIFICANCE 4 &
+        BWZ
+
+FIELD D_CPHMNTESC &
+        PICTURE "^^^,^^^.^^" &
+        SIGNIFICANCE 4 &
+        BWZ
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran par son code.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+BUILD
+;
+;************************* Historique des transactions *************************x
+;* Rapport dép...: xxxxxxxxxxxx                                                 *
+;*                   Date                                                       *
+;* Type             Journ.  Référence       Céd  +/-       Montant    Escompte  *
+;* xxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxx     xx   x  xxxxxxxxxxxxx  xxxxxxxxxx  *
+;* xxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxx     xx   x  xxxxxxxxxxxxx  xxxxxxxxxx  *
+;* xxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxx     xx   x  xxxxxxxxxxxxx  xxxxxxxxxx  *
+;* xxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxx     xx   x  xxxxxxxxxxxxx  xxxxxxxxxx  *
+;* xxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxx     xx   x  xxxxxxxxxxxxx  xxxxxxxxxx  *
+;* xxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxx     xx   x  xxxxxxxxxxxxx  xxxxxxxxxx  *
+;* xxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxx     xx   x  xxxxxxxxxxxxx  xxxxxxxxxx  *
+;* xxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxx     xx   x  xxxxxxxxxxxxx  xxxxxxxxxx  *
+;* xxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxx     xx   x  xxxxxxxxxxxxx  xxxxxxxxxx  *
+;********************************************************************************

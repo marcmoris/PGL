@@ -1,0 +1,237 @@
+;/T/ Annulation de paiements - Imputation
+;
+;/P/ Programmeur..: Thomas BRENNEUR
+;    Date Création: 6 Juillet 1993
+;
+;    Description..: consultation de l'imputation pour une annulation de
+;                   dépense directe.
+;
+;/M/ Adatation....: Marc Morissette 22 Octobre 1993
+;
+;    Description..: Ajout du flg Facturable Oui/non et du numéro de client
+;                   Ajout du code d'équipement
+;                   Modification de l'ordre de saisie des champs
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cp009b ACTIONBAR &
+              MODE LABEL "" AT 2,132 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              FROM 1,1 TO 23,132 &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              ACTIVITIES FIND &
+              RECEIVING T_CIECLEMNU  , &
+                        T_CIENOM     , &
+                        CPPAIEMENT
+
+
+USE ussectmp   NOLIST
+    "CP009B"
+
+USE cp009b.hlp NOLIST
+
+USE usactecr   NOLIST
+
+;
+; Ouverture d'une transaction QUERY indépendante de l'écran maitre.
+; pour ne pas rompre la chaine de lecture.
+;
+USE ustrasse   NOLIST
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de compagnie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie du menu.
+
+;-------------------------------------------------------------------------------
+;
+; Relations mâitres :
+;
+
+FILE CPPAIEMENT       MASTER
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION DE L'IMPUTATION
+;
+
+FILE CPPAM_IMPUTATION PRIMARY &
+                      OCCURS 14 &
+                      NOITEMS
+
+  ACCESS  VIA     CIECLE   ,&
+                  LBQCPTENC, &
+                  PAMCLE     &
+          USING   CIECLE    OF CPPAIEMENT, &
+                  LBQCPTENC OF CPPAIEMENT, &
+                  PAMCLE    OF CPPAIEMENT  &
+          ORDERBY CIECLE   , &
+                  LBQCPTENC, &
+                  PAMCLE   , &
+                  CPITIMSTP
+
+;-------------------------------------------------------------------------------
+;
+; Calcul de l'écart entre le montant brut et la sommation de l'imputation.
+;
+DEFINE D_ECART FLOAT SIZE 8 = PAMMNT    OF CPPAIEMENT - &
+                              PAMCUMMNT OF CPPAIEMENT
+
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+
+USE usdrw132 NOLIST
+USE ustit132 NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Imputation " &
+@ELSE
+      " Charge " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST
+
+
+ALIGN(,3,19) (,98,114)
+
+FIELD PAMCLE    OF CPPAIEMENT &
+      FIXED
+
+FIELD PAMMNT    OF CPPAIEMENT &
+      FIXED &
+@IF FRANCAIS
+      LABEL "Montant total.:"
+@ELSE
+      LABEL "Total amount..:"
+@ENDIF
+
+FIELD PAMMNTTPS OF CPPAIEMENT &
+      PREDISPLAY
+
+FIELD PAMCUMMNT OF CPPAIEMENT &
+      PREDISPLAY
+
+FIELD PAMMNTTVQ OF CPPAIEMENT &
+      PREDISPLAY
+
+FIELD D_ECART &
+      PREDISPLAY &
+@IF FRANCAIS
+      LABEL "Solde à vent..:" &
+@ELSE
+      LABEL "Balance.......:" &
+@ENDIF
+      PICTURE "^^,^^^,^^^.^^ " &
+      TRAILING SIGN "-" &
+      SIGNIFICANCE 5
+
+SKIP
+
+DRAW ,1 TO ,132
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+"Projet  SSpro Immobilis.  Unité    Compte       Montant  TF TP         TPS         TVQ Fac. Client"&
+@ENDIF
+  AT ,3
+
+ALIGN (3,2,3) (,,12) (,,16) (,,29) (,,38) (,,45) (,,60) (,,63) (,,66)(,,78)(,,90)(,,94)
+
+CLUSTER OCCURS WITH CPPAM_IMPUTATION ID BASE 05
+
+FIELD PRJCLE        OF CPPAM_IMPUTATION &
+      HIDDEN LABEL " "
+
+FIELD PRACLE        OF CPPAM_IMPUTATION
+FIELD IMMCLE        OF CPPAM_IMPUTATION
+
+
+FIELD UNACLE        OF CPPAM_IMPUTATION
+
+FIELD CPTCLE OF CPPAM_IMPUTATION
+
+FIELD CPIMNT        OF CPPAM_IMPUTATION
+
+FIELD CPITAXCODTPS  OF CPPAM_IMPUTATION
+
+FIELD CPITAXCODTVQ  OF CPPAM_IMPUTATION
+
+FIELD CPIMNTTPS     OF CPPAM_IMPUTATION
+
+FIELD CPIMNTTVQ     OF CPPAM_IMPUTATION
+
+FIELD CPIFLGFAC    OF CPPAM_IMPUTATION REQUIRED SIZE 3
+
+FIELD CLICLE       OF CPPAM_IMPUTATION REQUIRED
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+PROCEDURE OUTPUT CPIFLGFAC
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Averti l'usager si l'éciture ne balance pas.
+;
+;
+PROCEDURE EXIT
+BEGIN
+  IF PAMMNT OF CPPAIEMENT <> PAMCUMMNT OF CPPAIEMENT
+  THEN WARNING 459 ; L'imputation ne balance pas.
+END
+
+
+BUILD
+@IF FORMAT
+        CP009B    ;/T/ Annulation de paiements - Imputation    93-10-22
+
+        xxxx                                         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                              x
+        ************************************************************ Imputation ************************************************************
+        * No paiement...: xxxxxxx                        Montant total.: xxxxxxxxxxxxxx                                                    *
+        * Montant de TPS: xxxxxxxxxxx                    Cum. mnt brut.: xxxxxxxxxxxxxx                                                    *
+        * Montant de TVQ: xxxxxxxxxxx                    Ecart.........: xxxxxxxxxxxxxx                                                    *
+        ********************************************************************************                                                   *
+        * Projet  SSpro Équipement Unité    Compte        Montant  TF TP         TPS         TVQ                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        ************************************************************************************************************************************
+@ENDIF

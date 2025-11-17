@@ -1,0 +1,103 @@
+;/T/ 2.4.3 Enregistrer les rejets - PROCÉDURE DE TRANSFERT
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1994-03-30
+;
+;/M/ François Déry, 6 mai 1999
+;       Enlever une référence inuttiles au diagramme.
+
+USE ussetqts NOLIST   ; set process nolimit
+
+RUN pd715t
+
+USE usdimprd NOLIST   ; Dimension min et max pour les pièces de granit
+
+GLOBAL TEMPORARY T_ERREUR CHARACTER SIZE 01
+
+;-------------------------------------------------------------------------------
+;
+; Valide les lignes de détail du rapport d'opération de surface
+;
+
+REQUEST VALIDE_DETAIL_RAPPORT
+
+ACCESS PDREJET &
+  LINK CIECLE           OF PDREJET, &
+       REJNUMREJ        OF PDREJET  &
+    TO CIECLE,                               &
+       REJNUMREJ        OF PDDET_REJET       &
+  LINK CIECLE           OF PDREJET,      &
+       TRANUMTRA002     OF PDDET_REJET &
+    TO CIECLE,                               &
+       TRANUMTRA002     OF PDTRANCHE         OPTIONAL
+
+CHOOSE CIECLE PARM , REJNUMREJ PARM
+
+SORT ON REJNUMREJ OF PDREJET
+
+TEMPORARY T_MESSAGE CHARACTER SIZE 80
+
+;-------------------------------------------------------------------------------
+;
+; Code d'erreur pour le rapport
+;
+
+TEMPORARY T_ERREUR_1 CHARACTER SIZE 01
+TEMPORARY T_ERREUR_2 CHARACTER SIZE 01
+TEMPORARY T-FLAG CHARACTER SIZE 1
+
+ITEM T_ERREUR_1 = "1" IF RECORD PDTRANCHE EXIST AND TRASTU OF PDTRANCHE <> "I" &
+                      ELSE "0"
+
+ITEM T_ERREUR = "1" IF T_ERREUR_1 = "1" ;OR T_ERREUR_2 = "1"
+
+ITEM T_MESSAGE = &
+ "Le statut de la tranche " + TRANUMTRA002 OF PDDET_REJET + " est incorrect" &
+ IF T_ERREUR_1 = "1" ELSE &
+ "."
+
+SUBFILE W-PD715-PARAMETRE KEEP AT REJNUMREJ &
+  INCLUDE CIECLE    OF PDREJET, &
+          REJNUMREJ OF PDREJET
+
+SUBFILE W-PD715-MESSAGE KEEP &
+  INCLUDE PDDET_REJET, &
+          T_MESSAGE, &
+          T_ERREUR_1, &
+          T-FLAG
+
+REQUEST MISE-A-JOUR
+
+ACCESS *W-PD715-MESSAGE
+
+OUTPUT W-PD715-MESSAGE UPDATE
+  ITEM T-FLAG OF W-PD715-MESSAGE FINAL T_ERREUR
+
+REQUEST MISE-A-JOUR-1 EXECUTE IF T_ERREUR <> "1"
+
+ACCESS *W-PD715-MESSAGE &
+  LINK CIECLE           OF W-PD715-MESSAGE, &
+       TRANUMTRA002     OF W-PD715-MESSAGE  &
+    TO CIECLE,                              &
+       TRANUMTRA002     OF PDTRANCHE        OPTIONAL &
+
+  LINK CIECLE           OF W-PD715-MESSAGE, &
+       TRANUMTRA002     OF W-PD715-MESSAGE, &
+       "R"                                  &
+    TO CIECLE                             , &
+       TRANUMTRA002                       , &
+       DTRCODDEF        OF PDTRANCHE_DEF    OPTIONAL
+
+SELECT IF RECORD PDTRANCHE EXIST
+
+OUTPUT PDTRANCHE UPDATE
+  ITEM TRASTU OF PDTRANCHE FINAL "T"
+
+
+OUTPUT PDTRANCHE_DEF ADD UPDATE
+ ITEM CIECLE OF PDTRANCHE_DEF FINAL CIECLE OF PDTRANCHE
+ ITEM TRANUMTRA002 OF PDTRANCHE_DEF FINAL TRANUMTRA002 OF PDTRANCHE
+ ITEM DTRCODDEF OF PDTRANCHE_DEF FINAL "R "
+
+
+BUILD pd715t

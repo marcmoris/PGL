@@ -1,0 +1,526 @@
+;/T/ 2.5.7 FTRturation commande interne. (Tranche)
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1995-03-21
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   la facturation des commandes internes.
+;
+;/M/ François Déry, 12 mai 1999
+;       Enlever la table des séquences de numéro de facture et la transaction
+;       pour cette table car elles ne servaient à rien.
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd215a ACTIONBAR                     &
+              MODE LABEL "" AT 2,80         &
+              NOACTION                      &
+              ACTIVITIES FIND               &
+              FIELDMARK RETAIN STARTUP      &
+              HELP POPUP FROM 4,9 TO 20,72  &
+              RECEIVING T_CIECLEMNU,        &
+                        T_CIENOM,           &
+                        PDFACTURE,          &
+                        PDCOMMAN_INTERNE,   &
+                        PDBON_LIVRAISON
+
+
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD215A"
+
+
+;-------------------------------------------------------------------------------
+; Documentation de l'écran.
+;
+USE pd215a.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+
+;@IF FRANCAIS
+;ACTIONMENU LABEL "Sous-écrans"
+;  MENUITEM LABEL "Commentaire tranche             " ACTION DESIGNER D001 MARK
+;@ELSE
+;ACTIONMENU LABEL "Subscreen"
+;  MENUITEM LABEL "%%%Commentaire tranche          " ACTION DESIGNER D001 MARK
+;@ENDIF
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire au traitement
+;
+
+TEMPORARY T_TYPE_PROD CHARACTER SIZE 02 INITIAL "TR" RESET AT STARTUP ; Type de produit traiter par l'écran
+TEMPORARY T_TOTAL     INT SIZE 04
+TEMPORARY T_TRI       CHAR      SIZE 05
+TEMPORARY T_TRI2      CHAR SIZE 5
+;-------------------------------------------------------------------------------
+;
+; Variable temporaire du programme pour les pop-up
+;
+
+TEMPORARY T_TPDTYPPRD        CHARACTER SIZE 04 ; Type de produit
+TEMPORARY T_UNMCODUNM        CHARACTER SIZE 04 ; Unité de mesure
+
+TEMPORARY T_TRANUMTRA002     CHARACTER SIZE 07 ; Numéro de tranche
+TEMPORARY T_COD              INTEGER UNSIGNED  &
+                                       SIZE 02 ; Code de recherche
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du volume d'une pièce de granit
+;
+
+USE usvarvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du prix d'une ligne de détail bon de commande
+;
+USE usvarprigra NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Facture
+;
+
+FILE PDFACTURE MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Facture
+;
+
+FILE PDCOMMAN_INTERNE MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Expédition
+;
+
+FILE PDBON_LIVRAISON MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Facture tranche
+;
+
+FILE VEXPTRA PRIMARY &
+             NOITEM &
+             NOAPPEND &
+             NODELETE &
+             OCCURS 11 TIMES
+
+  ACCESS VIA     EXPNUMEXP,       &
+                 BLINUMBLI,       &
+                 COMNUMCOM,       &
+                 FTRNUMFAC        &
+         USING   EXPNUMEXP        OF PDBON_LIVRAISON, &
+                 BLINUMBLI        OF PDBON_LIVRAISON, &
+                 COMNUMCOM        OF PDFACTURE,        &
+                 FTRNUMFAC        OF PDFACTURE  &
+         ORDERBY TRANUMTRA002
+
+
+;-------------------------------------------------------------------------------
+;
+; Tranche
+;
+
+FILE PDTRANCHE REFERENCE &
+               OCCURS WITH VEXPTRA
+
+  ACCESS VIA     CIECLE,           &
+                 TRANUMTRA002      &
+         USING   T_CIECLEMNU,      &
+                 TRANUMTRA002      OF VEXPTRA &
+         ORDERBY TGRCODGRA ,&
+                 TYFCODFIN
+
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Emballage tranche
+;
+
+FILE PDEMBAL_TRANCHE REFERENCE &
+               OCCURS WITH VEXPTRA
+
+  ACCESS VIA     CIECLE,           &
+                 CAINUMCAI,        &
+                 TRANUMTRA002      &
+         USING   T_CIECLEMNU,                  &
+                 CAINUMCAI         OF VEXPTRA, &
+                 TRANUMTRA002      OF VEXPTRA
+
+
+;-------------------------------------------------------------------------------
+;
+; Détail commande interne
+;
+
+FILE PDDETAIL_C_I REFERENCE
+
+  ACCESS VIA   CIECLE,    &
+               COMNUMCOM, &
+               DCINUMLIG  &
+         USING T_CIECLEMNU,                  &
+               COMNUMCOM OF PDEMBAL_TRANCHE, &
+               DCINUMLIG OF PDEMBAL_TRANCHE
+
+
+;-------------------------------------------------------------------------------
+;
+; Client
+;
+
+FILE VCLC_CLI        REFERENCE
+
+  ACCESS VIA     CLICIECLE,        &
+                 CLICLE,           &
+                 CIECLE            &
+         USING   "----",                                &
+                 CLICLE            OF PDCOMMAN_INTERNE, &
+                 T_CIECLEMNU
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Type de produit
+;
+
+FILE PDTYPE_PRODUIT DESIGNER
+
+  ACCESS VIA     CIECLE,          &
+                 TPDTYPPRD        &
+         USING   T_CIECLEMNU,     &
+                 T_TYPE_PROD
+
+
+;------------------------------------------------------------------------------
+;
+FILE PDLOT_FACTURE DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+FILE PDLOT_TRANSFERT DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+; Variables nécessaire au traitement
+;
+
+DEFINE D_PRITOT    FLOAT     SIZE 08 = V_QTE_TOT_TRA OF VEXPTRA * &
+                                       EMTPRIUNI OF VEXPTRA
+
+DEFINE D_TOTAL     INT SIZE 4 = T_TOTAL
+
+def d_montant int size 4 = emtsurmc2ven of pdembal_tranche * dcipriunmprd of pddetail_c_i
+
+
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+
+SKIP
+
+
+TITLE &
+@IF FRANCAIS
+      " Facturation commande interne " &
+@ELSE
+      " %%%Facturation commande interne " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+
+ALIGN (,3,19)
+
+
+
+
+FIELD FTRNUMFAC        OF PDFACTURE        &
+        DISPLAY                            &
+        FIXED
+
+
+ALIGN (,3,19) (,,28)
+
+
+FIELD CLICLE           OF PDFACTURE        &
+        DISPLAY                            &
+        FIXED
+
+
+FIELD CLINOM           OF VCLC_CLI         &
+        FIXED
+
+
+DRAW 8,2 TO 8,79
+
+
+SKIP TO LINE 8
+
+
+TITLE &
+@IF FRANCAIS
+      " Tranche " &
+@ELSE
+      " %%%Tranche " &
+@ENDIF
+      CENTERED AT ,1
+
+
+SKIP TO LINE 10
+
+
+TITLE &
+@IF FRANCAIS
+      "Tranche Gra Fi Long Haut Epai    Surface     Prix vente U/M        Montant C" &
+@ELSE
+      "%%%nche Gra Fi Long Haut Epai    Surface     Prix vente U/M        Montant C" &
+@ENDIF
+      AT ,3
+
+
+ALIGN (02,,03) (,,11) (,,15) (,,18) (,,23) (,,28) (,,33) (,,44) (,,59) (,,62) (78,,78)
+
+
+CLUSTER OCCURS WITH VEXPTRA
+
+
+FIELD TRANUMTRA002     OF VEXPTRA          &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD TGRCODGRA        OF PDTRANCHE        &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD TYFCODFIN        OF PDTRANCHE        &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD EMTLONVEN        OF PDEMBAL_TRANCHE  &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD EMTHAUVEN        OF PDEMBAL_TRANCHE  &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD EMTEPAVEN        OF PDEMBAL_TRANCHE  &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD EMTSURMC2VEN     OF PDEMBAL_TRANCHE  &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD DCIPRIVEN        OF PDDETAIL_C_I     &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD DCIUNMVEN        OF PDDETAIL_C_I     &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD D_MONTANT PIC " ^^^,^^^,^^^.^^ "     &
+        HIDDEN                             &
+        DISPLAY
+;FIELD EMTPRIUNI        OF PDEMBAL_TRANCHE  &
+;        HIDDEN                             &
+;        DISPLAY
+
+
+CLUSTER
+
+SKIP TO LINE 22
+
+ALIGN (,,40)
+
+FIELD D_TOTAL PIC " ^^^,^^^,^^^.^^ "     &
+      NOID                               &
+      DISPLAY
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;------------------------------------------------------------------------------
+;
+;
+;--validation du status du lot
+;
+PROCEDURE PREUPDATE
+BEGIN
+
+  GET PDLOT_FACTURE OPTIONAL &
+    VIA   CIECLE,          &
+          FTRNUMFAC        &
+    USING T_CIECLEMNU,     &
+          FTRNUMFAC        OF PDFACTURE
+  IF ACCESSOK
+  THEN BEGIN
+   GET PDLOT_TRANSFERT OPTIONAL &
+    VIA   CIECLE,          &
+          LTRNUMLOT        &
+    USING CIECLE,     &
+          LTRNUMLOT        OF PDLOT_FACTURE
+    IF ACCESSOK
+    THEN BEGIN
+     IF LTRSTU OF PDLOT_TRANSFERT = "T"
+      THEN ERROR 2
+    END
+ END
+END
+;------------------------------------------------------------------------
+ PROCEDURE FIND
+   BEGIN
+     LET T_TRI   = " "
+     LET T_TOTAL = 0
+
+     FOR MISSING VEXPTRA
+       BEGIN
+          GET VEXPTRA VIA EXPNUMEXP , BLINUMBLI , FTRNUMFAC , COMNUMCOM ORDERBY TRANUMTRA002 &
+               USING EXPNUMEXP OF PDBON_LIVRAISON , BLINUMBLI OF &
+               PDBON_LIVRAISON , FTRNUMFAC OF PDFACTURE, COMNUMCOM OF PDFACTURE
+
+          GET PDTRANCHE VIA CIECLE,TRANUMTRA002 ORDERBY TGRCODGRA,TYFCODFIN &
+              USING CIECLE OF VEXPTRA,TRANUMTRA002 OF VEXPTRA
+
+         ; GET PDTRANCHE VIA CIECLE,TRANUMTRA002 ORDERBY TGRCODGRA,TYFCODFIN &
+         ;     USING CIECLE OF VEXPTRA,TRANUMTRA002 OF VEXPTRA
+
+              LET T_TRI2 = TRUNC(TGRCODGRA OF PDTRANCHE + TYFCODFIN OF PDTRANCHE)
+
+              IF T_TRI2 <> T_TRI AND T_TRI <> " "
+              THEN BEGIN
+                 DISPLAY D_TOTAL
+                 LET T_TOTAL = 0
+                 BREAK
+                ; IF 0 = SIZE(TRUNC(T_TRI2))
+                ; THEN
+              END
+          LET T_TRI = TRUNC(TGRCODGRA OF PDTRANCHE + TYFCODFIN OF PDTRANCHE)
+          LET T_TOTAL = T_TOTAL + D_MONTANT
+     END
+  END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul du volume d'une pièce de granit
+;
+
+USE uscalvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul du prix d'une ligne de détail bon commande
+;
+
+USE uscalprigra NOLIST
+
+
+BUILD DETAIL LIST
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+************************* Facturation commande interne *************************
+*                                                                              *
+* No. facture...: xxxxxxxxx                                                    *
+* Client........: xxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            *
+*                                                                              *
+*********************************** Tranche ************************************
+*                                                                              *
+* Tranche Gra Fi Long Haut Epai    Surface     Prix vente U/M        Montant C *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxxx xxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxxx xxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxxx xxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxxx xxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxxx xxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxxx xxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxxx xxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxxx xxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxxx xxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxxx xxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxxx xxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x *
+*                                                                              *
+********************************************************************************
+@ENDIF

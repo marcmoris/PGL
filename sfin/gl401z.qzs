@@ -1,0 +1,212 @@
+;/T/ Analyse de compte interne
+;
+;;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur...: Chantal Martineau
+;    Date Création.: 17 mai 1993
+;
+;    Description...: Ce rapport présente l'analyse des transactions
+;                    ayant affectées les soldes au grand livre.
+;
+;
+;    Particularités:
+;
+;-------------------------------------------------------------------------------
+;***M          -Dans le menu des rapports cosonlidé le nom qui apparait
+;***M           sur l'écran n'est pas le même que celui qui est imprimer
+;-------------------------------------------------------------------------------
+
+ USE ussetqzs NOLIST   ; permet de faire les SET REPORT DEV....
+ SET NOBLANK           ; Empêche l'impression de ligne blanche
+
+
+
+ACCESS *WGL401A &
+  LINK CIECLE OF WGL401A &
+    TO CIECLE    OF MCCOMPAGNIE OPTIONAL
+
+
+ DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &        ; titre1  du rapport
+@IF FRANCAIS
+                "Analyse de compte interne"
+@ELSE
+                "%%%Analyse de compte interne"
+@ENDIF
+ DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = &        ; titre2  du rapport
+       PACK(CPTDSC OF WGL401A + "/" + UNANOMABR OF WGL401A)
+ DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "GL401"  ; numéro du rapport
+ DEFINE DZ_CIENOM  CHARACTER SIZE 40 = CENTER(CIENOM OF MCCOMPAGNIE)[1:40] ; Nom de la compagnie
+
+
+;
+;Pour empêcher l'impression de certaine ligne
+;
+DEFINE D_ANNUL_LIGN VARCHAR SIZE 133 = &
+"                                                                  " + &
+"                                                                 " &
+ IF T_FLGDETHIS OF WGL401A = "0" ELSE ""
+
+;
+; Le montant de la période est soit le montant débit si il y a montant sinon
+; c'est le montant crédit (on inverse le signe du montant car il est créditeur)
+;
+DEFINE D_HECMNT FLOAT SIZE 8 = HECMNTDBT OF WGL401A IF HECMNTDBT OF WGL401A > 0 &
+                                         ELSE 0 - HECMNTCRT OF WGL401A
+
+;
+; Cette variable sert au calcul de l'écart cumulatif (en premier temps il faut le solde du compte
+; de la période - Proportion du budget de la période). Ce montant est par période.
+;
+DEFINE D_ECART FLOAT SIZE 8 = T_SANBDG OF WGL401A -  T_OUV_SANCUMANN_DC OF WGL401A
+
+;
+; Inversion du montant de la période (va servir au calcul de l'écart) Ce montant va etre cumulé
+; pour ce calcul
+;
+DEFINE D_INV_HECMNT     FLOAT SIZE 8 = &
+  (0 - D_HECMNT)
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE CHARACTER SIZE 5 = "1" + PECCLE OF WGL401A &
+         IF PECCLE OF WGL401A[1:1] < "8" &
+         ELSE "0" + PECCLE OF WGL401A
+
+SORT   ON  CIECLE   OF WGL401A , &                       ; Compagnie
+           G_CPTCLE OF WGL401A , &                       ; Compte
+           UNACLE   OF WGL401A , &                       ; Unité
+           D_PECCLE_SIE , &                       ; Période
+           HISDAT   OF WGL401A                           ; Date de transaction
+
+
+
+USE ustitstd NOLIST  ; Titre standard pour l'application
+SKIP 2 &
+TAB 001 "Période:" &
+TAB 010 PECCLE OF WGL401A  &
+SKIP 2 &
+@IF FRANCAIS
+  TAB 080 "--------------- Montant ---------------" &
+SKIP 1 &
+  TAB 001 "  Date        Référence                     Description                     " &
+  TAB 080 "     Période              Cumulatif    " &
+@ELSE
+  TAB 080 "%%%------------ Montant ---------------" &
+SKIP 1 &
+  TAB 001 "%%%ate        Référence                     Description                     " &
+  TAB 080 "%%%  Période              Cumulatif    " &
+@ENDIF
+SKIP 1 &
+  TAB 001 "--------   ---------------   -----------------------------------------------" &
+  TAB 080 "------------------   ------------------" &
+SKIP
+
+
+HEADING AT D_PECCLE_SIE &
+@IF FRANCAIS
+  TAB 030 "Solde au début.........:" &
+@ELSE
+  TAB 030 "%%%de au début.........:" &
+@ENDIF
+  TAB 101 T_OUV_SANCUMANN_DC OF WGL401A &
+          PICTURE " ^,^^^,^^^,^^^.^^ "  TRAILING SIGN ">" LEADING SIGN "<" SIGNIFICANCE 5 &
+SKIP 1
+
+
+REPORT &
+  TAB 001 " " &
+  TAB 001 D_ANNUL_LIGN &
+SKIP 2 &
+  TAB 001 HISDAT    OF WGL401A &
+  TAB 012 HISNUMDOC OF WGL401A &
+  TAB 030 REFCLENUM OF WGL401A &
+  TAB 037 T_HISDSCGEN OF WGL401A &
+  TAB 080 D_HECMNT &
+          PICTURE " ^,^^^,^^^,^^^.^^ "  TRAILING SIGN ">" LEADING SIGN "<" SIGNIFICANCE 5 &
+  TAB 001 D_ANNUL_LIGN  &
+SKIP &
+  TAB 37 HISDSCSAI OF WGL401A &
+  TAB 001 D_ANNUL_LIGN  &
+SKIP &
+  TAB 37 HISDSCSAI2 OF WGL401A&
+  TAB 001 D_ANNUL_LIGN
+
+
+FOOTING AT D_PECCLE_SIE &
+SKIP 2 &
+  TAB 080 "------------------" &
+@IF FRANCAIS
+SKIP &
+  TAB 030 "Total de la période....:" &
+@ELSE
+  TAB 030 "%%%al de la période....:" &
+@ENDIF
+  TAB 080 D_HECMNT SUBTOTAL &
+          PICTURE " ^,^^^,^^^,^^^.^^ "  TRAILING SIGN ">" LEADING SIGN "<" SIGNIFICANCE 5 &
+  TAB 001 D_ANNUL_LIGN  &
+SKIP 2&
+@IF FRANCAIS
+  TAB 030 "Solde de fin...........:" &
+@ELSE
+  TAB 030 "%%%de de fin...........:" &
+@ENDIF
+  TAB 101 D_HECMNT SUBTOTAL INITIAL T_OUV_SANCUMANN_DC RESET AT UNACLE &
+          PICTURE " ^,^^^,^^^,^^^.^^ "  TRAILING SIGN ">" LEADING SIGN "<" SIGNIFICANCE 5 &
+SKIP 2 &
+@IF FRANCAIS
+  TAB 030 "Proportion du budget...:" &
+@ELSE
+  TAB 030 "%%%portion du budget...:" &
+@ENDIF
+  TAB 101 T_SANBDG &
+          PICTURE " ^,^^^,^^^,^^^.^^ "  TRAILING SIGN ">" LEADING SIGN "<" SIGNIFICANCE 5 &
+SKIP 2&
+@IF FRANCAIS
+  TAB 030 "Ecart cumulatif........:" &
+@ELSE
+  TAB 030 "%%%rt cumulatif........:" &
+@ENDIF
+  TAB 101 D_INV_HECMNT SUBTOTAL INITIAL D_ECART &
+          PICTURE " ^,^^^,^^^,^^^.^^ "  TRAILING SIGN ">" LEADING SIGN "<" SIGNIFICANCE 5 &
+SKIP PAGE
+
+
+BUILD gl401z
+@IF FORMAT
+
+GL401                                         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                    Page: 9999
+99/99/99 HH:MM xxxxxxxxxxxx                           Analyse de compte interne
+                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+Période: XX-XX
+
+                                                                               --------------- Montant ---------------
+  Date        Référence                     Description                             Période              Cumulatif
+--------   ---------------   -----------------------------------------------   ------------------   ------------------
+                             Solde au début.........:                                               <9,999,999,999.99>
+
+XX/XX/XX   XXXXXXXXXXXXXXX   XXXXXX XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX   <9,999,999,999.99>
+                                    XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                                    XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+XX/XX/XX   XXXXXXXXXXXXXXX   XXXXXX XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX   <9,999,999,999.99>
+                                    XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                                    XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+XX/XX/XX   XXXXXXXXXXXXXXX   XXXXXX XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX   <9,999,999,999.99>
+                                    XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                                    XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+                                                                               ------------------
+                             Total de la période....:                          <9,999,999,999.99>
+
+                             Solde de fin...........:                                               <9,999,999,999.99>
+
+                             Proportion du budget...:                                               <9,999,999,999.99>
+
+                             Ecart cumulatif........ :                                              <9,999,999,999.99>
+@ENDIF

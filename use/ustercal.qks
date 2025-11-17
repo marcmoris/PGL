@@ -1,0 +1,99 @@
+; Calcul d'une date due selon un terme de paiement.
+;
+; - Il faut utiliser le USEFILE "USTERTMP" pour déclarer les variables
+;   nécessaire à la procédure suivante.
+;
+; - Le BUFFER de CPTERME doit être disponible, c-a-d qu'il faut faire
+;   un GET avant d'appeller cette procédure.
+;
+;   exemple: SCREEN ...
+;
+;            FILE ...
+;
+;            USE ustertmp NOLIST
+;
+;            ; Section des procédures
+;            USE ustercal NOLIST
+;            ;
+;            PROCEDURE EDIT toto
+;            BEGIN
+;              LET TZ_DATCAL = date du calcul
+;              GET CPTERME ...
+;              DO INTERNAL TER_DATE_DUE
+;              LET date résultat = TZ_DATRES
+;            END
+;
+;
+PROCEDURE INTERNAL TER_DATE_DUE
+BEGIN
+  ;
+  ; On ajoute le nombre de jours
+  ;
+  IF TERTYPCAL OF CPTERME <> "MM"
+  THEN LET TZ_DATRES = DATE(DAYS(TZ_DATCAL) + TERNBRJRSAJT OF CPTERME)
+  ELSE LET TZ_DATRES = TZ_DATCAL
+
+  ;
+  ; On ajoute le nombre de mois.
+  ;
+  IF TERNBRMOI OF CPTERME <> 0
+  THEN BEGIN
+    ;
+    ; On conserve le jour du mois.
+    ;
+    LET TZ_JRS = MOD(TZ_DATRES,100)
+    ;
+    ; On ramène la date au premier du mois et on ajoute 30.5 jours
+    ; par tranche de mois. Il faut ajouter un jour supplémentaire
+    ; au calcul pour les mois de 31 jours qui se suivent.
+    ; ( 30.5 = 366 jours / 12 ).
+    ;
+    LET TZ_DATRES = DATE( DAYS(FLOOR(TZ_DATRES  / 100) * 100 + 1) + &
+                    ROUND(TERNBRMOI OF CPTERME * 30.5) + 1)
+    ;
+    ; On remet le jour du mois de la date initiale à la date calculée,
+    ; tout en vérifiant que la date ne dépasse pas la fin mois.
+    ;
+    IF TZ_JRS <= MOD(LASTDAY(TZ_DATRES),100)
+    THEN LET TZ_DATRES = FLOOR(TZ_DATRES / 100) * 100 + TZ_JRS
+    ELSE LET TZ_DATRES = LASTDAY(TZ_DATRES)
+  END
+  ;
+  ; On transforme la date en jours.
+  ;
+  IF TERTYPCAL OF CPTERME = "JR"
+  THEN LET TZ_NBRJRS = DAYS(TZ_DATRES)
+  ;
+  ; Retourne le premier du mois suivant.
+  ;
+  IF TERTYPCAL OF CPTERME = "DM"
+  THEN LET TZ_NBRJRS = DAYS( LASTDAY(TZ_DATRES) ) + 1
+  ;
+  ; Retourne le premier janvier de l'année suivante.
+  ;
+  IF TERTYPCAL OF CPTERME = "DA"
+  THEN LET TZ_NBRJRS = DAYS(( FLOOR(TZ_DATRES/10000) + 1 ) * 10000 + 0101)
+  ;
+  ; Retourne soit le 15 ou le premier du mois suivant
+  ;
+  ;    exemple : 19990510 retourne 19990615
+  ;              19990520 retourne 19990631
+  ;              19990701 retourne 19990815
+  ;
+  IF TERTYPCAL OF CPTERME = "MM"
+  THEN BEGIN
+    LET TZ_JRS = NCONVERT(ASCII(TZ_DATRES)[7:2])
+    IF TZ_JRS >= 1 AND TZ_JRS <= 15 
+    THEN LET TZ_NBRJRS = DAYS( LASTDAY(TZ_DATRES) ) + 15 
+    ELSE BEGIN
+      LET TZ_DATRES = DATE(DAYS( LASTDAY(TZ_DATRES) ) + 1)
+      LET TZ_NBRJRS = DAYS( LASTDAY(TZ_DATRES) )  
+    END 
+  END
+  ;
+  ; On additionne le nombre de jour de délai et retourne le résultat sous
+  ; la forme DATE.
+  ;
+  LET TZ_DATRES = DATE( TZ_NBRJRS + TERNBRJRSDEL OF CPTERME )
+END
+

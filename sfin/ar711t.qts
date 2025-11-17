@@ -1,0 +1,152 @@
+;/T/ Procédure de génération du décompte physique
+;
+;/P/ Programmeur...: Nancy Marceau
+;    Date Création.: 20 mai 1994
+;
+;    Description...: Cette procédure permet de créer le décompte physique
+;                    ainsi que son détail automatiquement. Un décompte est
+;                    créé par groupe d'inventaire et entrepôt. Il est à noter
+;                    que les produits ne sont pas obligatoirement dans un
+;                    groupe.
+;
+;
+;    Paramètres....: Compagnie           (Compagnie du menu)
+;                    Entrepôt            (Obligatoire)
+;                    Localisation        (Obligatoire)
+;                    Période             (Obligatoire)
+;                    Groupe d'inventaire (Un,plusieurs ou tous)
+;
+;    Particularités: On ne choisit que les produits de type inventorié.
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST   ; set process nolimit
+
+
+RUN ar711t
+
+;
+; Pour arrêter la procédure en cas d'erreur
+;
+GLOBAL TEMPORARY G_ERREUR       CHARACTER SIZE 5
+
+GLOBAL TEMPORARY G_PECCLE       CHARACTER SIZE 4 PARM
+
+;-------------------------------------------------------------------------------
+; Cette étape permet d'extraire les produits de l'entrepôt ainsi que de valider
+; si la période comptable existe et qu'elle n'est pas fermée.
+;
+REQUEST EXTRAIRE_PRODUIT_ENTREPOT
+
+ACCESS VPRE_PRD   &
+  LINK CIECLE OF VPRE_PRD, &
+       G_PECCLE            &
+    TO CIECLE,             &
+       PECCLE  OF MCPERIODE_CIE   OPTIONAL
+
+
+CHOOSE CIECLE    PARM, &  ; Compagnie du menu
+       ENTCLE    PARM, &  ; Entrepôt du décompte
+       ENLCLE    PARM, &  ; Localisation
+       PRDGRPINV PARM, &  ; Groupe d'inventaire
+       PRDTYP "I"         ; Type de produit inventorié
+
+SELECT VPRE_PRD IF PREQTEPHY OF VPRE_PRD <> 0  OR &
+                   PRDSTU    OF VPRE_PRD = "A"
+
+TEMPORARY T_MESERR CHARACTER SIZE 80 ; Pour les erreurs.
+
+
+ITEM T_MESERR = &
+@IF FRANCAIS
+  "Cette période est fermée." + PECCLE OF MCPERIODE_CIE &
+
+@ELSE
+  "%%%Cette période est fermée." + PECCLE OF MCPERIODE_CIE &
+@ENDIF
+  IF PCCSTUAR OF MCPERIODE_CIE = "F" ELSE &
+
+@IF FRANCAIS
+  "Cette période n'existe pas." + G_PECCLE &
+
+@ELSE
+  "%%%Cette période n'existe pas." + G_PECCLE &
+@ENDIF
+  IF NOT RECORD MCPERIODE_CIE EXISTS
+
+
+
+ITEM G_ERREUR = "ARRET" IF T_MESERR <> ""
+
+
+SUBFILE WUS900ER KEEP &
+                 IF T_MESERR <> "" &
+  INCLUDE CIECLE OF MCPERIODE_CIE ALIAS CIECLE, &
+          PECCLE OF MCPERIODE_CIE ALIAS PECCLE, &
+          T_MESERR
+
+
+SUBFILE WAR711PR KEEP &
+  INCLUDE CIECLE    OF VPRE_PRD,      &
+          ENTCLE    OF VPRE_PRD,      &
+          ENLCLE    OF VPRE_PRD,      &
+          PECCLE    OF MCPERIODE_CIE, &
+          PRDGRPINV OF VPRE_PRD,      &
+          PRDCLE    OF VPRE_PRD,      &
+          PREQTEPHY OF VPRE_PRD,      &
+          PRECOUMYN OF VPRE_PRD
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+REQUEST CREER_DECOMPTE  TERMINATE IF G_ERREUR <> ""
+
+ACCESS *WAR711PR  &
+    ;
+    ; Pour aller chercher le dernier numéro d'inventaire
+    ;
+  LINK CIECLE OF WAR711PR, &
+       ENTCLE OF WAR711PR  &
+    TO CIECLE, &
+       ENTCLE OF ARENTREPOT
+
+
+SORT ON CIECLE    &  ; Compagnie
+     ON ENTCLE    &  ; Entrepôt
+     ON PRDGRPINV &  ; Groupe d'inventaire
+     ON PRDCLE       ; Produit
+
+
+OUTPUT ARDECOMPTE  ADD NOITEM AT PRDGRPINV
+  ITEM CIECLE    OF ARDECOMPTE FINAL CIECLE    OF WAR711PR
+  ITEM ENTCLE    OF ARDECOMPTE FINAL ENTCLE    OF WAR711PR
+  ITEM PECCLE    OF ARDECOMPTE FINAL PECCLE    OF WAR711PR
+  ITEM DECNUMINV OF ARDECOMPTE FINAL ASCII(ENTNUMSEQ OF ARENTREPOT + 1)
+  ITEM PRDGRPINV OF ARDECOMPTE FINAL PRDGRPINV OF WAR711PR
+  ITEM DECUSRCRE OF ARDECOMPTE FINAL LOGONID
+  ITEM DECDATCRE OF ARDECOMPTE FINAL SYSDATE
+  ITEM DECHRECRE OF ARDECOMPTE FINAL SYSTIME / 10000
+  ITEM DECSTU    OF ARDECOMPTE FINAL "P" ; Préliminaire
+
+
+OUTPUT ARDEC_DETAIL  ADD NOITEM AT PRDCLE
+  ITEM CIECLE    OF ARDEC_DETAIL FINAL CIECLE    OF WAR711PR
+  ITEM ENTCLE    OF ARDEC_DETAIL FINAL ENTCLE    OF WAR711PR
+  ITEM DECNUMINV OF ARDEC_DETAIL FINAL ASCII(ENTNUMSEQ OF ARENTREPOT + 1)
+  ITEM PRDGRPINV OF ARDEC_DETAIL FINAL PRDGRPINV OF WAR711PR
+  ITEM PRDCLE    OF ARDEC_DETAIL FINAL PRDCLE    OF WAR711PR
+  ITEM DEDQTEINF OF ARDEC_DETAIL FINAL PREQTEPHY OF WAR711PR
+  ITEM DEDQTEPHY OF ARDEC_DETAIL FINAL PREQTEPHY OF WAR711PR
+  ITEM DEDMNTAJT OF ARDEC_DETAIL FINAL ROUND (PREQTEPHY OF WAR711PR * &
+                                              PRECOUMYN OF WAR711PR / 100000)
+  ITEM ENLCLE    OF ARDEC_DETAIL FINAL ENLCLE    OF WAR711PR
+
+OUTPUT ARENTREPOT UPDATE AT FINAL
+  ITEM ENTNUMSEQ OF ARENTREPOT FINAL ENTNUMSEQ OF ARENTREPOT + 1
+
+
+SUBFILE WAR711PR2 KEEP AT PRDGRPINV INCLUDE ARDECOMPTE
+
+BUILD

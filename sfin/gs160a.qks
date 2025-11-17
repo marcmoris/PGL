@@ -1,0 +1,243 @@
+;/T/ Historique des traitements en lot
+;
+;/P/ Programmeur..: Patrick Langlois
+;    Date Création: 25 Septembre 1997
+;
+;    Description..: Visualisation de l'historique des lancement
+;                   de traitement en lot
+;
+;/M/ Francois Déry , 28 juillet 1999
+;    Ajout de la possibilité de consulter le LOG d'execution
+;-------------------------------------------------------------------------------
+
+SCREEN gs160a ACTIONBAR                       &
+              NOMODE                          &
+              NOACTION                        &
+              FIELDMARK RETAIN STARTUP        &
+              HELP POPUP FROM 4,1 TO 20,80    &
+              ACTIVITIES FIND
+
+USE ussectmp  NOLIST
+    "GS160A"
+
+;
+; Documentation de l'écran.
+;
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Consultation du LOG d'éxécution" ACTION DESIGNER D001 MARK
+;------------------------------------------------------------------------------
+;
+; Table dans environnement bth  " to public "
+;
+FILE GSBATCH_HISTO  PRIMARY OCCURS 14 NOITEMS NOAPPEND
+  ACCESS VIA   XPRNOM, &
+               USRCLE  &
+         USING XPRNOM OF GSBATCH_HISTO, &
+               USRCLE OF GSBATCH_HISTO  &
+         REQUEST XPRNOM, &
+                 USRCLE  &
+         ORDERBY BTHDATDEB DESCENDING, &
+                 BTHHREDEB DESCENDING
+
+  ACCESS VIA XPRNOM &
+         USING XPRNOM OF GSBATCH_HISTO &
+         REQUEST XPRNOM &
+         ORDERBY BTHDATDEB DESCENDING, &
+                 BTHHREDEB DESCENDING
+
+  ACCESS VIA USRCLE &
+         USING USRCLE OF GSBATCH_HISTO &
+         REQUEST USRCLE &
+         ORDERBY BTHDATDEB DESCENDING, &
+                 BTHHREDEB DESCENDING
+
+  ACCESS SEQUENTIAL &
+         ORDERBY BTHDATDEB DESCENDING, &
+                 BTHHREDEB DESCENDING
+
+;------------------------------------------------------------------------------
+TEMPORARY T_COMMAND CHARACTER SIZE 132
+TEMPORARY T_DSC CHARACTER SIZE 70
+
+;
+; Calcul de la durée en heure minutes secondes
+;
+
+DEFINE D_HREFIN INTEGER SIZE 4 = &
+                    floor( BTHHREFIN OF GSBATCH_HISTO / 10000 ) * 3600   + &
+               floor( mod( BTHHREFIN OF GSBATCH_HISTO / 100 , 100)) * 60 + &
+               floor( mod( BTHHREFIN OF GSBATCH_HISTO ,100) )
+
+;
+; jour différent   86400 = nombre de secondes d'une journée entière
+;
+; Ex : heure de fin      2h 10m 05s
+;      heure de début   23h 50m 35s
+;
+;      fin -->>  2h * 3600   +  10 * 60m   + 5s    = 7805 sec
+;      deb -->> 23h * 3600  +  50 * 60m   + 35s   = 86400 - 85835 = 565
+;
+;      7805 + 656 = 8370 sec = 2h 19m 30s
+;
+DEFINE D_HREDEB INTEGER SIZE 4 = &
+                     floor ( BTHHREDEB OF GSBATCH_HISTO / 10000 ) * 3600   + &
+               floor ( mod ( BTHHREDEB OF GSBATCH_HISTO / 100 , 100)) * 60 + &
+               floor ( mod ( BTHHREDEB OF GSBATCH_HISTO,100) )               &
+       IF BTHDATFIN OF GSBATCH_HISTO = BTHDATDEB OF GSBATCH_HISTO &
+     ELSE (86400 * (BTHDATFIN OF GSBATCH_HISTO - &
+                    BTHDATDEB OF GSBATCH_HISTO)) - &
+              (floor  ( BTHHREDEB OF GSBATCH_HISTO / 10000 ) * 3600    + &
+               floor ( mod ( BTHHREDEB OF GSBATCH_HISTO / 100 , 100)) * 60  + &
+               floor ( mod ( BTHHREDEB OF GSBATCH_HISTO,100) ))
+
+
+DEFINE D_SECTOT INTEGER SIZE 4 = D_HREFIN - D_HREDEB &
+       IF BTHDATFIN OF GSBATCH_HISTO = BTHDATDEB OF GSBATCH_HISTO &
+     ELSE D_HREFIN + D_HREDEB
+
+
+DEFINE D_HRS INTEGER SIZE 4 = D_SECTOT/3600
+DEFINE D_MIN INTEGER SIZE 4 = MOD(D_SECTOT,3600)/60
+DEFINE D_SEC INTEGER SIZE 4 = MOD(MOD(D_SECTOT,3600),60)
+
+DEFINE D_DUREE = NCONVERT(ASCII(D_HRS,2) + ASCII(D_MIN,2) + ASCII(D_SEC,2))
+
+
+;------------------------------------------------------------------------------
+
+
+DRAW 2,1 TO 23,80
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+TITLE " Historique des traitements en lot " CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP 1
+TITLE "--- Exécution ---" AT ,27
+SKIP
+TITLE "Nom      Usager           Date     Heure      Durée" &
+  AT ,4
+
+SKIP 1
+
+CLUSTER OCCURS WITH GSBATCH_HISTO ID BASE 10
+
+ALIGN (4,2,4) (,,13) (,,27) (,,39) (,,48)
+
+FIELD XPRNOM OF GSBATCH_HISTO         &
+      HELP "Nom de la file d'attente" &
+      HIDDEN                    &
+      LABEL " "
+
+FIELD USRCLE OF GSBATCH_HISTO UPSHIFT
+
+FIELD BTHDATDEB OF GSBATCH_HISTO &
+      FORMAT YYYYMMDD
+
+FIELD BTHHREDEB OF GSBATCH_HISTO &
+      OUTPUT SCALE -2            &
+      PICTURE "^^h^^"
+
+FIELD D_DUREE &
+      PICTURE "^^h^^m^^s" &
+      SIGNIFICANCE 3
+
+CLUSTER
+
+SKIP
+HILITE DISPLAY OFF
+
+FIELD T_DSC                     &
+      HIDDEN                    &
+      LABEL " "                 &
+      HILITE DISPLAY HALFTONE
+
+;-------------------------------------------------------------------------------
+;
+; Gestion de la sécurité
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;------------------------------------------------------------------------------
+;
+; Modification de la date pour le millénaire
+;
+;
+PROCEDURE INPUT BTHDATDEB
+BEGIN
+  ;    Ajout automatique du siècle dans la date
+  ;
+  ; Francois Déry, 24 Avril 1996
+  ;
+  IF 6 = SIZE( FIELDTEXT )
+  THEN BEGIN
+    IF "20" >= FIELDTEXT[1:2]
+    THEN LET FIELDTEXT = "20" + FIELDTEXT
+    ELSE LET FIELDTEXT = "19" + FIELDTEXT
+  END
+END
+
+PROCEDURE DESIGNER 10
+BEGIN
+  LET T_DSC = BTHDSC OF GSBATCH_HISTO
+  DISPLAY T_DSC
+END
+;
+PROCEDURE DESIGNER D001 
+BEGIN
+  LET T_COMMAND = "ls " + TRUNCATE( BTHFICLOG OF GSBATCH_HISTO ) + &
+                  " 1> /dev/null 2>&1"
+  RUN COMMAND T_COMMAND ON ERROR CONTINU NOWARN
+ 
+  IF NOT COMMANDOK
+  THEN INFORMATION "*I* Le fichier LOG n'existe plus..."
+  ELSE BEGIN
+    LET T_COMMAND = "clear"
+    RUN COMMAND T_COMMAND ON ERROR CONTINU NOWARN
+    LET T_COMMAND = "pg " + TRUNCATE( BTHFICLOG OF GSBATCH_HISTO )
+    RUN COMMAND T_COMMAND ON ERROR CONTINU NOWARN
+    REFRESH ALL
+  END
+END
+
+;
+; Documentation d'aide de l'écran et des champs
+;
+USE gs160a.hlp NOLIST
+
+BUILD
+
+
+@IF FORMAT
+********************** Historique des traitements en lot ***********************
+*                                                                              *
+*                         --- Exécution ---                                    *
+*  Nom      Usager           Date     Heure      Durée                         *
+*                                                                              *
+*  xxxxxxx  xxxxxxxxxxxx  xxxxxxxxxx  xxxxx    xxxxxxxxx                       *
+*  xxxxxxx  xxxxxxxxxxxx  xxxxxxxxxx  xxxxx    xxxxxxxxx                       *
+*  xxxxxxx  xxxxxxxxxxxx  xxxxxxxxxx  xxxxx    xxxxxxxxx                       *
+*  xxxxxxx  xxxxxxxxxxxx  xxxxxxxxxx  xxxxx    xxxxxxxxx                       *
+*  xxxxxxx  xxxxxxxxxxxx  xxxxxxxxxx  xxxxx    xxxxxxxxx                       *
+*  xxxxxxx  xxxxxxxxxxxx  xxxxxxxxxx  xxxxx    xxxxxxxxx                       *
+*  xxxxxxx  xxxxxxxxxxxx  xxxxxxxxxx  xxxxx    xxxxxxxxx                       *
+*  xxxxxxx  xxxxxxxxxxxx  xxxxxxxxxx  xxxxx    xxxxxxxxx                       *
+*  xxxxxxx  xxxxxxxxxxxx  xxxxxxxxxx  xxxxx    xxxxxxxxx                       *
+*  xxxxxxx  xxxxxxxxxxxx  xxxxxxxxxx  xxxxx    xxxxxxxxx                       *
+*  xxxxxxx  xxxxxxxxxxxx  xxxxxxxxxx  xxxxx    xxxxxxxxx                       *
+*  xxxxxxx  xxxxxxxxxxxx  xxxxxxxxxx  xxxxx    xxxxxxxxx                       *
+*  xxxxxxx  xxxxxxxxxxxx  xxxxxxxxxx  xxxxx    xxxxxxxxx                       *
+*  xxxxxxx  xxxxxxxxxxxx  xxxxxxxxxx  xxxxx    xxxxxxxxx                       *
+*                                                                              *
+*  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      *
+********************************************************************************
+@ENDIF

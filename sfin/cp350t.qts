@@ -1,0 +1,363 @@
+;/T/ Impression des chèques des comptes à payer
+;
+;/P/ Programmeur...: Thomas BRENNEUR
+;    Date Création.: 6 Aout 1993
+;
+;/V3.00.01/ Alain Côté, 8 février 1994, 210
+;/V3.00.02/ Alain Côté, 8 mars 1994, 227
+;
+;    Description...: Impression des chèques des comptes à payer
+;
+;    Particularités: Met a jour le Flag D'impression et le nombre de pages
+;                    utilisées par le chèque.
+;
+;    -------------------------------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin     
+;    Date..............: 05 décembre 2001
+;    Description.......: Ajout des descriptons 1 et 2 de la facture/note de crédit des comptes payables destinés
+;                        à l'impression niveau des talons de chèques. Ajout également de l'indicateur d'impression de la description.
+;
+;    Référence.........: Demande de changement directe - Demandeurs: Josée Robitaille & Anik Lupien.
+;
+;    Signet............: MP-01-12-05_DD.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+
+RUN cp350t
+
+;
+; Flag indiquant une "Impression" ou une "Ré-impression" des chèques
+;
+
+GLOBAL TEMPORARY G_REIMPRES   CHARACTER SIZE 1  PARM
+
+;
+; Nombre de lignes utilisable pour l'impression de la ventilation par
+; facture ou du talon du chèque. Ce nombre sert à calculer le nombre de
+; pages utilisés pour imprimer le chèque. (Voir la numérotation des paiements)
+; ATTENTION : ne pas confondre ce nombre avec le nombre de lignes par
+; page selon la taille du papier !
+;
+GLOBAL TEMPORARY G_NBRLIGPAG  INTEGER   SIZE 2  INITIAL 24
+
+
+;---------------------------------------------------------------------
+;
+; Sélection des chèques à imprimer :
+;
+;   Pour une IMPRESSION :
+;
+;       Ils ne doivent pas avoir déja été imprimés, ni journalisés.
+;       Ils ne doivent pas êtres annulés.
+;       Le montant du chèque doit être supérieur à zéro.
+;
+;   Pour une RÉ-IMPRESSION :
+;
+;       La sélection est identique sauf que les chèques doivent déja avoir
+;       été imprimés.
+;
+;
+; Note :  à part les paiements automatiques, un chèque possede soit une
+;         ventilation par facture, soit un talon de paiement. Jamais les
+;         deux en même temps.
+;         Dans le cas d'un paiement automatique, on ne doit pas prendre
+;         en compte sa ventilation par facture (parce qu'on ne l'imprime pas
+;         sur le chèque) . On doit considérer qu'il n'a qu'un talon de paiement.
+;
+;
+REQUEST SELECTION_PAIEMENTS
+
+;
+; Paiements
+;
+ACCESS  CPPAIEMENT &
+
+  ;
+  ; On retrouve la devise du grand-livre
+  ;
+  LINK  "1" &
+    TO  CIENMC                    OF MCHOLDING &
+
+  ;
+  ; On retrouve la référence du paiement
+  ;
+  LINK  REFCIECLE OF CPPAIEMENT, &
+        REFCLETYP OF CPPAIEMENT, &
+        REFCLENUM OF CPPAIEMENT, &
+        RADCLE    OF CPPAIEMENT  &
+    TO  REFCIECLE, &
+        REFCLETYP, &
+        REFCLENUM, &
+        RADCLE                    OF VRAD_01 &
+
+  ;
+  ; On retrouve la ventilation par facture du paiement (sauf dans le cas
+  ; des paiements automatiques. Dans leur cas, on n'imprime que le talon)
+  ;
+
+  LINK  CIECLE    OF CPPAIEMENT, &
+        LBQCPTENC OF CPPAIEMENT, &
+        PAMCLE    OF CPPAIEMENT  &
+    TO  CPHCLE1, &
+        CPHCLE2, &
+        CPHCLE3                   OF CPCAP_HISTO &
+  OPTIONAL &
+
+  ;
+  ; On retrouve le talon du paiement pour les paiements automatiques et
+  ; les paiements directs.
+  ;
+
+  LINK  CIECLE    OF CPPAIEMENT, &
+        LBQCPTENC OF CPPAIEMENT, &
+        PAMCLE    OF CPPAIEMENT  &
+    TO  CIECLE   , &
+        LBQCPTENC, &
+        PAMCLE                    OF CPPAM_TALON &
+  OPTIONAL &
+
+  ;
+  ; On retrouve le compte à payer associé à la ventilation pour pouvoir
+  ; récupérer le montant initial du paiement.
+  ;
+
+  LINK  FOUCIECLE OF CPCAP_HISTO, &
+        FOUCLE    OF CPCAP_HISTO, &
+        CAPCLE    OF CPCAP_HISTO  &
+    TO  FOUCIECLE, &
+        FOUCLE   , &
+        CAPCLE                    OF CPCPT_A_PAYER &
+  OPTIONAL &
+
+  ;
+  ; On retrouve la somme des transactions affectant ce compte à payer
+  ; pour pouvoir calculer le solde réel du compte à payer
+  ;
+
+  LINK  FOUCIECLE OF CPCAP_HISTO, &
+        FOUCLE    OF CPCAP_HISTO, &
+        CAPCLE    OF CPCAP_HISTO  &
+    TO  FOUCIECLE, &
+        FOUCLE   , &
+        CAPCLE                    OF VCAP_SLD &
+  OPTIONAL
+
+
+CHOOSE CIECLE    PARM       , &  ; Compagnie
+       LBQCPTENC PARM       , &  ; Compte d'encaisse
+       PECCLE    PARM       , &  ; Periode
+       LCPCLE    PARM       , &  ; No Lot
+       PAMCLE    PARM  RANGE     ; No chèque (de - à)
+
+
+SELECT  CPPAIEMENT &
+        IF    (     PAMTYPPAM OF CPPAIEMENT = "R"          &
+                OR  PAMTYPPAM OF CPPAIEMENT = "M")         &
+          AND PAMCODANN OF CPPAIEMENT = "0"                &
+          AND PAMMNT    OF CPPAIEMENT > 0                  &
+          AND (     (     PAMFLGIMP OF CPPAIEMENT <> "1"   &
+                      AND G_REIMPRES              =  "0" ) &
+                OR  G_REIMPRES = "1" )
+
+;
+; Temporaire permettant de réserver de la place dans le subfile pour les
+; request suivants
+;
+TEMPORARY T_FLGDER  CHARACTER SIZE 1  ; Flag indiquant la dernière ligne
+
+  ITEM T_FLGDER RESET AT INITIAL TO "0"
+
+;
+; Type de chèque :
+;
+;     1 = Chèque avec ventilation par facture
+;     2 = Chèque avec talon
+;
+
+TEMPORARY T_TYPCHQ CHARACTER SIZE 1
+
+  ITEM  T_TYPCHQ = "1" IF PAMFLGPA OF CPPAIEMENT = "0"
+  ITEM  T_TYPCHQ = "2" IF     PAMFLGPA  OF CPPAIEMENT = "1" &
+                          OR  PAMDEPDIR OF CPPAIEMENT = "1"
+
+;
+; Solde du compte à payer
+;
+TEMPORARY T_CAPMNT  FLOAT SIZE 8
+
+  ITEM T_CAPMNT = CAPMNT      OF CPCPT_A_PAYER &
+                + V_CAPMNTAJT OF VCAP_SLD      &
+                + V_CAPMNTCRT OF VCAP_SLD
+
+;
+; On indique la devise que si elle est différente de celle du grand-livre
+;
+TEMPORARY T_DEVCLE  CHARACTER SIZE 3
+
+ITEM T_DEVCLE = DEVCLE OF VRAD_01 IF DEVCLE OF VRAD_01 <> DEVCLE OF MCHOLDING &
+           ELSE " "
+
+;
+; On enregistre le chèque et sa ventilation par facture
+;
+SUBFILE WCP350A &
+  IF T_TYPCHQ = "1" &
+  INCLUDE CIECLE    OF CPPAIEMENT                 , &
+          LBQCPTENC OF CPPAIEMENT                 , &
+          PAMCLE    OF CPPAIEMENT                 , &
+          REFCLENUM OF CPPAIEMENT                 , &
+          RADNOM    OF VRAD_01                    , &
+          RADADR1   OF VRAD_01                    , &
+          RADADR2   OF VRAD_01                    , &
+          RADADR3   OF VRAD_01                    , &
+          RADADR4   OF VRAD_01                    , &
+          RADCP     OF VRAD_01                    , &
+          T_DEVCLE                    ALIAS DEVCLE, &
+          PAMDSC1   OF CPPAIEMENT                 , &
+          PAMDSC2   OF CPPAIEMENT                 , &
+          PAMDAT    OF CPPAIEMENT                 , &
+          PAMMNT    OF CPPAIEMENT                 , &
+          T_TYPCHQ                                , &
+          CAPCLE    OF CPCAP_HISTO                , &
+          CAPDSC1   OF CPCPT_A_PAYER              , & ; MP-01-12-05_DD.
+          CAPDSC2   OF CPCPT_A_PAYER              , & ; MP-01-12-05_DD.
+          CAPFLGIMPDSC OF CPCPT_A_PAYER           , & ; MP-01-12-05_DD.
+          CAPDAT    OF CPCPT_A_PAYER              , &
+          T_CAPMNT                    ALIAS CAPMNT, &
+          CPHMNTCAP OF CPCAP_HISTO                , &
+          CPHMNTESC OF CPCAP_HISTO                , &
+          CPHMNTPYE OF CPCAP_HISTO                , &
+          PTACLELIG OF CPPAM_TALON                , &
+          PTADSC    OF CPPAM_TALON                , &
+          T_FLGDER                                , &
+          G_REIMPRES
+
+;
+; On enregistre le chèque et son talon
+;
+OUTPUT *WCP350A ALIAS A_WCP350A ADD &
+          NOITEM &
+          IF T_TYPCHQ = "2"
+
+  ITEM CIECLE     OF A_WCP350A FINAL CIECLE    OF CPPAIEMENT
+  ITEM LBQCPTENC  OF A_WCP350A FINAL LBQCPTENC OF CPPAIEMENT
+  ITEM PAMCLE     OF A_WCP350A FINAL PAMCLE    OF CPPAIEMENT
+  ITEM REFCLENUM  OF A_WCP350A FINAL REFCLENUM OF CPPAIEMENT
+  ITEM RADNOM     OF A_WCP350A FINAL RADNOM    OF VRAD_01
+  ITEM RADADR1    OF A_WCP350A FINAL RADADR1   OF VRAD_01
+  ITEM RADADR2    OF A_WCP350A FINAL RADADR2   OF VRAD_01
+  ITEM RADADR3    OF A_WCP350A FINAL RADADR3   OF VRAD_01
+  ITEM RADADR4    OF A_WCP350A FINAL RADADR4   OF VRAD_01
+  ITEM RADCP      OF A_WCP350A FINAL RADCP     OF VRAD_01
+  ITEM DEVCLE     OF A_WCP350A FINAL T_DEVCLE
+  ITEM PAMDSC1    OF A_WCP350A FINAL PAMDSC1   OF CPPAIEMENT
+  ITEM PAMDSC2    OF A_WCP350A FINAL PAMDSC2   OF CPPAIEMENT
+  ITEM PAMDAT     OF A_WCP350A FINAL PAMDAT    OF CPPAIEMENT
+  ITEM PAMMNT     OF A_WCP350A FINAL PAMMNT    OF CPPAIEMENT
+  ITEM T_TYPCHQ   OF A_WCP350A FINAL T_TYPCHQ
+  ITEM CAPCLE     OF A_WCP350A FINAL " "
+  ITEM CAPDSC1    OF A_WCP350A FINAL " "    ; MP-01-12-05_DD.
+  ITEM CAPDSC2    OF A_WCP350A FINAL " "    ; MP-01-12-05_DD.
+  ITEM CAPFLGIMPDSC OF A_WCP350A FINAL " "  ; MP-01-12-05_DD.
+  ITEM CAPDAT     OF A_WCP350A FINAL 0
+  ITEM CAPMNT     OF A_WCP350A FINAL 0
+  ITEM CPHMNTCAP  OF A_WCP350A FINAL 0
+  ITEM CPHMNTESC  OF A_WCP350A FINAL 0
+  ITEM CPHMNTPYE  OF A_WCP350A FINAL 0
+  ITEM PTACLELIG  OF A_WCP350A FINAL PTACLELIG OF CPPAM_TALON
+  ITEM PTADSC     OF A_WCP350A FINAL PTADSC    OF CPPAM_TALON
+  ITEM G_REIMPRES OF A_WCP350A FINAL G_REIMPRES
+
+;-------------------------------------------------------------------------------
+;
+; Ce request sert à trier le subfile AVANT de mettre le flag
+; indiquant la dernière ligne du paiement. Ceci est nécéssaire
+; car sinon il n'est pas possible de synchroniser la mise à jour
+; du subfile avec le tri dans le même request
+;
+REQUEST TRI_SUBFILE
+
+ACCESS *WCP350A
+
+;
+; ATTENTION : Avant de modifier cet ordre de tri il faut savoir que la
+;             numérotation des chèques utilise le même ordre de tri pour
+;             effectuer sa numérotation. Il faut donc s'assurer que
+;             l'écran CP012 (numérotation des chèques) et ce traitement
+;             utilisent le même ordre de tri sous peine d'obtenir des
+;             chèques avec le mauvais numéro physique dans le système.
+;
+
+SORT ON PAMCLE    OF WCP350A, &
+        CAPCLE    OF WCP350A, &
+        PTACLELIG OF WCP350A
+
+SUBFILE WCP350B &
+        KEEP &
+        INCLUDE WCP350A
+
+;-------------------------------------------------------------------------
+;
+; Calcul du nombre de pages utilisés par chaque chèque.
+;
+;   Comme on ne fait pas de numérotation lors de l'impression des chèques,
+;   il faut compter le nombre de pages utilisés pour imprimer chaque
+;   chèque. Ce nombre va servir lors de la numérotation ( CP012 ) pour
+;   calculer la valeur à ajouter au nombre physique pour trouver le
+;   numéro pré-imprimé du chèque.
+;
+REQUEST CALCUL_NBR_PAGES
+
+;
+; Lecture des paiements sélectionnés
+;
+ACCESS *WCP350B
+
+SORTED  ON  PAMCLE    OF WCP350B, &
+            CAPCLE    OF WCP350B, &
+            PTACLELIG OF WCP350B
+;
+; On compte le nombre de lignes utilisé par le chèque
+;
+TEMPORARY T_NBRLIG INTEGER SIZE 2
+
+ ITEM T_NBRLIG COUNT RESET AT PAMCLE
+
+;
+; On marque la dernière ligne. Car c'est sur la page qui contiendra cette
+; dernière ligne que sera imprimé le chèque.
+;
+OUTPUT WCP350B UPDATE AT PAMCLE
+
+ ITEM T_FLGDER OF WCP350B FINAL "1"
+
+;
+; On marque le paiement comme étant imprimé et on calcule le nombre de
+; pages imprimées  pour permettre la numérotation des chèques.
+;
+OUTPUT  CPPAIEMENT &
+        UPDATE AT PAMCLE &
+        VIA   CIECLE   , &
+              LBQCPTENC, &
+              PAMCLE     &
+        USING CIECLE    OF WCP350B, &
+              LBQCPTENC OF WCP350B, &
+              PAMCLE    OF WCP350B
+
+  ITEM PAMFLGIMP OF CPPAIEMENT  = "1" &
+                                  IF G_REIMPRES = "0"
+  ITEM PAMNBRPAG OF CPPAIEMENT  = CEILING( T_NBRLIG / G_NBRLIGPAG ) &
+                                  IF G_REIMPRES = "0"
+
+;
+; Si on fait une ré-impression des chèques, alors il faut effacer le numéro
+; physique du chèque que l'on réimprime. Ceci permet ensuite de le re-numéroter
+; avec l'écran de numérotation des chèques
+;
+
+  ITEM PAMNUMPIM OF CPPAIEMENT = "        " IF G_REIMPRES = "1"
+
+BUILD cp350t
+

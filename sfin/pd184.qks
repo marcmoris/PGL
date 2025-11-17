@@ -1,0 +1,534 @@
+;/T/ 2.4.2. Enregistrer le sciage.
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1994-10-17
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   le sciage des blocs de granit.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd184  ACTIONBAR                    &
+              MODE LABEL "" AT 2,80        &
+              NOACTION                     &
+              ACTIVITIES CHANGE,FIND,ENTRY &
+              FIELDMARK RETAIN STARTUP     &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU ,      &
+                        T_CIENOM
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD184"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+USE pd184.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+TEMPORARY T_BLONUMGRA001APR CHAR SIZE 4 RESET AT STARTUP
+TEMPORARY T_BLONUMGRA002APR CHAR SIZE 5 RESET AT STARTUP
+TEMPORARY T_BLORECAPR       CHAR SIZE 1 RESET AT STARTUP
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire au traitement
+;
+
+TEMPORARY T_SILENT CHARACTER SIZE 01
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du volume d'une pièce de granit
+;
+use usvarvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Rapport de montage
+;
+
+FILE PDRAP_MONTAGE    PRIMARY &
+                      NOITEM &
+                      NODELETE
+
+  ACCESS VIA     CIECLE,                              &
+                 RMSNUMSEQ                            &
+         USING   T_CIECLEMNU,                         &
+                 RMSNUMSEQ        OF PDRAP_MONTAGE    &
+         REQUEST RMSNUMSEQ        OF PDRAP_MONTAGE    &
+         ORDERBY CIECLE,                              &
+                 RMSNUMSEQ
+
+  ACCESS VIA     CIECLE           &
+         USING   T_CIECLEMNU      &
+         ORDERBY CIECLE,          &
+                 RMSNUMSEQ
+
+  ITEM CIECLE OF PDRAP_MONTAGE INITIAL T_CIECLEMNU
+
+
+;-------------------------------------------------------------------------------
+;
+; Montage bloc
+;
+
+FILE PDMONTAGE_BLOC DETAIL &
+                    NOITEM &
+                    OCCURS 5 NODELETE
+
+  ACCESS VIA     CIECLE,                              &
+                 RMSNUMSEQ                            &
+         USING   T_CIECLEMNU,                         &
+                 RMSNUMSEQ        OF PDRAP_MONTAGE    &
+         ORDERBY CIECLE,                              &
+                 RMSNUMSEQ
+
+  ITEM CIECLE    OF PDRAP_MONTAGE INITIAL T_CIECLEMNU
+  ITEM RMSNUMSEQ OF PDRAP_MONTAGE INITIAL RMSNUMSEQ OF PDRAP_MONTAGE FIXED
+
+
+;-------------------------------------------------------------------------------
+;
+; Bloc
+;
+
+FILE PDBLOC DESIGNER OCCURS WITH PDMONTAGE_BLOC NODELETE
+
+  ACCESS VIA     CIECLE,          &
+                 BLONUMGRA001APR, &
+                 BLONUMGRA002APR, &
+                 BLORECAPR        &
+         USING   T_CIECLEMNU,                       &
+                 BLONUMGRA001APR OF PDMONTAGE_BLOC, &
+                 BLONUMGRA002APR OF PDMONTAGE_BLOC, &
+                 BLORECAPR       OF PDMONTAGE_BLOC
+
+  ITEM MOBHAUNET OF PDMONTAGE_BLOC FINAL BLOHAUNET OF PDBLOC
+  ITEM MOBLARNET OF PDMONTAGE_BLOC FINAL BLOLARNET OF PDBLOC
+
+
+;-------------------------------------------------------------------------------
+;
+; Sciage blocs
+;
+
+FILE PDSCIAGE_BLOCS SECONDARY &
+                    NOITEM &
+                    NODELETE
+
+  ACCESS VIA     CIECLE,                              &
+                 RMSNUMSEQ                            &
+         USING   T_CIECLEMNU,                         &
+                 RMSNUMSEQ        OF PDRAP_MONTAGE    &
+         ORDERBY CIECLE,                              &
+                 RMSNUMSEQ
+
+  ITEM CIECLE    OF PDSCIAGE_BLOCS INITIAL T_CIECLEMNU
+  ITEM RMSNUMSEQ OF PDSCIAGE_BLOCS INITIAL RMSNUMSEQ OF PDRAP_MONTAGE FIXED
+
+
+;-------------------------------------------------------------------------------
+;
+; Scies
+;
+
+FILE PDSCIES REFERENCE
+
+  ACCESS VIA     CIECLE,                              &
+                 SCINUMSCI                            &
+         USING   T_CIECLEMNU,                         &
+                 SCINUMSCI        OF PDRAP_MONTAGE
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables nécessaire pour le traitement
+;
+TEMPORARY T_VOL_BRUT  FLOAT SIZE 8 OCCURS WITH PDMONTAGE_BLOC
+TEMPORARY T_VOL_NET   FLOAT SIZE 8 OCCURS WITH PDMONTAGE_BLOC
+
+TEMPORARY T_VENT CHAR SIZE 1 OCCURS WITH PDMONTAGE_BLOC
+
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Tranches par bloc " &
+@ELSE
+      " %%%Tranches par bloc " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+ALIGN (2,3,19) (49,50,66)
+
+FIELD RMSNUMSEQ        OF PDRAP_MONTAGE    &
+label "Num. montage..:"&
+        HIDDEN ID 05                       &
+        DISPLAY
+
+
+FIELD SCBDATSCI        OF PDSCIAGE_BLOCS    FORMAT YYYYMMDD &
+PATTERN "####/##/##"&
+label "Date sciage...:"&
+        HIDDEN ID 10
+
+
+ALIGN (2,3,19)
+
+
+FIELD SCBDSC001        OF PDSCIAGE_BLOCS   &
+label "Description...:"&
+        HIDDEN ID 15
+
+
+ALIGN (,,19)
+
+
+FIELD SCBDSC002        OF PDSCIAGE_BLOCS   &
+        ID SAME
+
+
+
+FIELD SCBDSC003        OF PDSCIAGE_BLOCS   &
+        ID SAME
+
+
+DRAW 10,2 TO 10,79
+
+SKIP TO LINE 12
+
+
+TITLE &
+@IF FRANCAIS
+"                Dimension brute            Dimension nette           Type " &
+@ELSE
+"%%%             Dimension brute            Dimension nette           Type " &
+@ENDIF
+  AT ,2
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+"  Num. bloc     Long Haut Larg         M3  Long Haut Larg         M3 granit T" &
+@ELSE
+"  Num. bloc     Long Haut Larg         M3  Long Haut Larg         M3 granit T" &
+@ENDIF
+  AT ,2
+
+SKIP 1
+
+
+ALIGN (03,03,04) (,08,09) (,14,15) (,,18) (,,23) (,,28) (,,33) (,,45) (,,50) (,,55) (,,60) (,,72) (,,78)
+
+
+CLUSTER OCCURS WITH PDMONTAGE_BLOC  ID BASE 20
+
+
+FIELD BLONUMGRA001APR  OF PDMONTAGE_BLOC   &
+        HIDDEN                             &
+        LABEL " "                          &
+        DISPLAY                            &
+        NUMERIC                            &
+        BWZ
+
+
+FIELD BLONUMGRA002APR  OF PDMONTAGE_BLOC   &
+        HIDDEN                             &
+        DISPLAY                            &
+        LABEL "-"                          &
+        NUMERIC                            &
+        BWZ
+
+
+FIELD BLORECAPR        OF PDMONTAGE_BLOC   &
+        HIDDEN                             &
+        DISPLAY                            &
+        LABEL "-"
+
+
+FIELD BLOLONBRU        OF PDBLOC           &
+        HIDDEN                             &
+        DISPLAY size 4
+
+
+FIELD T_SILENT                             &
+        SILENT
+
+
+FIELD BLOHAUBRU        OF PDBLOC           &
+        HIDDEN                             &
+        DISPLAY size 4
+
+
+FIELD BLOLARBRU        OF PDBLOC           &
+        HIDDEN                             &
+        DISPLAY size 4
+
+
+FIELD BLOVOLMC3BRU     OF PDBLOC           &
+        HIDDEN                             &
+        DISPLAY                            size 10
+
+
+FIELD BLOLONNET        OF PDBLOC           &
+        HIDDEN                             &
+        DISPLAY size 4
+
+
+FIELD BLOHAUNET        OF PDBLOC           &
+        HIDDEN                             &
+        DISPLAY size 4
+
+
+FIELD BLOLARNET        OF PDBLOC           &
+        HIDDEN                             &
+        DISPLAY size 4
+
+
+FIELD BLOVOLMC3NET     OF PDBLOC           &
+        HIDDEN                             &
+        DISPLAY                            size 10
+
+
+FIELD TGRCODGRA        OF PDBLOC           &
+        HIDDEN                             &
+        DISPLAY
+
+FIELD T_VENT
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Procedure pour le calcul du volume d'une pièce de granit
+;
+
+USE uscalvol NOLIST
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Initialise le champ
+;
+
+PROCEDURE EDIT T_SILENT
+BEGIN
+  LET BLONUMBLOAPR OF PDMONTAGE_BLOC = BLONUMGRA001APR  OF PDMONTAGE_BLOC + &
+                                       BLONUMGRA002APR  OF PDMONTAGE_BLOC + &
+                                       BLORECAPR        OF PDMONTAGE_BLOC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+  IF 0 = SIZE(TRUNCATE(SCINUMSCI OF PDRAP_MONTAGE))
+  THEN BEGIN
+    ERROR 3061 ; Le statut du montage ne permet pas cette modification
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du volume du bloc
+;
+PROCEDURE DETAIL POSTFIND
+BEGIN
+  FOR PDMONTAGE_BLOC
+  BEGIN
+    GET PDBLOC
+    ;
+    ;
+    ;
+;;;    IF BLOSTU OF PDBLOC <> "I" AND BLOSTU OF PDBLOC <> "R"
+;;;    THEN BEGIN
+;;;      INFORMATION 1892 ; Le statut du bloc n'est pas réservé ou inventaire
+;;;    END
+    ;
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDRAP_MONTAGE &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDRAP_MONTAGE &
+     AND NOT NEWRECORD     OF PDRAP_MONTAGE &
+     AND NOT DELETEDRECORD OF PDRAP_MONTAGE &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  ;
+  ; Valide le statut du montage
+  ;
+  IF 0 = SIZE(TRUNCATE(SCINUMSCI OF PDRAP_MONTAGE))
+  THEN BEGIN
+    ERROR 3061 ; Le statut du montage ne permet pas cette modification
+  END
+
+  ;
+  ; Indique que le montage est terminé
+  ;
+  LET RMOSTU OF PDRAP_MONTAGE = "T"
+
+  ;
+  ; Pour chaque bloc un indique que le bloc a été traité.
+  ;
+
+  FOR PDMONTAGE_BLOC
+  BEGIN
+    GET PDBLOC
+    LET BLOSTU OF PDBLOC = "T"
+    PUT PDBLOC RESET
+  END
+
+  ;
+  ; Mise à jour des informations sur la mise à jour
+  ;
+  IF NOT NEWRECORD OF PDRAP_MONTAGE AND &
+     ALTEREDRECORD OF PDRAP_MONTAGE
+  THEN BEGIN
+    LET RMODATDERMAJ     OF PDRAP_MONTAGE = SYSDATE
+    LET RMOHREDERMAJ     OF PDRAP_MONTAGE = SYSTIME / 10000
+    LET RMOUSRDERMAJ     OF PDRAP_MONTAGE = LOGONID
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Tranche
+;
+PROCEDURE EDIT T_VENT
+BEGIN
+  LET T_BLONUMGRA001APR = BLONUMGRA001APR OF PDMONTAGE_BLOC
+  LET T_BLONUMGRA002APR = BLONUMGRA002APR OF PDMONTAGE_BLOC
+  LET T_BLORECAPR       = BLORECAPR       OF PDMONTAGE_BLOC
+  GET PDMONTAGE_BLOC VIA     CIECLE, &
+                             RMSNUMSEQ, &
+                             BLONUMGRA001APR, &
+                             BLONUMGRA002APR, &
+                             BLORECAPR &
+                     USING   T_CIECLEMNU, &
+                             RMSNUMSEQ OF PDRAP_MONTAGE, &
+                             T_BLONUMGRA001APR, &
+                             T_BLONUMGRA002APR, &
+                             T_BLORECAPR
+  RUN SCREEN  pd184a &
+              PASSING T_CIECLEMNU,        &
+                      T_CIENOM,           &
+                      PDMONTAGE_BLOC      &
+              MODE SAME
+END
+
+
+BUILD
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+************************************ Sciage ************************************
+*                                                                              *
+* Num. montage..: xxxxxxxxxxx                    Date sciage...: xxxxxxxx      *
+* Description...: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                                                                              *
+********************************************************************************
+*                                                                              *
+*                Dimension brute            Dimension nette            Type    *
+*  Num. bloc     Long Haut Larg         M3  Long Haut Larg         M3  granit  *
+*                                                                              *
+*  xxxx-xxxxx-x  xxxx xxxx xxxx xxxxxxxxxx  xxxx xxxx xxxx xxxxxxxxxx  xxx     *
+*  xxxx-xxxxx-x  xxxx xxxx xxxx xxxxxxxxxx  xxxx xxxx xxxx xxxxxxxxxx  xxx     *
+*  xxxx-xxxxx-x  xxxx xxxx xxxx xxxxxxxxxx  xxxx xxxx xxxx xxxxxxxxxx  xxx     *
+*  xxxx-xxxxx-x  xxxx xxxx xxxx xxxxxxxxxx  xxxx xxxx xxxx xxxxxxxxxx  xxx     *
+*  xxxx-xxxxx-x  xxxx xxxx xxxx xxxxxxxxxx  xxxx xxxx xxxx xxxxxxxxxx  xxx     *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+********************************************************************************
+@ENDIF

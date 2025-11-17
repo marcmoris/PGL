@@ -1,0 +1,498 @@
+;/T/ Facturation - Définition des éléments de tarification
+;
+;/P/ Programmeur..: Steeve Duguay
+;    Date Création: 14 décembre 1994
+;
+;    Description..: Définition des éléments de tarification
+;
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+;
+SCREEN fa002 ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CLICIECLE, &
+                       T_CIECLEMNU, &
+                       T_CIENOM
+
+USE ussectmp  NOLIST
+    "FA002"
+
+USE fa002.hlp NOLIST
+
+USE usactecr  NOLIST
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_CLICIECLE CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie - client
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie du menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; Compagnie du menu
+
+;-------------------------------------------------------------------------------
+;
+; Élément de tarification
+;
+FILE FAELEMENT_TARIF  PRIMARY  &
+                      OCCURS 6 &
+                      NOITEMS
+
+  ACCESS  VIA     CIECLE, &
+                  ETACLE  &
+          USING   T_CIECLEMNU, &
+                  ETACLE       &
+          REQUEST ETACLE &
+          ORDERBY ETACLE
+
+  ACCESS  VIA     CIECLE &
+          USING   T_CIECLEMNU &
+          ORDERBY ETACLE
+
+  ITEM CIECLE    OF FAELEMENT_TARIF INITIAL T_CIECLEMNU
+
+;-------------------------------------------------------------------
+; Validation du type d'élément et lecture de sa description
+;-------------------------------------------------------------------
+DEFINE    D_ETATYP CHARACTER SIZE 16 = "ETATYP"
+TEMPORARY T_ETATYP CHARACTER SIZE 4
+
+FILE VCBI_DSC               REFERENCE &
+                            ALIAS MCCODE_BUIL_ETATYP
+
+  ACCESS  VIA   XELNOM, &
+                CBICLE  &
+          USING D_ETATYP, &
+                ETATYP OF FAELEMENT_TARIF
+
+
+;--------------------------
+; Fichier compte client
+;--------------------------
+TEMPORARY T_CPTCLE    CHARACTER SIZE 6 ; Popup sur les comptes.
+TEMPORARY T_PECCLE    CHARACTER SIZE 4 ; Popup sur les comptes.
+TEMPORARY T_CPTTYPPAT CHARACTER SIZE 1 ; Popup sur les comptes.
+TEMPORARY T_CPTCATPAT CHARACTER SIZE 8 ; Popup sur les comptes.
+
+FILE VCPT_DSC REFERENCE
+
+  ACCESS VIA   CPTCLE    &
+         USING ETACPTCLE OF FAELEMENT_TARIF
+
+
+FILE VCPT_DSC REFERENCE  &
+              ALIAS A_CPT_ESC
+
+  ACCESS VIA   CPTCLE    &
+         USING ETACPTESC OF FAELEMENT_TARIF
+
+
+;-------------------------------------------------------------------------------
+; Validation du code de taxe fédéral.
+;
+FILE MCTAXE           REFERENCE &
+                      ALIAS A_TAX_TPS
+  ACCESS VIA   TAXCLETYP, &
+               TAXCLECOD &
+         USING ETATAXTYPTPS OF FAELEMENT_TARIF, &
+               ETATAXCODTPS OF FAELEMENT_TARIF
+
+;-------------------------------------------------------------------------------
+; Validation du code de taxe provincial.
+;
+FILE MCTAXE           REFERENCE &
+                      ALIAS A_TAX_TVP
+  ACCESS VIA   TAXCLETYP, &
+               TAXCLECOD &
+         USING ETATAXTYPTVQ OF FAELEMENT_TARIF, &
+               ETATAXCODTVQ OF FAELEMENT_TARIF
+
+
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_TAXCLETYP    CHARACTER SIZE 1 ; Popup sur les codes de taxes
+TEMPORARY T_TAXCLECOD    CHARACTER SIZE 2 ; Popup sur les codes de taxes
+TEMPORARY T_TAXMODPAT    CHARACTER SIZE 5 ; Popup sur les codes de taxes
+
+TEMPORARY T_FLGMOD       CHARACTER SIZE 1 OCCURS WITH FAELEMENT_TARIF
+                                          ; Flag pour déceler s'il y eu modif.
+TEMPORARY T_TAXMODTPSOLD CHARACTER SIZE 1 OCCURS WITH FAELEMENT_TARIF
+                                          ; Pour diminuer le bon cumul de taxe.
+TEMPORARY T_TAXMODTVQOLD CHARACTER SIZE 1 OCCURS WITH FAELEMENT_TARIF
+                                          ; Pour diminuer le bon cumul de taxe.
+
+TEMPORARY T_FLGDEL       CHARACTER SIZE 1 ; Flag pour la destruction
+
+TEMPORARY T_SILREV       CHARACTER SIZE 1
+TEMPORARY T_SILESC       CHARACTER SIZE 1
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Éléments de tarifications " &
+@ELSE
+      "%%%Éléments de tarifications " &
+@ENDIF
+      CENTERED AT ,1
+
+SKIP 1
+
+USE ustitoff NOLIST
+
+
+TITLE &
+@IF FRANCAIS
+    "                                                             --Taxe-- Poste" &
+@ELSE
+    "                                                             --Taxe-- Poste" &
+@ENDIF
+  AT 4,3
+
+TITLE &
+@IF FRANCAIS
+    "Code Description Fran/Ang.     Type Description    Gratuité  Féd Prov Rev/Esc" &
+@ELSE
+    "Code Description Fran/Ang.     Type Description    Gratuité  Féd Prov Rev/Esc"
+@ENDIF
+  AT 5,3
+
+SKIP TO 6
+
+ALIGN (3,2,3) (,,8) (,,35) (,,39) (,,56) (,,64) (,,69) (,,73)
+
+CLUSTER OCCUR WITH FAELEMENT_TARIF ID BASE 10
+
+FIELD ETACLE OF FAELEMENT_TARIF &
+      LABEL " " HIDDEN &
+      REQUIRED NOCHANGE &
+      LOOKUP NOTON FAELEMENT_TARIF &
+        VIA   CIECLE, &
+              ETACLE  &
+        USING T_CIECLEMNU, &
+              ETACLE OF FAELEMENT_TARIF &
+        MESSAGE 2706; Cet élément de tarification existe déjà
+
+FIELD ETADSCFRA    OF FAELEMENT_TARIF &
+      ID SAME
+
+FIELD ETATYP OF FAELEMENT_TARIF                       &
+      ID SAME                                         &
+      REQUIRED                                        &
+      LOOKUP ON MCCODE_BUIL_ETATYP                    &
+        MESSAGE 2707; Ce type d'élément de tarification est inexistant
+
+FIELD CBIDSC    OF MCCODE_BUIL_ETATYP                 &
+      ID SAME                                         &
+      DISPLAY                                         &
+      SIZE 15
+
+FIELD ETAGRA        OF FAELEMENT_TARIF SIZE 3
+
+FIELD ETATAXCODTPS  OF FAELEMENT_TARIF
+
+FIELD ETATAXCODTVQ  OF FAELEMENT_TARIF
+
+FIELD ETACPTCLE     OF FAELEMENT_TARIF &
+        LOOKUP ON VCPT_DSC &
+          MESSAGE 2708 ; Ce compte n'existe pas.
+
+FIELD T_SILREV &
+        SILENT
+SKIP
+
+FIELD ETADSCANG     OF FAELEMENT_TARIF &
+      ID SAME DATA AT ,8 NOLABEL
+
+FIELD ETACPTESC     OF FAELEMENT_TARIF &
+        ID SAME DATA AT ,73 NOLABEL &
+        LOOKUP ON A_CPT_ESC &
+          MESSAGE 2708 ; Ce compte n'existe pas.
+
+FIELD T_SILESC &
+        SILENT
+
+SKIP 1
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+; Pour la transformation du flag d'impression en 1 et 0
+;
+PROCEDURE INPUT ETAGRA
+BEGIN
+  USE usflginp NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Pour afficher le falg sous la forme Oui ou Non
+;
+PROCEDURE OUTPUT ETAGRA
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Sous-écran de consultation des codes de taxe.
+;
+PROCEDURE INPUT ETATAXCODTPS
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TAXCLETYP = ETATAXTYPTPS OF FAELEMENT_TARIF
+    LET T_TAXCLECOD = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    LET T_TAXMODPAT = "@"
+    RUN SCREEN mc111 MODE F PASSING T_TAXCLETYP, &
+                                    T_TAXCLECOD, &
+                                    T_TAXMODPAT &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNC(T_TAXCLECOD)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du code de taxe fédéral.
+;
+;
+PROCEDURE EDIT ETATAXCODTPS
+BEGIN
+  GET A_TAX_TPS OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 2709 ; Ce code de taxe n'existe pas.
+
+  ;
+  ; Initialise le flag à Oui dans la procédure EDIT. Car si l'usager saisi
+  ; une valeur la procédure EDIT est exécutée.
+  ;
+  LET T_FLGMOD = "1"
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran de consultation des codes de taxe.
+;
+;
+PROCEDURE INPUT ETATAXCODTVQ
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TAXCLETYP = ETATAXTYPTVQ OF FAELEMENT_TARIF
+    LET T_TAXCLECOD = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    LET T_TAXMODPAT = "@"
+    RUN SCREEN mc111 MODE F PASSING T_TAXCLETYP, &
+                                    T_TAXCLECOD, &
+                                    T_TAXMODPAT &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNC(T_TAXCLECOD)
+  END
+
+  ;
+  ; Force l'éxécution de la procédure edit, car il y a une relation entre
+  ; deux champs(taxe).
+  ;
+  IF    NOT FINDMODE  &
+    AND 0 = SIZE(FIELDTEXT) &
+    AND T_FLGMOD = "1"
+  THEN LET FIELDTEXT = ETATAXCODTVQ OF FAELEMENT_TARIF
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du code de taxe provincial
+;
+;
+PROCEDURE EDIT ETATAXCODTVQ
+BEGIN
+  GET A_TAX_TVP OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 2709 ; Ce code de taxe n'existe pas.
+
+  IF    TAXMOD    OF A_TAX_TVP = "I" &
+    AND TAXFLGNET OF A_TAX_TVP = "2" &
+    AND TAXMOD    OF A_TAX_TPS = "S"
+  THEN ERROR 2710 ; Codes de taxe TVQ inclus et TPS en sus sont incompatibles.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour le code bilingue type d'élément de tarification
+;
+;
+PROCEDURE INPUT ETATYP
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_ETATYP = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_ETATYP, T_ETATYP &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_ETATYP)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+; Procédure pour le dépisteur du numéro de compte.
+;
+PROCEDURE INPUT ETACPTCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_PECCLE    = " "
+    LET T_CPTTYPPAT = "@"
+    LET T_CPTCATPAT = "@"
+    RUN SCREEN mc103 MODE F PASSING T_CPTCLE   , &
+                                    T_CPTTYPPAT, &
+                                    T_CPTCATPAT, &
+                                    T_PECCLE     &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_CPTCLE)
+  END
+END
+
+PROCEDURE PROCESS T_SILREV
+BEGIN
+  INFO = CPTDSC OF VCPT_DSC
+END
+
+;-------------------------------------------------------------------------------
+; Procédure pour le dépisteur du numéro de compte.
+;
+PROCEDURE INPUT ETACPTESC
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_PECCLE    = " "
+    LET T_CPTTYPPAT = "@"
+    LET T_CPTCATPAT = "@"
+    RUN SCREEN mc103 MODE F PASSING T_CPTCLE   , &
+                                    T_CPTTYPPAT, &
+                                    T_CPTCATPAT, &
+                                    T_PECCLE     &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_CPTCLE)
+  END
+END
+
+PROCEDURE PROCESS T_SILESC
+BEGIN
+  INFO = CPTDSC OF A_CPT_ESC
+END
+
+
+PROCEDURE PROCESS ETADSCFRA
+BEGIN
+   IF ETADSCANG OF FAELEMENT_TARIF = " "
+   THEN BEGIN
+        LET ETADSCANG OF FAELEMENT_TARIF = ETADSCFRA OF FAELEMENT_TARIF
+        DISPLAY ETADSCANG OF FAELEMENT_TARIF
+   END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès pour l'écran par son code.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR FAELEMENT_TARIF
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF DELETEDRECORD OF FAELEMENT_TARIF &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification
+    ;
+    IF    ALTEREDRECORD     OF FAELEMENT_TARIF &
+      AND NOT NEWRECORD     OF FAELEMENT_TARIF &
+      AND NOT DELETEDRECORD OF FAELEMENT_TARIF &
+      AND TZ_SECMOD = "0"
+    THEN ERROR 2
+    ;
+    ; Destruction de l'élément de tarification
+    ;
+    IF DELETEDRECORD OF FAELEMENT_TARIF
+    THEN BEGIN
+      ;
+      ; On initialise le flag de retour pour savoir si le sous-écran a
+      ; bien fonctionné.
+      ;
+      LET T_FLGDEL = ""
+      ;
+      ; Appel du sous-écran qui valide si l'élément de tarification est
+      ; référée dans la définition des grilles  de tarifications.
+      ;
+      RUN SCREEN fa002x MODE SAME &
+                        PASSING FAELEMENT_TARIF, &
+                                T_FLGDEL
+      ;
+      ; Si la valeur de retour égale 1, cela indique que le sous-écran
+      ; n'a trouvé aucune référence pour l'identifiant demandé.
+      ;
+      IF T_FLGDEL = ""
+      THEN ERROR " "
+    END
+  END
+END
+
+BUILD
+@IF FORMAT
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+************************** Éléments de tarifications ***************************
+*                                                              --Taxe--  Poste *
+* Code Description               Type Description    Gratuité  Féd Prov Rev/Esc*
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  x   xxxxxxxxxxxxxxx  xxx     xx   xx  xxxxxx *
+*      xxxxxxxxxxxxxxxxxxxxxxxxx                                        xxxxxx *
+*                                                                              *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  x   xxxxxxxxxxxxxxx  xxx     xx   xx  xxxxxx *
+*      xxxxxxxxxxxxxxxxxxxxxxxxx                                        xxxxxx *
+*                                                                              *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  x   xxxxxxxxxxxxxxx  xxx     xx   xx  xxxxxx *
+*      xxxxxxxxxxxxxxxxxxxxxxxxx                                        xxxxxx *
+*                                                                              *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  x   xxxxxxxxxxxxxxx  xxx     xx   xx  xxxxxx *
+*      xxxxxxxxxxxxxxxxxxxxxxxxx                                        xxxxxx *
+*                                                                              *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  x   xxxxxxxxxxxxxxx  xxx     xx   xx  xxxxxx *
+*      xxxxxxxxxxxxxxxxxxxxxxxxx                                        xxxxxx *
+*                                                                              *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  x   xxxxxxxxxxxxxxx  xxx     xx   xx  xxxxxx *
+*      xxxxxxxxxxxxxxxxxxxxxxxxx                                        xxxxxx *
+********************************************************************************
+@ENDIF

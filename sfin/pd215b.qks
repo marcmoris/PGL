@@ -1,0 +1,533 @@
+;/T/ 2.5.7 Facturation commande interne. (Diagramme)
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1995-03-23
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   la facturation des commandes internes.
+;
+;/M/François Déry, 12 mai 1999
+;       Ajout du in dict sur la transaction pour unix.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date..............: 05 avril 2000
+;    Description.......: Incrémentation du numéro de facture par compagnie.
+;
+;    Référence.........: Stabilisation du module Gestion de blocs (point 2).
+;
+;    Signet............: MP-00-04-05_S02.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd215b ACTIONBAR                     &
+              MODE LABEL "" AT 2,80         &
+              NOACTION                      &
+              FIELDMARK RETAIN STARTUP      &
+              HELP POPUP FROM 4,9 TO 20,72  &
+              RECEIVING T_CIECLEMNU,        &
+                        T_CIENOM,           &
+                        PDFACTURE,          &
+                        PDCOMMAN_INTERNE,   &
+                        PDBON_LIVRAISON
+
+
+;-------------------------------------------------------------------------------
+;
+; Déclaration de la transaction pour donner un numéro séquentiel
+;
+
+TRANSACTION NO_SEQ READ WRITE &
+                   RESERVING FOR PROTECTED WRITE PDSEQ_FACTURE IN DICT
+
+
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+
+USE ussectmp  NOLIST
+    "PD215B"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+
+USE pd215b.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire au traitement
+;
+
+TEMPORARY T_TYPE_PROD CHARACTER SIZE 02 INITIAL "DI" RESET AT STARTUP ; Type de produit traiter par l'écran
+TEMPORARY T_TOTSURMC2 FLOAT     SIZE 08 RESET AT STARTUP ; Total surface des pièces de granit
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable temporaire du programme pour les pop-up
+;
+
+TEMPORARY T_TPDTYPPRD        CHARACTER SIZE 04 ; Type de produit
+TEMPORARY T_UNMCODUNM        CHARACTER SIZE 04 ; Unité de mesure
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du volume d'une pièce de granit
+;
+
+USE usvarvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du prix d'une ligne de détail bon de commande
+;
+
+USE usvarprigra NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Facture
+;
+
+FILE PDFACTURE MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Facture
+;
+
+FILE PDCOMMAN_INTERNE MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Expédition
+;
+
+FILE PDBON_LIVRAISON MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+
+FILE VEXPDIA PRIMARY &
+             NOITEM &
+             NOAPPEND &
+             NODELETE &
+             OCCURS 11 TIMES
+
+  ACCESS VIA     EXPNUMEXP,       &
+                 BLINUMBLI,       &
+                 FTRNUMFAC,       &
+                 COMNUMCOM        &
+          USING  EXPNUMEXP        OF PDBON_LIVRAISON, &
+                 BLINUMBLI        OF PDBON_LIVRAISON, &
+                 FTRNUMFAC        OF PDFACTURE,        &
+                 COMNUMCOM        OF PDFACTURE
+
+
+;-------------------------------------------------------------------------------
+;
+; Diagramme
+;
+
+FILE PDDIAGRAMME REFERENCE &
+                 OCCURS WITH VEXPDIA
+
+  ACCESS VIA     CIECLE,          &
+                 DIANUM002        &
+         USING   T_CIECLEMNU,     &
+                 DIANUM002        OF VEXPDIA
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro séquentiel pour les factures
+;
+
+FILE PDSEQ_FACTURE DESIGNER TRANSACTION NO_SEQ
+  ACCESS VIA CIECLE USING T_CIECLEMNU ; MP-00-04-05_S02.
+
+;-------------------------------------------------------------------------------
+;
+; Détail commande interne
+;
+
+FILE PDDETAIL_C_I REFERENCE
+
+  ACCESS VIA     CIECLE,          &
+                 COMNUMCOM,       &
+                 DCINUMLIG        &
+         USING   T_CIECLEMNU,                     &
+                 COMNUMCOM        OF PDDIAGRAMME, &
+                 DCINUMLIG        OF PDDIAGRAMME
+
+
+;-------------------------------------------------------------------------------
+;
+; Client
+;
+
+FILE VCLC_CLI        REFERENCE
+
+  ACCESS VIA     CLICIECLE,        &
+                 CLICLE,           &
+                 CIECLE            &
+         USING   "----",                                &
+                 CLICLE            OF PDCOMMAN_INTERNE, &
+                 T_CIECLEMNU
+
+
+;-------------------------------------------------------------------------------
+;
+; Type de produit
+;
+
+FILE PDTYPE_PRODUIT DESIGNER
+
+  ACCESS VIA     CIECLE,          &
+                 TPDTYPPRD        &
+         USING   T_CIECLEMNU,     &
+                 T_TYPE_PROD
+
+
+;-------------------------------------------------------------------------------
+;
+; Conversion unité mesure de commande à unité mesure production
+;
+
+FILE PDCONVERT_UN_M DESIGNER
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable necessaire au traitement
+;
+
+DEFINE D_PRITOT    FLOAT     SIZE 08 = V_QTE_TOT_DIA OF VEXPDIA * &
+                                       EMDPRIUNI OF VEXPDIA
+
+
+;-------------------------------------------------------------------------------
+;
+FILE PDLOT_TRANSFERT DESIGNER
+
+;-------------------------------------------------------------------------------
+
+FILE PDLOT_FACTURE DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+
+SKIP
+
+
+TITLE &
+@IF FRANCAIS
+      " Facturation commande interne " &
+@ELSE
+      " %%%Facturation commande interne " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+
+ALIGN (,3,19)
+
+
+FIELD FTRNUMFAC        OF PDFACTURE        &
+        DISPLAY                            &
+        FIXED
+
+
+ALIGN (,3,19) (,,28)
+
+
+FIELD CLICLE           OF PDCOMMAN_INTERNE &
+        DISPLAY                            &
+        FIXED
+
+
+FIELD CLINOM           OF VCLC_CLI         &
+        FIXED
+
+
+DRAW 8,2 TO 8,79
+
+
+SKIP TO LINE 8
+
+
+TITLE &
+@IF FRANCAIS
+      " Diagramme " &
+@ELSE
+      " %%%Diagramme " &
+@ENDIF
+      CENTERED AT ,1
+
+
+SKIP TO LINE 10
+
+
+TITLE &
+@IF FRANCAIS
+      " Diagr.  Gra Fi Long Haut Epai   Surface   Qte     Prix pièce    Prix total " &
+@ELSE
+      "%%%agr.  Gra Fi Long Haut Epai   Surface   Qte     Prix pièce    Prix total " &
+@ENDIF
+      AT ,2
+
+
+ALIGN (02,02,03) (,,11) (,,15) (,,18) (,,23) (,,28) (,,33) (,,43) (,,50) (,,64) (78,,78)
+
+
+CLUSTER OCCURS WITH VEXPDIA ID BASE 90
+
+
+FIELD DIANUM002        OF VEXPDIA          &
+        HIDDEN                             &
+        LABEL " "                          &
+        DISPLAY
+
+
+FIELD TGRCODGRA        OF PDDIAGRAMME      &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD TYFCODFIN        OF PDDIAGRAMME      &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD DIALON           OF PDDIAGRAMME      &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD DIAHAU           OF PDDIAGRAMME      &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD DIAEPA           OF PDDIAGRAMME      &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD DIASURMC2        OF PDDIAGRAMME      &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD V_QTE_TOT_DIA    OF VEXPDIA          &
+        HIDDEN                             &
+        DISPLAY                            &
+        PICTURE "^^^^^"
+
+
+FIELD EMDPRIUNI         OF VEXPDIA         &
+        HIDDEN                             &
+        DISPLAY                            &
+        PICTURE "^,^^^,^^^.^^ "
+
+
+FIELD D_PRITOT &
+        PICTURE "^,^^^,^^^.^^ "
+
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul du volume d'une pièce de granit
+;
+
+USE uscalvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul du prix d'une ligne de détail bon commande
+;
+
+USE uscalprigra NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; recherche le total de surface des diagrammes de granit
+;
+
+PROCEDURE POSTFIND
+BEGIN
+  LET T_TOTSURMC2 = 0
+  FOR VEXPDIA
+  BEGIN
+    LET T_TOTSURMC2 = T_TOTSURMC2 + DIASURMC2 OF PDDIAGRAMME * V_QTE_TOT_DIA
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF VEXPDIA &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF VEXPDIA &
+     AND NOT NEWRECORD     OF VEXPDIA &
+     AND NOT DELETEDRECORD OF VEXPDIA &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+ ;
+ ;--validation du status du lot
+ ;
+  GET PDLOT_FACTURE OPTIONAL &
+    VIA   CIECLE,          &
+          FTRNUMFAC        &
+    USING T_CIECLEMNU,     &
+          FTRNUMFAC        OF PDFACTURE
+  IF ACCESSOK
+  THEN BEGIN
+   GET PDLOT_TRANSFERT OPTIONAL &
+    VIA   CIECLE,          &
+          LTRNUMLOT        &
+    USING CIECLE,     &
+          LTRNUMLOT        OF PDLOT_FACTURE
+    IF ACCESSOK
+    THEN BEGIN
+     IF LTRSTU OF PDLOT_TRANSFERT = "T"
+      THEN ERROR 2
+    END
+  END
+
+
+
+  ;
+  ; Incrémentation du numéro de séquence
+  ;
+  IF 0 = FTRNUMFAC OF PDFACTURE
+  THEN BEGIN
+    START TRANSACTION NO_SEQ
+    GET PDSEQ_FACTURE OPTIONAL                      ; MP-00-04-05_S02.
+    LET CIECLE        OF PDSEQ_FACTURE = T_CIECLEMNU; MP-00-04-05_S02.
+    LET SEFNUMRAP     OF PDSEQ_FACTURE = SEFNUMRAP OF PDSEQ_FACTURE + 1
+    LET FTRNUMFAC     OF PDFACTURE     = SEFNUMRAP OF PDSEQ_FACTURE
+    PUT PDSEQ_FACTURE
+    DISPLAY FTRNUMFAC OF PDFACTURE
+  END
+
+END
+
+
+BUILD
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+************************* Facturation commande interne *************************
+*                                                                              *
+* No. facture...: xxxxxxx                                                      *
+* Client........: xxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            *
+*                                                                              *
+********************************** Diagramme ***********************************
+*                                                                              *
+* Diagr.  Gra Fi Long Haut Epai   Surface   Qte     Prix pièce    Prix total   *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxx xxxxxx xxxxxxxxxxxxx xxxxxxxxxxxxx   *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxx xxxxxx xxxxxxxxxxxxx xxxxxxxxxxxxx   *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxx xxxxxx xxxxxxxxxxxxx xxxxxxxxxxxxx   *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxx xxxxxx xxxxxxxxxxxxx xxxxxxxxxxxxx   *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxx xxxxxx xxxxxxxxxxxxx xxxxxxxxxxxxx   *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxx xxxxxx xxxxxxxxxxxxx xxxxxxxxxxxxx   *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxx xxxxxx xxxxxxxxxxxxx xxxxxxxxxxxxx   *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxx xxxxxx xxxxxxxxxxxxx xxxxxxxxxxxxx   *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxx xxxxxx xxxxxxxxxxxxx xxxxxxxxxxxxx   *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxx xxxxxx xxxxxxxxxxxxx xxxxxxxxxxxxx   *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxx xxxxxx xxxxxxxxxxxxx xxxxxxxxxxxxx   *
+*                                                                              *
+********************************************************************************
+@ENDIF

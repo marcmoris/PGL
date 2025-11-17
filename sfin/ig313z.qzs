@@ -1,0 +1,352 @@
+;/T/ Impression de l'inventaire physique des tranches avec valorisation.
+;
+;/P/ Programmeur..: René Bonneau
+;    Date Création: 1996-04-02
+;
+;    Description..: Le but de cette unité de traitement est d'imprimer
+;                   la liste de valorisation des tranches de l'inventaire
+;                   de tranches de granit de Granicor.
+;
+;    Paramètres....: Aucun
+;
+;-------------------------------------------------------------------------------
+;
+; initialisation des paramètres globales de QUIZ.
+;
+CANCEL CLEAR
+
+USE ussetqzs NOLIST
+
+;==============================================================================
+;
+;    Sommaire de l'inventaire de tranches
+;    Valorisation" &
+;
+ACCESS PDTRANCHE
+
+CHOOSE CIECLE PARM
+
+SELECT IF TRASTU OF PDTRANCHE = "I"
+
+DEFINE D-ANNEE CHARACTER SIZE 4 = ASCII(TRADATCRE OF PDTRANCHE)[1:4]
+DEFINE D-MOIS CHARACTER SIZE 2 = ASCII(TRADATCRE OF PDTRANCHE)[5:2]
+DEFINE D-D INTEGER SIZE 4 = NCONV(D-ANNEE) + 1 IF D-MOIS = "11" OR D-MOIS = "12" ELSE NCONV(D-ANNEE)
+DEFINE DD-ANNEE CHARACTER SIZE 4 = ASCII(D-D)
+
+DEFINE D-NBRE-TRANCHE   INTEGER   SIZE 2 = 1
+
+DEFINE D_MOD      INTEGER SIZE 4 = MOD(TRAEPA OF PDTRANCHE,5)
+DEFINE D_M_TRAEPA INTEGER SIZE 4 = TRAEPA OF PDTRANCHE - D_MOD     &
+                                   IF (D_MOD >= 0 AND D_MOD <= 2)  &
+                                   ELSE TRAEPA OF PDTRANCHE + 2    &
+                                                      IF D_MOD = 3 &
+                                   ELSE TRAEPA OF PDTRANCHE + 1
+
+DEFINE D-TRAEPA-TRI     CHARACTER SIZE 3 = ASCII(D_M_TRAEPA,3)
+DEFINE D-TRAEPA         CHARACTER SIZE 3 = ASCII(D_M_TRAEPA)
+
+SORT ON CIECLE          OF PDTRANCHE &
+     ON TGRCODGRA       OF PDTRANCHE &
+     ON TYFCODFIN       OF PDTRANCHE &
+     ON D-TRAEPA-TRI                     
+
+SET SUBFILE NAME WIG313Z1
+
+REPORT SUMMARY                                                          &
+  D_M_TRAEPA                                                            &
+  D-TRAEPA                                                              &
+  D-TRAEPA-TRI                                                          &
+  CIECLE                OF PDTRANCHE                                    &
+  TRANUMTRA002          OF PDTRANCHE                                    &
+  TGRCODGRA             OF PDTRANCHE                                    &
+  TYFCODFIN             OF PDTRANCHE                                    &
+  TRAEPA                OF PDTRANCHE                                    &
+  TRASURMC2             OF PDTRANCHE   & ;  SUBTOTAL RESET AT TRAEPA        &
+  D-NBRE-TRANCHE                       & ;  SUBTOTAL RESET AT TRAEPA        &
+  DD-ANNEE
+
+BUILD ig313z1
+
+ACCESS *WIG313Z1                                        &
+  LINK DD-ANNEE         OF WIG313Z1,                    &
+       CIECLE           OF WIG313Z1                     &
+    TO CPRANN,                                          &
+       CIECLE           OF PDCOUT_PRODUCT    opt        &
+  LINK TGRCODGRA        OF WIG313Z1,                    &
+       CIECLE           OF WIG313Z1                     &
+    TO TGRCODGRA,                                       &
+       CIECLE           OF PDTYPE_GRANIT                &
+  LINK TYFCODFIN        OF WIG313Z1,                    &
+       CIECLE           OF WIG313Z1                     &
+    TO TYFCODFIN,                                       &
+       CIECLE           OF PDTYPE_FINI                  &
+  LINK CIECLE           OF WIG313Z1                     &
+    TO CIECLE           OF MCCOMPAGNIE
+
+SORTED ON CIECLE          OF WIG313Z1 &
+       ON TGRCODGRA       OF WIG313Z1 &
+       ON TYFCODFIN       OF WIG313Z1 &
+       ON D-TRAEPA-TRI    OF WIG313Z1
+
+DEFINE D-CPRCUTPOL      FLOAT SIZE 8 = &
+                        ((CPRCUTPOL OF PDCOUT_PRODUCT * 10000) * &
+                          TYFFACPOL OF PDTYPE_FINI )
+
+DEFINE D-CPRCUTBRU      FLOAT SIZE 8 = &
+                        ((CPRCUTBRU OF PDCOUT_PRODUCT * 10000) * &
+                          TYFFACBRU OF PDTYPE_FINI )
+
+DEFINE D-EPA            FLOAT SIZE 8 OUTPUT SCALE 4 = &
+                        ((TRAEPA OF WIG313Z1 + &
+                         CPREPATRTLAM OF PDCOUT_PRODUCT) / 1000)
+
+DEFINE D-COUT-MC2       FLOAT SIZE 8 = &
+                        ROUND((TGRCOUGRA OF PDTYPE_GRANIT * &
+                               D-EPA + &
+                              (CPRCUTSCI OF PDCOUT_PRODUCT * 10000) + &
+                               D-CPRCUTPOL + &
+                               D-CPRCUTBRU) / 100 , 2) * 100
+
+SET SUBFILE NAME WIG313Z2
+
+REPORT SUMMARY                      &
+  D_M_TRAEPA            OF WIG313Z1 &
+  D-TRAEPA              OF WIG313Z1 &
+  D-TRAEPA-TRI          OF WIG313Z1 &
+  CIECLE                OF WIG313Z1 &
+  TRANUMTRA002          OF WIG313Z1 &
+  TGRCODGRA             OF WIG313Z1 &
+  TYFCODFIN             OF WIG313Z1 &
+  TRAEPA                OF WIG313Z1 &
+  TRASURMC2             OF WIG313Z1 &
+  D-NBRE-TRANCHE        OF WIG313Z1 &
+  DD-ANNEE              OF WIG313Z1 &
+  D-COUT-MC2                        &
+  D-CPRCUTPOL                       &
+  D-CPRCUTBRU                       &
+  D-EPA                             &
+  CPRCUTPOL                         &
+  CPRCUTBRU                         &
+  CPRCUTSCI                         &
+  CPREPATRTLAM
+
+BUILD ig313z3
+
+;================================================================================
+;
+;  CALCUL DE LA VALORISATION DE L'INVENTAIRE DE TRANCHES
+;
+ACCESS *WIG313Z2                                        &
+  LINK TGRCODGRA        OF WIG313Z2,                    &
+       CIECLE           OF WIG313Z2                     &
+    TO TGRCODGRA,                                       &
+       CIECLE           OF PDTYPE_GRANIT                &
+  LINK TYFCODFIN        OF WIG313Z2,                    &
+       CIECLE           OF WIG313Z2                     &
+    TO TYFCODFIN,                                       &
+       CIECLE           OF PDTYPE_FINI                  &
+  LINK CIECLE           OF WIG313Z2                     &
+    TO CIECLE           OF MCCOMPAGNIE
+
+;-------------------------------------------------------------------------------
+; Variables obligatoires pour les en-têtes standards.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = PARM
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = ""
+
+;-------------------------------------------------------------------------------
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE  7 = "IG313"
+
+;-------------------------------------------------------------------------------
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM        CHARACTER SIZE 40 = CENTRE (CIENOM OF MCCOMPAGNIE)
+
+DEFINE D-CIENOM         CHARACTER SIZE 20 = &
+                        TRUNCATE (CIENOM OF MCCOMPAGNIE)
+
+DEFINE D-COUT-TRANCHE   FLOAT SIZE 8 PICTURE " ^,^^^,^^^.^^" FLOAT "$" = &
+                        D-COUT-MC2 * TRASURMC2 OF WIG313Z2
+
+DEFINE D-TYFDSCFRA001   CHARACTER SIZE 6  = &
+                        TYFDSCFRA001 OF PDTYPE_FINI[1:6]
+
+DEFINE D-TGRDSCFRA001   CHARACTER SIZE 10 = &
+                        TGRDSCFRA001 OF PDTYPE_GRANIT[1:10]
+
+;DEFINE D-ERREUR         CHARACTER SIZE 4 = &
+;                        "****" IF NOT RECORD PDCOUT_PRODUCT EXIST
+
+SORTED ON CIECLE        OF WIG313Z2 &
+       ON TGRCODGRA     OF WIG313Z2 &
+       ON TYFCODFIN     OF WIG313Z2 &
+       ON D-TRAEPA-TRI  OF WIG313Z2 
+
+SET SUBFILE NAME WIG313Z3
+
+REP SUMMARY D-CPRCUTPOL CPRCUTPOL D-CPRCUTBRU CPRCUTBRU TGRCOUGRA &
+                TRAEPA CPREPATRTLAM CPRCUTSCI D-COUT-MC2 D-EPA
+
+DEFINE D-TITRE-CENTRE CHARACTER SIZE 80 = &
+        CENTRE ("SOMMAIRE DE L'INVENTAIRE DE TRANCHES                                            ")
+
+USE ustitstd52 NOLIST
+
+SKIP 3 &
+  TAB 025 D-TITRE-CENTRE &
+SKIP 3 &
+  TAB 003 "TYPE        TYPE                    SURFACE            VALEUR           VALEUR   NOMBRE" &
+SKIP 1 &
+  TAB 003 "GRANIT      FINI    ÉPAISSEUR     MÈTRE CARRÉ        UTILISÉE           TOTALE  TRANCHE  ERREUR" &
+SKIP 1 &
+  TAB 003 "------      ----    ---------     -----------        --------          -------  -------  ------" &
+SKIP 2
+
+FOOTING AT D-TRAEPA-TRI                                                 &
+  TAB 003 D-TGRDSCFRA001 PRINT AT TGRCODGRA                             &
+  TAB 015 D-TYFDSCFRA001                                                &
+  TAB 023 D-TRAEPA PICTURE "^^^^"                                       &
+  TAB 034 TRASURMC2 OF WIG313Z2 SUB RESET AT D-TRAEPA-TRI PICTURE "^,^^^,^^^.^^^^"                &
+  TAB 050 D-COUT-MC2 OF WIG313Z2 AVERAGE RESET AT D-TRAEPA-TRI PICTURE "^^^,^^^,^^^.^^ "              &
+  TAB 066 D-COUT-TRANCHE SUB RESET AT D-TRAEPA-TRI PICTURE "^^^,^^^,^^^.^^ " &
+  TAB 083 D-NBRE-TRANCHE OF WIG313Z2 SUB RESET AT D-TRAEPA-TRI
+
+FOOTING AT TGRCODGRA                                                    &
+  SKIP 2                                                                &
+  TAB 003 "                                  ===========                          =======  =======        " &
+  SKIP 2                                                                &
+  TAB 05 "TOTAL:"                                                       &
+  TAB 34 TRASURMC2       SUBTOTAL RESET AT TGRCODGRA PICTURE "^,^^^,^^^.^^^^"    &
+  TAB 66 D-COUT-TRANCHE  SUBTOTAL RESET AT TGRCODGRA PICTURE "^^^,^^^,^^^.^^ "  &
+  TAB 83 D-NBRE-TRANCHE  SUBTOTAL RESET AT TGRCODGRA                    &
+  SKIP 2                                                                &
+  TAB 1 "---------------------------------------------------"           &
+  TAB 40 "--------------------------------------------------"           &
+  TAB 80 "--------------"                                               &
+SKIP 2
+
+
+FOOTING AT CIECLE                                                       &
+SKIP 2                                                                  &
+  TAB 05 "GRAND TOTAL"   D-CIENOM                                       &
+  TAB 34 TRASURMC2       SUBTOTAL  PICTURE"^,^^^,^^^.^^^^"              &
+  TAB 66 D-COUT-TRANCHE  SUBTOTAL  PICTURE "^^^,^^^,^^^.^^ "            &
+  TAB 83 D-NBRE-TRANCHE  SUBTOTAL                                       &
+  SKIP PAGE
+
+BUILD ig313z2
+
+
+;/T/ Sommaire de l'inventaire physique des tranches avec valorisation
+;    (Calcul de la valorisation de l'inventaire de tranches).
+;
+;/A/ Auteur............: Marc Poulin     
+;    Date..............: 17 avril 2001
+;    Description.......: Ajout d'un rapport sommaire et ajustements des paramètres en conséquence.
+;
+;    Référence.........: Demande de changement 000134.
+;
+;    Signet............: MP-01-04-17_D134.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+ACCESS *WIG313Z2                                        &
+  LINK TGRCODGRA        OF WIG313Z2,                    &
+       CIECLE           OF WIG313Z2                     &
+    TO TGRCODGRA,                                       &
+       CIECLE           OF PDTYPE_GRANIT                &
+  LINK TYFCODFIN        OF WIG313Z2,                    &
+       CIECLE           OF WIG313Z2                     &
+    TO TYFCODFIN,                                       &
+       CIECLE           OF PDTYPE_FINI                  &
+  LINK CIECLE           OF WIG313Z2                     &
+    TO CIECLE           OF MCCOMPAGNIE
+
+;-------------------------------------------------------------------------------
+; Variables obligatoires pour les en-têtes standards.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = PARM
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = ""
+
+;-------------------------------------------------------------------------------
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE  7 = "IG313Z4"
+
+;-------------------------------------------------------------------------------
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM        CHARACTER SIZE 40 = CENTRE (CIENOM OF MCCOMPAGNIE)
+
+DEFINE D-CIENOM         CHARACTER SIZE 20 = &
+                        TRUNCATE (CIENOM OF MCCOMPAGNIE)
+
+DEFINE D-COUT-TRANCHE   FLOAT SIZE 8 PICTURE " ^,^^^,^^^.^^" FLOAT "$" = &
+                        D-COUT-MC2 * TRASURMC2 OF WIG313Z2
+
+DEFINE D-TYFDSCFRA001   CHARACTER SIZE 6  = &
+                        TYFDSCFRA001 OF PDTYPE_FINI[1:6]
+
+DEFINE D-TGRDSCFRA001   CHARACTER SIZE 10 = &
+                        TGRDSCFRA001 OF PDTYPE_GRANIT[1:10]
+
+;DEFINE D-ERREUR         CHARACTER SIZE 4 = &
+;                        "****" IF NOT RECORD PDCOUT_PRODUCT EXIST
+
+SORTED ON CIECLE        OF WIG313Z2 &
+       ON TGRCODGRA     OF WIG313Z2 &
+       ON TYFCODFIN     OF WIG313Z2 &
+       ON D-TRAEPA-TRI  OF WIG313Z2 
+
+SET SUBFILE NAME WIG313Z3
+
+REP SUMMARY D-CPRCUTPOL CPRCUTPOL D-CPRCUTBRU CPRCUTBRU TGRCOUGRA &
+                TRAEPA CPREPATRTLAM CPRCUTSCI D-COUT-MC2 D-EPA
+
+DEFINE D-TITRE-CENTRE CHARACTER SIZE 80 = &
+        CENTRE ("SOMMAIRE DE L'INVENTAIRE DE TRANCHES                                            ")
+
+
+USE ustitstd52 NOLIST
+ SKIP 003                                                                &
+  TAB 025 D-TITRE-CENTRE                                                 &
+ SKIP 003                                                                &
+  TAB 034 "    SURFACE   "                                               &
+  TAB 066 "    VALEUR     "                                              &
+  TAB 083 " NOMBRE  "                                                    &
+ SKIP 001                                                                &
+  TAB 008 "  GRANIT"                                                     &
+  TAB 034 "  MÈTRE CARRÉ "                                               &
+  TAB 066 "    TOTALE     "                                              &
+  TAB 083 " TRANCHE "                                                    &
+ SKIP 001                                                                &
+  TAB 008 "----------"                                                   &
+  TAB 034 "--------------"                                               &
+  TAB 066 "---------------"                                              &
+  TAB 083 "---------"                                                    &
+ SKIP 002
+
+FOOTING AT TGRCODGRA                                                     &
+  TAB 008 D-TGRDSCFRA001                                                 &
+  TAB 018 ":"                                                            &
+  TAB 034 TRASURMC2      SUBTOTAL PICTURE "^,^^^,^^^.^^^^"               &
+  TAB 066 D-COUT-TRANCHE SUBTOTAL PICTURE "^^^,^^^,^^^.^^ "              &
+  TAB 083 D-NBRE-TRANCHE SUBTOTAL PICTURE "^,^^^,^^^"                    &
+ RESERVE 4 LINES                                                         
+
+FOOTING AT CIECLE                                                        &
+ SKIP 002                                                                &
+  TAB 034 "=============="                                               &
+  TAB 066 "==============="                                              &
+  TAB 083 "========="                                                    &
+ SKIP 001                                                                &
+  TAB 005 "GRAND TOTAL" D-CIENOM ":"                                     &
+  TAB 034 TRASURMC2       SUBTOTAL  PICTURE "^,^^^,^^^.^^^^"             &
+  TAB 066 D-COUT-TRANCHE  SUBTOTAL  PICTURE "^^^,^^^,^^^.^^ "            &
+  TAB 083 D-NBRE-TRANCHE  SUBTOTAL  PICTURE "^,^^^,^^^"                  &
+ SKIP PAGE
+
+
+BUILD ig313z4

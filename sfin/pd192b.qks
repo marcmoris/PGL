@@ -1,0 +1,391 @@
+;/T/ Gérer les sorties de produits.
+;
+;/P/ Programmeur..: René Bonneau
+;    Date Création: 1994-10-20
+;
+;    Description..: Cette écran permet de faire la gestion des produits qui
+;                   sortent de l'usine sans utiliser le processus normal.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd192b ACTIONBAR                    &
+              FROM 06,01 TO 23,80          &
+              MODE LABEL "" AT 2,80        &
+              NOACTION                     &
+              FIELDMARK RETAIN STARTUP     &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING PDSORTIE_PRODUIT,T_CIECLEMNU
+
+
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+
+USE ussectmp  NOLIST
+    "PD192B"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+
+USE pd192b.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Clés de recherche pour les popup de consultations et les sous écrans
+;
+
+TEMPORARY T_TRANUMTRA002     CHARACTER SIZE 7
+TEMPORARY T_COD              INTEGER UNSIGNED SIZE 02
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 04
+
+
+;-------------------------------------------------------------------------------
+;
+; Sortie de produits
+;
+
+FILE PDSORTIE_PRODUIT MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Sortie de tranches
+;
+
+FILE PDSORTIE_TRANCHE PRIMARY OCCURS 11                &
+                      NOITEM
+
+  ACCESS VIA     CIECLE,                               &
+                 SPRNUMSOR                             &
+         USING   T_CIECLEMNU,                          &
+                 SPRNUMSOR        OF PDSORTIE_PRODUIT  &
+         ORDERBY TRANUMTRA002
+
+  ACCESS VIA     CIECLE        &
+         USING   T_CIECLEMNU   &
+         ORDERBY CIECLE,       &
+                 TRANUMTRA002
+
+  ITEM CIECLE    OF PDSORTIE_TRANCHE INITIAL T_CIECLEMNU
+  ITEM SPRNUMSOR OF PDSORTIE_TRANCHE FINAL &
+                                     SPRNUMSOR OF PDSORTIE_PRODUIT
+
+
+;-------------------------------------------------------------------------------
+;
+; Tranches
+;
+
+FILE PDTRANCHE        REFERENCE OCCURS WITH PDSORTIE_TRANCHE
+  ACCESS VIA    CIECLE,                                &
+                TRANUMTRA002                           &
+         USING  T_CIECLEMNU,                           &
+                TRANUMTRA002     OF PDSORTIE_TRANCHE
+
+
+FILE PDSEQ_SORTIE     DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+; Tranche pour mise a jour
+;
+
+FILE PDTRANCHE        DESIGNER ALIAS PDTRANCHE_MAJ
+
+
+;-------------------------------------------------------------------------------
+;
+; Type de granit
+;
+
+FILE PDTYPE_GRANIT    REFERENCE OCCURS WITH PDSORTIE_TRANCHE
+  ACCESS VIA    CIECLE,                            &
+                TGRCODGRA                          &
+         USING  T_CIECLEMNU,                       &
+                TGRCODGRA      OF PDTRANCHE
+
+
+;-------------------------------------------------------------------------------
+;
+;
+DRAW 3,1 TO 18,80   ; Remplace le Draw pour les écrans pleine page
+;USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+
+SKIP 2
+
+
+TITLE &
+@IF FRANCAIS
+      " Tranche " &
+@ELSE
+      " %%%Tranche " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP 1
+
+
+TITLE "No. tranche   Type de granit" at , 05
+TITLE "Surface" at ,65
+
+
+SKIP
+
+
+ALIGN (05,05,06) (,18,19) (,22,23) (,64,65)
+
+
+CLUSTER OCCURS WITH PDSORTIE_TRANCHE ID BASE 10
+
+
+  FIELD TRANUMTRA002     OF PDSORTIE_TRANCHE             &
+          HIDDEN                                         &
+          NOCHANGE                                       &
+          NUMERIC                                        &
+          LABEL " "                                      &
+          LOOKUP NOTON PDSORTIE_TRANCHE                  &
+            VIA    CIECLE,                               &
+                   TRANUMTRA002                          &
+            USING  T_CIECLEMNU,                          &
+                   TRANUMTRA002     OF PDSORTIE_TRANCHE  &
+            MESSAGE "Cette tranche est déjà sortie"      &
+          , ON PDTRANCHE                                 &
+            MESSAGE "Cette tranche n'existe pas"
+
+
+  FIELD TGRCODGRA        OF PDTRANCHE               &
+          HIDDEN                                    &
+          NUMERIC                                   &
+          DISPLAY                                   &
+          REFRESH                                   &
+          LABEL " "
+
+
+  FIELD TGRDSCFRA001     OF PDTYPE_GRANIT           &
+          HIDDEN                                    &
+          DISPLAY                                   &
+          REFRESH                                   &
+          LABEL " "
+
+
+  FIELD TRASURMC2        OF PDSORTIE_TRANCHE        &
+          HIDDEN                                    &
+          DISPLAY                                   &
+          REFRESH                                   &
+          LABEL " "
+
+
+
+
+CLUSTER
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+
+  USE ussececr NOLIST
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+
+  USE ussecent NOLIST
+
+  IF SPRCON OF PDSORTIE_PRODUIT = "O"
+  THEN ERROR 3012 ; La saisie est impossible car la sortie est confirmée
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur (pop-up) pour les fournisseurs.
+;
+
+PROCEDURE INPUT TRANUMTRA002
+BEGIN
+
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_COD          = 1
+    LET T_TRANUMTRA002 = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd122 MODE F &
+                     PASSING T_TRANUMTRA002, &
+                             T_COD, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_TRANUMTRA002 )
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Vérification du statut du bloc
+;
+
+PROCEDURE PROCESS TRANUMTRA002
+BEGIN
+
+  GET PDTRANCHE_MAJ                             &
+      VIA    CIECLE,                            &
+             TRANUMTRA002                       &
+      USING  T_CIECLEMNU,                       &
+             TRANUMTRA002   OF PDSORTIE_TRANCHE OPTIONAL
+  IF ACCESSOK AND &
+     (TRASTU OF PDTRANCHE_MAJ <> "I" AND        &
+      TRASTU OF PDTRANCHE_MAJ <> "R")
+  THEN ERROR "Cette tranche a un statut différent de (I ou R)"
+
+  LET      TRASURMC2     OF PDSORTIE_TRANCHE = TRASURMC2     OF PDTRANCHE
+  DISPLAY  TRASURMC2     OF PDSORTIE_TRANCHE
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+
+  ;
+  ; Empeche la destruction car la ssortie est confirmée
+  ;
+  IF SPRCON OF PDSORTIE_PRODUIT = "O" &
+     AND  DELETEDRECORD OF PDSORTIE_TRANCHE
+  THEN ERROR 3013 ; La destruction est impossible, la sortie est confirmée
+
+  IF 0 = SPRNUMSOR        OF PDSORTIE_PRODUIT
+  THEN BEGIN
+    GET PDSEQ_SORTIE OPTIONAL SEQUENTIAL
+    LET CIECLE    OF PDSEQ_SORTIE       = T_CIECLEMNU
+    LET SPRNUMSOR OF PDSEQ_SORTIE       = SPRNUMSOR OF PDSEQ_SORTIE + 1
+    LET SPRNUMSOR OF PDSORTIE_PRODUIT   = SPRNUMSOR OF PDSEQ_SORTIE
+    PUT PDSEQ_SORTIE
+  END
+
+  FOR PDSORTIE_TRANCHE
+  BEGIN
+
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF PDSORTIE_TRANCHE &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF PDSORTIE_TRANCHE &
+       AND NOT NEWRECORD     OF PDSORTIE_TRANCHE &
+       AND NOT DELETEDRECORD OF PDSORTIE_TRANCHE &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+
+    IF NEWRECORD         OF PDSORTIE_TRANCHE &
+     AND NOT DELETEDRECORD OF PDSORTIE_TRANCHE
+    THEN BEGIN
+
+      LET TRAVOLMC3      OF PDSORTIE_TRANCHE = TRAVOLMC3    OF PDTRANCHE
+
+      GET PDTRANCHE_MAJ                          &
+          VIA    CIECLE,                         &
+                 TRANUMTRA002                    &
+          USING  T_CIECLEMNU,                    &
+                 TRANUMTRA002    OF PDSORTIE_TRANCHE OPTIONAL
+      IF ACCESSOK
+      THEN BEGIN
+        LET TRASTU      OF PDTRANCHE_MAJ = "T"  ; sortie
+        PUT PDTRANCHE_MAJ
+      END
+    END
+
+    IF DELETEDRECORD     OF PDSORTIE_TRANCHE &
+     AND NOT NEWRECORD OF PDSORTIE_TRANCHE
+    THEN BEGIN
+      GET PDTRANCHE_MAJ                          &
+          VIA    CIECLE,                         &
+                 TRANUMTRA002                    &
+          USING  T_CIECLEMNU,                    &
+                 TRANUMTRA002    OF PDSORTIE_TRANCHE OPTIONAL
+      IF ACCESSOK
+      THEN BEGIN
+        LET TRASTU      OF PDTRANCHE_MAJ = "I"  ; Remis en inventaire
+        PUT PDTRANCHE_MAJ
+      END
+    END
+
+  END
+
+END
+
+
+
+
+BUILD
+
+@IF FORMAT
+*********************************** Tranche ************************************
+*                                                                              *
+*   No. tranche   Type de granit                                Surface        *
+*    xxxxxxxxx    xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxx   *
+*    xxxxxxxxx    xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxx   *
+*    xxxxxxxxx    xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxx   *
+*    xxxxxxxxx    xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxx   *
+*    xxxxxxxxx    xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxx   *
+*    xxxxxxxxx    xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxx   *
+*    xxxxxxxxx    xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxx   *
+*    xxxxxxxxx    xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxx   *
+*    xxxxxxxxx    xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxx   *
+*    xxxxxxxxx    xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxx   *
+*    xxxxxxxxx    xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxx   *
+*                                                                              *
+********************************************************************************
+@ENDIF

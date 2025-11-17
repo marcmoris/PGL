@@ -1,0 +1,225 @@
+;/T/ Gestion des unités de mesure
+;
+;/P/ Programmeur..: Nancy Marceau
+;    Date Création: 28 février 1994
+;
+;    Description..: Définition des unités de mesure des produits et de leur
+;                   description française et anglaise. Ces unités de mesure
+;                   des produits sont communes à toutes les compagnies.
+;
+;
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN ar151 ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU, &
+                       T_CIENOM
+
+USE ussectmp  NOLIST     
+    "AR151"
+
+USE ar151.hlp NOLIST
+
+USE usactecr  NOLIST     
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro compagnie
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom du holding
+TEMPORARY T_PRDUNI    CHARACTER SIZE 16 INITIAL "PRDUNI" RESET AT STARTUP
+
+;-------------------------------------------------------------------------------
+;
+; Recherche de la valeur du code bilingue
+;
+FILE MCCODE_BILINGUE   PRIMARY &
+                      OCCURS 16 &
+                      NOITEMS
+
+  ACCESS  VIA     XELNOM, &
+                  CBICLE &
+          USING   T_PRDUNI, &
+                  CBICLE OF MCCODE_BILINGUE &
+          REQUEST CBICLE &
+          ORDERBY CBICLE
+
+  ACCESS  VIA     XELNOM &
+          USING   T_PRDUNI &
+          ORDERBY CBICLE
+
+  ITEM XELNOM OF MCCODE_BILINGUE INITIAL T_PRDUNI
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_FLGDEL CHARACTER SIZE 1 ; Flag pour le sous-écran de destruction
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+
+USE usdrwecr NOLIST     
+USE ustitstd NOLIST
+USE ushilite NOLIST     
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Unités de mesure " &             
+@ELSE
+      "%%%Unités de mesure " &                  
+@ENDIF
+      CENTERED AT ,1
+
+SKIP 1
+
+USE ustitoff NOLIST           
+
+TITLE &
+@IF FRANCAIS
+    "Code  Description française         Description anglaise" &
+@ELSE
+    "Cod   French description            English description " &
+@ENDIF
+  AT 5,8
+SKIP TO 6
+
+ALIGN(8,6,8)(,,13)(,,44)
+
+CLUSTER OCCUR WITH MCCODE_BILINGUE ID BASE 10
+
+FIELD CBICLE OF MCCODE_BILINGUE &
+        LABEL " " HIDDEN &
+        REQUIRED NOCHANGE &
+        LOOKUP NOTON MCCODE_BILINGUE &
+          VIA   XELNOM, CBICLE &
+          USING XELNOM OF MCCODE_BILINGUE, &
+                CBICLE OF MCCODE_BILINGUE &
+          MESSAGE 1323; Cette unité de mesure existe déjà
+
+FIELD CBIDSCFRA    OF MCCODE_BILINGUE
+
+FIELD CBIDSCANG    OF MCCODE_BILINGUE &
+      DEFAULT CBIDSCFRA OF MCCODE_BILINGUE
+
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès pour l'écran par son code.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Validation de l'autorisation d'entrer des données
+;
+PROCEDURE INPUT CBICLE
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;
+; Procédure servant à modifier la première d'une occurrence d'un cluster
+; avec Powerhouse Client.
+;
+PROCEDURE DESIGNER PH01
+BEGIN
+  ACCEPT CBIDSCFRA OF MCCODE_BILINGUE
+  ACCEPT CBIDSCANG OF MCCODE_BILINGUE
+END
+
+
+;
+; Procédure servant à détruire la première d'une occurrence d'un cluster
+; avec Powerhouse Client.
+;
+PROCEDURE DESIGNER PH02
+BEGIN
+  DELETE MCCODE_BILINGUE
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR MCCODE_BILINGUE
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF DELETEDRECORD OF MCCODE_BILINGUE &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification
+    ;
+    IF    ALTEREDRECORD     OF MCCODE_BILINGUE &
+      AND NOT NEWRECORD     OF MCCODE_BILINGUE &
+      AND NOT DELETEDRECORD OF MCCODE_BILINGUE &
+      AND TZ_SECMOD = "0"
+    THEN ERROR 2
+    ;
+    ; Destruction d'une unité de mesure
+    ;
+    IF DELETEDRECORD OF MCCODE_BILINGUE
+    THEN BEGIN
+      ;
+      ; On initialise le flag de retour pour savoir si le sous-écran a
+      ; bien fonctionné.
+      ;
+      LET T_FLGDEL = ""
+      ;
+      ; Appel du sous-écran qui valide si l'unité de mesure est référée dans 
+      ; la définition de produit.
+      ;
+      RUN SCREEN ar151x MODE SAME &
+                        PASSING MCCODE_BILINGUE, &
+                                T_FLGDEL
+      ;
+      ; Si la valeur de retour égale 1, cela indique que le sous-écran
+      ; n'a trouvé aucune référence pour l'identifiant demandé.
+      ;
+      IF T_FLGDEL = ""
+      THEN ERROR " "
+    END
+  END
+END
+
+BUILD
+@IF FORMAT
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+******************************* Unités de mesure *******************************
+*                                                                              *
+*      Code  Description française         Description anglaise                *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*                                                                              *
+********************************************************************************
+@ENDIF

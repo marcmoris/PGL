@@ -1,0 +1,462 @@
+;/T/ Liste des commandes d'achat / Détaillée
+;
+;/P/ Programmeur...: Nancy Marceau
+;    Date Création.: 3 mai 1994
+;
+;    Description...: Cette liste permet l'impression des commandes d'achat
+;                    selon les paramètres demandés.
+;
+;    Paramètres....: Compagnie
+;                    Entrepôt           (Un, plusieurs ou tous)
+;                    Devise             (Une ou toutes)
+;                    Numéro commande    (Borne de début, <retour>=tous)
+;                    Numéro commande    (Borne de fin)
+;                    Statut             (P=préliminaire, A=approuvée,
+;                                        S=sélectionnée,C=complète,<retour>=tous)
+;/M/CRI01-0017/ Isabelle Bilodeau , 29 avril 1997
+;         Le total par commande d'achat est inexacte.
+;
+;/M/                 Caroline Kaine, 12 nov 96, Format passe de 180 a 175
+;
+;/M/ Nadja Fradette, 6 février 1997 Imprimer le compte, unité, projet et sous-p.
+;
+;/M/ Francois Richard, 1999/97/09 , Ajustement pour le changement de siècle
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST
+SET REPORT NOBLANK
+
+
+ACCESS ARCOMMANDE   &
+   ;
+   ; Pour afficher le nom de l'entrepôt
+   ;
+  LINK CIECLE OF ARCOMMANDE, &
+       ENTCLE OF ARCOMMANDE  &
+    TO CIECLE, &
+       ENTCLE OF ARENTREPOT    &
+   ;
+   ; Pour sélectionner la devise du fournisseur.
+   ;
+  LINK FOUCIECLE OF ARCOMMANDE, &
+       FOUCLE    OF ARCOMMANDE, &
+       CIECLE    OF ARCOMMANDE  &
+    TO FOUCIECLE, &
+       FOUCLE,    &
+       FOCCIECLE OF VFOC_FOU     &
+
+   ;
+   ; Pour afficher le nom du fournisseur divers
+   ;
+  LINK FOUCIECLE OF ARCOMMANDE, &
+       REFCLETYP OF ARCOMMANDE, &
+       FOUCLE    OF ARCOMMANDE, &
+       RADCLE    OF ARCOMMANDE  &
+    TO REFCIECLE, &
+       REFCLETYP, &
+       REFCLENUM, &
+       RADCLE OF MCREF_ADRESSE    &
+
+   ;
+   ; Devise du consolidé
+   ;
+  LINK ("1") &
+    TO CIENMC OF MCHOLDING    &
+
+
+   ;
+   ; Statut de la commande
+   ;
+  LINK ("CMDSTU",                  &
+         CMDSTU OF ARCOMMANDE)     &
+    TO XELNOM,                     &
+       CBICLE OF VCBI_DSC   ALIAS A_CBI_CMDSTU OPTIONAL &
+
+   ;
+   ; Détail de commande
+   ;
+  LINK CIECLE OF ARCOMMANDE, &
+       CMDCLE OF ARCOMMANDE, &
+       CMDAJT OF ARCOMMANDE  &
+    TO CIECLE, &
+       CMDCLE, &
+       CMDAJT OF ARCMD_DETAIL    &
+
+   ;
+   ; Notes descriptives
+   ;
+  LINK CIECLE OF ARCMD_DETAIL, &
+       CMDCLE OF ARCMD_DETAIL, &
+       CMDAJT OF ARCMD_DETAIL, &
+       CDECLE OF ARCMD_DETAIL  &
+    TO CIECLE, &
+       CMDCLE, &
+       CMDAJT, &
+       CDECLE  OF ARCDE_NOTE   OPTIONAL &
+
+   ;
+   ; Description du compte
+   ;
+   LINK CPTCLE OF ARCMD_DETAIL &
+     TO CPTCLE OF MCCOMPTE     OPTIONAL &
+
+   ;
+   ; Description de l'unité administrative
+   ;
+   LINK CIECLE OF ARCMD_DETAIL, &
+        UNACLE OF ARCMD_DETAIL  &
+     TO CIECLE, &
+        UNACLE OF MCUNITE_ADM  OPTIONAL &
+
+   ;
+   ; Description du projet
+   ;
+   LINK CIECLE OF ARCMD_DETAIL, &
+        PRJCLE OF ARCMD_DETAIL  &
+     TO CIECLE, &
+        PRJCLE OF GPPROJETS   OPTIONAL &
+   ;
+   ; Description du sous-projet
+   ;
+   LINK CIECLE OF ARCMD_DETAIL, &
+        PRJCLE OF ARCMD_DETAIL, &
+        PRACLE OF ARCMD_DETAIL  &
+     TO CIECLE, &
+        PRJCLE, &
+        PRACLE OF GPPRO_ACTIVITE  OPTIONAL &
+
+
+   ;
+   ; Statut de la ligne de commande
+   ;
+  LINK ("CDESTU",                    &
+         CDESTU OF ARCMD_DETAIL)     &
+    TO XELNOM,                       &
+       CBICLE OF VCBI_DSC   ALIAS A_CBI_CDESTU OPTIONAL
+
+CHOOSE CIECLE       PARM,       &  ; Compagnie du menu
+       ENTCLE       PARM,       &  ; Code d'entrepôt
+       CMDCLE       PARM RANGE     ; Numéro de commande
+
+DEFINE D_DATLIVDEB        DATE   = PARM
+DEFINE D_DATLIVFIN        DATE   = PARM
+
+DEFINE D_CMDSTU CHARACTER SIZE 6 = PARM UPSHIFT  ; Statut de la commande
+
+DEFINE D_DEVCLE CHARACTER SIZE 3 = PARM          ; Devise
+
+SELECT ARCOMMANDE IF (0 <> INDEX(D_CMDSTU,CMDSTU)) OR (D_CMDSTU = "") 
+
+SELECT ARCMD_DETAIL IF CDEDATLIVPRE OF ARCMD_DETAIL >= D_DATLIVDEB AND &
+                      (CDEDATLIVPRE OF ARCMD_DETAIL <= D_DATLIVFIN  OR &
+                                                  0  = D_DATLIVFIN)
+
+SELECT VFOC_FOU IF D_DEVCLE = DEVCLE OF VFOC_FOU OR D_DEVCLE = ""
+
+
+DEFINE D_RADNOM CHARACTER SIZE 40 = RADNOM OF MCREF_ADRESSE[1:40]
+
+; Variables obligatoires pour les en-têtes standards.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+       "Liste des commandes d'achat / Détaillée"
+@ELSE
+       "%%%Liste des commandes d'achat / Détaillée"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = ""
+
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE  7 = "AR322Z"
+;
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM
+
+
+USE usflgdet NOLIST ;Flag Bilingue (O/N)
+
+;
+;Indique si la commande d'achat est imprimée.
+;
+DEFINE D_CMDFLGIMP CHARACTER SIZE 3 &
+        = DZ_FLGAFFO IF CMDFLGIMP OF ARCOMMANDE <> "0" ELSE &
+          DZ_FLGAFFN
+
+ ; Statuts de commande demandés
+ ;
+DEFINE D_CBIDSC1 CHARACTER SIZE 15 = "Approuvée " &
+  IF 0 <> INDEX (D_CMDSTU,"A") OR  D_CMDSTU = "" &
+    ELSE ""
+
+DEFINE D_CBIDSC2 CHARACTER SIZE 15 = "Complète "&
+  IF 0 <> INDEX (D_CMDSTU,"C") OR  D_CMDSTU = "" &
+    ELSE ""
+
+DEFINE D_CBIDSC3 CHARACTER SIZE 15 = "Préliminaire " &
+  IF 0 <> INDEX (D_CMDSTU,"P") OR  D_CMDSTU = "" &
+    ELSE ""
+
+DEFINE D_CBIDSC4 CHARACTER SIZE 15 = "Sélectionnée " &
+  IF 0 <> INDEX (D_CMDSTU,"S") OR  D_CMDSTU = "" &
+    ELSE ""
+
+DEFINE D_CBIDSCDEM CHARACTER SIZE 70 = &
+  PACK (TRUNCATE(D_CBIDSC1) + " " + &
+        TRUNCATE(D_CBIDSC2) + " " + &
+        TRUNCATE(D_CBIDSC3) + " " + &
+        TRUNCATE(D_CBIDSC4))
+
+
+DEFINE D_CBIDSC_CMDSTU CHARACTER SIZE 15 = CBIDSC OF A_CBI_CMDSTU
+DEFINE D_CBIDSC_CDESTU CHARACTER SIZE 15 = CBIDSC OF A_CBI_CDESTU
+
+
+DEFINE    D_DEVCLEIMP   CHARACTER SIZE 04 = " " &
+          IF DEVCLE OF VFOC_FOU = DEVCLE OF MCHOLDING OR &
+             0 = SIZE(TRUNCATE(FOUCLE OF ARCOMMANDE)) &
+          ELSE "/" + DEVCLE OF VFOC_FOU
+
+;
+; Description du projet et du sous-projet
+;
+DEFINE D_PRJDSC CHARACTER SIZE 20 = PRJDSC1 OF GPPROJETS[1:20]
+DEFINE D_PRADSC CHARACTER SIZE 20 = PRADSC1 OF GPPRO_ACTIVITE[1:20]
+
+; Ajustement pour le changement de siècle
+DEFINE D_CMDCLE_TRI CHARACTER SIZE 10 = "1" + CMDCLE OF ARCOMMANDE &
+   IF CMDCLE OF ARCOMMANDE[1:1] < "8" &
+   ELSE "0" + CMDCLE OF ARCOMMANDE
+
+SORT ON CIECLE OF ARCOMMANDE   & ; Compagnie
+     ON ENTCLE OF ARCOMMANDE   & ; Entrepôt
+     ON DEVCLE OF VFOC_FOU     & ; Devise
+     ON CMDSTU OF ARCOMMANDE   & ; Statut de la commande
+     ON D_CMDCLE_TRI           & ; Numéro de commande
+     ON CMDAJT OF ARCOMMANDE   & ; Numéro d'ajustement
+     ON CDECLE OF ARCMD_DETAIL & ; Numéro d'item de la commande
+     ON CDNSEQ OF ARCDE_NOTE     ; Séquence dans les notes
+
+
+USE ustit175 NOLIST
+  SKIP 2 &
+@IF FRANCAIS
+TAB 001 "Devise............:" &
+@ELSE
+TAB 001 "%%%Devise............:" &
+@ENDIF
+
+TAB 021 DEVCLE OF VFOC_FOU    &
+  SKIP &
+@IF FRANCAIS
+TAB 001 "Entrepôt..........:" &
+@ELSE
+TAB 001 "%%%Entrepôt..........:" &
+@ENDIF
+
+TAB 021 ENTCLE OF ARCOMMANDE &
+TAB 027 ENTNOM OF ARENTREPOT &
+  SKIP  &
+@IF FRANCAIS
+TAB 001 "Statuts demandés..:" &
+@ELSE
+TAB 001 "%%%Statuts demandés..:" &
+@ENDIF
+
+TAB 021 D_CBIDSCDEM &
+  SKIP 2 &
+@IF FRANCAIS
+TAB 001 " Commande       Période                                                                      Date                           Nombre        " &
+@ELSE
+TAB 001 "%%% Commande   Période                                                                       Date                        Nombre             Montant" &
+@ENDIF
+
+  SKIP &
+@IF FRANCAIS
+TAB 001 "  d'achat       comptable   Fournisseur                                     Statut         Commande               Imprimée  d'items      Montant brut   " &
+@ELSE
+TAB 001 "%%%  d'achat   comptable   Fournisseur                                     Statut          Commande             Imprimée d'items              brut  " &
+@ENDIF
+  SKIP &
+TAB 001 "                                                                                           aa/mm/jj" &
+  SKIP &
+TAB 001 " ------------- ----------- ----------------------------------------------- --------------- --------               --------- --------  ---------------" &
+  SKIP 1
+
+
+
+HEADING AT CMDAJT &
+TAB 002 CMDCLE OF ARCOMMANDE &
+TAB 012 CMDAJT OF ARCOMMANDE &
+TAB 019 PECCLE OF ARCOMMANDE &
+  PICTURE "^^-^^"            &
+TAB 028 FOUCLE OF ARCOMMANDE &
+TAB 035 D_RADNOM             &
+TAB 076 D_CBIDSC_CMDSTU  &
+TAB 092 CMDDAT    OF ARCOMMANDE    &
+TAB 118 D_CMDFLGIMP &
+TAB 125 CMDNBRITE OF ARCOMMANDE &
+TAB 135 CMDMNTTOT OF ARCOMMANDE &
+TAB 151 D_DEVCLEIMP &
+  SKIP 2 &
+@IF FRANCAIS
+TAB 001 "  Item    Produit                                              Qté commandée  Qté reçue   Prix unitaire         TPS         TVQ    Escompte           Total      Statut" &
+@ELSE
+TAB 001 "%%%" &
+@ENDIF
+SKIP &
+@IF FRANCAIS
+TAB 001 "  /Compte                     Unité                         Projet                        Sous-projet" &
+@ELSE
+TAB 001 "%%%" &
+@ENDIF
+  SKIP 1 &
+TAB 001 "  ------- ---------------------------------------------------- ------------- ----------- --------------- ----------- ----------- ----------- ---------------  ---------------" &
+  SKIP 1
+
+HEADING AT CDECLE &
+TAB 003 CDECLE    OF ARCMD_DETAIL &
+TAB 011 PRDCLE    OF ARCMD_DETAIL &
+TAB 024 CDEDSCPRD OF ARCMD_DETAIL &
+TAB 066 CDEQTECOM OF ARCMD_DETAIL &
+  PICTURE "^^,^^^.^^^ " &
+  TRAILING SIGN "-"     &
+  SIGNIFICANCE 6        &
+  BWZ &
+TAB 078 CDEQTEREC OF ARCMD_DETAIL &
+  PICTURE "^^,^^^.^^^ " &
+  TRAILING SIGN "-"     &
+  SIGNIFICANCE 6        &
+  BWZ &
+TAB 090 CDEPRIUNI OF ARCMD_DETAIL &
+TAB 106 CDEMNTTPS OF ARCMD_DETAIL &
+  PICTURE "^^^,^^^.^^ " &
+  TRAILING SIGN "-"     &
+  SIGNIFICANCE 5        &
+  BWZ &
+TAB 118 CDEMNTTVQ OF ARCMD_DETAIL &
+  PICTURE "^^^,^^^.^^ " &
+  TRAILING SIGN "-"     &
+  SIGNIFICANCE 5        &
+  BWZ &
+TAB 130 CDEMNTESC OF ARCMD_DETAIL &
+  PICTURE "^^^,^^^.^^ " &
+  TRAILING SIGN "-"     &
+  SIGNIFICANCE 5        &
+  BWZ &
+TAB 142 CDEMNTTOT OF ARCMD_DETAIL &
+TAB 159 D_CBIDSC_CDESTU
+
+REPORT &
+TAB 024 CDNDSC OF ARCDE_NOTE
+
+FOOTING AT CDECLE &
+ SKIP 1 &
+  TAB 003 CPTCLE       OF ARCMD_DETAIL &
+  TAB 010 CPTDSCABRFRA OF MCCOMPTE     &
+  TAB 031 UNACLE       OF ARCMD_DETAIL &
+  TAB 040 UNANOMABR    OF MCUNITE_ADM  &
+  TAB 061 PRJCLE       OF ARCMD_DETAIL &
+  TAB 070 D_PRJDSC                     &
+  TAB 091 PRACLE       OF ARCMD_DETAIL &
+  TAB 095 D_PRADSC
+
+FOOT AT D_CMDCLE_TRI &
+  SKIP 1 &
+TAB 106 "----------- ----------- ----------- ---------------" &
+  SKIP &
+TAB 106 CDEMNTTPS OF ARCMD_DETAIL SUBTOTAL AT CDECLE &
+  PICTURE "^^^,^^^.^^ " &
+  TRAILING SIGN "-"     &
+  SIGNIFICANCE 5        &
+  BWZ &
+TAB 118 CDEMNTTVQ OF ARCMD_DETAIL SUBTOTAL AT CDECLE &
+  PICTURE "^^^,^^^.^^ " &
+  TRAILING SIGN "-"     &
+  SIGNIFICANCE 5        &
+  BWZ &
+TAB 130 CDEMNTESC OF ARCMD_DETAIL SUBTOTAL AT CDECLE &
+  PICTURE "^^^,^^^.^^ " &
+  TRAILING SIGN "-"     &
+  SIGNIFICANCE 5        &
+  BWZ &
+TAB 142 CDEMNTTOT OF ARCMD_DETAIL SUBTOTAL AT CDECLE &
+TAB 157 D_DEVCLEIMP &
+ SKIP 2
+
+FOOT AT DEVCLE &
+  SKIP 1 &
+TAB 106 "----------- ----------- ----------- ---------------" &
+  SKIP &
+@IF FRANCAIS
+TAB 012 "Total pour l'entrepôt " &
+@ELSE
+TAB 012 "%%%Total pour l'entrepôt " &
+@ENDIF
+
+TAB 034 ENTCLE OF ARCOMMANDE &
+@IF FRANCAIS
+TAB 038 " en devise " &
+@ELSE
+TAB 038 "%%% en devise " &
+@ENDIF
+
+TAB 049 DEVCLE OF VFOC_FOU &
+TAB 106 CDEMNTTPS OF ARCMD_DETAIL SUBTOTAL AT CDECLE &
+  PICTURE "^^^,^^^.^^ " &
+  TRAILING SIGN "-"     &
+  SIGNIFICANCE 5        &
+  BWZ &
+TAB 118 CDEMNTTVQ OF ARCMD_DETAIL SUBTOTAL AT CDECLE &
+  PICTURE "^^^,^^^.^^ " &
+  TRAILING SIGN "-"     &
+  SIGNIFICANCE 5        &
+  BWZ &
+TAB 130 CDEMNTESC OF ARCMD_DETAIL SUBTOTAL AT CDECLE &
+  PICTURE "^^^,^^^.^^ " &
+  TRAILING SIGN "-"     &
+  SIGNIFICANCE 5        &
+  BWZ &
+TAB 142 CDEMNTTOT OF ARCMD_DETAIL SUBTOTAL AT CDECLE &
+TAB 157 D_DEVCLEIMP &
+  SKIP &
+TAB 106 "=========== =========== =========== ===============" &
+  SKIP PAGE
+
+BUILD ar322z
+
+
+
+@IF FORMAT
+         1         2         3         4         5         6         7         8         9        10        11        12        13        14        15        16        17        18        19        20
+12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+AR322                                        xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                                         Page: 9999
+99/99/99 HH:MM xxxxxxxxxxxx                   Liste des commandes d'achat / Détaillée
+                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+Devise............: xxx
+Entrepôt..........: xxxx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+Statuts demandés..: xxxxxxxxxxxxxxx xxxxxxxxxxxxxxx xxxxxxxxxxxxxxx xxxxxxxxxxxxxxx
+
+Commande   Période                                                                      Dates             Nombre             Montant
+d'achat   comptable   Fournisseur                                     Statut          Commande   Imprimée d'items               brut
+--------- ----------- ----------------------------------------------- --------------- ---------  -------- -------     ---------------
+xxxxxxxxx    xx-xx    xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxx  xx/xx/xx    xxx      999       999,999,999.99-/xxx
+
+  Item    Produit                                              Qté commandée  Qté recue   Prix unitaire         TPS         TVQ    Escompte           Total   Statut
+  /Compte                     Unité                         Projet                        Sous-projet
+  ------- ---------------------------------------------------- ------------- ----------- --------------- ----------- ----------- ----------- ---------------  ---------------
+  xxxxxxx xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  99,999.999- 99,999.999- 999,999,999.99- 999,999.99- 999,999.99- 999,999.99- 999,999,999.99-  xxxxxxxxxxxxxxx
+  xxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxxxxxxx xxx xxxxxxxxxxxxxxxxxxxx
+  xxxxxxx xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  99,999.999- 99,999.999- 999,999,999.99- 999,999.99- 999,999.99- 999,999.99- 999,999,999.99-  xxxxxxxxxxxxxxx
+  xxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxxxxxxx xxx xxxxxxxxxxxxxxxxxxxx
+  xxxxxxx xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  99,999.999- 99,999.999- 999,999,999.99- 999,999.99- 999,999.99- 999,999.99- 999,999,999.99-  xxxxxxxxxxxxxxx
+  xxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxxxxxxx xxx xxxxxxxxxxxxxxxxxxxx
+                                                                                                         ----------- ----------- ----------- ---------------
+                                                                                                         999,999.99- 999,999.99- 999,999.99- 999,999,999.99-/xxx
+
+@ENDIF

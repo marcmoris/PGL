@@ -1,0 +1,434 @@
+;/T/ Réception - Génération du détail de réception
+;
+;/P/ Programmeur..: Nancy Marceau
+;    Date Création: 28 mars 1994
+;
+;    Description..: Cet écran permet de générer le détail de la
+;                   réception à partir du détail de la commande d'achat.  Ce
+;                   traitement s'effectue de façon transparente pour
+;                   l'utilisateur puisque cet écran est appelé dans un mode
+;                   'Ghost screen'.
+;
+;    Modifié par..: Guy Chabot 28 septembre 1994
+;            but..: Rendre le prix unitaire à 4 décimales.
+;
+;
+;/M/ Programmeur.......: Patrick Langlois
+;    Date modification.: 09 Juin 1999
+;    Description.......: Migration Achat/Réception/Inventaire de l'environnement (BOC)
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN ar009e NOMODE ACTION LABEL "" &
+              FROM 23,70 TO 23,80 &
+              RECEIVING ARRECEPTION
+
+
+;
+; La transaction UPDATE doit être celle de l'appelant.
+;
+TRANSACTION UPDATE INHERITED NOCOMMIT
+
+
+FILE ARRECEPTION  MASTER NOITEM
+
+
+;
+; Fichier du détail de la réception.
+;
+FILE ARREC_DETAIL  DESIGNER NOITEM   
+
+
+;------------------------------------------------------------------------------
+;
+; Fichier pour sélectionner le détail de la commande et ses ajustements.
+;
+FILE VCMD_CDE     DESIGNER &
+                 OPEN READ
+
+  ACCESS VIA    CIECLE, &
+                CMDCLE  &
+         USING  CIECLE OF ARRECEPTION, &
+                CMDCLE OF ARRECEPTION
+
+;
+; Fichier du détail de la commande d'achat.
+;
+FILE ARCMD_DETAIL  DESIGNER
+
+  ACCESS VIA   CIECLE, &
+               CMDCLE, &
+               CMDAJT, &
+               CDECLE  &
+         USING CIECLE OF VCMD_CDE, &
+               CMDCLE OF VCMD_CDE, &
+               CMDAJT OF VCMD_CDE, &
+               CDECLE OF VCMD_CDE
+
+;-------------------------------------------------------------------------------
+; Validation du code de taxe fédéral.
+;
+FILE MCTAXE            REFERENCE &
+                      ALIAS A_TAX_TPS
+  ACCESS VIA   TAXCLETYP, &
+               TAXCLECOD &
+         USING REDTAXTYPTPS OF ARREC_DETAIL, &
+               REDTAXCODTPS OF ARREC_DETAIL
+
+;-------------------------------------------------------------------------------
+; Validation du code de taxe provincial.
+;
+FILE MCTAXE            REFERENCE &
+                      ALIAS A_TAX_TVP
+  ACCESS VIA   TAXCLETYP, &
+               TAXCLECOD &
+         USING REDTAXTYPTVQ OF ARREC_DETAIL, &
+               REDTAXCODTVQ OF ARREC_DETAIL
+
+
+;-------------------------------------------------------------------------------
+; Fichier du terme d'escompte d'achat du fournisseur.
+;
+FILE VTER_DSC  REFERENCE
+  ACCESS VIA    TERCLE  &
+         USING  REDTERESCACH OF ARREC_DETAIL
+
+
+
+;-------------------------------------------------------------------------------
+; Pour le calcul des taxes.
+;
+;
+USE ustaxtmp NOLIST
+
+
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du CTI = remboursement de TPS.
+;
+PROCEDURE INTERNAL CALCUL_CTI
+BEGIN
+  ;
+  ; Il faut diminuer le cumulatif de taxe de la réception.
+  ;
+  LET RECMNTCTI OF ARRECEPTION   = RECMNTCTI OF ARRECEPTION - &
+                                   REDMNTCTI OF ARREC_DETAIL
+  ;
+  LET REDMNTCTI OF ARREC_DETAIL = 0
+
+  ;
+  ; Calcul du remboursement fédéral.
+  ;
+  LET REDMNTCTI OF ARREC_DETAIL = &
+                ROUND( REDMNTTPS OF ARREC_DETAIL * TAXPCTCTI OF A_TAX_TPS )
+  ;
+  ; Il faut augmenter le cumulatif de taxe de la réception.
+  ;
+  LET RECMNTCTI OF ARRECEPTION = RECMNTCTI OF ARRECEPTION + &
+                                 REDMNTCTI OF ARREC_DETAIL
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du RTI = remboursement de TVQ.
+;
+PROCEDURE INTERNAL CALCUL_RTI
+BEGIN
+  ;
+  ; Il faut diminuer le cumulatif de taxe de la réception.
+  ;
+  LET RECMNTRTI OF ARRECEPTION = RECMNTRTI OF ARRECEPTION - &
+                                 REDMNTRTI OF ARREC_DETAIL
+  ;
+  LET REDMNTRTI OF ARREC_DETAIL = 0
+
+  ;
+  ; Calcul du remboursement fédéral.
+  ;
+  LET REDMNTRTI OF ARREC_DETAIL = &
+                ROUND( REDMNTTVQ OF ARREC_DETAIL * TAXPCTCTI OF A_TAX_TVP )
+  ;
+  ; Il faut augmenter le cumulatif de taxe de la réception.
+  ;
+  LET RECMNTRTI OF ARRECEPTION = RECMNTRTI OF ARRECEPTION + &
+                                 REDMNTRTI OF ARREC_DETAIL
+END
+
+
+
+;-------------------------------------------------------------------------------
+; Calcul des taxes (provinciale et fédérale)
+;
+PROCEDURE INTERNAL CALCUL_TAXES
+BEGIN
+  ;
+  ; Enlève les anciennes valeurs des totaux
+  ;
+  LET RECMNTTPS OF ARRECEPTION = RECMNTTPS OF ARRECEPTION - &
+                                 REDMNTTPS OF ARREC_DETAIL
+
+  LET RECMNTTVQ OF ARRECEPTION = RECMNTTVQ OF ARRECEPTION - &
+                                 REDMNTTVQ OF ARREC_DETAIL
+  ;
+  LET REDMNTTPS OF ARREC_DETAIL = 0
+  LET REDMNTTVQ OF ARREC_DETAIL = 0
+  ;
+  ; On prend le montant brut de la ligne de réception pour le calcul des taxes.
+  ;
+  LET TZ_MNTTXB = REDMNTTOT OF ARREC_DETAIL
+  ;
+  ; Use standard pour le calcul des taxes
+  ;
+  USE ustaxcal NOLIST
+
+  LET REDMNTTPS OF ARREC_DETAIL = TZ_MNTTPS
+  LET REDMNTTVQ OF ARREC_DETAIL = TZ_MNTTVP
+
+  LET RECMNTTPS OF ARRECEPTION = RECMNTTPS OF ARRECEPTION + &
+                                 REDMNTTPS OF ARREC_DETAIL
+
+  LET RECMNTTVQ OF ARRECEPTION = RECMNTTVQ OF ARRECEPTION + &
+                                 REDMNTTVQ OF ARREC_DETAIL
+
+  ;
+  ; Si le mode de taxation est "EN SUS", il faut mettre à jour le cumulatif brut
+  ; de la réception.
+  ;
+  IF TAXMOD OF A_TAX_TPS = "S"
+  THEN BEGIN
+    LET RECMNTTOT OF ARRECEPTION   = RECMNTTOT OF ARRECEPTION  + &
+                                     REDMNTTPS OF ARREC_DETAIL
+
+    LET REDMNTTOT OF ARREC_DETAIL = REDMNTTOT OF ARREC_DETAIL  + &
+                                    REDMNTTPS OF ARREC_DETAIL
+
+  END
+
+
+  IF TAXMOD OF A_TAX_TVP = "S"
+  THEN BEGIN
+     LET RECMNTTOT OF ARRECEPTION   = RECMNTTOT OF ARRECEPTION   + &
+                                      REDMNTTVQ OF ARREC_DETAIL
+
+     LET REDMNTTOT OF ARREC_DETAIL = REDMNTTOT OF ARREC_DETAIL + &
+                                     REDMNTTVQ OF ARREC_DETAIL
+
+  END
+
+  ;
+  ; Calcul des montants de taxe remboursables (CTI & RTI)
+  ;
+  DO INTERNAL CALCUL_CTI
+  DO INTERNAL CALCUL_RTI
+
+  LET REDMNTNET    OF ARREC_DETAIL =  REDMNTTOT OF ARREC_DETAIL - &
+                                      REDMNTTPS OF ARREC_DETAIL - &
+                                      REDMNTTVQ OF ARREC_DETAIL
+
+  LET RECMNTNET    OF ARRECEPTION  =  RECMNTTOT OF ARRECEPTION - &
+                                      RECMNTTPS OF ARRECEPTION - &
+                                      RECMNTTVQ OF ARRECEPTION
+
+
+END
+
+
+;-------------------------------------------------------------------------------
+; Calcul de l'escompte si le terme du fournisseur est spécifié.
+;
+PROCEDURE INTERNAL CALCUL_ESCOMPTE
+BEGIN
+  LET RECMNTESC OF ARRECEPTION = RECMNTESC OF ARRECEPTION - &
+                                 REDMNTESC OF ARREC_DETAIL
+
+  LET REDMNTESC OF ARREC_DETAIL = 0
+
+
+  ; On calcule le montant d'escompte en utilisant le pourcentage d'escompte
+  ; du terme.
+
+  IF REDTERESCACH OF ARREC_DETAIL <> ""
+  THEN BEGIN
+    LET REDMNTESC OF ARREC_DETAIL = ROUND ( REDMNTNET OF ARREC_DETAIL * &
+                                            TERPCT    OF VTER_DSC )
+
+    LET RECMNTESC OF ARRECEPTION  = RECMNTESC OF ARRECEPTION + &
+                                    REDMNTESC OF ARREC_DETAIL
+
+    LET RECMNTTOT OF ARRECEPTION  = RECMNTTOT OF ARRECEPTION - &
+                                    REDMNTESC OF ARREC_DETAIL
+
+    LET REDMNTTOT OF ARREC_DETAIL = REDMNTTOT OF ARREC_DETAIL - &
+                                    REDMNTESC OF ARREC_DETAIL
+
+
+    IF TAXMOD OF A_TAX_TPS = "S"
+    THEN LET REDMNTTOT OF ARREC_DETAIL = REDMNTTOT OF ARREC_DETAIL - &
+                                         REDMNTTPS OF ARREC_DETAIL
+
+    IF TAXMOD OF A_TAX_TVP = "S"
+    THEN LET REDMNTTOT OF ARREC_DETAIL = REDMNTTOT OF ARREC_DETAIL - &
+                                         REDMNTTVQ OF ARREC_DETAIL
+
+    ; On recalcule les taxes pour tenir compte de l'escompte.
+    ;
+    IF 0 <> REDMNTESC OF ARREC_DETAIL
+    THEN BEGIN
+      IF TAXMOD OF A_TAX_TPS = "S"
+      THEN LET RECMNTTOT OF ARRECEPTION = RECMNTTOT OF ARRECEPTION - &
+                                          REDMNTTPS OF ARREC_DETAIL
+
+      IF TAXMOD OF A_TAX_TVP = "S"
+      THEN LET RECMNTTOT OF ARRECEPTION = RECMNTTOT OF ARRECEPTION - &
+                                          REDMNTTVQ OF ARREC_DETAIL
+
+      DO INTERNAL CALCUL_TAXES
+    END
+  END
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul des montants et des taxes.
+;
+PROCEDURE INTERNAL CALCUL_MONTANT
+BEGIN
+  ;
+  ; Calcul du montant brut du produit
+  ;
+  LET RECMNTTOT OF ARRECEPTION  = RECMNTTOT OF ARRECEPTION - &
+                                  REDMNTTOT OF ARREC_DETAIL
+
+
+  ;
+  ; La division par 100000 représente les 3 chiffres après le point pour
+  ; les qtes et 2 chiffres pour les décimales 3 et 4 du prix unitaire.
+  ;
+  LET REDMNTTOT OF ARREC_DETAIL = &
+    ROUND ( REDQTEREC OF ARREC_DETAIL * &
+            REDPRIUNI OF ARREC_DETAIL /100000 )
+
+  LET RECMNTTOT OF ARRECEPTION = RECMNTTOT OF ARRECEPTION + &
+                                 REDMNTTOT OF ARREC_DETAIL
+
+
+  ; Cette procédure calcule les montants de taxe ainsi que les montants de
+  ; CTI et RTI.
+
+  DO INTERNAL CALCUL_TAXES
+
+
+  ; On calcule l'escompte.
+  ;
+  DO INTERNAL CALCUL_ESCOMPTE
+
+
+
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de mettre à jour les informations de chacune des
+; lignes de la commande d'achat concernée.
+;
+PROCEDURE INTERNAL MAJ_DETAIL_COMMANDE
+BEGIN
+
+  GET ARCMD_DETAIL OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+
+    LET CDEQTEREC OF ARCMD_DETAIL = CDEQTEREC OF ARCMD_DETAIL + &
+                                  ( CDEQTECOM OF ARCMD_DETAIL - &
+                                    CDEQTEREC OF ARCMD_DETAIL )
+
+    LET CDESTU    OF ARCMD_DETAIL = "C"
+    PUT ARCMD_DETAIL RESET
+
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de générer les lignes de réception pour chacune des
+; lignes de la commande d'achat concernée.
+;
+PROCEDURE INTERNAL CREER_DETAIL_RECEPTION
+BEGIN
+  LET CIECLE       OF ARREC_DETAIL = CIECLE    OF ARRECEPTION
+  LET RECCLE       OF ARREC_DETAIL = RECCLE    OF ARRECEPTION
+  LET REDCLE       OF ARREC_DETAIL = CDECLE    OF VCMD_CDE
+  LET CMDAJT       OF ARREC_DETAIL = CMDAJT    OF VCMD_CDE
+  LET PRDCLE       OF ARREC_DETAIL = PRDCLE    OF VCMD_CDE
+  LET REDDSC       OF ARREC_DETAIL = CDEDSCPRD OF VCMD_CDE
+
+  LET REDQTEREC    OF ARREC_DETAIL = CDEQTECOM OF VCMD_CDE - &
+                                     CDEQTEREC OF VCMD_CDE
+
+  LET REDQTERECREJ OF ARREC_DETAIL = 0
+  LET REDQTERET    OF ARREC_DETAIL = 0
+  LET REDQTEFAC    OF ARREC_DETAIL = 0
+
+  LET REDFLGCOM    OF ARREC_DETAIL = "1"
+  LET REDTERESCACH OF ARREC_DETAIL = CDETERESCACH OF VCMD_CDE
+
+  LET CPTCLE       OF ARREC_DETAIL = CPTCLE       OF VCMD_CDE
+  LET UNACLE       OF ARREC_DETAIL = UNACLE       OF VCMD_CDE
+  LET PRJCLE       OF ARREC_DETAIL = PRJCLE       OF VCMD_CDE
+  LET PRACLE       OF ARREC_DETAIL = PRACLE       OF VCMD_CDE
+  LET IMMCLE       OF ARREC_DETAIL = IMMCLE       OF VCMD_CDE
+  LET REDTAXTYPTPS OF ARREC_DETAIL = CDETAXTYPTPS OF VCMD_CDE
+  LET REDTAXCODTPS OF ARREC_DETAIL = CDETAXCODTPS OF VCMD_CDE
+  LET REDTAXTYPTVQ OF ARREC_DETAIL = CDETAXTYPTVQ OF VCMD_CDE
+  LET REDTAXCODTVQ OF ARREC_DETAIL = CDETAXCODTVQ OF VCMD_CDE
+
+  LET REDPRIUNI    OF ARREC_DETAIL = CDEPRIUNI    OF VCMD_CDE
+
+  LET REDMNTDES    OF ARREC_DETAIL = ( CDEMNTENG OF VCMD_CDE /  &
+                                       CDEQTECOM OF VCMD_CDE ) * &
+                                       REDQTEREC OF ARREC_DETAIL
+
+  LET REDSTU OF ARREC_DETAIL = " "
+
+   ; Calcul des montants, des taxes et de l'escompte selon quantité reçue.
+   ;
+  DO INTERNAL CALCUL_MONTANT
+
+   ; Mise à jour du nombre d'items de la réception.
+   ;
+  IF NEWRECORD     OF ARREC_DETAIL
+  THEN LET RECNBRITE OF ARRECEPTION = RECNBRITE OF ARRECEPTION + 1
+
+  PUT ARRECEPTION
+  PUT ARREC_DETAIL RESET
+END
+
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure est exécutée seulement en mode ENTRY lorsque la réception
+; est préliminaire.
+;
+PROCEDURE PREENTRY
+BEGIN
+  IF RECSTU OF ARRECEPTION = "P"
+  THEN BEGIN
+    WHILE RETRIEVING VCMD_CDE
+    BEGIN
+      DO INTERNAL CREER_DETAIL_RECEPTION
+      DO INTERNAL MAJ_DETAIL_COMMANDE
+    END
+  END
+
+  RETURN
+END
+
+BUILD

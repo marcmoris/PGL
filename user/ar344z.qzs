@@ -1,0 +1,383 @@
+;/T/ Liste de vérification des mouvements d'inventaire
+;
+;/M/TRSMAG/Sylvie Chouinard/1999-09-08
+; État......... : Terminé
+; Description.. : GRA01 
+;                 Le détail du rapport doit être le détail du mouvement 
+;		  d'inventaire au lieu de l'imputation.
+;
+;/P/ Programmeur...: Nancy Marceau
+;    Date Création.: 24 mai 1994
+;
+;    Description...: Pour faire la vérification des lots des mouvements
+;                    d'inventaire. Cette liste peut être lancée pour les
+;                    lots journlaisés ou non.
+;
+;    Paramètres....: Compagnie          (Compagnie du menu)
+;                    Période comptable  (Obligatoire)
+;                    No lot             (Un, Plusieurs ou tous)
+;
+;
+;    Particularités: Pour faire la vérification des lots non journalisés, il
+;                    faut donner en paramètre le numéro de lot (0000). Ainsi,
+;                    tous les mouvements d'inventaire approuvés apparaîtront
+;                    dans la liste de vérification.
+;
+;-------------------------------------------------------------------------------
+
+ USE ussetqzs NOLIST   ; permet de faire les SET REPORT DEV....
+ SET NOBLANK           ; Empêche l'impression de ligne blanche
+
+
+ACCESS *WAR344  &
+  ;
+  ; On va chercher l'entrepôt pour afficher les infos de l'entrepôt.
+  ;
+  LINK CIECLE OF WAR344,      &
+       ENTCLE OF WAR344       &
+    TO CIECLE, &
+       ENTCLE              OF ARENTREPOT   &
+
+  LINK CIECLE     OF WAR344,      &
+       PRD_ENTCLE OF WAR344       &
+    TO CIECLE, &
+       ENTCLE              OF ARENTREPOT  ALIAS  PRD_ARENTREPOT OPTIONAL &
+
+  ;
+  ; Lien pour l'info du produit
+  ;
+  LINK CIECLE OF WAR344,      &
+       PRDCLE OF WAR344,      &
+       ENTCLE OF WAR344       &
+    TO CIECLE, &
+       PRDCLE, &
+       ENTCLE              OF VPRE_PRD         OPTIONAL &
+
+  ;
+  ; Lien pour le nom de l'utilisateur
+  ;
+  LINK UTLCLE OF WAR344     &
+    TO UTLCLE             OF ARUTILISATEUR     OPTIONAL &
+
+
+  LINK CPTCLE   OF WAR344     &
+    TO CPTCLE             OF VCPT_DSC          OPTIONAL &
+  
+  LINK CIECLE   OF WAR344 , &
+       UNACLE   OF WAR344   &
+    TO CIECLE             , &
+       UNACLE             OF MCUNITE_ADM       OPTIONAL &
+
+; LINK CIECLE OF WAR344   , &
+;      PRJCLE OF WAR344     &
+;   TO CIECLE             , &
+;      PRJCLE             OF GPPROJETS         OPTIONAL &
+;
+; LINK CIECLE OF WAR344   , &
+;      PRJCLE OF WAR344   , &
+;      PRACLE OF WAR344     &
+;   TO CIECLE             , &
+;      PRJCLE             , &
+;      PRACLE             OF GPPRO_ACTIVITE    OPTIONAL &
+
+  ;
+  ; Statut du mouvement
+  ;
+  LINK ("MOUSTU",                   &
+         MOUSTU OF WAR344)          &
+    TO XELNOM,                      &
+       CBICLE OF VCBI_DSC    ALIAS A_CBI_MOUSTU OPTIONAL  &
+
+  ;
+  ; Type du mouvement
+  ;
+  LINK ("MOUTYP",                   &
+         MOUTYP OF WAR344)          &
+    TO XELNOM,                      &
+       CBICLE OF VCBI_DSC    ALIAS A_CBI_MOUTYP OPTIONAL
+
+
+
+ DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = & ; titre1  du rapport
+@IF FRANCAIS
+                   "Liste de vérification des mouvements d'inventaire"
+@ELSE
+                   "%%%Liste de vérification des mouvements d'inventaire"
+@ENDIF
+ DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = " " ; titre2  du rapport
+
+ DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "AR344Z"       ; numéro du rapport
+ DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM            ; nom de la compagnie
+
+
+USE usflgdet NOLIST                    ;Flag Bilingue (O/N)
+DEFINE D_HRSBLC    CHARACTER SIZE 3 =  DZ_FLGAFFO IF 0 <> LARNBRTRSERR OF WAR344 &
+                                       ELSE DZ_FLGAFFN IF LARNBRTRSERR OF WAR344 = 0
+
+
+DEFINE D_JOURNALISE CHAR SIZE 12 = &                                    ;Indique si Journalisé
+@IF FRANCAIS
+                            "Journalisé" &
+@ELSE
+                            "Posted" &
+@ENDIF
+                            IF LARDATJOU OF WAR344 <> 0 ELSE " "
+;***********************
+; Pour le rendre à 20 caractères.
+;
+;DEFINE D_PROTIT    CHARACTER SIZE 20 = PRJDSC1 OF GPPROJETS
+;DEFINE D_ACTTIT    CHARACTER SIZE 20 = PRADSC1 OF GPPRO_ACTIVITE
+
+;***********************
+
+; Statut du mouvement (15 caractères)
+
+DEFINE D_CBIDSC_MOUSTU CHARACTER SIZE 15 = CBIDSC OF A_CBI_MOUSTU
+
+; Type du mouvement (15 caractères)
+
+DEFINE D_CBIDSC_MOUTYP CHARACTER SIZE 15 = CBIDSC OF A_CBI_MOUTYP
+
+
+DEFINE D_LARNBRTRSDIF INTEGER SIZE 4 = LARNBRTRSVER OF WAR344 - &
+                                       LARNBRTRS    OF WAR344     ;Différence nbre transactions réel et nbre transactions évalué
+DEFINE D_LARCUMMNTDIF FLOAT SIZE 8   = LARCUMMNTVER OF WAR344 - &
+                                       LARCUMMNT    OF WAR344     ;Différence Montant transaction réel et Montant transaction évalué
+;
+; Vérification si montant entré par l'usager balance avec le total imputation si
+; ne balance imprimer un "*"
+;
+DEFINE D_BALANCE  CHARACTER SIZE 1 = "*" IF (MOUMNTNET OF WAR344 <> &
+                                             MOUMNTDBT OF WAR344) &
+                                         OR (MOUMNTNET OF WAR344 <> &
+                                             MOUMNTCRT OF WAR344) &
+                                         OR (MOUMNTDBT OF WAR344 <> &
+                                             MOUMNTCRT OF WAR344) ELSE " "
+
+
+;DEFINE D_MNTDBT FLOAT SIZE 8 &
+;       PICTURE "^^^,^^^,^^^.^^ " TRAIL SIGN "-" SIGNIF 5 BWZ = &
+;       MIMMNT OF WAR344 IF MIMCODDC OF WAR344 = "D" ELSE 0
+;
+;DEFINE D_MNTCRT FLOAT SIZE 8 &
+;       PICTURE "^^^,^^^,^^^.^^ " TRAIL SIGN "-" SIGNIF 5 BWZ = &
+;       MIMMNT OF WAR344 IF MIMCODDC OF WAR344 = "C" ELSE 0
+
+;
+; Nom + prenom de l'utilisateur
+;
+DEFINE D_UTLNOM  CHARACTER SIZE 29 = TRUNC(UTLNOM OF ARUTILISATEUR) + ", " + &
+                                     TRUNC(UTLPNM OF ARUTILISATEUR)
+
+DEFINE D_PRDDSC1 CHARACTER SIZE 20 = PRDDSC1 OF VPRE_PRD[1:20]
+DEFINE D_ENTNOM  CHARACTER SIZE 20 = ENTNOM  OF PRD_ARENTREPOT[1:20]
+
+
+SORT ON LARCLE    OF WAR344, &          ; No lot
+        MOUCLE    OF WAR344             ; No de mouvement
+
+
+ USE ustit175 NOLIST  ; Titre standard pour l'application à 175
+SKIP 2&
+@IF FRANCAIS
+ TAB 001 "Lot....: "   &
+@ELSE
+ TAB 001 "Batch..: "   &
+@ENDIF
+ TAB 011 LARCLE OF WAR344 &
+ TAB 016 LARDSC OF WAR344 &
+ TAB 060 D_JOURNALISE &
+ SKIP &
+@IF FRANCAIS
+ TAB 001 "Période: " &
+@ELSE
+ TAB 001 "Period.: " &
+@ENDIF
+ TAB 011 PECCLE OF WAR344 &
+SKIP 2 &
+@IF FRANCAIS
+  TAB 001 "No.                                                                                                                                                Nombre" &
+@ELSE
+  TAB 001 "%%%No.                                                                                                                                                Nombre" &
+@ENDIF
+
+
+
+;No.                                                                                                                                                Nombre" 
+;mouvement   Type de mouvement  Statut               Date    Entrepôt                                      Utilisateur                              d'items        Montant" &
+;                                                  aa/mm/jj
+;----------- ------------------ ----------------- ---------- --------------------------------------------- ---------------------------------------- ------- --------------- " &
+;                                                                                                          1234567890 12345678901234567890123456789                                             
+
+;------------Produit-------------- --------Entrepot--------- ----------Compte----------- -----Unité administrative---- --Cout moyen-- -Qté mouv.--  Prix unitaire ---Montant---"
+;123456789012 12345678901234567890 1234 12345678901234567890 123456 12345678901234567890 12345678 12345678901234567890 9,999,999.9999 9999,999.999 9,999,999.9999999,999,999.99
+;1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345 
+;         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7   
+
+ SKIP &
+@IF FRANCAIS
+  TAB 001 "mouvement   Type de mouvement  Statut               Date    Entrepôt                                      Utilisateur                              d'items        Montant" &
+@ELSE
+  TAB 001 "%%%vement   Type de mouvement  Statut               Date    Entrepôt                                      Utilisateur                              d'items        Montant" &
+@ENDIF
+skip &
+  TAB 001 "                                                  aa/mm/jj" &
+ SKIP &
+  TAB 001 "----------- ------------------ ----------------- ---------- --------------------------------------------- ---------------------------------------- ------- --------------- " &
+ SKIP
+
+
+HEADING AT MOUCLE &
+  TAB 001  D_BALANCE &
+  TAB 003  MOUCLE    OF WAR344        &
+  TAB 013  MOUTYP    OF WAR344        &
+  TAB 016  D_CBIDSC_MOUTYP            &
+  TAB 032  MOUSTU    OF WAR344        &
+  TAB 034  D_CBIDSC_MOUSTU            &
+  TAB 050  MOUDAT    OF WAR344        &
+  TAB 061  ENTCLE    OF WAR344        &
+  TAB 066  ENTNOM    OF ARENTREPOT    &
+ ;TAB 107  MOUDSC1   OF WAR344        &
+  TAB 107  UTLCLE    OF WAR344        &
+  TAB 118  D_UTLNOM                   &
+  TAB 150  MOUNBRITE OF WAR344        &
+  TAB 156  MOUMNTNET OF WAR344        &
+ ;SKIP &
+ ;TAB 107  MOUDSC2   OF WAR344        &
+ SKIP 3 &
+@IF FRANCAIS
+; TAB 001 "----------Compte-----------  ----Unité administrative-----  ---------Projet-----------  --------Activité----------- -------Montant " &
+  TAB 001 "------------Produit-------------- --------Entrepot--------- ----------Compte----------- -----Unité administrative---- --Cout moyen-- -Qté mouv.--  Prix unitaire ---Montant---" &
+@ELSE
+; TAB 001 "%%%-------Compte-----------  ----Unité administrative-----  -----------Projet------------  -------Activité--------- -------Montant " &
+  TAB 001 "%%%---------Produit-------------- --------Entrepot--------- ----------Compte----------- -----Unité administrative---- --Cout moyen-- -Qté mouv.--  Prix unitaire ---Montant---" &
+@ENDIF
+ SKIP
+
+REPORT &
+  TAB 001 PRDCLE     OF WAR344      &
+  TAB 014 D_PRDDSC1   &
+  TAB 035 PRD_ENTCLE OF WAR344      &
+  TAB 040 D_ENTNOM    &
+  TAB 061 CPTCLE     OF WAR344      &
+  TAB 068 CPTDSCABR  OF VCPT_DSC    &
+  TAB 089 UNACLE     OF WAR344      &
+  TAB 098 UNANOMABR  OF MCUNITE_ADM &
+  TAB 119 PRECOUMYN  OF VPRE_PRD    &
+  TAB 134 MODQTE     OF WAR344      &
+  TAB 147 MODPRIUNI  OF WAR344      &
+
+  TAB 161 MODMNTNET  OF WAR344      
+
+; TAB 117 D_MNTDBT                  &
+; TAB 133 D_MNTCRT
+
+
+FOOTING AT MOUCLE &
+   TAB 161 "---------------" &
+;  TAB 117 "---------------" &
+;  TAB 133 "---------------" &
+SKIP &
+   TAB 161 MODMNTNET  OF WAR344 SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " TRAIL SIGN "-" SIGNIF 5 BWZ &
+;  TAB 117 D_MNTDBT SUBTOTAL &
+;  TAB 133 D_MNTCRT SUBTOTAL &
+SKIP &
+  TAB 001  "-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------" &
+ SKIP
+
+
+FOOTING AT LARCLE &
+   TAB 161 "---------------" &
+;  TAB 117 "---------------" &
+;  TAB 133 "---------------" &
+ SKIP &
+@IF FRANCAIS
+  TAB 134 "Total du Lot:" &
+@ELSE
+  TAB 134 "Batch Total :" &
+@ENDIF
+   TAB 161 MODMNTNET  OF WAR344 SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " TRAIL SIGN "-" SIGNIF 5 BWZ &
+;  TAB 117 D_MNTDBT SUBTOTAL &
+;  TAB 133 D_MNTCRT SUBTOTAL &
+ SKIP &
+
+   TAB 161 "===============" &
+;  TAB 117 "===============" &
+;  TAB 133 "===============" &
+ SKIP &
+  TAB 001 "-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------" &
+ SKIP 1 &
+@IF FRANCAIS
+  TAB 049 "    Vérifiés         Cumulés             Ecart        Hors balance(*)" &
+@ELSE
+  TAB 049 "%%%    Vérifiés         Cumulés             Ecart        Hors balance(*)" &
+@ENDIF
+ SKIP 1 &
+  TAB 049 "--------------    --------------    --------------    ---------------" &
+ SKIP &
+@IF FRANCAIS
+  TAB 023   "Nombre de transactions:" &
+@ELSE
+  TAB 023   "%%%bre de transactions:" &
+@ENDIF
+  TAB 055 LARNBRTRSVER   OF WAR344 PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+  TAB 073 LARNBRTRS      OF WAR344 PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+  TAB 091 D_LARNBRTRSDIF           PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+  TAB 109 D_HRSBLC &
+SKIP &
+@IF FRANCAIS
+  TAB 023   "Montant total.........:" &
+@ELSE
+  TAB 023   "%%%tant total.........:" &
+@ENDIF
+  TAB 049 LARCUMMNTVER OF WAR344   PICTURE "^^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5 &
+  TAB 067 LARCUMMNT    OF WAR344   PICTURE "^^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5 &
+  TAB 085 D_LARCUMMNTDIF           PICTURE "^^^,^^^,^^^.^^ "  TRAILING SIGN "-" SIGNIFICANCE 5 &
+SKIP 1 &
+  TAB 001  "-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------" &
+SKIP PAGE
+
+BUILD ar344z
+
+@IF FORMAT
+AR344                                        xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                           Page: 9999
+99/99/99 HH:MM xxxxxxxxxxxx              Liste de vérification des mouvements d'inventaire
+                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+Lot.....: xxxx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxx
+Période.: xx-xx
+
+No.                                                                                                                                                Nombre
+mouvement   Type de mouvement  Statut               Date    Entrepôt                                      Raison / Responsable                     d'items        Montant
+----------- ------------------ ----------------- ---------- --------------------------------------------- ---------------------------------------- ------- ---------------
+ xxxxxxxxx  xx xxxxxxxxxxxxxxx x xxxxxxxxxxxxxxx AAAA/MM/JJ xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   999   999,999,999.99-
+                                                                                                          xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+----------Compte-----------  ----Unité administrative-----  ---------Projet-----------  --------Activité----------- -------Montant
+123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99-
+                                                                                                                    ---------------
+                                                                                                                    999,999,999.99-
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ xxxxxxxxx  xx xxxxxxxxxxxxxxx x xxxxxxxxxxxxxxx AAAA/MM/JJ xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   999   999,999,999.99-
+                                                                                                          xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+----------Compte-----------  ----Unité administrative-----  ---------Projet-----------  --------Activité----------- -------Montant
+123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99-
+                                                                                                                    ---------------
+                                                                                                                    999,999,999.99-
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                                    ---------------
+                                                                                                     Total du lot:  999,999,999.99-
+                                                                                                                    ===============
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                    Vérifiés         Cumulés             Ecart        Hors balance(*)
+                                                --------------    --------------    --------------    ---------------
+                      Nombre de transactions:         9,999             9,999             9,999-            xxx
+                      Montant total.........:   999,999,999.99    999,999,999.99    999,999,999.99-
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+@ENDIF

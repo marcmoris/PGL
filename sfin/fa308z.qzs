@@ -1,0 +1,402 @@
+;/T/ Liste de validation du transfert des factures aux CAR.
+;
+;/P/ Programmeur...: Marie-Josée Hamel
+;    Date Création.: 96.02.13
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST   ; permet de faire les SET REPORT DEV....
+SET NOBLANKS
+
+ACCESS *WFA308FA &
+  ;------------------------------------
+  ; Pour le nom du client
+  LINK REFCIECLE OF WFA308FA, &
+       REFCLENUM OF WFA308FA, &
+       CIECLE    OF WFA308FA  &
+    TO CLICIECLE,                &
+       CLICLE,                   &
+       CIECLE    OF VCLC_CLI     &
+  ;------------------------------------
+  ; Détail de la facture
+  LINK  CIECLE    OF WFA308FA,  &
+        FARCLE    OF WFA308FA   &
+    TO  CIECLE,   &
+        FARCLE                    OF FAFAR_DETAIL  &
+  ;------------------------------------
+  ; Entete de la facture
+  LINK  CIECLE    OF WFA308FA,  &
+        FARCLE    OF WFA308FA   &
+    TO  CIECLE,   &
+        FARCLE                    OF FAFAR_ENTETE OPTIONAL  &
+  ;------------------------------------
+  ; Note de l'item
+  LINK  CIECLE    OF FAFAR_DETAIL,  &
+        FARCLE    OF FAFAR_DETAIL,  &
+        FFDCLELIG OF FAFAR_DETAIL   &
+    TO  CIECLE   ,   &
+        FARCLE   ,   &
+        FFDCLELIG                 OF FAFAR_NOTE OPTIONAL  &
+  ;------------------------------------
+  ; Pour la description
+  LINK CIECLE OF FAFAR_DETAIL     , &
+       TRPCLE OF FAFAR_DETAIL       &
+    TO CIECLE,    &
+       TRPCLE                     OF FATRAJET_PRODUIT OPTIONAL &
+  ;------------------------------------
+  ; Pour le compte d'escompte et la description
+  LINK CIECLE OF FAFAR_DETAIL     , &
+       ETACLE OF FAFAR_DETAIL       &
+    TO CIECLE,    &
+       ETACLE                     OF FAELEMENT_TARIF OPTIONAL &
+  ;------------------------------------
+  ; Pour la description
+  LINK FFDTERESC OF FAFAR_DETAIL  &
+    TO TMECLE                     OF CRTERME OPTIONAL &
+  ;------------------------------------
+  ; Description du statut
+  LINK ("FARSTU"                    , &
+         FARSTU OF WFA308FA ) &
+    TO XELNOM , &
+       CBICLE                     OF VCBI_DSC OPTIONAL
+
+
+;
+; Variables obligatoires pour les en-têtes standards.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+       "Validation des factures, notes de crédit et ajustements"
+@ELSE
+       "%%%"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+       ""
+@ELSE
+       "%%%"
+@ENDIF
+
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE  7 = "FA308ZA"
+;
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM
+
+SORT ON CIECLE    OF WFA308FA &
+     ON REFCLENUM OF WFA308FA &
+     ON FARCLE    OF WFA308FA &
+     ON FFDCLELIG OF FAFAR_DETAIL &
+     ON FFNSEQ    OF FAFAR_NOTE
+
+
+DEFINE D_LIBORI CHARACTER SIZE 21 = "Port d'origine.....: " &
+        IF FFEPORORI OF FAFAR_ENTETE <> " " &
+        ELSE " "
+DEFINE D_LIBDES CHARACTER SIZE 21 = "Port de destination: " &
+        IF FFEPORDES OF FAFAR_ENTETE <> " " &
+        ELSE " "
+DEFINE D_LIBLIE CHARACTER SIZE 21 = "Lieu de travail....: " &
+        IF FFELIUTRV OF FAFAR_ENTETE <> " " &
+        ELSE " "
+DEFINE D_LIBCNS CHARACTER SIZE 21 = "Connaissements.....: " &
+        IF FFECNS1   OF FAFAR_ENTETE <> " " &
+        ELSE " "
+DEFINE D_LIBDST CHARACTER SIZE 21 = "Destinataire.......: " &
+        IF FFEDES    OF FAFAR_ENTETE <> " " &
+        ELSE " "
+
+DEFINE D_LIBESC CHARACTER SIZE 9 = "Escompte:" &
+        IF FFDTERESC OF FAFAR_DETAIL <> " " &
+        ELSE " "
+
+DEFINE D_ESC    CHARACTER SIZE 6 = ETACPTESC    OF FAELEMENT_TARIF &
+        IF FFDTERESC OF FAFAR_DETAIL <> " " &
+        ELSE " "
+
+DEFINE D_MNTBRUT   FLOAT SIZE 8 = ROUND ( FFDQTEFAC OF FAFAR_DETAIL * &
+                                          FFDPRIUNI OF FAFAR_DETAIL / 100 ) &
+                                - FFDMNTESC OF FAFAR_DETAIL &
+                            IF   FFDTYP OF FAFAR_DETAIL = "1" &
+                              OR FFDTYP OF FAFAR_DETAIL = "2" &
+                            ELSE FFDMNTNET OF FAFAR_DETAIL
+
+DEFINE D_TRPDSC CHARACTER SIZE 40 = TRPDSCFRA OF FATRAJET_PRODUIT &
+                            IF CLILNG OF VCLC_CLI = "F" &
+                          ELSE TRPDSCANG OF FATRAJET_PRODUIT
+
+DEFINE D_ETADSC CHARACTER SIZE 24 = ETADSCFRA OF FAELEMENT_TARIF &
+                            IF CLILNG OF VCLC_CLI = "F" &
+                          ELSE ETADSCANG OF FAELEMENT_TARIF
+
+USE usflgdet NOLIST ;Flag Bilingue (O/N)
+
+;
+;Indique si on imprime le produit
+;
+DEFINE D_IMPTRP CHARACTER SIZE 3 &
+        = DZ_FLGAFFO IF TRPIMP OF FATRAJET_PRODUIT = "1" ELSE &
+          DZ_FLGAFFN
+
+
+DEFINE D_IMPIMM CHARACTER SIZE 3 &
+        = DZ_FLGAFFO IF FFDIMPIMM OF FAFAR_DETAIL = "1" ELSE &
+          DZ_FLGAFFN
+
+
+USE ustit220 NOLIST
+SKIP 2
+
+HEADING AT FARCLE &
+SKIP 2 &
+  TAB 001 "                         Client                   Facture   Type Date fact. Fact référée  Bon commande   Dev      Statut      Pér.  Lot" &
+SKIP &
+  TAB 001 "----------------------------------------------- ------------ ---- ---------- ------------ --------------- --- --------------- ----- ----" &
+SKIP &
+  TAB 001 REFCLENUM OF WFA308FA &
+  TAB 008 CLINOM    OF VCLC_CLI    &
+  TAB 049 FARCLE    OF WFA308FA &
+  TAB 063 FARTYPECR OF WFA308FA &
+  TAB 067 FARDAT    OF WFA308FA &
+  TAB 078 FARCLEREF OF WFA308FA &
+  TAB 091 FARCMDCLI OF WFA308FA &
+  TAB 107 DEVCLE    OF VCLC_CLI &
+  TAB 111 FARSTU    OF WFA308FA &
+  TAB 113 CBIDSC    OF VCBI_DSC    PICTURE "^^^^^^^^^^^^^" &
+  TAB 127 PECCLE    OF WFA308FA &
+  TAB 133 LCRCLE    OF WFA308FA &
+SKIP &
+  TAB 091 D_LIBORI &
+  TAB 112 FFEPORORI OF FAFAR_ENTETE &
+SKIP &
+  TAB 091 D_LIBDES &
+  TAB 112 FFEPORDES OF FAFAR_ENTETE &
+SKIP &
+  TAB 091 D_LIBLIE &
+  TAB 112 FFELIUTRV OF FAFAR_ENTETE &
+SKIP &
+  TAB 091 D_LIBCNS &
+  TAB 112 FFECNS1 OF FAFAR_ENTETE &
+  TAB 120 FFECNS2 OF FAFAR_ENTETE &
+  TAB 128 FFECNS3 OF FAFAR_ENTETE &
+  TAB 136 FFECNS4 OF FAFAR_ENTETE &
+  TAB 144 FFECNS5 OF FAFAR_ENTETE &
+  TAB 152 FFECNS6 OF FAFAR_ENTETE &
+  TAB 160 FFECNS7 OF FAFAR_ENTETE &
+SKIP &
+  TAB 091 D_LIBDST &
+  TAB 112 FFEDES    OF FAFAR_ENTETE &
+SKIP &
+  TAB 172 "Ss-                            Unité" &
+SKIP &
+TAB 005 "Séq.  Typ                   Produit                    Imp             Élément             Prix unitaire    Quantité     Montant brut  TPS TVP   Montant net   Projet  prj Immobilisation Imp Compte  admin." &
+SKIP &
+TAB 003 "------- --- -------------------------------------------- --- ----------------------------- --------------- -------------- -------------- --- --- -------------- -------- --- -------------- --- ------ --------"
+
+HEADING AT FFDCLELIG &
+  TAB 001 FFDCLELIG OF FAFAR_DETAIL &
+  TAB 012 FFDTYP    OF FAFAR_DETAIL &
+  TAB 015 TRPCLE    OF FAFAR_DETAIL &
+  TAB 019 D_TRPDSC                  &
+  TAB 060 D_IMPTRP                  &
+  TAB 064 ETACLE    OF FAFAR_DETAIL &
+  TAB 069 D_ETADSC                  &
+  TAB 094 FFDPRIUNI OF FAFAR_DETAIL &
+  TAB 110 FFDQTEFAC OF FAFAR_DETAIL &
+  TAB 125 D_MNTBRUT                 &
+          PICTURE "^^,^^^,^^^.^^ "  &
+          TRAILING SIGN "-" SIGNIF 5 &
+  TAB 140 FFDTAXCODTPS OF FAFAR_DETAIL &
+  TAB 144 FFDTAXCODTVQ OF FAFAR_DETAIL &
+  TAB 148 FFDMNTNET OF FAFAR_DETAIL &
+  TAB 163 PRJCLE    OF FAFAR_DETAIL &
+  TAB 172 PRACLE    OF FAFAR_DETAIL &
+  TAB 177 IMMCLE    OF FAFAR_DETAIL &
+  TAB 191 D_IMPIMM                  &
+  TAB 195 CPTCLE    OF FAFAR_DETAIL &
+  TAB 202 UNACLE    OF FAFAR_DETAIL &
+SKIP &
+  TAB 113 D_LIBESC &
+  TAB 125 FFDMNTESC    OF FAFAR_DETAIL BWZ &
+  TAB 140 TMEDSCABRFRA OF CRTERME &
+  TAB 195 D_ESC
+
+REPORT &
+  TAB 019 FFNDSC OF FAFAR_NOTE
+
+FOOTING AT FARCLE &
+  TAB 124 "---------------"  &
+  TAB 147 "---------------"  &
+SKIP &
+  TAB 107 "Total facture:"   &
+  TAB 124 D_MNTBRUT SUBTOTAL AT FFDCLELIG  &
+        PICTURE "^^^,^^^,^^^.^^ "  &
+        TRAILING SIGN "-" SIGNIF 5 &
+  TAB 147 FFDMNTNET SUBTOTAL AT FFDCLELIG  &
+        PICTURE "^^^,^^^,^^^.^^ "  &
+        TRAILING SIGN "-" SIGNIF 5
+
+FINAL FOOTING &
+  TAB 124 "---------------"  &
+  TAB 147 "---------------"  &
+SKIP &
+  TAB 107 "Total........:"   &
+  TAB 124 D_MNTBRUT SUBTOTAL AT FFDCLELIG  &
+        PICTURE "^^^,^^^,^^^.^^ "  &
+        TRAILING SIGN "-" SIGNIF 5 &
+  TAB 147 FFDMNTNET SUBTOTAL AT FFDCLELIG  &
+        PICTURE "^^^,^^^,^^^.^^ "  &
+        TRAILING SIGN "-" SIGNIF 5
+
+BUILD fa308za
+
+USE ussetqzs NOLIST   ; permet de faire les SET REPORT DEV....
+
+ACCESS *WFA308IM
+;
+; Variables obligatoires pour les en-têtes standards.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+       "Validation des factures, notes de crédit et ajustements"
+@ELSE
+       "%%%"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+       "Sommaire"
+@ELSE
+       "%%%"
+@ENDIF
+
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE  7 = "FA308ZB"
+;
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM
+
+SORT ON CIECLE       &
+     ON PRJCLE       &
+     ON PRACLE       &
+     ON UNACLE       &
+     ON CPTCLE
+
+DEFINE D_FFDMNTTOT   FLOAT SIZE 08 = FFDMNTTOT + FFDMNTTPS + FFDMNTTVQ
+
+USE ustit180 NOLIST
+  SKIP 2 &
+    TAB 001 "Période   : " &
+    TAB 015 PECCLE &
+  SKIP  &
+    TAB 001 "Lot       : " &
+    TAB 015 LCRCLE &
+  SKIP 2 &
+    TAB 012 "Sous-" &
+    TAB 037 "Unité" &
+  SKIP &
+    TAB 002 "Projet" &
+    TAB 012 "Projet" &
+    TAB 020 "Immobilisation" &
+    TAB 037 "Adm." &
+    TAB 048 "Compte" &
+    TAB 059 "Montant brut" &
+    TAB 076 "Montant T.P.S." &
+    TAB 094 "Montant T.V.Q." &
+    TAB 112 "Montant Total" &
+  SKIP &
+    TAB 001 "--------" &
+    TAB 012 "------" &
+    TAB 020 "--------------" &
+    TAB 036 "--------" &
+    TAB 048 "------" &
+    TAB 058 "--------------" &
+    TAB 076 "--------------" &
+    TAB 094 "--------------" &
+    TAB 112 "--------------" &
+  SKIP 2
+
+FOOTING AT CPTCLE &
+    TAB 001 PRJCLE                 &
+    TAB 013 PRACLE                 &
+    TAB 021 IMMCLE                 &
+    TAB 036 UNACLE                 &
+    TAB 048 CPTCLE                 &
+    TAB 058 FFDMNTTOT SUBTOTAL     &
+        PICTURE "^^^,^^^,^^^.^^ "  &
+        TRAILING SIGN "-" SIGNIF 5 &
+    TAB 076 FFDMNTTPS SUBTOTAL   &
+        PICTURE "^^^,^^^,^^^.^^ "  &
+        TRAILING SIGN "-" SIGNIF 5 &
+    TAB 094 FFDMNTTVQ SUBTOTAL     &
+        PICTURE "^^^,^^^,^^^.^^ "  &
+        TRAILING SIGN "-" SIGNIF 5 &
+    TAB 112 D_FFDMNTTOT SUBTOTAL   &
+        PICTURE "^^^,^^^,^^^.^^ "  &
+        TRAILING SIGN "-" SIGNIF 5 &
+    RESERVE 4 LINES
+
+
+FINAL FOOTING  &
+    TAB 058 "--------------" &
+    TAB 076 "--------------" &
+    TAB 094 "--------------" &
+    TAB 112 "--------------" &
+        SKIP                 &
+    TAB 037 "Total du lot : " &
+    TAB 058 FFDMNTTOT SUBTOTAL     &
+        PICTURE "^^^,^^^,^^^.^^ "  &
+        TRAILING SIGN "-" SIGNIF 5 &
+    TAB 076 FFDMNTTPS SUBTOTAL     &
+        PICTURE "^^^,^^^,^^^.^^ "  &
+        TRAILING SIGN "-" SIGNIF 5 &
+    TAB 094 FFDMNTTVQ SUBTOTAL     &
+        PICTURE "^^^,^^^,^^^.^^ "  &
+        TRAILING SIGN "-" SIGNIF 5 &
+    TAB 112 D_FFDMNTTOT SUBTOTAL   &
+        PICTURE "^^^,^^^,^^^.^^ "  &
+        TRAILING SIGN "-" SIGNIF 5
+
+BUILD fa308zb
+@IF FORMAT
+Client                                             Facture   Type Date fact. Fact référée  Bon commande   Dev Statut           Pér.  Lot
+----------------------------------------------- ------------ ---- ---------- ------------ --------------- --- --------------- ----- ----
+XXXXXX XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX XXXXXXXXXXXX  XX  9999/99/99 XXXXXXXXXXXX XXXXXXXXXXXXXXX XXX X XXXXXXXXXXXXX 99-99 0000
+                                                                                          Port d'origine.....: XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                                                                                          Port de destination: XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                                                                                          Lieu de travail....: XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                                                                                          Connaissements.....: XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX XXXXXXX
+                                                                                          Destinataire.......: XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                                                                                                                                                                          Ss-                            Unité
+    Séq.  Typ                   Produit                    Imp             Élément            Prix unitaire    Quantité     Montant brut  TPS TVP   Montant net   Projet  prj Immobilisation Imp Compte  admin.
+  ------- --- -------------------------------------------- --- ----------------------------- --------------- -------------- -------------- --- --- -------------- -------- --- -------------- --- ------ --------
+  XXX.XXX  X  XXX XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX XXX XXXX XXXXXXXXXXXXXXXXXXXXXXXX 9,999,999.9999- 999999.999999- 99,999,999.99- XX  XX  99,999,999.99- XXXXXXXX XXX  XXXXXXXXXXXX  XXX XXXXXX XXXXXXXX
+                                                                                                                Escompte:   99,999,999.99- XXXXXXXXXXXXXXXXXXXX                                   XXXXXX
+                  XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                  XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                  XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                  XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+                                                                                                                       ---------------        ---------------
+                                                                                                      Total facture:   999,999,999.99-        999,999,999.99-
+
+                                                                                                      Total lot....:   999,999,999.99-        999,999,999.99-
+
+           Sous-                    Unité
+ Projet    Projet  Immobilisation   Adm.       Compte     Montant brut     Montant T.P.S.    Montant T.V.Q.    Montant Total
+ --------  ------  --------------  --------    ------    --------------    --------------    --------------    --------------
+
+ XXXXXXXX   XXX     XXXXXXXXXXXX   XXXXXXXX    XXXXXX    999,999,999.99-   999,999,999.99-   999,999,999.99-   999,999,999.99-
+ XXXXXXXX   XXX     XXXXXXXXXXXX   XXXXXXXX    XXXXXX    999,999,999.99-   999,999,999.99-   999,999,999.99-   999,999,999.99-
+ XXXXXXXX   XXX     XXXXXXXXXXXX   XXXXXXXX    XXXXXX    999,999,999.99-   999,999,999.99-   999,999,999.99-   999,999,999.99-
+
+                                                         --------------    --------------    --------------    --------------
+                                    Total.......:        999,999,999.99-   999,999,999.99-   999,999,999.99-   999,999,999.99-
+@ENDIF

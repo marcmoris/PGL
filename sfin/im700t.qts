@@ -1,0 +1,591 @@
+;/T/ Programme de transfert des amortissements au Grand Livre
+;
+;//M/GRA01/Francois Richard/1999-06-23
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur..: Alain Côté
+;    Date création: 23 février 1994
+;
+;/V3.02.00/ Alain Côté, 23 février 1994, Immobilisation
+;
+;/V3.02.00/ Daniel Labrie, 15 MARS 1994, 6
+;/V3.03.02/ Alain Côté, 29 août 1994, 285
+;
+;    Description..: Comptabilisation des amortissements au Grand Livre.
+;
+;                   Cette procédure crée une écriture de journal par compte
+;                   amortissement accumulé. En plus elle alimente le fichier
+;                   d'intersection entre l'immobilisation et l'écriture de
+;                   journal.
+;
+;
+;    Exemple d'une écriture d'amortissement:
+;
+;        Compte                         Unité                 Débit  Crédit
+;        -----------------------------  ------------------    -----  ------
+;        Compte de dépense              Unité adm.              X
+;        (IMMCPTDEPAMT)                 ( UNACLE ou
+;                                         IMMUNADEPAMT )
+;        Compte amortissement accumulé  Unité adm.                     X
+;        (IMMCPTAMTACC)                 ( UNACLE ou
+;                                         IMMUNAAMTACC )
+;
+;/M/ Stephane Jackson, 98-08-21
+;
+;    Ajustement pour le changement de siècle
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST
+
+RUN im700t
+;
+; Pour arrêter la procédure en cas d'erreur.
+;
+GLOBAL TEMPORARY G_ERREUR        CHARACTER SIZE 5
+;
+; Période à traiter.
+;
+GLOBAL TEMPORARY G_PECCLE        CHARACTER SIZE 4
+;
+; Pour garder la même date du jour partout ou on en a besoin.
+;
+GLOBAL TEMPORARY G_DATSTP        DATE
+;
+; Date de fin de la période à traiter.
+;
+GLOBAL TEMPORARY G_PECDATFIN     DATE
+;
+; Parametres de holding pour nombre de période ctb.
+;
+GLOBAL TEMPORARY G_HLDNBRPERCTB INTEGER SIZE 2
+;
+; Parametre pour le mode de numerotation des écritures
+;
+GLOBAL TEMPORARY G_HLDECRAUT    CHARACTER SIZE 1
+GLOBAL TEMPORARY G_HLDECRCOD    CHARACTER SIZE 1
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide que la période recu en paramètre soit courante ou subséquente.
+; Calcul la derniére période d'amortissement soit celle qui précède celle
+; demandé en paramétre.
+;
+;
+REQUEST VALIDE_PERIODE
+
+ACCESS MCPERIODE_CIE &
+
+  LINK PECCLE OF MCPERIODE_CIE &
+    TO PECCLE OF MCPERIODE_CTB &
+
+  LINK "1" &
+    TO CIENMC OF MCHOLDING
+
+CHOOSE CIECLE PARM, &
+       PECCLE PARM
+
+
+TEMPORARY T_MESERR      CHARACTER SIZE 80 ; Pour les erreurs.
+
+
+ITEM T_MESERR = &
+@IF FRANCAIS
+      " La période comptable demandée est une période fermée" &
+@ELSE
+      " %%%La période comptable demandée est une période fermée" &
+@ENDIF
+                IF PCCSTUIM OF MCPERIODE_CIE = "F" &
+@IF FRANCAIS
+ ELSE " On ne peut pas utiliser une période de régularisation" &
+@ELSE
+ ELSE " %%%On ne peut pas utiliser une période de régularisation" &
+@ENDIF
+                IF PECRGL OF MCPERIODE_CTB = "1" &
+ ELSE ""
+
+ITEM G_DATSTP RESET AT INITIAL TO SYSDATE
+
+ITEM G_PECCLE    = PECCLE    OF MCPERIODE_CIE
+ITEM G_PECDATFIN = PECDATFIN OF MCPERIODE_CTB
+
+ITEM G_HLDNBRPERCTB = HLDNBRPERCTB OF MCHOLDING
+ITEM G_HLDECRAUT    = HLDECRAUT    OF MCHOLDING
+ITEM G_HLDECRCOD    = HLDECRCOD    OF MCHOLDING
+
+;
+; Affectation d'erreurs
+;
+ITEM G_ERREUR = "ARRET" IF T_MESERR <> ""
+
+;
+; Sous-fichier pour les messages d'erreurs.
+;
+SUBFILE WIM700E KEEP &
+                AT FINAL &
+                IF T_MESERR <> "" &
+        INCLUDE T_MESERR
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sélectionne les immobilisations :
+;       1) Qui sont actives et transférable (flag <> n).
+;       2) Dont la derniére amortissement, a été faite,
+;          dans la période qui précède celle demandé en paramètre.
+;       3) Qui n'ont pas d'aliénation.
+;       4) Dont le montant non amortie est supérieur à 0.
+;       5) Dont la durée de vie non écoulée est > que 0 pour la méthode linéaire
+;       6) Dont les comptes comptables sont <> ""
+;
+;
+REQUEST SELECTION_IMMO     TERMINATE IF G_ERREUR = "ARRET" OR G_PECCLE = ""
+
+ACCESS IMIMMOBILISATION &
+  LINK CIECLE OF IMIMMOBILISATION , &
+       IMMCLE OF IMIMMOBILISATION   &
+    TO CIECLE , &
+       IMMCLE OF IMIMM_AJUSTEMENT OPTIONAL
+
+CHOOSE CIECLE PARM
+
+; Ajustement pour le changement de siècle
+DEFINE D_IMMPERAMT_SIE CHARACTER SIZE 5 = "1" + IMMPERAMT OF IMIMMOBILISATION &
+         IF IMMPERAMT OF IMIMMOBILISATION[1:1] < "8" &
+         ELSE "0" + IMMPERAMT OF IMIMMOBILISATION
+
+; Ajustement pour le changement de siècle
+DEFINE D_G_PECCLE_SIE CHARACTER SIZE 5 = "1" + G_PECCLE &
+         IF G_PECCLE[1:1] < "8" &
+         ELSE "0" + G_PECCLE
+
+SELECT IMIMMOBILISATION IF     IMMFLGTRS OF IMIMMOBILISATION = "1" &
+                           AND (   IMMPERAMT OF IMIMMOBILISATION = "" &
+                                OR D_IMMPERAMT_SIE < D_G_PECCLE_SIE ) &
+                           AND IMMPECALI OF IMIMMOBILISATION = "" &
+                           AND 0 < (   IMMMNTINI    OF IMIMMOBILISATION &
+                                     + IMMMNTAJT    OF IMIMMOBILISATION &
+                                     - IMMMNTREC    OF IMIMMOBILISATION &
+                                     - IMMAMTACC    OF IMIMMOBILISATION &
+                                     - IMMMNTAMTANN OF IMIMMOBILISATION ) &
+                           AND IMMCPTDEPAMT OF IMIMMOBILISATION <> "" &
+                           AND IMMCPTAMTACC OF IMIMMOBILISATION <> "" &
+                           AND (    (     IMMTYPAMO OF IMIMMOBILISATION = "D" &
+                                      AND IMMTAUAMT OF IMIMMOBILISATION <> 0 ) &
+                                 OR (     IMMTYPAMO OF IMIMMOBILISATION = "L" &
+                                      AND IMMDURAMT    OF IMIMMOBILISATION > &
+                                          IMMNBRPERAMT OF IMIMMOBILISATION ) )
+
+
+
+SORTED ON CIECLE OF IMIMMOBILISATION &
+       ON IMMCLE OF IMIMMOBILISATION
+
+
+;
+; Mise à jour de la période de l'ajustement, pour savoir a quel période
+; l'ajustement a modifier le calcul d'amortissement.
+;
+OUTPUT IMIMM_AJUSTEMENT UPDATE &
+                        IF RECORD IMIMM_AJUSTEMENT EXISTS
+  ITEM PECCLE OF IMIMM_AJUSTEMENT FINAL G_PECCLE
+
+;
+;
+OUTPUT IMIMMOBILISATION UPDATE &
+                        AT IMMCLE
+  ;
+  ; Ajout de l'amortissement annuel à l'amortissement accumulé en début
+  ; d'année.
+  ;
+
+  ; Ajustement pour le changement de siècle
+  DEFINE D_G_PECCLE_SIE2 CHARACTER SIZE 5 = "1" + G_PECCLE &
+         IF G_PECCLE[1:1] < "8" &
+         ELSE "0" + G_PECCLE
+  ; Ajustement pour le changement de siècle
+  DEFINE D_IMMPERAMT_SIE2 CHARACTER SIZE 5 = "1" + IMMPERAMT OF IMIMMOBILISATION &
+      IF IMMPERAMT OF IMIMMOBILISATION[1:1] < "8" &
+      ELSE "0" + IMMPERAMT OF IMIMMOBILISATION
+
+  ITEM IMMAMTACC    OF IMIMMOBILISATION = IMMAMTACC OF IMIMMOBILISATION + &
+                                          IMMMNTAMTANN OF IMIMMOBILISATION &
+                     IF     D_G_PECCLE_SIE2[1:3] > D_IMMPERAMT_SIE2[1:3] &
+                        AND "" <> TRUNCATE( IMMPERAMT OF IMIMMOBILISATION )
+  ;
+  ; Mise à zéro de l'amortissement annuel si on change d'année d'amortissement.
+  ;
+
+  ; Ajustement pour le changement de siècle
+  DEFINE D_G_PECCLE_SIE3 CHARACTER SIZE 5 = "1" + G_PECCLE &
+         IF G_PECCLE[1:1] < "8" &
+         ELSE "0" + G_PECCLE
+
+  ; Ajustement pour le changement de siècle
+  DEFINE D_IMMPERAMT_SIE3 CHARACTER SIZE 5 = "1" + IMMPERAMT OF IMIMMOBILISATION &
+         IF IMMPERAMT OF IMIMMOBILISATION[1:1] < "8" &
+         ELSE "0" + IMMPERAMT OF IMIMMOBILISATION
+
+  ITEM IMMMNTAMTANN OF IMIMMOBILISATION = 0 &
+                     IF     D_G_PECCLE_SIE3[1:3] > D_IMMPERAMT_SIE3[1:3] &
+                        AND "" <> TRUNCATE( IMMPERAMT OF IMIMMOBILISATION )
+
+SUBFILE WIM700A &
+  INCLUDE CIECLE OF IMIMMOBILISATION, &
+          IMMCLE OF IMIMMOBILISATION
+
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+;
+REQUEST CALCUL_AMORTISSEMENT
+
+ACCESS *WIM700A &
+
+  LINK CIECLE OF WIM700A , &
+       IMMCLE OF WIM700A   &
+    TO CIECLE , &
+       IMMCLE OF IMIMMOBILISATION &
+  ;
+  ; Séquence des écritures de journal.
+  ;
+  LINK CIECLE    OF IMIMMOBILISATION , &
+       G_PECCLE[1:2]                   &
+    TO ECSCIECLE , &
+       ECSANN OF GLECJ_SEQ OPTIONAL &
+  ;
+  ; Séquence des lots.
+  ;
+  LINK CIECLE OF IMIMMOBILISATION , &
+       G_PECCLE                     &
+    TO LGSCIECLE , &
+       PECCLE OF GLLGL_SEQ OPTIONAL
+
+
+TEMPORARY T_NUMSEQ       INTEGER UNSIGNED SIZE 4 ; Dernier numéro d'écriture
+TEMPORARY T_ECSNUMSEQ    INTEGER          SIZE 4 ; Incrémentation # écriture
+TEMPORARY T_LGLCLE       CHARACTER        SIZE 4 ; Numéro de lot
+TEMPORARY T_UNA_DEP      CHARACTER        SIZE 8 ; Unité adm. de dépense
+TEMPORARY T_CODDEB       CHARACTER        SIZE 1 ; Code débit/crédit
+
+
+SORT ON CIECLE       OF IMIMMOBILISATION &
+     ON IMMCPTAMTACC OF IMIMMOBILISATION
+
+; Génération des numéros d'écriture :
+; - Si les numéros d'écritures sont normalement saisie par l'usager
+;   ('S' selon le holding, alors le numéro d'écriture généré sera
+;   composé de la facon suivante :
+;   . 1ere position  : Identifiant d'écriture selon le parametre du holding
+;   . 2eme et 3eme   : Deux dernier caractere de l'annee (ex: 1992 -> 92)
+;   . Postions 4 a 8 : Séquence de 1 a 9999 generer a partir du fichier
+;                      de sequence.
+; - Si les numéros d'écritures sont toujours générés par le systeme
+;   ('A' selon le holding, alors le numéro d'écriture généré sera
+;   composé de la facon suivante :
+;   . Position 1 a 2 ; Deux dernier caractere de l'année (ex: 1992 -> 92)
+;   . Postions 3 a 8 : Séquence de 1 a 9999 generer a partir du fichier
+;                      de sequence.
+;
+;
+;ITEM T_NUMSEQ INITIAL NCONVERT( G_PECCLE[1:2] ) * &
+;                      (10 ^ (ECSLONNUM OF GLECJ_SEQ - 2) ) &
+;                         IF NOT RECORD GLECJ_SEQ EXIST AND &
+;                            G_HLDECRAUT = "A" &
+;                 ELSE NCONVERT( G_PECCLE[1:2] ) * &
+;                      (10 ^ (ECSLONNUM OF GLECJ_SEQ - 3) ) &
+;                         IF NOT RECORD GLECJ_SEQ EXIST &
+;                 ELSE ECSNUMSEQ OF GLECJ_SEQ
+
+ITEM T_NUMSEQ INITIAL 0 &
+            IF NOT RECORD GLECJ_SEQ EXIST &
+            ELSE ECSNUMSEQ OF GLECJ_SEQ
+
+;
+; On incrémente le numéro d'écriture de journal par compte amortissement
+; accumulé.
+;
+ITEM T_ECSNUMSEQ COUNT AT IMMCPTAMTACC OF IMIMMOBILISATION &
+                   RESET AT CIECLE TO T_NUMSEQ + 1
+
+;
+; Numéro de lot.
+;
+ITEM T_LGLCLE = ASCII(LGSSEQ OF GLLGL_SEQ + 1 ,4) RESET AT CIECLE
+
+OUTPUT IMIMM_SUIVI ADD
+  ITEM CIECLE       OF IMIMM_SUIVI INITIAL CIECLE OF IMIMMOBILISATION
+  ITEM IMMCLE       OF IMIMM_SUIVI INITIAL IMMCLE OF IMIMMOBILISATION
+  ITEM PECCLE       OF IMIMM_SUIVI INITIAL G_PECCLE
+
+  ; Ajustement pour le changement de siècle
+  ITEM ECJCLENUM    OF IMIMM_SUIVI   =  G_PECCLE[1:2] + &
+                                  ASCII(T_ECSNUMSEQ ,ECSLONNUM OF GLECJ_SEQ - 2) &
+                               IF G_HLDECRAUT = "A" &
+                             ELSE G_HLDECRCOD + G_PECCLE[1:2] + &
+                                  ASCII(T_ECSNUMSEQ ,ECSLONNUM OF GLECJ_SEQ - 3)
+  ITEM ECJCLESEQ    OF IMIMM_SUIVI INITIAL ""
+  ITEM IMITYP       OF IMIMM_SUIVI INITIAL "AM"
+  ;
+  ; Montant à amortir.
+  ;
+  ITEM IMIMNTAMO    OF IMIMM_SUIVI =   IMMMNTINI OF IMIMMOBILISATION &
+                                     + IMMMNTAJT OF IMIMMOBILISATION &
+                                     - IMMMNTREC OF IMIMMOBILISATION
+  ;
+  ; Montant non amorti.
+  ;
+  ITEM IMIMNTNONAMT OF IMIMM_SUIVI =     IMIMNTAMO OF IMIMM_SUIVI &
+                                       - IMMAMTACC OF IMIMMOBILISATION &
+                                       - IMMMNTAMTANN OF IMIMMOBILISATION
+  ;
+  ; Montant de l'amortissement selon le type d'amortissement. Pour la
+  ; méthode dégressive il faut avoir le montant non amorti en début d'année,
+  ; c'est pour cette raison que l'on ajoute l'amortissement annuel dans le
+  ; calcul, car le montant non amorti précédemment calculé inclu
+  ; l'amortissement annuel.
+  ;
+  ITEM IMIMNTAMT    OF IMIMM_SUIVI = &
+                          ROUND( IMIMNTNONAMT OF IMIMM_SUIVI / &
+                                 ( IMMDURAMT OF IMIMMOBILISATION - &
+                                   IMMNBRPERAMT OF IMIMMOBILISATION ) ) &
+                       IF IMMTYPAMO OF IMIMMOBILISATION = "L" &
+                     ELSE ROUND( ( IMIMNTNONAMT OF IMIMM_SUIVI &
+                                   + IMMMNTAMTANN OF IMIMMOBILISATION ) * &
+                                 IMMTAUAMT OF IMIMMOBILISATION / &
+                                 G_HLDNBRPERCTB )
+
+;
+; Mise à jour de la fiche d'immobilisation.
+;
+OUTPUT IMIMMOBILISATION UPDATE
+  ;
+  ; Amortissement annuel.
+  ;
+  ITEM IMMMNTAMTANN OF IMIMMOBILISATION = IMMMNTAMTANN OF IMIMMOBILISATION + &
+                                          IMIMNTAMT OF IMIMM_SUIVI
+  ;
+  ; Nombre de période amorties.
+  ;
+  ITEM IMMNBRPERAMT OF IMIMMOBILISATION = IMMNBRPERAMT OF IMIMMOBILISATION + &
+                                          1
+  ;
+  ; Inscrit la période traitée.
+  ;
+  ITEM IMMPERAMT    OF IMIMMOBILISATION = G_PECCLE
+
+;
+; On prend l'unité adm. de l'immobilisation si l'unité adm de dépense n'est
+; pas spécifier.
+;
+ITEM T_UNA_DEP = UNACLE OF IMIMMOBILISATION &
+               IF "" = TRUNCATE( IMMUNADEPAMT OF IMIMMOBILISATION ) &
+            ELSE IMMUNADEPAMT OF IMIMMOBILISATION
+
+ITEM T_CODDEB RESET AT INITIAL TO "D"
+
+;
+; Sous-fichier contenant l'imputation comptable pour le compte de dépense
+; de l'amortissement. Sert aussi à l'impression du résultat de la procé-
+; dure.
+;
+SUBFILE WIM700I &
+  KEEP &
+  INCLUDE CIECLE       OF IMIMMOBILISATION              , &
+          IMMCLE       OF IMIMMOBILISATION              , &
+          IMMDSC       OF IMIMMOBILISATION              , &
+          ECJCLENUM    OF IMIMM_SUIVI                   , &
+          IMIMNTNONAMT OF IMIMM_SUIVI                   , &
+          IMIMNTAMT    OF IMIMM_SUIVI                   , &
+          IMMCPTDEPAMT OF IMIMMOBILISATION ALIAS CPTCLE , &
+          T_UNA_DEP                        ALIAS UNACLE , &
+          T_CODDEB                         ALIAS T_CODDC , &
+          G_PECCLE                                       , &
+          T_LGLCLE
+
+;
+; Ajout de l'imputation comptable pour le compte d'amortissement accumulé dans
+; le sous-fichier prévue à cette effet. Sert aussi à l'impression du résultat
+; de la procédure.
+;
+OUTPUT *WIM700I ADD &
+                ALIAS A_WIM700I_ACC
+  ITEM CIECLE       OF A_WIM700I_ACC FINAL CIECLE       OF IMIMMOBILISATION
+  ITEM IMMCLE       OF A_WIM700I_ACC FINAL IMMCLE       OF IMIMMOBILISATION
+  ITEM IMMDSC       OF A_WIM700I_ACC FINAL IMMDSC       OF IMIMMOBILISATION
+  ITEM ECJCLENUM    OF A_WIM700I_ACC FINAL ECJCLENUM    OF IMIMM_SUIVI
+  ITEM IMIMNTNONAMT OF A_WIM700I_ACC FINAL IMIMNTNONAMT OF IMIMM_SUIVI
+  ITEM IMIMNTAMT    OF A_WIM700I_ACC FINAL IMIMNTAMT    OF IMIMM_SUIVI
+  ITEM CPTCLE       OF A_WIM700I_ACC FINAL IMMCPTAMTACC OF IMIMMOBILISATION
+  ;
+  ; On prend l'unité adm. de l'immobilisation si l'unité adm de du compte
+  ; d'amortissement accumulé n'est pas spécifier.
+  ;
+  ITEM UNACLE       OF A_WIM700I_ACC FINAL UNACLE       OF IMIMMOBILISATION &
+                          IF "" = TRUNCATE( IMMUNAAMTACC OF IMIMMOBILISATION ) &
+                                   ELSE IMMUNAAMTACC OF IMIMMOBILISATION
+  ITEM T_CODDC      OF A_WIM700I_ACC FINAL "C"
+  ITEM G_PECCLE     OF A_WIM700I_ACC FINAL G_PECCLE
+  ITEM T_LGLCLE     OF A_WIM700I_ACC FINAL T_LGLCLE
+
+;
+; Mise à jour du fichier de séquence des numéros d'écritures.
+;
+OUTPUT GLECJ_SEQ ADD UPDATE &
+                 AT FINAL   &
+                 NOITEM
+  ITEM ECSCIECLE OF GLECJ_SEQ INITIAL CIECLE OF IMIMMOBILISATION
+  ITEM ECSANN    OF GLECJ_SEQ INITIAL G_PECCLE[1:2]
+  ITEM ECSNUMSEQ OF GLECJ_SEQ    =    T_ECSNUMSEQ
+
+;
+; Maj du numéro de sequence des lots.
+;
+OUTPUT GLLGL_SEQ ADD UPDATE &
+                 AT CIECLE
+  ITEM LGSCIECLE OF GLLGL_SEQ INITIAL CIECLE OF IMIMMOBILISATION
+  ITEM PECCLE    OF GLLGL_SEQ INITIAL G_PECCLE
+  ITEM LGSSEQ    OF GLLGL_SEQ    =    NCONVERT(T_LGLCLE)
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Ajout des écritures de journal.
+;
+;
+REQUEST CREATION_ECRITURE_JOURNAL
+
+ACCESS *WIM700I
+
+
+TEMPORARY T_MESERR   CHARACTER SIZE 80 ; Pour les erreurs.
+
+TEMPORARY T_COUNT        INTEGER SIZE 4  ; Numéro de ligne de l'imputation
+
+
+TEMPORARY T_MNTDBT       FLOAT   SIZE 8
+TEMPORARY T_MNTCRT       FLOAT   SIZE 8
+
+; Ajustement pour le changement de siècle
+DEFINE D_ECJCLENUM_TRI CHARACTER SIZE 10 = "1" + ECJCLENUM OF WIM700I &
+   IF ECJCLENUM OF WIM700I[1:1] < "8" &
+   ELSE "0" + ECJCLENUM OF WIM700I
+
+SORT ON CIECLE    OF WIM700I &
+     ON D_ECJCLENUM_TRI &
+     ON CPTCLE    OF WIM700I &
+     ON UNACLE    OF WIM700I &
+     ON T_CODDC
+
+;
+; Numéro de ligne de l'imputation.
+;
+ITEM T_COUNT COUNT RESET AT D_ECJCLENUM_TRI
+
+
+;
+; Ajout de l'imputation.
+;
+OUTPUT GLIMPUTATION ADD &
+                        AT T_CODDC
+  ITEM  ECJCIECLE  OF GLIMPUTATION INITIAL CIECLE    OF WIM700I
+  ITEM  ECJCLENUM  OF GLIMPUTATION INITIAL ECJCLENUM OF WIM700I
+  ITEM  ECJCLESEQ  OF GLIMPUTATION INITIAL ""
+  ITEM  ECINUMLIG  OF GLIMPUTATION INITIAL T_COUNT
+  ITEM  PRJCLE     OF GLIMPUTATION INITIAL ""
+  ITEM  PRACLE     OF GLIMPUTATION INITIAL ""
+  ITEM  CPTCLE     OF GLIMPUTATION INITIAL CPTCLE    OF WIM700I
+  ITEM  CIECLE     OF GLIMPUTATION INITIAL CIECLE    OF WIM700I
+  ITEM  UNACLE     OF GLIMPUTATION INITIAL UNACLE    OF WIM700I
+  ITEM  ECICODDC   OF GLIMPUTATION INITIAL T_CODDC   OF WIM700I
+  ITEM  ECIMNT     OF GLIMPUTATION SUBTOTAL IMIMNTAMT OF WIM700I &
+                                            RESET AT T_CODDC
+
+;
+; Ajout des écritures de journal.
+;
+OUTPUT GLECRITURE_JG ADD &
+                     AT D_ECJCLENUM_TRI
+  ITEM ECJCIECLE    OF GLECRITURE_JG INITIAL CIECLE    OF WIM700I
+  ITEM ECJCLENUM    OF GLECRITURE_JG INITIAL ECJCLENUM OF WIM700I
+  ITEM ECJCLESEQ    OF GLECRITURE_JG INITIAL ""
+  ITEM PECCLE       OF GLECRITURE_JG INITIAL G_PECCLE
+  ITEM LGLCLE       OF GLECRITURE_JG    =    T_LGLCLE  OF WIM700I
+  ITEM ECJFLGINTCIE OF GLECRITURE_JG INITIAL "0"
+  ITEM ECJTYPECR    OF GLECRITURE_JG INITIAL "RG"
+  ITEM ECJFLGANN    OF GLECRITURE_JG INITIAL "0"
+  ITEM ECJDAT       OF GLECRITURE_JG INITIAL G_PECDATFIN
+  ITEM ECJDATSTP    OF GLECRITURE_JG INITIAL G_DATSTP
+  ITEM ECJDATJOU    OF GLECRITURE_JG INITIAL 0
+  ITEM ECJHREJOU    OF GLECRITURE_JG INITIAL 0
+  ITEM ECJDSC1      OF GLECRITURE_JG INITIAL "Transfert d'amortissement "
+  ITEM ECJDSC2      OF GLECRITURE_JG INITIAL ""
+  ITEM ECJDSC3      OF GLECRITURE_JG INITIAL ""
+  ITEM ECJCIEINT    OF GLECRITURE_JG INITIAL ""
+  ITEM ECJTRFUNA    OF GLECRITURE_JG INITIAL "0"
+  ITEM ECJNBRPERINI OF GLECRITURE_JG INITIAL 0
+  ITEM ECJNBRPERRES OF GLECRITURE_JG INITIAL 0
+  ITEM ECJPECDES    OF GLECRITURE_JG INITIAL ""
+  ITEM ECJMNTDBT    OF GLECRITURE_JG SUBTOTAL IMIMNTAMT OF WIM700I &
+                                       IF T_CODDC = "D" &
+                                       RESET AT CIECLE
+  ITEM ECJMNTCRT    OF GLECRITURE_JG SUBTOTAL IMIMNTAMT OF WIM700I &
+                                       IF T_CODDC = "C" &
+                                       RESET AT CIECLE
+  ITEM ECJNUMLIG    OF GLECRITURE_JG = T_COUNT
+  ITEM HISCLE       OF GLECRITURE_JG INITIAL 0
+  ITEM ECJUSRCRE    OF GLECRITURE_JG INITIAL LOGONID
+  ITEM ECJUNAINT1   OF GLECRITURE_JG INITIAL ""
+  ITEM ECJUNAINT2   OF GLECRITURE_JG INITIAL ""
+  ITEM ECJUNANBR1   OF GLECRITURE_JG INITIAL 0
+  ITEM ECJUNANBR2   OF GLECRITURE_JG INITIAL 0
+
+
+;
+; NOTE : Nous devons gerer les cumulatifs du lot ici, car le trigger T_ECJ
+;        ne fonctionnera pas dans ce cas-ci.
+;        Raison : Le lot sera créer une fois que toutes les écritures de
+;                 journal se référant a ce lot seront créées.
+;                 Donc, dans le 'store' du trigger, on ne trouvera pas le lot.
+;
+OUTPUT GLLOT ADD &
+             AT CIECLE
+  ITEM LGLCIECLE OF GLLOT INITIAL CIECLE   OF WIM700I
+  ITEM LGLCLE    OF GLLOT INITIAL T_LGLCLE OF WIM700I
+  ITEM PECCLE    OF GLLOT INITIAL G_PECCLE
+  ITEM LGLTYPECR OF GLLOT INITIAL "RG"
+  ITEM LGLUSR    OF GLLOT INITIAL LOGONID
+  ITEM LGLDSC    OF GLLOT INITIAL "Transfert de l'amortissement"
+  ITEM LGLDATVAL OF GLLOT INITIAL 0
+  ITEM LGLDATJOU OF GLLOT INITIAL 0
+  ITEM LGLHREJOU OF GLLOT INITIAL 0
+  ITEM LGLUSRJOU OF GLLOT INITIAL ""
+  ITEM LGLATRJOU OF GLLOT INITIAL "0"
+  ITEM LGLUSRATR OF GLLOT INITIAL ""
+  ITEM LGLNBRTRS OF GLLOT COUNT AT D_ECJCLENUM_TRI
+  ITEM LGLCUMMNT OF GLLOT SUBTOTAL IMIMNTAMT OF WIM700I &
+                                     IF T_CODDC = "D" &
+                                     RESET AT CIECLE
+  ITEM LGLNBRTRSERR OF GLLOT INITIAL 0
+  ITEM LGLCUMMNTVER OF GLLOT    =    LGLCUMMNT OF GLLOT
+  ITEM LGLNBRTRSVER OF GLLOT    =    LGLNBRTRS OF GLLOT
+  ITEM LGLDATCRE    OF GLLOT INITIAL SYSDATE
+  ITEM LGLUSRCRE    OF GLLOT INITIAL LOGONID
+  ITEM LGLHRECRE    OF GLLOT INITIAL SYSTIME / 10000
+  ITEM LGLDATMOD    OF GLLOT INITIAL 0
+  ITEM LGLHREMOD    OF GLLOT INITIAL 0
+  ITEM LGLUSRMOD    OF GLLOT INITIAL ""
+  ITEM LGLUSRVAL    OF GLLOT INITIAL ""
+
+BUILD

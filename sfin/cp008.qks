@@ -1,0 +1,1948 @@
+;/T/ Paiements
+;
+;//M/GRA01/Francois Richard/1999-06-18
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur..: Thomas BRENNEUR
+;    Date Création: 25 JUIN 1993
+;
+;    Description..: Saisie et modifications des paiements
+;                   NOTE : les paiements ne sont pas supprimable.
+;
+;/M/ François Déry, 30 avril 1999
+;       Modifier l'accèss au fichier de séquence car il a
+;       été converti en format interbase au lieu d'indexé.
+;
+;/M/ Modifié par..: Guy Chabot le 12 octobre 1994
+;
+;    Description..: Introduction du P.N.A. aux payables sur le même principe
+;                   ou presque des recevables.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cp008  ACTIONBAR &
+              MODE LABEL "" AT 2,80 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              ACTIVITIES ENTRY, FIND, CHANGE &
+              RECEIVING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        T_PECCLEMNU, &
+                        T_PECCLECOU, &
+                        T_FOUCIECLE, &
+                        T_EMPCIECLE, &
+                        T_LBQCPTENCFND, &
+                        T_PAMCLEFND
+
+TEMPORARY T_PECCLECOU_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_FIELDTEXT_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CPTPECDEBI_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CPTPECDEBA_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_PECCLE_SIE1 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+
+USE ussectmp NOLIST
+    "CP008"
+
+USE cp008.hlp NOLIST
+
+USE ustraecr NOLIST
+
+USE usactecr NOLIST
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-Ecrans"
+  MENUITEM LABEL "Ventilation des documents       " ACTION DESIGNER D001
+  MENUITEM LABEL "Pré-paiement                    " ACTION DESIGNER D008
+  MENUITEM LABEL "Imputation                      " ACTION DESIGNER D002
+  MENUITEM LABEL "Écriture comptable              " ACTION DESIGNER D003
+  MENUITEM LABEL "Talon du paiement               " ACTION DESIGNER D004
+  MENUITEM LABEL "Adresse - Fournisseur divers    " ACTION DESIGNER D005
+  MENUITEM LABEL "Gestion des lots                " ACTION DESIGNER D006
+  MENUITEM LABEL "Vérification                    " ACTION DESIGNER D007
+@ELSE
+ACTIONMENU LABEL "Subscreens"
+  MENUITEM LABEL "Item break down                 " ACTION DESIGNER D001
+  MENUITEM LABEL "%%%-paiement                    " ACTION DESIGNER D008
+  MENUITEM LABEL "Charges                         " ACTION DESIGNER D002
+  MENUITEM LABEL "Accounting entry                " ACTION DESIGNER D003
+  MENUITEM LABEL "Payment stub                    " ACTION DESIGNER D004
+  MENUITEM LABEL "Adress - Misc. supplyers        " ACTION DESIGNER D005
+  MENUITEM LABEL "Batch management                " ACTION DESIGNER D006
+  MENUITEM LABEL "Verification                    " ACTION DESIGNER D007
+@ENDIF
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE CPPAM_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_RAD_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE MCRAD_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE  4 RESET AT STARTUP ; compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; Nom de la compagnie
+TEMPORARY T_FOUCIECLE CHARACTER SIZE  4 RESET AT STARTUP ; Cie du fournisseur
+TEMPORARY T_EMPCIECLE CHARACTER SIZE  4 RESET AT STARTUP ; Cie employé
+TEMPORARY T_PECCLEMNU CHARACTER SIZE  4 RESET AT STARTUP ; periode menu
+TEMPORARY T_PECCLECOU CHARACTER SIZE  4 RESET AT STARTUP ; periode courante
+
+TEMPORARY T_CIECLEFND CHARACTER SIZE  4 RESET AT STARTUP
+                                        ; Cie du fournisseur ou de l'employé
+                                        ; en fonction du type de référence
+
+TEMPORARY T_LBQCPTENCFND CHARACTER SIZE 6 ; No chèque à chercher
+TEMPORARY T_PAMCLEFND    CHARACTER SIZE 7 ; No chèque à chercher
+
+TEMPORARY T_PECCLE_DUP CHARACTER SIZE  4 RESET AT MODE ; Pour dupliquer la periode
+TEMPORARY T_LCPCLE_DUP CHARACTER SIZE  4 RESET AT MODE ; et le lot en mode ENTRY
+
+;-------------------------------------------------------------------------------
+;
+; PAIEMENTS
+;
+;
+FILE CPPAIEMENT PRIMARY &
+                NOITEM
+  ;
+  ; La procédure PATH et FIND on été écrite pour que l'écran soit appelé
+  ; directement par l'analyse de compte.
+  ;
+  ITEM CIECLE     OF CPPAIEMENT INITIAL T_CIECLEMNU
+  ITEM PAMTYPPAM  OF CPPAIEMENT INITIAL "M"
+  ITEM PAMTYPECR  OF CPPAIEMENT INITIAL "CH"
+  ITEM PAMCODANN  OF CPPAIEMENT INITIAL "0"
+  ITEM PAMFLGIMP  OF CPPAIEMENT INITIAL "0"
+  ITEM PAMNUMPIM  OF CPPAIEMENT INITIAL "        "
+  ITEM PAMFLGPA   OF CPPAIEMENT INITIAL "0"
+  ITEM PECCLE     OF CPPAIEMENT INITIAL T_PECCLE_DUP
+  ITEM LCPCLE     OF CPPAIEMENT INITIAL T_LCPCLE_DUP
+  ITEM PAMUSRCRE  OF CPPAIEMENT INITIAL LOGONID
+  ITEM PAMDATCRE  OF CPPAIEMENT INITIAL SYSDATE
+  ITEM PAMHRECRE  OF CPPAIEMENT INITIAL SYSTIME / 10000
+
+
+;
+; Validation du numéro d'adresse et ajout de la nouvelle adresse pour les
+; fournisseur divers.
+;
+FILE MCREF_ADRESSE    SECONDARY &
+                      NOITEM &
+                      NODELETE
+
+  ACCESS  VIA   REFCIECLE, &
+                REFCLETYP, &
+                REFCLENUM, &
+                RADCLE     &
+          USING REFCIECLE OF CPPAIEMENT , &
+                REFCLETYP OF CPPAIEMENT , &
+                REFCLENUM OF CPPAIEMENT , &
+                RADCLE    OF CPPAIEMENT
+
+  ITEM REFCIECLE OF MCREF_ADRESSE FINAL   REFCIECLE OF CPPAIEMENT
+  ITEM REFCLETYP OF MCREF_ADRESSE FINAL   REFCLETYP OF CPPAIEMENT
+  ITEM REFCLENUM OF MCREF_ADRESSE FINAL   REFCLENUM OF CPPAIEMENT
+  ITEM RADCLE    OF MCREF_ADRESSE FINAL   RADCLE    OF CPPAIEMENT
+  ITEM RADPAMCP  OF MCREF_ADRESSE INITIAL "1"
+
+;
+; Item du CPPAIEMENT, le timbre de modification est mis à jour si l'usager
+; modifie le paiement ou l'adresse.
+;
+  ITEM PAMDATMOD OF CPPAIEMENT  FINAL   SYSDATE        &
+                                        IF NOT NEWRECORD OF CPPAIEMENT AND &
+                                           ( ALTEREDRECORD OF CPPAIEMENT OR &
+                                             ALTEREDRECORD OF MCREF_ADRESSE )
+  ITEM PAMHREMOD OF CPPAIEMENT  FINAL   SYSTIME / 10000 &
+                                        IF NOT NEWRECORD OF CPPAIEMENT AND &
+                                           ( ALTEREDRECORD OF CPPAIEMENT OR &
+                                             ALTEREDRECORD OF MCREF_ADRESSE )
+  ITEM PAMUSRMOD OF CPPAIEMENT  FINAL   LOGONID         &
+                                        IF NOT NEWRECORD OF CPPAIEMENT AND &
+                                           ( ALTEREDRECORD OF CPPAIEMENT OR &
+                                             ALTEREDRECORD OF MCREF_ADRESSE )
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation et recherche de la description du compte d'encaisse du paiement
+;
+FILE MCLIVRET_BQ REFERENCE
+
+  ACCESS  VIA   CIECLE, &
+                LBQCPTENC &
+          USING CIECLE    OF CPPAIEMENT, &
+                LBQCPTENC OF CPPAIEMENT
+
+FILE VCPT_DSC REFERENCE
+
+  ACCESS  VIA   CPTCLE &
+          USING LBQCPTENC OF CPPAIEMENT
+
+;-------------------------------------------------------------------------------
+;
+; Validation de la référence, employé ou fournisseur
+;
+;
+FILE MCREFERENCE        REFERENCE
+
+  ACCESS  VIA   REFCIECLE, &
+                REFCLETYP, &
+                REFCLENUM  &
+          USING REFCIECLE OF CPPAIEMENT , &
+                REFCLETYP OF CPPAIEMENT , &
+                REFCLENUM OF CPPAIEMENT
+
+;-------------------------------------------------------------------------------
+;
+; Lecture des informations du fournisseur
+;
+;
+FILE VFOC_FOU REFERENCE
+
+  ACCESS  VIA   FOUCIECLE, &
+                FOUCLE   , &
+                FOCCIECLE  &
+          USING REFCIECLE OF CPPAIEMENT , &
+                REFCLENUM OF CPPAIEMENT , &
+                T_CIECLEMNU
+
+
+;
+; Numéro de séquence des adresses pour les clients divers.
+;
+FILE MCRAD_SEQ        DESIGNER &
+                      TRANSACTION GEN_RAD_SEQ
+
+;-------------------------------------------------------------------------------
+;
+; Validation du lot
+;
+FILE CPLOT  REFERENCE
+
+  ACCESS  VIA   CIECLE, &
+                PECCLE, &
+                LCPCLE  &
+          USING CIECLE OF CPPAIEMENT , &
+                PECCLE OF CPPAIEMENT , &
+                LCPCLE OF CPPAIEMENT
+
+;
+; Si le lot est autorisé, sert au sous-écran CP008A et CP008B
+;
+DEFINE D_LCPATRJOU    CHARACTER SIZE 1 = LCPATRJOU OF CPLOT
+;
+; Devise de la référence, sert au sous-écran CP008B.
+;
+DEFINE D_REFDEVCLE    CHARACTER SIZE 3 = DEVCLE OF MCREFERENCE
+
+;-------------------------------------------------------------------------------
+;
+; VALIDATION DE LA PÉRIODE COMPTABLE
+;
+FILE MCPERIODE_CTB REFERENCE
+
+  ACCESS  VIA   PECCLE  &
+          USING PECCLE OF CPPAIEMENT
+
+;-------------------------------------------------------------------------------
+;
+; Paramètres pour la compagnie consolidé(holding)
+;
+FILE MCHOLDING REFERENCE
+  ACCESS VIA CIENMC USING "1"
+
+;-------------------------------------------------------------------------------
+;
+; Modification de la date de l'historique si on change la date du paiement
+;
+;
+FILE CPCAP_HISTO  DESIGNER &
+                  NOITEM &
+                  ALIAS A_CPH_PAMDAT
+
+  ACCESS  VIA   CPHCLE1, &
+                CPHCLE2, &
+                CPHCLE3  &
+          USING CIECLE    OF CPPAIEMENT, &
+                LBQCPTENC OF CPPAIEMENT, &
+                PAMCLE    OF CPPAIEMENT
+
+;-------------------------------------------------------------------------------
+;
+; Numérotation du numéro de paiement, le numéro est attribué par compagnie
+; et par compte d'encaisse.
+;
+FILE CPPAM_SEQ  DESIGNER &
+                TRANSACTION GEN_NUM_SEQ
+
+  ACCESS  VIA   CIECLE   , &
+                LBQCPTENC  &
+          USING CIECLE    OF CPPAIEMENT , &
+                LBQCPTENC OF CPPAIEMENT
+
+  ITEM CIECLE     OF CPPAM_SEQ INITIAL CIECLE    OF CPPAIEMENT
+  ITEM LBQCPTENC  OF CPPAM_SEQ INITIAL LBQCPTENC OF CPPAIEMENT
+
+;-------------------------------------------------------------------------------
+;
+; Code bilingue sur le type de paiement
+;
+;
+DEFINE    D_PAMTYPPAM CHARACTER SIZE 16 = "PAMTYPPAM"
+TEMPORARY T_PAMTYPPAM CHARACTER SIZE 4
+
+FILE VCBI_DSC REFERENCE &
+              ALIAS A_CBI_PAMTYPPAM
+
+  ACCESS  VIA   XELNOM, &
+                CBICLE  &
+          USING D_PAMTYPPAM, &
+                PAMTYPPAM OF CPPAIEMENT
+
+;-------------------------------------------------------------------------------
+;
+; Code bilingue sur le type de référence
+;
+;
+DEFINE    D_REFCLETYP CHARACTER SIZE 16 = "REFCLETYP"
+TEMPORARY T_REFCLETYP CHARACTER SIZE 4
+
+FILE VCBI_DSC REFERENCE &
+              ALIAS A_CBI_REFCLETYP
+
+  ACCESS  VIA   XELNOM, &
+                CBICLE  &
+          USING D_REFCLETYP, &
+                REFCLETYP OF CPPAIEMENT
+
+
+;
+; Paramètre des comptes à payer par compagnie, pour avoir le compte de banque
+; par défaut des employés.
+;
+FILE CPCIE_PARAM      REFERENCE
+  ACCESS VIA CIECLE &
+         USING CIECLE OF CPPAIEMENT
+
+
+;-------------------------------------------------------------------------------
+
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+DEFINE  D_FLGIMP CHARACTER SIZE 11 = &
+@IF FRANCAIS
+        "Imprimé    " &
+@ELSE
+        "Printed    " &
+@ENDIF
+ IF PAMFLGIMP OF CPPAIEMENT = "1" ELSE &
+@IF FRANCAIS
+        "Non-imprimé"
+@ELSE
+        "Not-Printed"
+@ENDIF
+
+DEFINE  D_DEVCLE CHARACTER SIZE 4 &
+        = " " IF DEVCLE OF MCREFERENCE = DEVCLE OF MCHOLDING ELSE &
+          "/" + DEVCLE OF MCREFERENCE
+
+TEMPORARY T_CODMOD    CHARACTER SIZE  2 INITIAL "CP" RESET AT STARTUP
+
+TEMPORARY T_CIECLE    CHARACTER SIZE  4
+TEMPORARY T_LBQCPTENC CHARACTER SIZE  6
+TEMPORARY T_PECCLE    CHARACTER SIZE  4 ; Pour le choix des période ctb.
+TEMPORARY T_LCPCLE    CHARACTER SIZE  4 ; Pour le choix des lots.
+TEMPORARY T_LCPCLEFND CHARACTER SIZE  4 ; Pour consulter le lot
+TEMPORARY T_PECCLEFND CHARACTER SIZE  4 ;  "       "      "  "
+TEMPORARY T_TYPECR    CHARACTER SIZE  2 ; Pour les types d'écriture.
+TEMPORARY T_TYPADR    CHARACTER SIZE  3 ; Pour le type d'adresse
+TEMPORARY T_RADCLE    INTEGER UNSIGNED SIZE 2 ; pour le numéro d'adresse
+TEMPORARY T_REFCLENUM CHARACTER SIZE  6 ; pour le choix des fourn. ou empl.
+TEMPORARY T_REFNOMABR CHARACTER SIZE 20 ; pour passer en parametre
+TEMPORARY T_REFCIECLE CHARACTER SIZE  4 ; pour le choix des fourn. ou empl.
+TEMPORARY T_REFTYP    CHARACTER SIZE  1 ; pour le choix des fourn. ou empl.
+TEMPORARY T_REFSTUPAT CHARACTER SIZE  5 INITIAL "A"
+TEMPORARY T_SILPAMDAT CHARACTER SIZE  1 ; Pour la validation de la date de
+                                        ; paiement.
+
+;
+; Pour la consultation des écritures
+;
+DEFINE D_HISCLE INTEGER UNSIGNED SIZE 4 = HISCLE OF CPPAIEMENT
+
+;-------------------------------------------------------------------------------
+
+USE ustitstd NOLIST
+USE usdrwecr NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Paiements " &
+@ELSE
+      " Payments " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP
+
+ALIGN (3,3,19) (,27,43) (,48,63) (,,74)
+
+FIELD PECCLE OF CPPAIEMENT &
+LABEL "Période ......:"&
+      ID 05 HIDDEN &
+      DEFAULT T_PECCLEMNU &
+      NOCHANGE &
+      LOOKUP ON MCPERIODE_CTB &
+        MESSAGE 405 ; Cette période n'existe pas.
+
+FIELD LCPCLE OF CPPAIEMENT &
+LABEL "Numéro de lot.:"&
+      ID SAME &
+      REQUIRED &
+      NOCHANGE &
+      NUMERIC SIGNIFICANCE 4 &
+      LOOKUP ON CPLOT &
+        MESSAGE 436 ; Ce numéro de lot n'existe pas
+
+FIELD PAMDATJOU OF CPPAIEMENT  FORMAT YYYYMMDD PATTERN "####/##/##"&
+LABEL "Journalisé le.:"&
+      DISPLAY
+
+FIELD PAMHREJOU OF CPPAIEMENT &
+      DISPLAY SIZE 5
+
+SKIP 1
+
+ALIGN (3,3,19) (,,21) (,49,65)
+
+FIELD PAMTYPPAM OF CPPAIEMENT &
+LABEL "Type paiement.:"&
+      ID 10 HIDDEN &
+      REQUIRED &
+      NOCHANGE &
+      LOOKUP ON A_CBI_PAMTYPPAM &
+        MESSAGE 515 ; Ce type de paiement n'existe pas.
+
+FIELD CBIDSC OF A_CBI_PAMTYPPAM &
+      DISPLAY
+
+FIELD PAMDEPDIR OF CPPAIEMENT &
+LABEL "Dépense direct:"&
+      NOCHANGE &
+      SIZE 3
+
+SKIP 1
+
+ALIGN (3,3,19) (,,21) (,,28)
+
+FIELD REFCLETYP OF CPPAIEMENT &
+@IF FRANCAIS
+      LABEL "Fourn./employé:" &
+@ELSE
+      LABEL "Suppl./employe:" &
+@ENDIF
+      ID 15 HIDDEN &
+      REQUIRED &
+      NOCHANGE &
+      LOOKUP ON A_CBI_REFCLETYP &
+        MESSAGE 439 ; Ce code est invalide.
+
+FIELD REFCLENUM OF CPPAIEMENT &
+      REQUIRED &
+      NOCHANGE &
+      LOOKUP ON MCREFERENCE &
+        MESSAGE 500 ; Ce numéro n'existe pas.
+
+FIELD RADNOM OF MCREF_ADRESSE &
+      DISPLAY &
+      REFRESH
+
+SKIP
+
+ALIGN (3,3,19) (,,28)
+
+FIELD RADCLE OF CPPAIEMENT &
+      ID 20 HIDDEN &
+      REQUIRED &
+      REFRESH  &
+@IF FRANCAIS
+      LABEL "Adr. paiement.:" &
+@ELSE
+      LABEL "Payment Addre.:" &
+@ENDIF
+      LOOKUP ON MCREF_ADRESSE &
+        MESSAGE 415 ; Ce numéro d'adresse n'existe pas.
+
+FIELD RADADR1 OF MCREF_ADRESSE &
+      DISPLAY REFRESH
+
+SKIP
+
+FIELD LBQCPTENC OF CPPAIEMENT &
+LABEL "Cpt encaisse..:"&
+      ID 25 HIDDEN &
+      REQUIRED &
+      NOCHANGE &
+      LOOKUP &
+        ON VCPT_DSC &
+          MESSAGE 411, & ; Ce compte est inexistant
+        ON MCLIVRET_BQ &
+          MESSAGE 569 ; Ce compte n'est pas un compte d'encaisse
+
+FIELD CPTDSC OF VCPT_DSC &
+      DISPLAY
+
+
+ALIGN (3,3,19) (,40,56)
+
+FIELD PAMCLE OF CPPAIEMENT &
+LABEL "No paiement...:"&
+      ID 30 HIDDEN &
+      DISPLAY &
+      REFRESH
+
+FIELD PAMDAT OF CPPAIEMENT  FORMAT YYYYMMDD PATTERN "####/##/##" &
+LABEL "Date paiement.:"&
+      REQUIRED
+
+FIELD T_SILPAMDAT &
+      SILENT
+
+SKIP
+
+ALIGN (3,3,19) (,,28) (,40,56)
+
+FIELD PAMNUMPIM OF CPPAIEMENT &
+LABEL "No pré-imprimé:"&
+      ID 35 HIDDEN &
+      REQUIRED &
+      PIC "^^^^^^^^" &
+      NUMERIC &
+      SIGNIFICANCE 8 &
+      LOOKUP NOTON CPPAIEMENT &
+        VIA CIECLE    , &
+            LBQCPTENC , &
+            PAMNUMPIM   &
+        USING CIECLE    OF CPPAIEMENT , &
+              LBQCPTENC OF CPPAIEMENT , &
+              PAMNUMPIM OF CPPAIEMENT   &
+        MESSAGE 537 ; Ce numéro de paiement existe déjà.
+
+FIELD D_FLGIMP &
+      DISPLAY
+
+FIELD PAMCCLDAT OF CPPAIEMENT   FORMAT YYYYMMDD PATTERN "####/##/##"&
+LABEL "Concilié le...:"&
+      DISPLAY
+
+ALIGN (3,3,19) (,40,56)
+
+FIELD PAMCODANN OF CPPAIEMENT &
+LABEL "Annulation....:"&
+      ID 40 HIDDEN &
+      SIZE 3
+
+FIELD PAMDATANN OF CPPAIEMENT  FORMAT YYYYMMDD PATTERN "####/##/##"&
+LABEL "Annulé le.....:"&
+      REQUIRED &
+      DEFAULT SYSDATE
+
+SKIP TO GROUP 2
+
+FIELD PAMPAMCLEANN OF CPPAIEMENT &
+LABEL "No. annulation:"&
+      DISPLAY
+
+SKIP 1
+
+ALIGN (3,3,19)
+
+FIELD PAMDSC1 OF CPPAIEMENT &
+LABEL "Description...:"&
+      ID 50 HIDDEN &
+      REQUIRED
+
+FIELD PAMDSC2 OF CPPAIEMENT &
+      ID SAME &
+      NOLABEL
+
+SKIP 1
+
+ALIGN (3,3,19)(,,33) (,40,56)
+
+FIELD PAMMNT OF CPPAIEMENT &
+LABEL "Mnt paiement..:"&
+      ID 55 HIDDEN &
+      REQUIRED &
+      REFRESH
+
+FIELD D_DEVCLE &
+      DISPLAY
+
+FIELD PAMMNTTPS OF CPPAIEMENT &
+LABEL "Montant de TPS:"&
+      DISPLAY &
+      REFRESH
+
+SKIP TO GROUP 3
+
+FIELD PAMMNTCTI OF CPPAIEMENT &
+LABEL "C.T.I.........:"&
+      DISPLAY &
+      REFRESH
+
+SKIP TO GROUP 3
+
+FIELD PAMMNTTVQ OF CPPAIEMENT &
+LABEL "Montant de TVQ:"&
+      DISPLAY &
+      REFRESH
+
+SKIP
+
+FIELD FOCSLDACJ OF VFOC_FOU &
+LABEL "Solde fourn...:"&
+      DISPLAY
+
+SKIP TO GROUP 3
+
+FIELD PAMMNTRTI OF CPPAIEMENT &
+LABEL "R.T.I.........:"&
+      DISPLAY &
+      REFRESH
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès pour l'écran par son code.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+  ;
+  ; Si l'écran n'est pas appellé par le menu, alors on interdit la saisie,
+  ; la destruction et la modification à l'usager
+  ;
+  IF T_PAMCLEFND <> ""
+  THEN BEGIN
+    LET TZ_SECENT = "0"
+    LET TZ_SECDEL = "0"
+    LET TZ_SECMOD = "0"
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Consultation & validation de la période comptable
+;
+;
+PROCEDURE INPUT PECCLE OF CPPAIEMENT
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PECCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc109 MODE F PASSING T_CIECLEMNU, T_PECCLE, T_CODMOD
+    LET FIELDTEXT = TRUNCATE(T_PECCLE)
+  END
+END
+;
+; La période doit être ouverte. Elle peut être différente de la période
+; courante.
+;
+PROCEDURE EDIT PECCLE OF CPPAIEMENT
+BEGIN
+
+  ; Ajustement pour le changement de siècle
+  IF FIELDTEXT[1:1] < "8"
+  THEN LET T_FIELDTEXT_SIE = "1" + FIELDTEXT
+  ELSE LET T_FIELDTEXT_SIE = "0" + FIELDTEXT
+
+  ; Ajustement pour le changement de siècle
+  IF T_PECCLECOU[1:1] < "8"
+  THEN LET T_PECCLECOU_SIE = "1" + T_PECCLECOU
+  ELSE LET T_PECCLECOU_SIE = "0" + T_PECCLECOU
+
+  IF T_FIELDTEXT_SIE < T_PECCLECOU_SIE
+  THEN ERROR 406 ; Cette période est fermée.
+
+  IF FIELDTEXT <> T_PECCLECOU
+  THEN WARNING 407 ; La période indiquée est différente de la période courante.
+END
+
+;-------------------------------------------------------------------------------
+;
+; Consultation & validation du lot
+;
+;
+PROCEDURE INPUT LCPCLE OF CPPAIEMENT
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PECCLE = PECCLE    OF CPPAIEMENT
+    LET T_TYPECR = "CH"
+    LET T_LCPCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cp103 MODE F PASSING T_TYPECR, T_CIECLEMNU, T_PECCLE, T_LCPCLE
+    LET FIELDTEXT = TRUNCATE(T_LCPCLE)
+  END
+  ;
+  ; Force l'éxécution du LOOKUP sur le lot de la procédure EDIT.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(LCPCLE OF CPPAIEMENT))
+  THEN LET FIELDTEXT = LCPCLE OF CPPAIEMENT
+END
+
+;
+; Validation du lot.
+;
+PROCEDURE EDIT LCPCLE OF CPPAIEMENT
+BEGIN
+  IF LCPTYPECR OF CPLOT <> "CH"
+  THEN ERROR 441 ; Ce lot n'est pas du bon type.
+
+  IF LCPDATJOU OF CPLOT <> 0
+  THEN ERROR 442 ; Le lot est déjà journalisé.
+
+  IF LCPATRJOU OF CPLOT = "1"
+  THEN ERROR 443 ; On ne peut pas utiliser un lot autorisé à la journalisation.
+
+  IF LCPUSR OF CPLOT <> LOGONID
+  THEN ERROR 444 ; Ce lot ne vous est pas destiné.
+
+  IF LCPNBRTRSVER OF CPLOT = 0
+  THEN ERROR 549 ; Saisie interdite, entrez d'abord vos montants vérifiés
+                 ; dans le lot.
+
+  IF LCPDATVAL OF CPLOT <> 0
+  THEN WARNING 445 ; Une liste de vérification a déjà été demandé pour ce lot.
+
+END
+
+;-------------------------------------------------------------------------------
+;
+; Consultation & validation du type de paiement
+;
+;
+PROCEDURE INPUT PAMTYPPAM
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PAMTYPPAM = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_PAMTYPPAM, T_PAMTYPPAM
+    LET FIELDTEXT = TRUNCATE(T_PAMTYPPAM)
+  END
+END
+
+PROCEDURE EDIT PAMTYPPAM
+BEGIN
+  IF    ENTRYMODE &
+    AND PAMTYPPAM OF CPPAIEMENT = "R"
+  THEN ERROR 530 ; Un paiement Régulier ne peut pas être saisi manuellement.
+END
+
+;-------------------------------------------------------------------------------
+;
+; Validation du flag sur la dépense directe
+;
+;
+PROCEDURE INPUT PAMDEPDIR OF CPPAIEMENT
+BEGIN
+  USE usflginp NOLIST
+END
+
+PROCEDURE OUTPUT PAMDEPDIR OF CPPAIEMENT
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Consultation & validation du type de référence
+;
+;
+PROCEDURE INPUT REFCLETYP
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_REFCLETYP = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_REFCLETYP, T_REFCLETYP
+    LET FIELDTEXT = TRUNCATE(T_REFCLETYP)
+  END
+  ;
+  ; En FIND on assigne la bonne valeur de la compagnie dans la compagnie de la
+  ; référence pour rechercher avec la compagnie de l'employé ou la compagnie
+  ; du fournisseur
+  ;
+  IF FINDMODE
+  THEN BEGIN
+    IF FIELDTEXT = "F"
+    THEN LET T_CIECLEFND = T_FOUCIECLE
+    ELSE LET T_CIECLEFND = T_EMPCIECLE
+  END
+END
+
+;
+; Seuls les fournisseurs ou employés sont acceptés
+;
+PROCEDURE EDIT REFCLETYP
+BEGIN
+  IF REFCLETYP OF CPPAIEMENT = "F"
+  THEN LET REFCIECLE OF CPPAIEMENT = T_FOUCIECLE
+  ELSE BEGIN
+    ;
+    ; Dans un premier temps, les pré-paiements sont réservée uniquement
+    ; aux fournisseurs.
+    ;
+    IF      REFCLETYP OF CPPAIEMENT = "E" &
+       AND (PAMTYPPAM OF CPPAIEMENT = "1" &
+        OR  PAMTYPPAM OF CPPAIEMENT = "2")
+    THEN ERROR 585 ; Impossible de faire un pré-paiement à un employé.
+    ;
+    IF REFCLETYP OF CPPAIEMENT = "E"
+    THEN LET REFCIECLE OF CPPAIEMENT = T_EMPCIECLE
+    ELSE ERROR 553 ; Seuls les Fournisseurs et Employés sont autorisés ici.
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Consultation et validation des références (Fournisseur & Employés)
+;
+;
+PROCEDURE INPUT REFCLENUM
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    IF REFCLETYP OF CPPAIEMENT = "F"
+    THEN LET T_REFCIECLE = T_FOUCIECLE
+
+    IF REFCLETYP OF CPPAIEMENT = "E"
+    THEN LET T_REFCIECLE = T_EMPCIECLE
+
+    LET T_REFTYP    = REFCLETYP OF CPPAIEMENT
+    LET T_REFCLENUM = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    IF REFCLETYP OF CPPAIEMENT = "F"
+        THEN BEGIN
+        RUN SCREEN cp055 MODE F &
+        PASSING T_REFCIECLE, T_REFTYP, T_REFCLENUM, T_REFSTUPAT
+        LET FIELDTEXT = TRUNCATE(T_REFCLENUM)
+    END
+    IF REFCLETYP OF CPPAIEMENT = "E"
+        THEN BEGIN
+        RUN SCREEN mc112 MODE F &
+        PASSING T_REFCIECLE, T_REFTYP, T_REFCLENUM, T_REFSTUPAT
+        LET FIELDTEXT = TRUNCATE(T_REFCLENUM)
+    END
+END
+  ;
+  ; Force la procédure EDIT.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(REFCLENUM OF CPPAIEMENT))
+  THEN LET FIELDTEXT = REFCLENUM OF CPPAIEMENT
+END
+
+;
+; Validation du fournisseur ou de l'employe
+;
+PROCEDURE EDIT REFCLENUM OF CPPAIEMENT
+BEGIN
+  IF REFSTU OF MCREFERENCE = "I" AND REFCLETYP OF CPPAIEMENT = "F"
+  THEN ERROR 446 ; Le fournisseur est inactif.
+
+  IF REFSTU OF MCREFERENCE = "I" AND REFCLETYP OF CPPAIEMENT = "E"
+  THEN ERROR 504 ; Cet employé est inactif.
+
+  IF REFFOURTU OF MCREFERENCE = "1" AND REFCLETYP OF CPPAIEMENT = "F"
+  THEN WARNING 447 ; Le fournisseur est présentement retenu.
+
+  IF REFCLETYP OF CPPAIEMENT = "F" ; Dans le cas des fournisseurs
+  THEN BEGIN
+    GET VFOC_FOU OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 500 ;"Ce numéro n'existe pas..."
+
+    IF    PAMDEPDIR OF CPPAIEMENT = "1" &
+      AND FOUTYP OF VFOC_FOU= "I"
+    THEN ERROR 543 ; Les déboursés direct ne sont pas permit pour les fournissuer interne
+  END
+
+END
+
+;
+; Assignation de l'adresse de paiement du fournisseur au paiement s'il
+; s'agit d'un employé ou d'un fournisseur autre que divers
+;
+PROCEDURE PROCESS REFCLENUM
+BEGIN
+  IF    REFCLETYP OF CPPAIEMENT  = "E" &
+    OR  FOUTYP    OF VFOC_FOU   <> "D"
+  THEN BEGIN
+    IF REFCLETYP OF CPPAIEMENT = "E"
+    THEN LET RADCLE OF CPPAIEMENT = REFADRPAM OF MCREFERENCE
+    ELSE LET RADCLE OF CPPAIEMENT = FOCADRPAM OF VFOC_FOU
+    EDIT    RADCLE     OF CPPAIEMENT
+  END
+  ;
+  ; Il réinitialiser le numéro d'adresse pour les fournisseurs divers, la
+  ; condition suivante sert si l'usager recul(\) et modifie le numéro de
+  ; fournisseur.
+  ;
+  IF     FOUTYP OF VFOC_FOU = "D" &
+     AND RADCLE OF CPPAIEMENT <> 0
+  THEN BEGIN
+    LET RADCLE OF CPPAIEMENT  = 0
+    GET MCREF_ADRESSE OPTIONAL
+  END
+
+  DISPLAY RADCLE     OF CPPAIEMENT
+  DISPLAY RADADR1    OF MCREF_ADRESSE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Si l'usager modifie le nom du fournisseur divers, il faut mettre à jour
+; le nom abrégé si celui-ci correspond à l'ancienne valeur.
+;
+;
+PROCEDURE EDIT RADNOM
+BEGIN
+  IF RADNOMABR OF MCREF_ADRESSE = OLDVALUE( RADNOM OF MCREF_ADRESSE )[1:20]
+  THEN LET RADNOMABR OF MCREF_ADRESSE = RADNOM OF MCREF_ADRESSE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Consultation des adresses de paiement pour un fournisseur.
+;
+;
+PROCEDURE INPUT RADCLE OF CPPAIEMENT
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_REFCIECLE = REFCIECLE OF CPPAIEMENT
+    LET T_REFTYP    = REFCLETYP OF CPPAIEMENT
+    LET T_REFCLENUM = REFCLENUM OF CPPAIEMENT
+    LET T_TYPADR    = "PAM"
+    LET T_RADCLE    = 0
+    RUN SCREEN mc108 MODE F &
+            PASSING   T_REFCIECLE, &
+                      T_REFTYP, &
+                      T_REFCLENUM, &
+                      T_TYPADR   , &
+                      T_RADCLE
+    IF T_RADCLE <> 0
+    THEN LET FIELDTEXT = ASCII(T_RADCLE)
+    ELSE LET FIELDTEXT = ""
+  END
+
+  ;
+  ; Force la procédure EDIT.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT)
+  THEN LET FIELDTEXT = ASCII(RADCLE OF CPPAIEMENT)
+
+END
+
+;
+; Validation de l'adresse.
+;
+PROCEDURE EDIT RADCLE OF CPPAIEMENT
+BEGIN
+  IF RADPAMCP OF MCREF_ADRESSE <> "1"
+  THEN ERROR 423 ; Ce n'est pas une adresse de paiement.
+END
+
+;
+; Affiche le nom du fournisseur provenant de l'adresse
+;
+PROCEDURE PROCESS RADCLE
+BEGIN
+  DISPLAY RADNOM  OF MCREF_ADRESSE
+  DISPLAY RADADR1 OF MCREF_ADRESSE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Consultation & validation du compte d'encaisse
+;
+;
+PROCEDURE INPUT LBQCPTENC
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE    = T_CIECLEMNU
+    LET T_LBQCPTENC = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc110 PASSING T_CIECLE, T_LBQCPTENC MODE F
+    LET FIELDTEXT = TRUNCATE(T_LBQCPTENC)
+  END
+  ;
+  ; On assigne le compte de banque du fournisseur ou des employés au paiement.
+  ;
+  IF    ENTRYMODE &
+    AND 0 = SIZE ( TRUNCATE(FIELDTEXT) ) &
+    AND "" = TRUNCATE( LBQCPTENC OF CPPAIEMENT )
+  THEN BEGIN
+    IF REFCLETYP OF CPPAIEMENT = "F"
+    THEN LET FIELDTEXT = LBQCPTENC OF VFOC_FOU
+    ELSE LET FIELDTEXT = LBQCPTENC OF CPCIE_PARAM
+  END
+  ;
+  ; On force le LOOKUP et la procédure EDIT
+  ;
+  IF    ENTRYMODE &
+    AND 0 = SIZE (TRUNCATE(FIELDTEXT)) &
+    AND LBQCPTENC OF CPPAIEMENT <> ""
+  THEN LET FIELDTEXT = LBQCPTENC OF CPPAIEMENT
+
+END
+;
+; Ce compte doit être actif
+;
+PROCEDURE EDIT LBQCPTENC
+BEGIN
+  ;
+  ; Note: La période de fin, est la première période d'inactivité.
+  ;
+
+  ; Ajustement pour le changement de siècle
+  IF PECCLE OF CPPAIEMENT[1:1] < "8"
+  THEN LET T_PECCLE_SIE1 = "1" + PECCLE OF CPPAIEMENT
+  ELSE LET T_PECCLE_SIE1 = "0" + PECCLE OF CPPAIEMENT
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBA OF VCPT_DSC[1:1] < "8"
+  THEN LET T_CPTPECDEBA_SIE = "1" + CPTPECDEBA OF VCPT_DSC
+  ELSE LET T_CPTPECDEBA_SIE = "0" + CPTPECDEBA OF VCPT_DSC
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBI OF VCPT_DSC[1:1] < "8"
+  THEN LET T_CPTPECDEBI_SIE = "1" + CPTPECDEBI OF VCPT_DSC
+  ELSE LET T_CPTPECDEBI_SIE = "0" + CPTPECDEBI OF VCPT_DSC
+
+  IF T_PECCLE_SIE1 >= T_CPTPECDEBA_SIE AND &
+     ( &
+       T_PECCLE_SIE1 < T_CPTPECDEBI_SIE OR &
+       CPTPECDEBI OF VCPT_DSC = "" &
+     )
+  THEN NULL
+  ELSE ERROR 473 ; Ce compte est inactif.
+
+  IF DEVCLE OF MCREFERENCE <> DEVCLE OF VCPT_DSC
+  THEN ERROR 570 ; Le compte doit être dans la devise du fournisseur.
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; On valide la date de paiement selon l'interval de date de la période.
+;
+;
+PROCEDURE EDIT T_SILPAMDAT
+BEGIN
+  IF PAMDAT OF CPPAIEMENT < PECDATDEB OF MCPERIODE_CTB
+  THEN ERROR 452 ; La date est inférieure à la date de début de la période
+
+  IF PAMDAT OF CPPAIEMENT > PECDATFIN OF MCPERIODE_CTB
+  THEN ERROR 453 ; La date est supérieure à la date de fin de la période.
+  ;
+  ;
+  ; Si l'usager change la date du paiement, alors il faut aussi aller
+  ; changer la date dans la ventilation du paiement (= historique)
+  ;
+  IF ALTEREDRECORD OF CPPAIEMENT
+  THEN BEGIN
+    WHILE RETRIEVING A_CPH_PAMDAT
+    BEGIN
+      LET CPHDAT OF A_CPH_PAMDAT = PAMDAT OF CPPAIEMENT
+      PUT A_CPH_PAMDAT
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Flag OUI/NON sur le code d'annulation
+;
+;
+PROCEDURE INPUT PAMCODANN
+BEGIN
+  USE usflginp NOLIST
+END
+
+PROCEDURE OUTPUT PAMCODANN
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Annulation d'un paiement avant impression et journalisation.
+;
+; Note :  lors de cette annulation, à l'update, le trigger TPAMMOD va
+;         supprimer l'imputation et la ventilation de ce paiement.
+;         Il va aussi mettre à jour les cumulatifs du lot.
+;
+;
+PROCEDURE PROCESS PAMCODANN
+BEGIN
+  IF PAMCODANN OF CPPAIEMENT = "1"
+  THEN BEGIN
+      LET PAMDATANN OF CPPAIEMENT = SYSDATE
+      DISPLAY PAMDATANN OF CPPAIEMENT
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation de la sécurité d'accès en entrée de données
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Saisie d'un nouveau paiement
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  ;
+  ; La période et le lot restent les mêmes pour la durée de la saisie.
+  ;
+  IF T_PECCLE_DUP = ""
+  THEN BEGIN
+    ACCEPT PECCLE OF CPPAIEMENT
+    ACCEPT LCPCLE OF CPPAIEMENT
+    LET T_PECCLE_DUP = PECCLE OF CPPAIEMENT
+    LET T_LCPCLE_DUP = LCPCLE OF CPPAIEMENT
+  END
+  ELSE BEGIN
+    DISPLAY PECCLE OF CPPAIEMENT
+    DISPLAY LCPCLE OF CPPAIEMENT
+  END
+
+  ACCEPT  PAMTYPPAM OF CPPAIEMENT
+  DISPLAY CBIDSC OF A_CBI_PAMTYPPAM
+  ;
+  ; Pour les pré-paiements il est impossible d'avoir un dépense direct.
+  ;
+  IF PAMTYPPAM OF CPPAIEMENT <> "1" AND & ; Pré-paiement
+     PAMTYPPAM OF CPPAIEMENT <> "2"       ; Pré-paiement externe
+  THEN ACCEPT PAMDEPDIR OF CPPAIEMENT
+  ELSE LET PAMDEPDIR OF CPPAIEMENT = "0"
+
+  ACCEPT REFCLETYP OF CPPAIEMENT
+  ACCEPT REFCLENUM OF CPPAIEMENT
+  DISPLAY FOCSLDACJ OF VFOC_FOU
+
+  ;
+  ; Si c'est un fournisseur divers et un paiement de type
+  ; déboursé directe, alors l'usager doit saisir une adresse pour le paiement.
+  ;
+  IF    REFCLETYP OF CPPAIEMENT = "F" &
+    AND FOUTYP    OF VFOC_FOU   = "D" &
+    AND PAMDEPDIR OF CPPAIEMENT = "1"
+  THEN BEGIN
+    ACCEPT RADNOM OF MCREF_ADRESSE
+    ;
+    ; L'adresse n'est pas saisie dans le cas du paiement externe
+    ;
+    IF PAMTYPPAM OF CPPAIEMENT <> "E"
+    THEN BEGIN
+      RUN SCREEN cp008d PASSING MCREF_ADRESSE MODE E
+      DISPLAY RADADR1 OF MCREF_ADRESSE
+    END
+  END
+  ELSE BEGIN
+    ;
+    ; Sinon, il doit utiliser celle de la pièce d'origine
+    ;
+    ACCEPT  RADCLE    OF CPPAIEMENT
+    DISPLAY RADNOM    OF MCREF_ADRESSE
+    DISPLAY RADADR1   OF MCREF_ADRESSE
+  END
+
+  ACCEPT  LBQCPTENC OF CPPAIEMENT
+  DISPLAY CPTDSC OF VCPT_DSC
+
+  ACCEPT  PAMDAT OF CPPAIEMENT
+  EDIT    T_SILPAMDAT
+
+  ;
+  ; Si le paiement est de type "Externe" alors on demande le numéro
+  ; physique (pré-imprimé) du chèque. Car un paiement externe n'est
+  ; pas imprimé par le système.
+  ;
+  IF PAMTYPPAM OF CPPAIEMENT = "E" OR & ; Paiement externe
+     PAMTYPPAM OF CPPAIEMENT = "2"      ; Pré-paiement externe
+  THEN BEGIN
+    ACCEPT PAMNUMPIM OF CPPAIEMENT
+    LET PAMFLGIMP OF CPPAIEMENT = "1"
+    DISPLAY D_FLGIMP
+  END
+
+  DISPLAY PAMCODANN OF CPPAIEMENT
+
+  ACCEPT PAMDSC1 OF CPPAIEMENT
+  ACCEPT PAMDSC2 OF CPPAIEMENT
+
+  ;
+  ; Si le paiement est un déboursé directe, alors l'usager doit saisir un
+  ; montant. Et la somme de l'imputation devra être égale à ce montant.
+  ; Sinon, le montant du paiement est égal à la somme payé par la ventilation
+  ; des documents.
+  ;
+  IF PAMDEPDIR OF CPPAIEMENT = "1"
+  THEN ACCEPT PAMMNT OF CPPAIEMENT
+  ELSE DISPLAY PAMMNT OF CPPAIEMENT
+
+  ;
+  ; Si ce n'est pas un déboursé directe
+  ; alors on saisis la ventilation de facture mais pas pour les pré-paiements.
+  ;
+  IF PAMDEPDIR OF CPPAIEMENT =  "0" AND & ; Pas de déboursé direct
+     PAMTYPPAM OF CPPAIEMENT <> "1" AND & ; Pas de pré-paiement
+     PAMTYPPAM OF CPPAIEMENT <> "2"       ; Pas de pré-paiement externe
+  THEN BEGIN
+    RUN SCREEN cp008a MODE SAME &
+      PASSING T_CIECLEMNU   , &
+              T_CIENOM      , &
+              T_FOUCIECLE   , &
+              T_EMPCIECLE   , &
+              D_LCPATRJOU   , &
+              CPPAIEMENT    , &
+              VFOC_FOU      , &
+              MCREF_ADRESSE , &
+              MCREFERENCE
+  ;
+  ; Si l'usager à entré un paiement automatique, alors on va vérifier
+  ; la ventilation comptable et le talon du chèque
+  ;
+    IF PAMFLGPA OF CPPAIEMENT = "1"
+    THEN BEGIN
+      RUN SCREEN cp008b MODE F &
+        PASSING T_CIECLEMNU   , &
+                T_CIENOM      , &
+                D_LCPATRJOU   , &
+                D_REFDEVCLE   , &
+                CPPAIEMENT    , &
+                VFOC_FOU      , &
+                MCREF_ADRESSE
+
+      RUN SCREEN cp008c MODE F &
+              PASSING   CPPAIEMENT, &
+                  VFOC_FOU  , &
+                  MCREF_ADRESSE
+    END
+  END
+
+  ;
+  ; Si c'est un déboursé directe
+  ; alors on saisie la ventilation comptable
+  ;
+  IF PAMDEPDIR OF CPPAIEMENT = "1"
+  THEN BEGIN
+    RUN SCREEN cp008b MODE SAME &
+      PASSING T_CIECLEMNU   , &
+              T_CIENOM      , &
+              D_LCPATRJOU   , &
+              D_REFDEVCLE   , &
+              CPPAIEMENT    , &
+              VFOC_FOU      , &
+              MCREF_ADRESSE
+
+    ; Si ce n'est pas un paiement de type externe
+    ; alors on saisie le talon de cheque pour les déboursés directs.
+    ;
+    IF PAMTYPPAM OF CPPAIEMENT <> "E"
+    THEN BEGIN
+      RUN SCREEN cp008c MODE SAME &
+              PASSING   CPPAIEMENT, &
+                  VFOC_FOU  , &
+                  MCREF_ADRESSE
+    END
+  END
+  ;
+  ; Ecran pour la saisi du pré-paiement.
+  ;
+  IF PAMTYPPAM OF CPPAIEMENT = "1" OR &
+     PAMTYPPAM OF CPPAIEMENT = "2"
+  THEN RUN SCREEN cp008f MODE SAME &
+      PASSING T_CIECLEMNU   , &
+              T_CIENOM      , &
+              T_FOUCIECLE   , &
+              T_EMPCIECLE   , &
+              D_LCPATRJOU   , &
+              CPPAIEMENT    , &
+              MCREF_ADRESSE , &
+              MCREFERENCE
+
+  DISPLAY PAMMNT OF CPPAIEMENT
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Le nom et l'adresse de la référence pour un paiement direct sur un
+; fournisseur divers reste modifiable tant que le paiement n'est ni imprimé,
+; ni journalisé ni annulé.
+;
+;
+PROCEDURE DESIGNER 15
+BEGIN
+  IF    PAMCODANN OF CPPAIEMENT = "0" &
+    AND REFCLETYP OF CPPAIEMENT = "F" &
+    AND FOUTYP    OF VFOC_FOU   = "D" &
+    AND PAMDEPDIR OF CPPAIEMENT = "1" &
+    AND PAMDATJOU OF CPPAIEMENT = 0   &
+    AND (    PAMTYPPAM OF CPPAIEMENT = "E" &
+          OR (     PAMTYPPAM OF CPPAIEMENT <> "E" &
+               AND PAMFLGIMP OF CPPAIEMENT = "0" ) )
+  THEN ACCEPT RADNOM OF MCREF_ADRESSE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; L'adresse de paiement reste modifiable tant que le paiement n'est ni imprimé,
+; ni journalisé ni annulé.
+;
+PROCEDURE DESIGNER 20
+BEGIN
+  IF    (     (     PAMCODANN OF CPPAIEMENT =  "0"   &
+                AND PAMFLGIMP OF CPPAIEMENT =  "0" ) &
+          OR  PAMTYPPAM OF CPPAIEMENT = "E" )        &
+    AND PAMDATJOU OF CPPAIEMENT =  0                 &
+    AND REFCLETYP OF CPPAIEMENT =  "F"               &
+    AND FOUTYP    OF VFOC_FOU   <> "D"
+  THEN ACCEPT RADCLE OF CPPAIEMENT
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; La date du paiement est modifiable tant que le chèque n'a pas été
+; imprimé ni journalisé ni annulé. Pour les paiements externes la date reste
+; modifiable jusqu'à la journalisation.
+;
+PROCEDURE DESIGNER 30
+BEGIN
+  IF    PAMCODANN OF CPPAIEMENT = "0" &
+    AND PAMDATJOU OF CPPAIEMENT = 0   &
+
+    AND (     (     PAMFLGIMP OF CPPAIEMENT = "0"    &
+                AND PAMTYPPAM OF CPPAIEMENT <> "E"   &
+                AND PAMTYPPAM OF CPPAIEMENT <> "2" ) &
+          OR ( PAMTYPPAM OF CPPAIEMENT = "E" OR &
+               PAMTYPPAM OF CPPAIEMENT = "2" ) )
+  THEN BEGIN
+    ACCEPT PAMDAT OF CPPAIEMENT
+    EDIT   T_SILPAMDAT
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Le numéro physique du chèque du paiement externe reste modifiable tant
+; qu'il n'a pas été journalisé ni annulé.
+;
+PROCEDURE DESIGNER 35
+BEGIN
+  IF     PAMCODANN OF CPPAIEMENT = "0" &
+    AND  PAMDATJOU OF CPPAIEMENT = 0   &
+    AND (PAMTYPPAM OF CPPAIEMENT = "E" OR &
+         PAMTYPPAM OF CPPAIEMENT = "2")
+  THEN ACCEPT PAMNUMPIM OF CPPAIEMENT
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Les annulations de paiements se font avec l'écran d'annulation. Cependant
+; si le paiement n'est pas déjà annulé, ni journalisé, ni imprimé on peut
+; l'annuler. On ne peut jamais supprimer un paiement.
+;
+;
+PROCEDURE DESIGNER 40
+BEGIN
+  IF ALTEREDRECORD OF CPPAIEMENT
+  THEN ERROR 427 ; Faire une mise à jour avant la prochaine modification.
+
+  IF     PAMCODANN OF CPPAIEMENT = "0"                &
+     AND PAMDATJOU OF CPPAIEMENT = 0                  &
+     AND (     (     PAMTYPPAM OF CPPAIEMENT <> "E" &
+                 AND PAMTYPPAM OF CPPAIEMENT <> "2"  &
+                 AND PAMFLGIMP OF CPPAIEMENT = "0" )  &
+            OR (PAMTYPPAM OF CPPAIEMENT = "E" OR &
+                PAMTYPPAM OF CPPAIEMENT = "2") )
+  THEN ACCEPT PAMCODANN OF CPPAIEMENT
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; La description est modifiable jusqu'à la journalisation ou l'annulation.
+;
+;
+PROCEDURE DESIGNER 50
+BEGIN
+  IF PAMCODANN OF CPPAIEMENT = "0"
+  THEN BEGIN
+    ACCEPT PAMDSC1 OF CPPAIEMENT
+    ACCEPT PAMDSC2 OF CPPAIEMENT
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Le montant est modifiable lors d'un déboursé directe jusqu'à l'impression
+; ou la journalisation (pour un paiement externe) ou l'annulation.
+;
+;
+PROCEDURE DESIGNER 55
+BEGIN
+  IF    PAMDEPDIR OF CPPAIEMENT = "1" &
+    AND PAMCODANN OF CPPAIEMENT = "0" &
+    AND PAMDATJOU OF CPPAIEMENT = 0   &
+    AND (     (     PAMFLGIMP OF CPPAIEMENT = "0"    &
+                AND PAMTYPPAM OF CPPAIEMENT <> "E" ) &
+          OR  PAMTYPPAM OF CPPAIEMENT = "E" )
+  THEN ACCEPT PAMMNT OF CPPAIEMENT
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Sous-ecran de ventilation des documents
+;
+PROCEDURE DESIGNER D001
+BEGIN
+  IF PAMDEPDIR OF CPPAIEMENT = "1"
+  THEN WARNING 531 ; Ventilation des documents non accessible pour dépenses
+                   ; directes.
+  ;
+  ; Pas de ventilation de document pour les pré-paiements.
+  ;
+  IF     PAMTYPPAM OF CPPAIEMENT <> "1" &
+     AND PAMTYPPAM OF CPPAIEMENT <> "2" &
+     AND PAMDEPDIR OF CPPAIEMENT =  "0"
+  THEN RUN SCREEN cp008a MODE F  &
+                         PASSING T_CIECLEMNU   , &
+                                 T_CIENOM      , &
+                                 T_FOUCIECLE   , &
+                                 T_EMPCIECLE   , &
+                                 D_LCPATRJOU   , &
+                                 CPPAIEMENT    , &
+                                 VFOC_FOU      , &
+                                 MCREF_ADRESSE , &
+                                 MCREFERENCE
+END
+
+;-------------------------------------------------------------------------------
+;
+; Sous-ecran de l'imputation comptable
+;
+PROCEDURE DESIGNER D002
+BEGIN
+  IF    PAMDEPDIR OF CPPAIEMENT <> "1" &
+    AND PAMFLGPA OF CPPAIEMENT  <> "1"
+  THEN WARNING 532 ; L'imputation comptable n'est pas accessible pour ce
+                   ; paiement.
+  ;
+  ; Pas d'imputation comptable pour les pré-paiements.
+  ;
+  IF     PAMTYPPAM OF CPPAIEMENT <> "1" &
+     AND PAMTYPPAM OF CPPAIEMENT <> "2" &
+     AND PAMDEPDIR OF CPPAIEMENT =  "1"
+  THEN RUN SCREEN cp008b MODE F  &
+                         PASSING T_CIECLEMNU   , &
+                                 T_CIENOM      , &
+                                 D_LCPATRJOU   , &
+                                 D_REFDEVCLE   , &
+                                 CPPAIEMENT    , &
+                                 VFOC_FOU      , &
+                                 MCREF_ADRESSE
+END
+
+;-------------------------------------------------------------------------------
+;
+; Sous-ecran de consultation des écritures comptables.
+;
+PROCEDURE DESIGNER D003
+BEGIN
+  IF PAMDATJOU OF CPPAIEMENT = 0
+  THEN WARNING 460 ; L'écriture doit être journalisée pour accèder le
+                   ; sous-écran.
+  ELSE BEGIN
+    IF    PAMCODANN OF CPPAIEMENT = "1" &
+      AND PAMFLGIMP OF CPPAIEMENT = "0"
+    THEN WARNING 506 ; Il n'y a pas d'écriture comptable pour cette transaction
+    ELSE RUN SCREEN mc090  MODE F PASSING D_HISCLE
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Sous-ecran du talon de cheque
+;
+PROCEDURE DESIGNER D004
+BEGIN
+  IF    PAMFLGPA  OF CPPAIEMENT =  "1"         &
+    OR  (     PAMDEPDIR OF CPPAIEMENT =  "1"   &
+          AND PAMTYPPAM OF CPPAIEMENT <> "E" )
+  THEN RUN SCREEN cp008c MODE SAME PASSING CPPAIEMENT, VFOC_FOU, MCREF_ADRESSE
+  ELSE WARNING 533 ; Le talon n'est accessible que pour les paiements directs
+                   ; de type R ou M
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Adresse du fournisseur divers
+;
+;
+PROCEDURE DESIGNER D005
+BEGIN
+  IF    REFCLETYP OF CPPAIEMENT = "F" &
+    AND FOUTYP    OF VFOC_FOU   = "D"
+  THEN RUN SCREEN cp008d MODE SAME PASSING MCREF_ADRESSE
+END
+
+;-------------------------------------------------------------------------------
+;
+; Gestion des lots
+;
+;
+PROCEDURE DESIGNER D006
+BEGIN
+
+  LET T_PECCLEFND = PECCLE OF CPPAIEMENT
+  LET T_LCPCLEFND = LCPCLE OF CPPAIEMENT
+
+  RUN SCREEN cp020 &
+              PASSING T_CIECLEMNU, &
+                      T_CIENOM   , &
+                      T_PECCLEMNU, &
+                      T_PECCLECOU, &
+                      T_PECCLEFND, &
+                      T_LCPCLEFND  &
+              MODE F
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Vérification
+;
+;
+PROCEDURE DESIGNER D007
+BEGIN
+  RUN SCREEN cp008e MODE F PASSING CPPAIEMENT
+END
+
+
+;------------------------------------------------------------------------------
+;
+; Saisie du montant de pré-paiement.
+;
+PROCEDURE DESIGNER D008
+BEGIN
+
+  IF PAMTYPPAM OF CPPAIEMENT = "1" OR &
+     PAMTYPPAM OF CPPAIEMENT = "2"
+  THEN RUN SCREEN cp008f MODE SAME &
+      PASSING T_CIECLEMNU   , &
+              T_CIENOM      , &
+              T_FOUCIECLE   , &
+              T_EMPCIECLE   , &
+              D_LCPATRJOU   , &
+              CPPAIEMENT    , &
+              MCREF_ADRESSE , &
+              MCREFERENCE
+
+  DISPLAY PAMMNT OF CPPAIEMENT
+
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; La procédure PATH suivante est nécessaire dans le cas où l'écran est
+; appelé autre que par le menu.
+;
+;
+PROCEDURE PATH
+BEGIN
+  IF T_PAMCLEFND <> ""
+  THEN LET PATH = 99
+  ELSE BEGIN
+    REQUEST PAMNUMPIM OF CPPAIEMENT
+    IF PROMPTOK
+    THEN LET PATH = 1
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST LBQCPTENC OF CPPAIEMENT
+      IF PROMPTOK
+      THEN REQUEST PAMCLE OF CPPAIEMENT
+      IF PROMPTOK
+      THEN LET PATH = 2
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST PAMCLE OF CPPAIEMENT
+      IF PROMPTOK
+      THEN LET PATH = 3
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST LBQCPTENC OF CPPAIEMENT
+      IF PROMPTOK
+      THEN LET PATH = 4
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST PECCLE OF CPPAIEMENT
+      IF PROMPTOK
+      THEN REQUEST LCPCLE OF CPPAIEMENT
+      IF PROMPTOK
+      THEN LET PATH = 5
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST PECCLE OF CPPAIEMENT
+      IF PROMPTOK
+      THEN LET PATH = 6
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST REFCLETYP OF CPPAIEMENT
+      IF PROMPTOK
+      THEN REQUEST REFCLENUM OF CPPAIEMENT
+      IF PROMPTOK
+      THEN LET PATH = 7
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST REFCLETYP OF CPPAIEMENT
+      IF PROMPTOK
+      THEN LET PATH = 8
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      LET PATH = 9
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; La procédure FIND est pour gérer l'appel en sous-écran (PATH=99)
+;
+;
+PROCEDURE FIND
+BEGIN
+  IF PATH = 1
+  THEN GET CPPAIEMENT VIA CIECLE    , &
+                          PAMNUMPIM , &
+                          PAMTYPECR   &
+                      USING T_CIECLEMNU             , &
+                            PAMNUMPIM OF CPPAIEMENT , &
+                            "CH"
+
+  IF PATH = 2
+  THEN GET CPPAIEMENT VIA CIECLE    , &
+                          LBQCPTENC , &
+                          PAMCLE    , &
+                          PAMTYPECR   &
+                      USING T_CIECLEMNU             , &
+                            LBQCPTENC OF CPPAIEMENT , &
+                            PAMCLE    OF CPPAIEMENT , &
+                            "CH"                      &
+                      ORDERBY CIECLE    , &
+                              LBQCPTENC , &
+                              PAMCLE
+
+  IF PATH = 3
+  THEN GET CPPAIEMENT VIA CIECLE    , &
+                          LBQCPTENC , &
+                          PAMCLE    , &
+                          PAMTYPECR   &
+                      USING T_CIECLEMNU             , &
+                            "@"                     , &
+                            PAMCLE    OF CPPAIEMENT , &
+                            "CH"                      &
+                      ORDERBY CIECLE    , &
+                              LBQCPTENC , &
+                              PAMCLE
+
+  IF PATH = 4
+  THEN GET CPPAIEMENT VIA CIECLE    , &
+                          LBQCPTENC , &
+                          PAMTYPECR   &
+                      USING T_CIECLEMNU             , &
+                            LBQCPTENC OF CPPAIEMENT , &
+                            "CH"                      &
+                      ORDERBY CIECLE    , &
+                              LBQCPTENC , &
+                              PAMCLE
+
+  IF PATH = 5
+  THEN GET CPPAIEMENT VIA CIECLE , &
+                          PECCLE , &
+                          LCPCLE , &
+                          PAMTYPECR &
+                      USING T_CIECLEMNU          , &
+                            PECCLE OF CPPAIEMENT , &
+                            LCPCLE OF CPPAIEMENT , &
+                            "CH"                   &
+                      ORDERBY CIECLE   , &
+                              LBQCPTENC, &
+                              PAMCLE
+
+  IF PATH = 6
+  THEN GET CPPAIEMENT VIA CIECLE    , &
+                          PECCLE    , &
+                          PAMTYPECR   &
+                      USING T_CIECLEMNU          , &
+                            PECCLE OF CPPAIEMENT , &
+                            "CH"                   &
+                      ORDERBY CIECLE , &
+                              PECCLE , &
+                              LCPCLE , &
+                              LBQCPTENC, &
+                              PAMCLE
+
+
+  IF PATH = 7
+  THEN GET CPPAIEMENT VIA CIECLE    , &
+                          REFCIECLE , &
+                          REFCLETYP , &
+                          REFCLENUM , &
+                          PAMTYPECR   &
+                      USING T_CIECLEMNU , &
+                            T_CIECLEFND , &
+                            REFCLETYP OF CPPAIEMENT , &
+                            REFCLENUM OF CPPAIEMENT , &
+                            "CH"                      &
+                      ORDERBY REFCIECLE , &
+                              REFCLETYP , &
+                              REFCLENUM
+
+  IF PATH = 8
+  THEN GET CPPAIEMENT VIA CIECLE    , &
+                          REFCIECLE , &
+                          REFCLETYP , &
+                          PAMTYPECR   &
+                      USING T_CIECLEMNU             , &
+                            T_CIECLEFND             , &
+                            REFCLETYP OF CPPAIEMENT , &
+                            "CH"                      &
+                      ORDERBY REFCIECLE , &
+                              REFCLETYP , &
+                              REFCLENUM
+  IF PATH = 9
+  THEN GET CPPAIEMENT VIA CIECLE    , &
+                          PAMTYPECR   &
+                      USING T_CIECLEMNU , &
+                            "CH"          &
+                      ORDERBY CIECLE    , &
+                              LBQCPTENC , &
+                              PAMCLE
+
+  IF PATH = 99
+  THEN GET CPPAIEMENT VIA CIECLE    , &
+                          LBQCPTENC , &
+                          PAMCLE      &
+                      USING T_CIECLEMNU    , &
+                            T_LBQCPTENCFND , &
+                            T_PAMCLEFND
+
+  GET MCREF_ADRESSE OPTIONAL
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF CPPAIEMENT &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     (   ALTEREDRECORD OF CPPAIEMENT      &
+          OR ALTEREDRECORD OF MCREF_ADRESSE ) &
+     AND NOT NEWRECORD     OF CPPAIEMENT &
+     AND NOT DELETEDRECORD OF CPPAIEMENT &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  IF ALTEREDRECORD OF CPPAIEMENT AND PAMDATJOU OF CPPAIEMENT <> 0
+  THEN ERROR 527 ; Impossible de modifier, ce paiement est journalisé.
+
+  IF LCPATRJOU OF CPLOT = "1" AND PAMDATJOU OF CPPAIEMENT = 0
+  THEN ERROR 544 ; Ce lot est déjà autorisé.
+
+  IF PAMMNT OF CPPAIEMENT <> PAMCUMMNT OF CPPAIEMENT
+  THEN WARNING 459 ; L'imputation ne balance pas.
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Mise à jour des fichiers.
+;
+; Cette procédure est nécéssaire à cause des fichiers indexés contenant les
+; numéros séquentiels. De mettre les put dans cette procedure donne à
+; quick la possibilité de faire des backout sur les fichiers designers en
+; cas de problèmes
+;
+PROCEDURE UPDATE
+BEGIN
+  ;
+  ; On incrémente l'adresse pour les fournisseurs divers
+  ;
+  IF    REFCLETYP OF CPPAIEMENT = "F" &
+    AND FOUTYP    OF VFOC_FOU   = "D" &
+    AND PAMDEPDIR OF CPPAIEMENT = "1" &
+    AND RADCLE    OF CPPAIEMENT  = 0
+  THEN BEGIN
+    START TRANSACTION GEN_RAD_SEQ
+    GET MCRAD_SEQ VIA REFCIECLE, &
+                      REFCLETYP, &
+                      REFCLENUM  &
+                  USING REFCIECLE OF CPPAIEMENT, &
+                        REFCLETYP OF CPPAIEMENT, &
+                        REFCLENUM OF CPPAIEMENT  &
+                  OPTIONAL
+    LET REFCIECLE OF MCRAD_SEQ = REFCIECLE OF CPPAIEMENT
+    LET REFCLETYP OF MCRAD_SEQ = REFCLETYP OF CPPAIEMENT
+    LET REFCLENUM OF MCRAD_SEQ = REFCLENUM OF CPPAIEMENT
+    LET RASNUMSEQ OF MCRAD_SEQ = RASNUMSEQ OF MCRAD_SEQ + 1
+    LET RADCLE    OF CPPAIEMENT = RASNUMSEQ OF MCRAD_SEQ
+    PUT MCRAD_SEQ
+    COMMIT TRANSACTION GEN_RAD_SEQ
+  END
+
+  ;
+  ; On obtient un numéro de paiement pour le nouveau paiement
+  ;
+  IF NEWRECORD OF CPPAIEMENT
+  THEN BEGIN
+    START TRANSACTION GEN_NUM_SEQ
+    GET CPPAM_SEQ OPTIONAL
+    LET PSENUMSEQ OF CPPAM_SEQ = PSENUMSEQ OF CPPAM_SEQ + 1
+    LET PAMCLE OF CPPAIEMENT &
+                = ASCII(PSENUMSEQ OF CPPAM_SEQ,PSELONNUM OF CPPAM_SEQ)
+    PUT CPPAM_SEQ
+    COMMIT TRANSACTION GEN_NUM_SEQ
+  END
+
+  PUT CPPAIEMENT
+  PUT MCREF_ADRESSE
+END
+
+;-------------------------------------------------------------------------------
+;
+; On affiche le numéro du paiement après sa génération
+;
+;
+PROCEDURE POSTUPDATE
+BEGIN
+  DISPLAY PAMCLE OF CPPAIEMENT
+END
+
+BUILD
+@IF FORMAT
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+********************************** Paiements ***********************************
+* Période ......: xxxxx   Numéro de lot.: xxxx  Journalisé le.: xxxxxxxx xxxxx *
+*                                                                              *
+* Type paiement.: x xxxxxxxxxxxxxxxxxxxxxxxxx   Dépense direct: xxx            *
+*                                                                              *
+* Fourn./employé: x xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            *
+* Adr. paiement.: xxxx     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            *
+* Cpt encaisse..: xxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                 *
+* No paiement...: xxxxxxx              Date paiement.: xxxxxxxx                *
+* No pré-imprimé: xxxxxxxx xxxxxxxxxxx Concilié le...: xxxxxxxx                *
+* Annulation....: xxx                  Annulé le.....: xxxxxxxx                *
+*                                      No. annulation: xxxxxxx                 *
+*                                                                              *
+* Description...: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                                                                              *
+* Mnt paiement..: xxxxxxxxxxxxxxxxxx   Montant de TPS: xxxxxxxxxxx             *
+*                                      C.T.I.........: xxxxxxxxxxx             *
+*                                      Montant de TVQ: xxxxxxxxxxx             *
+* Solde fourn...: xxxxxxxxxxxxxx       R.T.I.........: xxxxxxxxxxx             *
+********************************************************************************
+@ENDIF

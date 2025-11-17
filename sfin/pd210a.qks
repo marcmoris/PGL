@@ -1,0 +1,691 @@
+;/T/ 2.3.1 Enregistrer la commande interne. (Adresse livraison)
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1995-01-26
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   les commandes internes.
+;
+;    NOTE.........: La procédure ENTRY a été codée.
+;
+;------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin     
+;    Date modification.: 17 octobre 2001
+;    Description.......: Ajuster le traitement afin qu'un dépisteur soit disponible pour le numéro
+;                        de contact.
+;
+;    Référence.........: Demande directe - Demandeur: Nathalie Desrochers.
+;
+;    Signets...........: MP-01-10-17_DD.
+;
+;------------------------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd210a ACTIONBAR                     &
+              slave &
+              MODE LABEL "" AT 2,80         &
+              NOACTION                      &
+              FIELDMARK RETAIN STARTUP      &
+              HELP POPUP FROM 4,9 TO 20,72  &
+              RECEIVING T_CIECLEMNU,        &
+                        T_CIENOM,           &
+                        PDCOMMAN_INTERNE,   &
+                        VCLC_CLI
+
+
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD210A"
+
+
+;-------------------------------------------------------------------------------
+; Documentation de l'écran.
+;
+USE pd210a.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable temporaire du programme pour les pop-up
+;
+
+TEMPORARY T_CLICIECLE CHARACTER SIZE 04 ; Popup sur les adresses du client
+TEMPORARY T_CLICLE    CHARACTER SIZE 06 ; Popup sur les adresses du client
+TEMPORARY T_REFCLETYP CHARACTER SIZE 01 ; Popup sur les adresses du client
+TEMPORARY T_RADCLE    INTEGER UNSIGNED &
+                                SIZE 02 ; Popup sur les adresses du client
+TEMPORARY T_TYPADR    CHARACTER SIZE 03 ; Popup sur les adresses du client
+
+TEMPORARY T_CCTCLE    INTEGER UNSIGNED &
+                                SIZE 02 ; Popup sur les contacts
+
+TEMPORARY T_TAXCLETYP CHARACTER SIZE 01 ; Popup sur les codes de taxes
+TEMPORARY T_TAXCLECOD CHARACTER SIZE 02 ; Popup sur les codes de taxes
+TEMPORARY T_TAXMODPAT CHARACTER SIZE 05 ; Popup sur les codes de taxes
+
+
+;-------------------------------------------------------------------------------
+;
+; Sert à valider les codes bilingue et pour les sous-écrans de consultation
+;
+DEFINE    D_PLVCODLIV CHARACTER SIZE 16 = "PLVCODLIV"
+TEMPORARY T_PLVCODLIV CHARACTER SIZE 04
+
+
+;-------------------------------------------------------------------------------
+;
+; Commande interne
+;
+
+FILE PDCOMMAN_INTERNE MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Client
+;
+
+FILE VCLC_CLI MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Adresse clients
+;
+;
+; Cette table est utilisée pour valider l'adresse de facturation ou pour créer
+; l'adresse si nécessaire.
+;
+
+FILE MCREF_ADRESSE    REFERENCE
+
+  ACCESS VIA   REFCIECLE,                &
+               REFCLETYP,                &
+               REFCLENUM,                &
+               RADCLE                    &
+         USING "----",                               &
+               "C",                                  &
+               CLICLE           OF PDCOMMAN_INTERNE, &
+               COMNUMADRLIV     OF PDCOMMAN_INTERNE
+
+
+;-------------------------------------------------------------------------------
+;
+; Code bilingue (Statut)
+;
+
+FILE VCBI_DSC  REFERENCE &
+               ALIAS A_CBI_PLVCODLIV
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_PLVCODLIV,                          &
+               PLVCODLIV        OF PDCOMMAN_INTERNE
+
+
+;-------------------------------------------------------------------------------
+;
+; Contact
+;
+
+FILE CRCLI_CONTACT    REFERENCE
+
+  ACCESS VIA   CLICIECLE,       &
+               CLICLE,          &
+               CCTCLE           &
+         USING CLICIECLE        OF PDCOMMAN_INTERNE, &
+               CLICLE           OF PDCOMMAN_INTERNE, &
+               COMCCTCLELIV     OF PDCOMMAN_INTERNE
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation des codes de taxes fédéral.
+;
+
+FILE MCTAXE           REFERENCE &
+                      ALIAS A_TAX_TPS
+
+  ACCESS  VIA   TAXCLETYP, &
+                TAXCLECOD &
+          USING COMTAXTYPTPS OF PDCOMMAN_INTERNE, &
+                COMTAXCODTPS OF PDCOMMAN_INTERNE
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation des codes de taxes provincial.
+;
+
+FILE MCTAXE           REFERENCE &
+                      ALIAS A_TAX_TVP
+
+  ACCESS  VIA   TAXCLETYP, &
+                TAXCLECOD &
+          USING COMTAXTYPTVQ OF PDCOMMAN_INTERNE, &
+                COMTAXCODTVQ OF PDCOMMAN_INTERNE
+
+
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+
+SKIP
+
+
+TITLE &
+@IF FRANCAIS
+      " Adresse de livraison " &
+@ELSE
+      " %%%Adresse de livraison " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 4
+
+
+ALIGN (,3,19) (,21,22) (,24,25) (,,32)
+
+
+FIELD PJTABR           OF PDCOMMAN_INTERNE &
+        LABEL "Num. commande.:"            &
+        FIXED
+
+
+FIELD PJTANN           OF PDCOMMAN_INTERNE &
+        LABEL "-"                          &
+        FIXED
+
+
+FIELD COMNUMCOMINT     OF PDCOMMAN_INTERNE &
+        LABEL "-"                          &
+        FIXED
+
+
+FIELD COMNOM           OF PDCOMMAN_INTERNE &
+        FIXED
+
+
+DRAW 5,2 TO 5,79
+
+
+SKIP TO LINE 7
+
+
+ALIGN ( ,3,19)
+
+
+FIELD RADNOM           OF MCREF_ADRESSE    &
+        PREDISPLAY                         &
+        DISPLAY
+
+
+ALIGN (2,3,19) (,,24)
+
+
+FIELD COMNUMADRLIV     OF PDCOMMAN_INTERNE &
+        HIDDEN ID 15                       &
+        REQUIRED                           &
+        LABEL "Adresse.......:"            &
+        PREDISPLAY                         &
+        LOOKUP ON MCREF_ADRESSE            &
+          MESSAGE 2981 ; Ce numéro d'adresse n'existe pas
+
+
+FIELD RADADR1          OF MCREF_ADRESSE    &
+        PREDISPLAY                         &
+        DISPLAY
+
+
+ALIGN (,,24)
+
+
+FIELD RADADR2          OF MCREF_ADRESSE    &
+        PREDISPLAY                         &
+        DISPLAY
+
+
+FIELD RADADR3          OF MCREF_ADRESSE    &
+        PREDISPLAY                         &
+        DISPLAY
+
+
+FIELD RADADR4          OF MCREF_ADRESSE    &
+        PREDISPLAY                         &
+        DISPLAY
+
+
+FIELD RADCP            OF MCREF_ADRESSE    &
+        PREDISPLAY                         &
+        DISPLAY
+
+
+ALIGN ( ,3,19)
+
+
+FIELD RADTEL           OF MCREF_ADRESSE    &
+        PREDISPLAY                         &
+        DISPLAY
+
+
+FIELD RADFAX           OF MCREF_ADRESSE    &
+        PREDISPLAY                         &
+        DISPLAY
+
+
+;------------------------------------------
+; MP-01-10-17_DD
+;
+ALIGN (2,3,19) (,,22)
+
+FIELD COMCCTCLELIV     OF PDCOMMAN_INTERNE &
+      HIDDEN                               &
+      LABEL "Contact.......:"              
+
+FIELD CCTNOM           OF CRCLI_CONTACT    &
+      DISPLAY
+
+; ------------------------------------------
+
+
+FIELD COMNUMCMD        OF PDCOMMAN_INTERNE &
+      LABEL "Ref.Client....:"   &
+      HIDDEN ID 60
+
+
+SKIP
+
+
+ALIGN (2,3,19) (,,24)
+
+
+FIELD PLVCODLIV        OF PDCOMMAN_INTERNE &
+        HIDDEN ID 65                       &
+        LOOKUP ON A_CBI_PLVCODLIV          &
+          VIA   XELNOM,                    &
+                CBICLE                     &
+          USING D_PLVCODLIV,               &
+                PLVCODLIV        OF PDCOMMAN_INTERNE &
+          MESSAGE 3092 ; Cette condition de livraison n'existe pas
+
+
+FIELD CBIDSC           OF A_CBI_PLVCODLIV  &
+        DISPLAY
+
+SKIP
+
+
+FIELD COMCOMLIV        OF PDCOMMAN_INTERNE &
+        HIDDEN ID 70
+
+
+SKIP
+
+ALIGN (2,3,19) (23,24,41)
+
+
+FIELD COMTAXCODTPS     OF PDCOMMAN_INTERNE &
+        HIDDEN ID 75                       &
+        LOOKUP ON A_TAX_TPS                &
+          MESSAGE 3089 ; Ce code de taxe n'existe pas
+
+
+FIELD COMNUMEXPTPS     OF PDCOMMAN_INTERNE &
+        ID SAME
+
+
+FIELD COMTAXCODTVQ     OF PDCOMMAN_INTERNE &
+        HIDDEN ID 85                       &
+        LOOKUP ON A_TAX_TVP                &
+          MESSAGE 3089 ; Ce code de taxe n'existe pas
+
+
+FIELD COMNUMEXPTVQ     OF PDCOMMAN_INTERNE &
+        ID SAME
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+; MP-01-10-17_DD
+;
+; Appel du pop-up pour le numéro de contact
+;
+PROCEDURE INPUT COMCCTCLELIV
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CLICIECLE = CLICIECLE    OF PDCOMMAN_INTERNE
+    LET T_CLICLE    = CLICLE       OF PDCOMMAN_INTERNE
+    LET T_CCTCLE    = COMCCTCLELIV OF PDCOMMAN_INTERNE
+    RUN SCREEN pd210r MODE F               &
+                      PASSING T_CLICIECLE, &
+                              T_CLICLE   , &
+                              T_CCTCLE
+    LET FIELDTEXT = ASCII(T_CCTCLE,2)
+  END
+END
+
+;-------------------------------------------------------------------------------
+; MP-01-10-17_DD
+;
+; Validation de présence unitaire sur le numéro de contact
+;
+PROCEDURE EDIT COMCCTCLELIV
+BEGIN
+  IF FIELDVALUE <> 0 
+  THEN BEGIN
+    GET CRCLI_CONTACT VIA CLICIECLE                    , &
+                          CLICLE                       , &
+                          CCTCLE                         &
+                    USING CLICIECLE OF PDCOMMAN_INTERNE, &
+                          CLICLE    OF PDCOMMAN_INTERNE, &
+                          FIELDVALUE   OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 728 ; Ce numéro de contact n'existe pas.
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du pop-up pour l'adresse de livraison
+
+PROCEDURE INPUT COMNUMADRLIV
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CLICIECLE = "----"
+    LET T_REFCLETYP = CLIREFTYP OF VCLC_CLI
+    LET T_CLICLE    = CLICLE    OF PDCOMMAN_INTERNE
+    LET T_TYPADR    = ""
+    LET T_RADCLE    = 0
+    RUN SCREEN mc108 MODE F PASSING T_CLICIECLE, &
+                                    T_REFCLETYP, &
+                                    T_CLICLE   , &
+                                    T_TYPADR   , &
+                                    T_RADCLE
+    IF T_RADCLE <> 0
+    THEN BEGIN
+      LET FIELDTEXT = ASCII(T_RADCLE)
+    END
+    ELSE BEGIN
+       LET FIELDTEXT = ""
+    END
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation de l'adresse.
+;
+
+PROCEDURE EDIT COMNUMADRLIV
+BEGIN
+  IF "1" <> RADLIVCR OF MCREF_ADRESSE
+  THEN BEGIN
+    WARNING 3091 ; Cette adresse n'est pas une adresse de livraison
+  END
+  DISPLAY RADNOM  OF MCREF_ADRESSE
+  DISPLAY RADADR1 OF MCREF_ADRESSE
+  DISPLAY RADADR2 OF MCREF_ADRESSE
+  DISPLAY RADADR3 OF MCREF_ADRESSE
+  DISPLAY RADCP   OF MCREF_ADRESSE
+  DISPLAY RADTEL  OF MCREF_ADRESSE
+  DISPLAY RADFAX  OF MCREF_ADRESSE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Dépisteur pour le champ
+;
+
+PROCEDURE INPUT PLVCODLIV        OF PDCOMMAN_INTERNE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PLVCODLIV = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 &
+               MODE F &
+               PASSING D_PLVCODLIV, &
+                       T_PLVCODLIV
+    LET FIELDTEXT = TRUNCATE(T_PLVCODLIV)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Sous-écran de consultation des codes de taxe.
+;
+
+PROCEDURE INPUT COMTAXCODTPS
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TAXCLETYP = COMTAXTYPTPS OF PDCOMMAN_INTERNE
+    LET T_TAXCLECOD = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    LET T_TAXMODPAT = "@"
+    RUN SCREEN mc111 MODE F PASSING T_TAXCLETYP, &
+                                    T_TAXCLECOD, &
+                                    T_TAXMODPAT
+    LET FIELDTEXT = TRUNC(T_TAXCLECOD)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que le code de taxe est de type exclu seulement
+;
+
+PROCEDURE EDIT COMTAXCODTPS
+BEGIN
+  IF TAXMOD OF A_TAX_TPS <> "S"
+  THEN BEGIN
+    ERROR 3107 ; Le type de taxe doit être en sus
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Sous-écran de consultation des codes de taxe.
+;
+
+PROCEDURE INPUT COMTAXCODTVQ
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TAXCLETYP = COMTAXTYPTVQ OF PDCOMMAN_INTERNE
+    LET T_TAXCLECOD = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    LET T_TAXMODPAT = "@"
+    RUN SCREEN mc111 MODE F PASSING T_TAXCLETYP, &
+                                    T_TAXCLECOD, &
+                                    T_TAXMODPAT
+    LET FIELDTEXT = TRUNC(T_TAXCLECOD)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que le code de taxe est de type exclu seulement
+;
+
+PROCEDURE EDIT COMTAXCODTVQ
+BEGIN
+  IF TAXMOD OF A_TAX_TVP <> "S"
+  THEN BEGIN
+    ERROR 3107 ; Le type de taxe doit être en sus
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure de saisie
+;
+
+PROCEDURE ENTRY
+BEGIN
+  DISPLAY RADNOM       OF MCREF_ADRESSE
+  ;
+  ; Appel du sous-écran pour les adresses
+  ;
+  RUN SCREEN pd210l &
+               MODE F &
+               PASSING VCLC_CLI, &
+                       T_RADCLE, &
+                       T_CIECLEMNU
+
+  IF T_RADCLE <> 0
+  THEN BEGIN
+    LET COMNUMADRLIV        OF PDCOMMAN_INTERNE = T_RADCLE
+  END
+  ELSE BEGIN
+    LET COMNUMADRLIV        OF PDCOMMAN_INTERNE = 1
+  END
+
+  EDIT     COMNUMADRLIV     OF PDCOMMAN_INTERNE
+  DISPLAY  COMNUMADRLIV     OF PDCOMMAN_INTERNE
+
+  DISPLAY RADADR1      OF MCREF_ADRESSE
+  DISPLAY RADADR2      OF MCREF_ADRESSE
+  DISPLAY RADADR3      OF MCREF_ADRESSE
+  DISPLAY RADADR4      OF MCREF_ADRESSE
+  DISPLAY RADCP        OF MCREF_ADRESSE
+  DISPLAY RADTEL       OF MCREF_ADRESSE
+  DISPLAY RADFAX       OF MCREF_ADRESSE
+  ;
+  ; Appel sous-écran pour les contacts
+  ;
+  RUN SCREEN pd210m &
+               MODE F &
+               PASSING VCLC_CLI, &
+                       T_CIECLEMNU
+
+
+  ACCEPT  COMCCTCLELIV OF PDCOMMAN_INTERNE
+  DISPLAY CCTNOM       OF CRCLI_CONTACT
+
+  ACCEPT  COMNUMCMD    OF PDCOMMAN_INTERNE
+  ACCEPT  PLVCODLIV    OF PDCOMMAN_INTERNE
+  DISPLAY CBIDSC       OF A_CBI_PLVCODLIV
+  ACCEPT  COMCOMLIV    OF PDCOMMAN_INTERNE
+  ACCEPT  COMTAXCODTPS OF PDCOMMAN_INTERNE
+  ACCEPT  COMNUMEXPTPS OF PDCOMMAN_INTERNE
+  ACCEPT  COMTAXCODTVQ OF PDCOMMAN_INTERNE
+  ACCEPT  COMNUMEXPTVQ OF PDCOMMAN_INTERNE
+END
+
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDCOMMAN_INTERNE &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDCOMMAN_INTERNE &
+     AND NOT NEWRECORD     OF PDCOMMAN_INTERNE &
+     AND NOT DELETEDRECORD OF PDCOMMAN_INTERNE &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+END
+
+
+BUILD
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+***************************** Adresse de livraison *****************************
+* Num. commande.: xx-xx-xxx    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        *
+********************************************************************************
+*                                                                              *
+* Nom...........: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+* Adresse.......: xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                *
+*                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                *
+*                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                *
+*                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                *
+*                      xxxxxxxxxx                                              *
+* Téléphone.....: xxxxxxxxxxxxx                                                *
+* Fax...........: xxxxxxxxxxxxx                                                *
+* Contact.......: xxxxxxxxxxxxxxxxxxxx                                         *
+* Numéro client.: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+* Condition liv.: xxx  xxxxxxxxxxxxxxxxxxxxxxxxx                               *
+* Code taxe TPS.: xx   Numéro TPS....:  xxxxxxxxxxxxxxxxxxxxxxxxx              *
+* Code taxe TVP.: xx   Numéro TVQ....:  xxxxxxxxxxxxxxxxxxxxxxxxx              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+********************************************************************************
+@ENDIF

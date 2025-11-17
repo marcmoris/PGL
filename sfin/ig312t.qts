@@ -1,0 +1,225 @@
+;------------------------------------------------------------------------------
+;
+;/T/ Titre........: Recherche de tout les bloc de granite
+;    Programmeur..: Rémy Demers
+;
+;    Description..: Supplement au quiz ig312z affin de trouver tout les prix
+;                   des blocs pour sommariser un prix moyen
+;
+;
+;-------------------------------------------------------------------------------
+;
+use ussetqts nolist
+
+set lock record update
+
+run ig312t
+
+GLOBAL TEMPORARY T-BLOVOLMC3PYE FLOAT   SIZE 8
+GLOBAL TEMPORARY T-BLOVOLMC3NET FLOAT   SIZE 8
+GLOBAL TEMPORARY COMPTEUR INTEGER SIZE 4
+
+global temporary g_ciecle character size 04
+
+;--------------------------------------------------------
+request r_subfile_1
+access pdbloc
+choose ciecle parm
+select if blostu of pdbloc <> "T" and &
+          blostu of pdbloc <> "V" and &
+          blostu of pdbloc <> "D" and &
+          blostu of pdbloc <> "E"
+subfile wpdbloc keep include pdbloc           &
+                       index sf1_idx          &
+                     segment blonumgra001apr, &
+                             blonumgra002apr, &
+                             blorecapr      , &
+                             ciecle         
+item g_ciecle = ciecle of pdbloc
+;--------------------------------------------------------
+request r_subfile_2
+acc pdreception_bloc link blonumgra001apr, &
+                          blonumgra002apr, &
+                          blorecapr      , &
+                          ciecle           &
+                       to blonumgra001apr, &
+                          blonumgra002apr, &
+                          blorecapr      , &
+                          ciecle of *wpdbloc
+choose ciecle (g_ciecle)
+subfile wpdreception_bloc keep include pdreception_bloc &
+                                 index sf2_idx          &
+                               segment blonumgra001apr, &
+                                       blonumgra002apr, &
+                                       blorecapr      , &
+                                       ciecle         
+;--------------------------------------------------------
+request r_subfile_3
+access pdbloc_defauts
+choose ciecle (g_ciecle)
+subfile wpdbloc_defauts keep include pdbloc_defauts  &
+                              index sf3_idx          &
+                            segment blonumgra001apr, &
+                                    blonumgra002apr, &
+                                    blorecapr      , &
+                                    ciecle         
+;--------------------------------------------------------
+request r_subfile_4
+access pdredim_bloc
+choose ciecle (g_ciecle)
+subfile wpdredim_bloc keep include pdredim_bloc      &
+                              index sf4_idx          &
+                            segment blonumgra001apr, &
+                                    blonumgra002apr, &
+                                    blorecapr      , &
+                                    ciecle         
+;--------------------------------------------------------
+request r_subfile_5
+access pdreception
+choose ciecle (g_ciecle)
+subfile wpdreception keep include pdreception  &
+                              index sf5_idx    &
+                            segment rctnumrec, &
+                                    ciecle         
+;--------------------------------------------------------
+request r_subfile_6
+access pddet_bon_comman
+choose ciecle (g_ciecle)
+subfile wpddet_bon_comman keep include pddet_bon_comman &
+                              index sf6_idx             &
+                            segment bcmnumbcm         , &
+                                    ciecle            , &
+                                    podnumlig
+;--------------------------------------------------------
+REQUEST TOUT_LES_BLOCS
+
+access *wpdbloc link blonumgra001apr of  wpdbloc                   , &
+                     blonumgra002apr of  wpdbloc                   , &
+                     blorecapr       of  wpdbloc                   , &
+                     ciecle          of  wpdbloc                     &
+                  to blonumgra001apr                               , &
+                     blonumgra002apr                               , &
+                     blorecapr                                     , &
+                     ciecle          of *wpdbloc_defauts   optional  &
+
+                link blonumgra001apr of  wpdbloc                   , &
+                     blonumgra002apr of  wpdbloc                   , &
+                     blorecapr       of  wpdbloc                   , &
+                     ciecle          of  wpdbloc                     &
+                  to blonumgra001apr                               , &
+                     blonumgra002apr                               , &
+                     blorecapr                                     , &
+                     ciecle          of *wpdredim_bloc     optional  &
+
+                link blonumgra001apr of  wpdbloc                   , &
+                     blonumgra002apr of  wpdbloc                   , &
+                     blorecapr       of  wpdbloc                   , &
+                     ciecle          of  wpdbloc                     &
+                  to blonumgra001apr                               , &
+                     blonumgra002apr                               , &
+                     blorecapr                                     , &
+                     ciecle          of *wpdreception_bloc optional  &
+
+                link rctnumrec       of  wpdreception_bloc         , &
+                     ciecle          of  wpdreception_bloc           &
+                  to rctnumrec                                     , &
+                     ciecle          of *wpdreception      optional  &
+
+                link bcmnumbcm       of  wpdreception              , &
+                     ciecle          of  wpdreception              , &
+                     podnumlig       of  wpdreception_bloc           &
+                  to bcmnumbcm                                     , &
+                     ciecle                                        , &
+                     podnumlig       of *wpddet_bon_comman optional
+
+TEMPORARY T-VALEUR-TOTALE FLOAT SIZE 8
+TEMPORARY T-REBPRIMC3 FLOAT SIZE 8
+
+sort on ciecle       of wpdbloc &
+     on tgrcodgra    of wpdbloc &
+     on blonumbloapr of wpdbloc
+
+item compteur count at blonumbloapr reset at tgrcodgra of wpdbloc
+
+item t-rebprimc3  = rebprimc3ven of wpdredim_bloc &
+                if rebprimc3ven of wpdredim_bloc <> 0              &
+                else                                                  &
+                   rebprimc3  of wpdredim_bloc                     &
+                   if rebprimc3 of wpdredim_bloc <> 0              &
+                   else                                               &
+                     rebprimc3ven of wpdreception_bloc    &
+                     if rebprimc3ven of wpdreception_bloc <> 0              &
+                      else                                                  &
+                        rebprimc3  of wpdreception_bloc                     &
+                        if rebprimc3 of wpdreception_bloc <> 0              &
+                         else                                               &
+                           podpri of wpddet_bon_comman at blonumbloapr
+
+
+ITEM T-REBPRIMC3 = 0 IF T-REBPRIMC3 = 0.1
+
+item t-blovolmc3pye =blovolmc3pye of wpdbloc  &
+                if dblcoddef of wpdbloc_defauts <> "RJ" at blonumbloapr
+
+item t-blovolmc3net= blovolmc3net of wpdbloc  &
+                if dblcoddef of wpdbloc_defauts <> "RJ" at blonumbloapr
+
+ITEM T-VALEUR-TOTALE = T-REBPRIMC3 * T-BLOVOLMC3PYE AT BLONUMBLOAPR
+
+SUBFILE WIG312A  KEEP AT BLONUMBLOAPR &
+include   ciecle        of wpdbloc   ,   &
+          tgrcodgra     of wpdbloc   ,   &
+          blonumbloapr  of wpdbloc   ,   &
+          blovolmc3bru  of wpdbloc       ,      &
+          blovolmc3net  of wpdbloc       ,      &
+          blovolmc3pye  of wpdbloc       ,      &
+          t-blovolmc3pye         ,              &
+          t-blovolmc3net          ,             &
+          t-rebprimc3         ,                 &
+          t-valeur-totale         ,             &
+          compteur
+
+;--------------------------------------------------------------------
+REQUEST SOMMARISATION
+
+ACCESS *WIG312A
+
+TEMPORARY BRU FLOAT SIZE 8
+TEMPORARY NET FLOAT SIZE 8
+TEMPORARY PYE FLOAT SIZE 8
+TEMPORARY TPYE FLOAT SIZE 8
+TEMPORARY TNET FLOAT SIZE 8
+TEMPORARY TREB FLOAT SIZE 8
+TEMPORARY TVAL FLOAT SIZE 8
+TEMPORARY TCOMPTEUR INTEGER SIZE 4
+
+SORTED ON CIECLE OF WIG312A &
+       ON TGRCODGRA OF WIG312A
+
+ITEM BRU  SUBTOTAL BLOVOLMC3BRU OF WIG312A RESET AT TGRCODGRA OF WIG312A
+ITEM NET  SUBTOTAL BLOVOLMC3NET OF WIG312A RESET AT TGRCODGRA OF WIG312A
+ITEM PYE  SUBTOTAL BLOVOLMC3PYE OF WIG312A RESET AT TGRCODGRA OF WIG312A
+ITEM TPYE SUBTOTAL T-BLOVOLMC3PYE OF WIG312A RESET AT TGRCODGRA OF WIG312A
+ITEM TNET SUBTOTAL T-BLOVOLMC3NET OF WIG312A RESET AT TGRCODGRA OF WIG312A
+;ITEM TREB SUBTOTAL T-REBPRIMC3 OF WIG312A RESET AT TGRCODGRA OF WIG312A
+ITEM TVAL SUBTOTAL T-VALEUR-TOTALE OF WIG312A RESET AT TGRCODGRA OF WIG312A
+
+ITEM TCOMPTEUR COUNT RESET AT TGRCODGRA OF WIG312A
+
+
+SUBFILE WIG312B KEEP AT TGRCODGRA &
+INCLUDE   CIECLE        OF WIG312A   ,   &
+          TGRCODGRA     OF WIG312A   ,   &
+          BLONUMBLOAPR  OF WIG312A   ,   &
+          BRU         ,      &
+          NET         ,      &
+          PYE         ,      &
+          TPYE        ,      &
+          TNET        ,      &
+          TREB ,&
+          TVAL ,&
+          TCOMPTEUR
+
+
+BUILD ig312t
+

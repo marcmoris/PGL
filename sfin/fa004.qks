@@ -1,0 +1,2117 @@
+;/T/ Factures
+;
+;//M/GRA01/Francois Richard/1999-06-18
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur..: Steeve Duguay
+;    Date Création: 31 mars 1995
+;
+;    Description..: Saisie des factures au niveau du module de facturation.
+;
+;/M/ François Déry, 30 avril 1999
+;       Modifier l'accèss au fichier de séquence car il a
+;       été converti en format interbase au lieu d'indexé.
+;
+;/M/ Marie-Josée Hamel, 96.02.08, ajouter statut, mnt escompte
+;/M/ Marie-Josée Hamel, 96.02.12, ajouter le type NC, AJ et CR
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN fa004 ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             ACTIVITIES ENTRY, FIND, CHANGE &
+             RECEIVING T_CLICIECLE, &
+                       T_CIECLEMNU, &
+                       T_CIENOM   , &
+                       T_PECCLEMNU, &
+                       T_PECCLECOU, &
+                       T_FARCLEFND
+
+TEMPORARY T_PECCLECOU_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_FIELDTEXT_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+USE ussectmp  NOLIST
+    "FA004"
+
+USE fa004.hlp NOLIST
+
+USE usactecr NOLIST
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Statut"
+  MENUITEM LABEL "Approbation           " ACTION DESIGNER D005
+  MENUITEM LABEL "Remise à Préliminaire " ACTION DESIGNER D006
+  MENUITEM LABEL "Annulation            " ACTION DESIGNER D007
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Détail de la facture    " ACTION DESIGNER D001
+  MENUITEM LABEL "Adresse - client divers " ACTION DESIGNER D002
+  MENUITEM LABEL "Vérification            " ACTION DESIGNER D003
+  MENUITEM LABEL "Entête de la facture    " ACTION DESIGNER D004
+  MENUITEM LABEL "Copie de facture        " ACTION DESIGNER D008
+@ELSE
+ACTIONMENU LABEL "%%%ts"
+  MENUITEM LABEL "%%%robation                     " ACTION DESIGNER D005
+  MENUITEM LABEL "%%%ise à l'état Préliminaire    " ACTION DESIGNER D006
+  MENUITEM LABEL "%%%ulation                      " ACTION DESIGNER D007
+ACTIONMENU LABEL "Subscreens"
+  MENUITEM LABEL "Invoice detail                  " ACTION DESIGNER D001
+  MENUITEM LABEL "Addresse                        " ACTION DESIGNER D002
+  MENUITEM LABEL "Verification                    " ACTION DESIGNER D003
+  MENUITEM LABEL "Invoice top                     " ACTION DESIGNER D004
+  MENUITEM LABEL "%%%ie de facture                " ACTION DESIGNER D008
+@ENDIF
+
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE FAFAR_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_RAD_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE MCRAD_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CLICIECLE CHARACTER SIZE 4  ; Compagnie du client.
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de compagnie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie du menu.
+TEMPORARY T_PECCLECOU CHARACTER SIZE 4  RESET AT STARTUP ; Période courante
+TEMPORARY T_PECCLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Période courante
+TEMPORARY T_FARCLEFND CHARACTER SIZE 9  RESET AT STARTUP
+
+;
+; Variables temporaires pour répèter la valeur de la période et du lot en
+; mode saisie.
+;
+TEMPORARY T_PECCLESAI CHARACTER SIZE 4 RESET AT STARTUP
+TEMPORARY T_LCRCLESAI CHARACTER SIZE 4 RESET AT STARTUP
+
+;-------------------------------------------------------------------------------
+
+;
+;
+FILE FACPT_A_REC      PRIMARY
+
+  ITEM CIECLE    OF FACPT_A_REC INITIAL T_CIECLEMNU
+  ITEM REFCIECLE OF FACPT_A_REC INITIAL T_CLICIECLE
+  ITEM REFCLETYP OF FACPT_A_REC INITIAL "C"
+  ITEM FARDAT    OF FACPT_A_REC INITIAL SYSDATE
+  ITEM FARDATCRE OF FACPT_A_REC INITIAL SYSDATE
+  ITEM FARHRECRE OF FACPT_A_REC INITIAL SYSTIME / 10000
+  ITEM FARUSRCRE OF FACPT_A_REC INITIAL LOGONID
+  ITEM PECCLE    OF FACPT_A_REC INITIAL T_PECCLESAI
+  ITEM LCRCLE    OF FACPT_A_REC INITIAL T_LCRCLESAI
+
+;
+; Cette table est utilisée pour valider l'adresse d'état de compte ou pour créer
+; l'adresse pour un client divers.
+;
+FILE MCREF_ADRESSE    SECONDARY &
+                      NOITEM    &
+                      NODELETE
+  ACCESS VIA REFCIECLE, &
+             REFCLETYP, &
+             REFCLENUM, &
+             RADCLE     &
+        USING REFCIECLE OF FACPT_A_REC, &
+              REFCLETYP OF FACPT_A_REC, &
+              REFCLENUM OF FACPT_A_REC, &
+              RADCLE    OF FACPT_A_REC
+
+  ITEM REFCIECLE   OF MCREF_ADRESSE FINAL REFCIECLE OF FACPT_A_REC
+  ITEM REFCLETYP   OF MCREF_ADRESSE FINAL REFCLETYP OF FACPT_A_REC
+  ITEM REFCLENUM   OF MCREF_ADRESSE FINAL REFCLENUM OF FACPT_A_REC
+  ITEM RADCLE      OF MCREF_ADRESSE FINAL RADCLE    OF FACPT_A_REC
+  ITEM RADETACPTCR OF MCREF_ADRESSE INITIAL  "1"
+
+;
+; Item du FACPT_A_REC, le timbre de modification est mis à jour si l'usager
+; modifie la fichier ou l'adresse.
+;
+  ITEM FARDATMOD OF FACPT_A_REC FINAL   SYSDATE        &
+                                        IF NOT NEWRECORD OF FACPT_A_REC AND &
+                                           ( ALTEREDRECORD OF FACPT_A_REC OR &
+                                             ALTEREDRECORD OF MCREF_ADRESSE )
+  ITEM FARHREMOD OF FACPT_A_REC FINAL   SYSTIME / 10000 &
+                                        IF NOT NEWRECORD OF FACPT_A_REC AND &
+                                           ( ALTEREDRECORD OF FACPT_A_REC OR &
+                                             ALTEREDRECORD OF MCREF_ADRESSE )
+  ITEM FARUSRMOD OF FACPT_A_REC FINAL   LOGONID         &
+                                        IF NOT NEWRECORD OF FACPT_A_REC AND &
+                                           ( ALTEREDRECORD OF FACPT_A_REC OR &
+                                             ALTEREDRECORD OF MCREF_ADRESSE )
+;
+; Validation du lot.
+;
+FILE CRLOT            REFERENCE
+  ACCESS VIA CIECLE, &
+             PECCLE, &
+             LCRCLE &
+         USING CIECLE OF FACPT_A_REC, &
+               PECCLE OF FACPT_A_REC, &
+               LCRCLE OF FACPT_A_REC
+
+
+;
+; Code bilingue, pour le statut de la facture
+;
+DEFINE    D_FARSTU CHARACTER SIZE 16 = "FARSTU"
+TEMPORARY T_FARSTU CHARACTER SIZE 1
+
+FILE VCBI_DSC REFERENCE ALIAS A_CBI_FARSTU
+  ACCESS  VIA XELNOM, &
+              CBICLE  &
+          USING D_FARSTU, &
+                FARSTU OF FACPT_A_REC
+
+
+
+;
+; Validation de l'existence de la facture référée
+;
+FILE FACPT_A_REC      REFERENCE ALIAS A_FAR_REFEREE
+  ACCESS VIA   CIECLE , &
+               FARCLE   &
+         USING CIECLE    OF FACPT_A_REC , &
+               FARCLEREF OF FACPT_A_REC
+
+
+;
+; Pour trouver le prochain numéro d'ajustement
+;
+FILE FACPT_A_REC      DESIGNER OPEN READ ALIAS A_FAR_AJ
+
+
+;
+; Numéro de séquence des adresses pour les clients divers.
+;
+FILE MCRAD_SEQ        DESIGNER &
+                      TRANSACTION GEN_RAD_SEQ
+
+;
+; Validation du numéro de client et on a besoin de certaines informations sur
+; le client , comme les termes d'encaissements, le statut, le type...
+;
+FILE VCLC_CLI         REFERENCE
+  ACCESS VIA CLICIECLE, &
+             CLICLE   , &
+             CIECLE     &
+         USING REFCIECLE OF FACPT_A_REC, &
+               REFCLENUM OF FACPT_A_REC, &
+               CIECLE    OF FACPT_A_REC
+
+;
+; Pour avoir le total d'ajustement et de note de crédit
+;
+FILE VFAR_SLD         REFERENCE
+  ACCESS VIA   CIECLE , &
+               FARCLE   &
+         USING CIECLE OF FACPT_A_REC , &
+               FARCLE OF FACPT_A_REC
+
+;
+; Valiation des termes et calcul des dates due.
+;
+FILE CRTERME          DESIGNER &
+                      OPEN READ
+
+
+;
+; Validation du type de facture(bilingue).
+;
+DEFINE    D_FARTYPECR CHARACTER SIZE 16 = "FARTYPECR"
+TEMPORARY T_FARTYPECR CHARACTER SIZE  4
+;
+FILE VCBI_DSC         REFERENCE
+  ACCESS VIA XELNOM, &
+             CBICLE  &
+         USING D_FARTYPECR, &
+               FARTYPECR OF FACPT_A_REC
+
+;
+; Validation de la période comptable.
+;
+FILE MCPERIODE_CTB    REFERENCE
+  ACCESS VIA PECCLE &
+         USING PECCLE OF FACPT_A_REC
+
+;
+; Pour avoir la devise de base du Grand livre.
+;
+FILE MCHOLDING       REFERENCE
+  ACCESS VIA CIENMC &
+         USING "1"
+
+;-------------------------------------------------------------------------------
+;
+; Permet de conserver le taux de la devise à chacune des modifications.
+;
+FILE MCDEVISE   DESIGNER OPEN READ
+
+
+;-------------------------------------------------------------------------------
+;
+; Pour sélectionner une facture selon un numéro de connaissement
+;
+TEMPORARY T_CNSLAB CHARACTER SIZE 15 RESET AT STARTUP
+TEMPORARY T_CNS    CHARACTER SIZE 7  RESET AT STARTUP
+
+FILE FAFAR_ENTETE    DESIGNER OPEN READ
+
+  ACCESS VIA    CIECLE, &
+                FARCLE  &
+         USING  CIECLE OF FACPT_A_REC, &
+                FARCLE OF FACPT_A_REC
+
+ SELECT IF   T_CNS = FFECNS1 OF FAFAR_ENTETE &
+          OR T_CNS = FFECNS2 OF FAFAR_ENTETE &
+          OR T_CNS = FFECNS3 OF FAFAR_ENTETE &
+          OR T_CNS = FFECNS4 OF FAFAR_ENTETE &
+          OR T_CNS = FFECNS5 OF FAFAR_ENTETE &
+          OR T_CNS = FFECNS6 OF FAFAR_ENTETE &
+          OR T_CNS = FFECNS7 OF FAFAR_ENTETE
+
+;------------------------------------------------------------------------------
+;
+; Fichier pour les numéros séquentiels des factures
+;
+FILE FAFAR_SEQ DESIGNER &
+               TRANSACTION GEN_NUM_SEQ
+
+
+;-------------------------------------------------------------------------------
+;
+; Pour creer les lignes d'historique lors de l'approbation
+;
+FILE FAFAR_DETAIL     DESIGNER OPEN READ
+  ACCESS VIA   CIECLE , &
+               FARCLE   &
+         USING CIECLE OF FACPT_A_REC , &
+               FARCLE OF FACPT_A_REC
+
+FILE FAFAR_HIST       DESIGNER
+  ACCESS VIA   CIECLE    , &
+               FHIFARCLE , &
+               FFDCLELIG   &
+         USING CIECLE    OF FAFAR_DETAIL , &
+               FARCLE    OF FAFAR_DETAIL , &
+               FFDCLELIG OF FAFAR_DETAIL
+
+FILE FAPERIODE        DESIGNER OPEN READ
+  ACCESS VIA   CIECLE , &
+               PERANN   &
+         USING CIECLE OF FAFAR_DETAIL , &
+               NCONVERT( ASCII( FARDAT OF FACPT_A_REC )[3:2] )
+
+SELECT IF  &
+ FARDAT OF FACPT_A_REC >= PERDATDEB OF FAPERIODE &
+        AND FARDAT OF FACPT_A_REC <= PERDATFIN OF FAPERIODE
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables temporaire pour le calcul des dates due.
+;
+USE ustertmp NOLIST
+
+;
+TEMPORARY T_INFFAR    CHARACTER SIZE  1   RESET AT STARTUP
+TEMPORARY T_LCRCLE    CHARACTER SIZE  4 ; Popup sur les lots
+TEMPORARY T_CODMOD    CHARACTER SIZE  2 ; Popup sur les périodes
+TEMPORARY T_PECCLE    CHARACTER SIZE  4 ; Popup sur les périodes et lots
+TEMPORARY T_TYPECR    CHARACTER SIZE  2 ; Popup sur les lots
+
+TEMPORARY T_CLICLE    CHARACTER SIZE  6 ; Popup sur les clients
+TEMPORARY T_REFCLETYP CHARACTER SIZE  1 ; Popup sur les adresses du client
+TEMPORARY T_RADCLE    INTEGER UNSIGNED &
+                                SIZE  2 ; Popup sur les adresses du client
+TEMPORARY T_TYPADR    CHARACTER SIZE  3 ; Popup sur les adresses du client
+
+TEMPORARY T_FARCLE    CHARACTER SIZE 12 ; Popup sur les documents référés
+TEMPORARY T_FLGSLD    CHARACTER SIZE  1 ; Popup sur les documents référés.??
+TEMPORARY T_TYPECRPAT CHARACTER SIZE 11 ; Popup sur les documents référés.
+TEMPORARY T_CCDCLELIG INTEGER   SIZE  2 ; Popup sur les lignes de cédule
+
+TEMPORARY T_TMECATPAT CHARACTER SIZE  11; Popup sur les termes d'encaissement.
+TEMPORARY T_TMECLE    CHARACTER SIZE  4 ; Popup sur les termes d'encaissement.
+
+TEMPORARY T_NUMAJT    CHARACTER SIZE  2 ; Pour le traitement des ajustements.
+
+TEMPORARY T_SIZE      INTEGER   SIZE  2
+
+;
+; Variable d'affichage des devises et du montant à recevoir.
+;
+DEFINE D_DEVCAR CHARACTER SIZE 4 = " " IF DEVCLE OF VCLC_CLI = &
+                                          DEVCLE OF MCHOLDING &
+                              ELSE "/" + DEVCLE OF VCLC_CLI
+
+
+
+;
+; Solde à recevoir.
+;
+DEFINE D_SLD_A_REC FLOAT SIZE 8 = FARMNT      OF FACPT_A_REC - &
+                                  FARMNTREC   OF FACPT_A_REC + &
+                                  V_FARMNTAJT OF VFAR_SLD    + &
+                                  V_FARMNTCRT OF VFAR_SLD
+
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Factures " &
+@ELSE
+      " Invoices " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST
+
+
+ALIGN(3,3,19) (,49,65)
+
+FIELD PECCLE OF FACPT_A_REC HIDDEN ID 05 &
+LABEL "Période ......:"&
+        DEFAULT T_PECCLEMNU &
+        DUPLICATE &
+        NOCHANGE &
+        LOOKUP ON MCPERIODE_CTB &
+          MESSAGE 606 ; Cette periode est inexistante
+
+
+FIELD LCRCLE    OF FACPT_A_REC &
+LABEL "Lot...........:"&
+        REQUIRED  &
+        DUPLICATE &
+        NOCHANGE  &
+        NUMERIC   &
+        SIGNIFICANCE 4 &
+        LOOKUP ON CRLOT &
+          MESSAGE 622 ; Ce lot est inexistant
+
+SKIP
+
+ALIGN(3,3,19) (,,22) (,49,65) (,,67)
+
+FIELD FARTYPECR OF FACPT_A_REC HIDDEN ID 10 &
+LABEL "Type facture..:"&
+        DEFAULT "FA" &
+        NOCHANGE     &
+        NOCORRECT    &
+        LOOKUP ON VCBI_DSC &
+          MESSAGE 609 ; Ce type d'écriture est invalide
+
+FIELD CBIDSC OF VCBI_DSC &
+        DISPLAY
+
+FIELD FARSTU OF FACPT_A_REC &
+LABEL "Statut........:"&
+        DISPLAY
+
+FIELD CBIDSC OF A_CBI_FARSTU &
+        DISPLAY SIZE 13
+
+ALIGN(,40,56) (,,68)
+
+FIELD FARDATJOU OF FACPT_A_REC  FORMAT YYYYMMDD PATTERN "####/##/##"&
+        LABEL "Date du statut:" &
+        DISPLAY
+
+FIELD FARHREJOU OF FACPT_A_REC &
+        DISPLAY SIZE 5
+
+ALIGN (3,3,19) (,,26)
+
+FIELD REFCLENUM OF FACPT_A_REC HIDDEN ID 15 &
+@IF FRANCAIS
+        LABEL "No client.....:" &
+@ELSE
+        LABEL "Client no.....:" &
+@ENDIF
+        REQUIRED &
+        NOCHANGE &
+        LOOKUP ON VCLC_CLI &
+          MESSAGE 624  ; Ce client n'existe pas.
+
+FIELD RADNOM OF MCREF_ADRESSE &
+        REQUIRED
+
+FIELD RADCLE OF FACPT_A_REC HIDDEN ID 20 &
+LABEL "No adresse....:"&
+        REQUIRED &
+        LOOKUP ON MCREF_ADRESSE &
+          MESSAGE 625 ; Ce numero d'adresse est inexistante
+FIELD RADADR1 OF MCREF_ADRESSE DISPLAY
+
+ALIGN (,,3) (,,19)
+
+HILITE DISPLAY HALFTONE
+
+FIELD T_CNSLAB &
+        DISPLAY
+FIELD T_CNS
+
+USE ushilite NOLIST
+USE ustitoff NOLIST
+
+ALIGN (3,3,19) (,39,55) ;(,,67)
+
+FIELD FARCLE    OF FACPT_A_REC HIDDEN ID 25 &
+LABEL "Facture.......:"&
+        DISPLAY
+
+FIELD FARDAT    OF FACPT_A_REC  FORMAT YYYYMMDD PATTERN "####/##/##" &
+LABEL "Date facture..:"
+
+FIELD FARCMDCLI OF FACPT_A_REC HIDDEN ID 30 &
+LABEL "Bon commande.."
+
+
+
+
+FIELD FARCLEREF OF FACPT_A_REC &
+LABEL "Fact. référée.:" &
+        REQUIRED &
+        NOCHANGE &
+        IF   FARTYPECR OF FACPT_A_REC = "NC" &
+          OR FARTYPECR OF FACPT_A_REC = "AJ" &
+        LOOKUP ON A_FAR_REFEREE &
+        MESSAGE 2754 ; Cette facture n'existe pas
+
+
+
+
+ALIGN(3,3,19) (,,24) (,35,43) (,,48) (,59,65) (,,70)
+
+FIELD FARTERNET  OF FACPT_A_REC HIDDEN ID 35 &
+LABEL "Terme net.....:"
+
+FIELD FARDATNET  OF FACPT_A_REC FORMAT YYYYMMDD PATTERN "####/##/##"
+
+FIELD FARTERESC1 OF FACPT_A_REC &
+@IF FRANCAIS
+        LABEL "Esc(1):"
+@ELSE
+        LABEL "Dis(1):"
+@ENDIF
+
+FIELD FARDATESC1 OF FACPT_A_REC FORMAT YYYYMMDD PATTERN "####/##/##"
+
+FIELD FARTERFRS  OF FACPT_A_REC &
+@IF FRANCAIS
+        LABEL "Frais:"
+@ELSE
+        LABEL "Expd.:"
+@ENDIF
+
+FIELD FARDATFRS  OF FACPT_A_REC FORMAT YYYYMMDD PATTERN "####/##/##"
+
+SKIP TO GROUP 3
+
+FIELD FARTERESC2 OF FACPT_A_REC &
+@IF FRANCAIS
+        LABEL "Esc(2):"
+@ELSE
+        LABEL "Dis(2):"
+@ENDIF
+
+FIELD FARDATESC2 OF FACPT_A_REC FORMAT YYYYMMDD PATTERN "####/##/##"
+
+
+ALIGN(3,3,19)
+
+FIELD FARDSC1 OF FACPT_A_REC HIDDEN ID 40 &
+LABEL "Description...:"
+
+ALIGN (,,19)
+FIELD FARDSC2 OF FACPT_A_REC NOLABEL ID SAME
+
+ALIGN(3,3,19)
+
+FIELD FARCODPOS  OF FACPT_A_REC HIDDEN ID 43 &
+LABEL "Code pos., Zip:"
+
+
+SKIP 1
+
+ALIGN(3,3,19) (,,34)
+
+FIELD FARMNT     OF FACPT_A_REC HIDDEN ID 45 &
+LABEL "Montant brut..:"&
+        DISPLAY
+
+FIELD D_DEVCAR   &
+        DISPLAY
+
+ALIGN (,3,19)
+
+FIELD FARMNTREC  OF FACPT_A_REC &
+LABEL "Montant recu..:"&
+      DISPLAY
+
+FIELD V_FARMNTAJT  OF VFAR_SLD &
+      LABEL "Ajustement....:" &
+      PICTURE "^^,^^^,^^^.^^ " &
+      TRAILING SIGN "-" SIGNIFICANCE 5 BWZ &
+      DISPLAY
+
+FIELD V_FARMNTCRT  OF VFAR_SLD &
+      LABEL "Crédit........:" &
+      PICTURE "^^,^^^,^^^.^^ " &
+      TRAILING SIGN "-" SIGNIFICANCE 5 BWZ &
+      DISPLAY
+
+FIELD D_SLD_A_REC &
+      LABEL "Solde à rec...:" &
+      PICTURE "^^,^^^,^^^.^^ " &
+      TRAILING SIGN "-" SIGNIFICANCE 5 BWZ
+
+SKIP TO LINE 18
+
+ALIGN (,49,65)
+
+FIELD FARMNTTPS  OF FACPT_A_REC &
+LABEL "Montant T.P.S.:"&
+        DISPLAY
+
+FIELD FARMNTTVQ  OF FACPT_A_REC &
+LABEL "Montant T.V.Q.:"&
+        DISPLAY
+
+FIELD FARMNTESC  OF FACPT_A_REC &
+LABEL "Escompte......:"&
+        DISPLAY
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+
+  ;
+  ; Si l'écran n'est pas appelé par le menu, alors on interdit la saisie,
+  ; la destruction et la modification des données.
+  ;
+  IF T_FARCLEFND <> ""
+  THEN BEGIN
+    LET TZ_SECENT = "0"
+    LET TZ_SECMOD = "0"
+    LET TZ_SECDEL = "0"
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT FARCLE OF FACPT_A_REC
+BEGIN
+  IF    7  > SIZE( TRUNCATE ( FIELDTEXT ) ) &
+    AND 0 <> SIZE( TRUNCATE ( FIELDTEXT ) )
+  THEN BEGIN
+    LET T_SIZE = SIZE (TRUNCATE( FIELDTEXT) )
+    LET FIELDTEXT = FIELDTEXT[1:2] &
+                  + "0000000"[1:(9 - T_SIZE)] &
+                  + FIELDTEXT[3:(T_SIZE - 2) ]
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les périodes.
+;
+;
+PROCEDURE INPUT PECCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CODMOD = "CR"
+    LET T_PECCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc109 MODE F PASSING T_CIECLEMNU, &
+                                    T_PECCLE   , &
+                                    T_CODMOD
+    LET FIELDTEXT = TRUNC(T_PECCLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation de la période.
+;
+;
+PROCEDURE EDIT PECCLE
+BEGIN
+
+  ; Ajustement pour le changement de siècle
+  IF FIELDTEXT[1:1] < "8"
+  THEN LET T_FIELDTEXT_SIE = "1" + FIELDTEXT
+  ELSE LET T_FIELDTEXT_SIE = "0" + FIELDTEXT
+
+  ; Ajustement pour le changement de siècle
+  IF T_PECCLECOU[1:1] < "8"
+  THEN LET T_PECCLECOU_SIE = "1" + T_PECCLECOU
+  ELSE LET T_PECCLECOU_SIE = "0" + T_PECCLECOU
+
+  IF T_FIELDTEXT_SIE < T_PECCLECOU_SIE
+  THEN ERROR 607 ; Cette période est fermée.
+  ;
+  IF FIELDTEXT <> T_PECCLECOU
+  THEN WARNING 608 ; La période indiquée est différente de la période courante.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les lots.
+;
+;
+PROCEDURE INPUT LCRCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TYPECR = "FA"
+    LET T_PECCLE = PECCLE OF FACPT_A_REC
+    LET T_LCRCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cr101 MODE F PASSING T_CIECLEMNU, &
+                                    T_TYPECR, &
+                                    T_PECCLE, &
+                                    T_LCRCLE
+    LET FIELDTEXT = TRUNC(T_LCRCLE)
+  END
+  ;
+  ; Force l'éxécution du LOOKUP sur le lot et de la procédure EDIT.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNC(LCRCLE OF FACPT_A_REC))
+  THEN LET FIELDTEXT = LCRCLE OF FACPT_A_REC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du lot.
+;
+;
+PROCEDURE EDIT LCRCLE
+BEGIN
+  IF LCRTYPECR OF CRLOT <> "FA"
+  THEN ERROR 627 ; Ce lot n'est pas du bon type.
+  ;
+  IF LCRDATJOU OF CRLOT <> 0
+  THEN ERROR 628 ; Le lot est déjà journalisé.
+  ;
+  IF LCRATRJOU OF CRLOT = "1"
+  THEN ERROR 629 ; On ne peut pas utiliser un lot autorisé à la journalisation.
+  ;
+  IF LCRUSR OF CRLOT <> LOGONID
+  THEN ERROR 630 ; Ce lot ne vous est pas destiné.
+  ;
+  IF LCRNBRTRSVER OF CRLOT = 0
+  THEN ERROR 719 ; Saisie interdite, entrez d'abord vos montants vérifiés dans le lot.
+  ;
+  IF LCRDATVAL OF CRLOT <> 0
+  THEN WARNING 631 ; Une liste de vérification a déjà été demandé pour ce lot.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les types de factures(bilingue).
+;
+;
+PROCEDURE INPUT FARTYPECR
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_FARTYPECR = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_FARTYPECR, T_FARTYPECR
+    LET FIELDTEXT = TRUNC(T_FARTYPECR)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; On ne peut pas saisir un paiement non-appliqué par cet écran.
+;
+;
+PROCEDURE EDIT FARTYPECR
+BEGIN
+  IF FIELDTEXT = "NA"
+  THEN ERROR 623 ; Ce type de facture n'est pas permis.
+END
+
+
+;-------------------------------------------------------------------------------
+; Pour faire afficher la date d'approbation si on est seulement rendu à approuvé
+; sinon, on met la date de transfert.
+;
+PROCEDURE OUTPUT FARDATJOU OF FACPT_A_REC
+BEGIN
+  IF FARSTU OF FACPT_A_REC = "A"
+  THEN LET FIELDTEXT = ASCII( FARDATAPP OF FACPT_A_REC )
+
+END
+
+;-------------------------------------------------------------------------------
+; Pour faire afficher la date d'approbation si on est seulement rendu à approuvé
+; sinon, on met la date de transfert.
+;
+PROCEDURE OUTPUT FARHREJOU OF FACPT_A_REC
+BEGIN
+  IF FARSTU OF FACPT_A_REC = "A"
+  THEN LET FIELDTEXT = ASCII( 0 )
+
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les client.
+;
+;
+PROCEDURE INPUT REFCLENUM
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CLICLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cr102 MODE F PASSING T_CLICIECLE, T_CIECLEMNU, T_CLICLE
+    LET FIELDTEXT = TRUNC(T_CLICLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du client.
+;
+;
+PROCEDURE EDIT REFCLENUM
+BEGIN
+  IF CLISTU OF VCLC_CLI = "I"
+  THEN ERROR 632 ; Le client est inactif.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Assignation...
+;  - de l'adresse d'état de compte du client à la facture.
+;  - des codes termes du client à la facture.
+;
+;
+PROCEDURE PROCESS REFCLENUM
+BEGIN
+  LET FARTERNET  OF FACPT_A_REC = CLCTERNET  OF VCLC_CLI
+  LET FARTERESC1 OF FACPT_A_REC = CLCTERESC1 OF VCLC_CLI
+  LET FARTERESC2 OF FACPT_A_REC = CLCTERESC2 OF VCLC_CLI
+  LET FARTERFRS  OF FACPT_A_REC = CLCTERFRS  OF VCLC_CLI
+
+  IF CLITYP OF VCLC_CLI <> "D"
+  THEN BEGIN
+    LET     RADCLE  OF FACPT_A_REC = CLCADRETACPT OF VCLC_CLI
+    EDIT    RADCLE  OF FACPT_A_REC
+    DISPLAY RADCLE  OF FACPT_A_REC
+    DISPLAY RADADR1 OF MCREF_ADRESSE
+  END
+  ELSE LET RADCLE OF FACPT_A_REC = 0
+  DISPLAY FARTERNET  OF FACPT_A_REC
+  DISPLAY FARTERESC1 OF FACPT_A_REC
+  DISPLAY FARTERESC2 OF FACPT_A_REC
+  DISPLAY FARTERFRS  OF FACPT_A_REC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Affiche le nom du client régulier, sinon affiche le nom saisie dans
+; la facture pour les clients divers.
+;
+;
+PROCEDURE OUTPUT RADNOM
+BEGIN
+  IF CLITYP OF VCLC_CLI <> "D"
+  THEN LET FIELDTEXT = CLINOM OF VCLC_CLI
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Si l'usager modifie le nom du client divers, il faut mettre à jour
+; le nom abrégé si celui-ci correspond à l'ancienne valeur.
+;
+;
+PROCEDURE EDIT RADNOM
+BEGIN
+  IF RADNOMABR OF MCREF_ADRESSE = OLDVALUE( RADNOM OF MCREF_ADRESSE )[1:20]
+  THEN LET RADNOMABR OF MCREF_ADRESSE = RADNOM OF MCREF_ADRESSE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les adresses du client.
+;
+;
+PROCEDURE INPUT RADCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_REFCLETYP = REFCLETYP OF FACPT_A_REC
+    LET T_CLICLE    = REFCLENUM OF FACPT_A_REC
+    LET T_TYPADR    = "ETA"
+    LET T_RADCLE    = 0
+    RUN SCREEN mc108 MODE F PASSING T_CLICIECLE, &
+                                    T_REFCLETYP, &
+                                    T_CLICLE   , &
+                                    T_TYPADR   , &
+                                    T_RADCLE
+    IF T_RADCLE <> 0
+    THEN LET FIELDTEXT = ASCII(T_RADCLE)
+    ELSE LET FIELDTEXT = ""
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation de l'adresse.
+;
+;
+PROCEDURE EDIT RADCLE
+BEGIN
+  IF RADETACPTCR OF MCREF_ADRESSE <> "1"
+  THEN ERROR 633 ; Ce n'est pas une adresse d'état de compte
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la date de facture selon l'interval de date de la période.
+;
+;
+PROCEDURE EDIT FARDAT
+BEGIN
+  IF FIELDVALUE < PECDATDEB OF MCPERIODE_CTB
+  THEN WARNING 637 ; La date est inférieure à la date de début de la période
+
+  IF FIELDVALUE > PECDATFIN OF MCPERIODE_CTB
+  THEN WARNING 638 ; La date est supérieure à la date de fin de la période.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Calcul des dates due et les affiches.
+;
+;
+PROCEDURE PROCESS FARDAT
+BEGIN
+  EDIT FARTERNET  OF FACPT_A_REC
+  EDIT FARTERESC1 OF FACPT_A_REC
+  EDIT FARTERESC2 OF FACPT_A_REC
+  EDIT FARTERFRS  OF FACPT_A_REC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Numéro de facture en référence pour les notes de crédit.
+;
+;
+PROCEDURE INPUT FARCLEREF OF FACPT_A_REC
+BEGIN
+  ;
+  ; Sous-écran de consultation des factures pour les notes de crédit.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CLICLE    = REFCLENUM OF FACPT_A_REC
+    IF FARTYPECR OF FACPT_A_REC = "NC"
+    THEN LET T_TYPECRPAT = "FA"
+    ELSE LET T_TYPECRPAT = "FA|CR|NC"
+    LET T_FLGSLD    = "0"
+    LET T_FARCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN fa105 MODE F PASSING T_CLICIECLE, &
+                                    T_CLICLE   , &
+                                    T_TYPECRPAT, &
+                                    T_FLGSLD   , &
+                                    T_CIECLEMNU, &
+                                    T_FARCLE
+    LET FIELDTEXT = TRUNC(T_FARCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du numéro de document référé.
+;
+;
+PROCEDURE EDIT FARCLEREF OF FACPT_A_REC
+BEGIN
+  IF FARTYPECR OF FACPT_A_REC = "NC" AND &
+     FARTYPECR OF A_FAR_REFEREE <> "FA"
+  THEN ERROR 2750 ; Une note de crédit doit s'appliquer qu'à une facture.
+
+  IF FARTYPECR OF FACPT_A_REC = "AJ" AND &
+     FARTYPECR OF A_FAR_REFEREE = "AJ"
+  THEN ERROR 2752 ; On ne peut pas appliquer un ajustement sur un ajustement.
+
+  IF FARDATJOU OF A_FAR_REFEREE = 0
+  THEN ERROR 2751 ; La facture doit être journalisée pour la référer.
+
+  IF REFCLENUM OF A_FAR_REFEREE <> REFCLENUM OF FACPT_A_REC
+  THEN ERROR 2753 ; Cette facture n'appartient pas à ce client.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Terme net, popup sur les termes d'encaissements.
+;
+;
+PROCEDURE INPUT FARTERNET
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TMECLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_TMECATPAT = "NET"
+    RUN SCREEN cr104 MODE F PASSING T_TMECLE, &
+                                    T_TMECATPAT
+    LET FIELDTEXT = TRUNC(T_TMECLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du code de terme-net, il est optionel.
+;
+;
+PROCEDURE EDIT FARTERNET
+BEGIN
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    GET CRTERME VIA TMECLE &
+                USING FIELDTEXT &
+                OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 639 ; Ce terme n'existe pas.
+
+    IF TMECAT OF CRTERME <> "NET"
+    THEN ERROR 640 ; Ce n'est pas un code terme pour le net.
+  END
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Procédure pour le calcul des dates due.
+;
+;
+USE ustmecal NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Calcul de la date due pour le terme-net.
+;
+;
+PROCEDURE PROCESS FARTERNET
+BEGIN
+  ;
+  ; Calcul de la date due.
+  ;
+  IF FARTYPECR OF FACPT_A_REC = "FA"
+  THEN BEGIN
+    IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+    THEN BEGIN
+      LET TZ_DATCAL = FARDAT OF FACPT_A_REC
+      DO INTERNAL TER_DATE_DUE
+      LET FARDATNET OF FACPT_A_REC = TZ_DATRES
+    END
+  END
+  ELSE LET FARDATNET OF FACPT_A_REC = FARDAT OF FACPT_A_REC
+
+  DISPLAY FARDATNET OF FACPT_A_REC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Force l'éxécution de la procédure EDIT, car la date due pour le net est
+; obligatoire.
+;
+;
+PROCEDURE INPUT FARDATNET
+BEGIN
+  IF NOT FINDMODE AND  &
+     0 = SIZE(FIELDTEXT)
+  THEN LET FIELDTEXT = ASCII( MOD( FARDATNET OF FACPT_A_REC,1000000 ),6 )
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la date due avec la date de la facture.
+;
+;
+PROCEDURE EDIT FARDATNET
+BEGIN
+  IF FIELDVALUE < FARDAT OF FACPT_A_REC
+  THEN ERROR 641 ; La date due ne peut être inférieure à la date de la facture.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Terme d'escompte 1, popup sur les termes d'encaissements.
+;
+;
+PROCEDURE INPUT FARTERESC1
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TMECATPAT = "ESC"
+    LET T_TMECLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cr104 MODE F PASSING T_TMECLE, &
+                                    T_TMECATPAT
+    LET FIELDTEXT = TRUNC(T_TMECLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du code de terme-escmpte(1), il est optionel.
+;
+;
+PROCEDURE EDIT FARTERESC1
+BEGIN
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    GET CRTERME VIA TMECLE &
+                USING FIELDTEXT &
+                OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 639 ; Ce terme n'existe pas.
+
+    IF TMECAT OF CRTERME <> "ESC"
+    THEN ERROR 640 ; Ce n'est pas un code terme pour les escmptes.
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Calcul de la date due pour le terme-escompte(1).
+;
+;
+PROCEDURE PROCESS FARTERESC1
+BEGIN
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    ;
+    ; Calcul de l date due.
+    ;
+    LET TZ_DATCAL = FARDAT OF FACPT_A_REC
+    DO INTERNAL TER_DATE_DUE
+    LET FARDATESC1 OF FACPT_A_REC = TZ_DATRES
+  END
+  ELSE BEGIN
+    LET FARDATESC1 OF FACPT_A_REC = 0
+    LET FARTERESC2 OF FACPT_A_REC = ""
+    LET FARDATESC2 OF FACPT_A_REC = 0
+    DISPLAY FARTERESC2 OF FACPT_A_REC
+    DISPLAY FARDATESC2 OF FACPT_A_REC
+  END
+  DISPLAY FARDATESC1 OF FACPT_A_REC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la date due avec la date de la facture.
+;
+;
+PROCEDURE EDIT FARDATESC1
+BEGIN
+  IF FIELDVALUE < FARDAT OF FACPT_A_REC
+  THEN ERROR 641 ; La date due ne peut être inférieure à la date de la facture.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Terme d'escompte 2, popup sur les termes d'encaissements.
+;
+;
+PROCEDURE INPUT FARTERESC2
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TMECATPAT = "ESC"
+    LET T_TMECLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cr104 MODE F PASSING T_TMECLE, &
+                                    T_TMECATPAT
+    LET FIELDTEXT = TRUNC(T_TMECLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du code de terme-escmpte(2).
+;
+;
+PROCEDURE EDIT FARTERESC2
+BEGIN
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    GET CRTERME VIA TMECLE &
+                USING FIELDTEXT &
+                OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 639 ; Ce terme n'existe pas.
+
+    IF TMECAT OF CRTERME <> "ESC"
+    THEN ERROR 640 ; Ce n'est pas un code terme pour les escmptes.
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Calcul de la date due pour le terme-escompte(2).
+;
+;
+PROCEDURE PROCESS FARTERESC2
+BEGIN
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    ;
+    ; Calcul de l date due.
+    ;
+    LET TZ_DATCAL = FARDAT OF FACPT_A_REC
+    DO INTERNAL TER_DATE_DUE
+    LET FARDATESC2 OF FACPT_A_REC = TZ_DATRES
+  END
+  ELSE BEGIN
+    LET FARDATESC2 OF FACPT_A_REC = 0
+  END
+  DISPLAY FARDATESC2 OF FACPT_A_REC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la date due avec la date de la facture.
+;
+;
+PROCEDURE EDIT FARDATESC2
+BEGIN
+  IF FIELDVALUE < FARDAT OF FACPT_A_REC
+  THEN ERROR 641 ; La date due ne peut être inférieure à la date de la facture.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Terme de frais, popup sur les termes d'encaissement.
+;
+;
+PROCEDURE INPUT FARTERFRS
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TMECATPAT = "FRS"
+    LET T_TMECLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cr104 MODE F PASSING T_TMECLE, &
+                                    T_TMECATPAT
+    LET FIELDTEXT = TRUNC(T_TMECLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du code de terme-frais.
+;
+;
+PROCEDURE EDIT FARTERFRS
+BEGIN
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    GET CRTERME VIA TMECLE &
+                USING FIELDTEXT &
+                OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 639 ; Ce terme n'existe pas.
+
+    IF TMECAT OF CRTERME <> "FRS"
+    THEN ERROR 640 ; Ce n'est pas un code terme pour les frais d'administration.
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Calcul de la date due pour le terme-FRAIS.
+;
+;
+PROCEDURE PROCESS FARTERFRS
+BEGIN
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    ;
+    ; Calcul de l date due.
+    ;
+    LET TZ_DATCAL = FARDAT OF FACPT_A_REC
+    DO INTERNAL TER_DATE_DUE
+    LET FARDATFRS OF FACPT_A_REC = TZ_DATRES
+  END
+  ELSE BEGIN
+    LET FARDATFRS OF FACPT_A_REC = 0
+  END
+  DISPLAY FARDATFRS OF FACPT_A_REC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la date due avec la date de la facture.
+;
+;
+PROCEDURE EDIT FARDATFRS
+BEGIN
+  IF FIELDVALUE < FARDAT OF FACPT_A_REC
+  THEN ERROR 641 ; La date due ne peut être inférieure à la date de la facture.
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Montant brut du compte à recevoir(facture, note de crédit).
+;
+;
+;PROCEDURE EDIT FARMNT
+;BEGIN
+;  ;
+;  ; Valide la partie décimale.
+;  ;
+;  USE USVALDEC NOLIST
+;  ;
+;  ; Valide le montant pour les notes de crédits.
+;  ;
+;  IF (     FIELDVALUE > 0 &
+;       AND (    FARTYPECR OF FACPT_A_REC = "NC" &
+;             OR FARTYPECR OF FACPT_A_REC = "CR" ) &
+;     ) &
+;     OR &
+;     (     FIELDVALUE < 0 &
+;       AND FARTYPECR OF FACPT_A_REC = "FA" &
+;     )
+;  THEN ERROR 642 ; Le signe du montant est invalide pour ce type de trasanction;
+;
+;END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  ;
+  ; Période, lot.
+  ;
+  IF    T_PECCLESAI = "" &
+     OR T_LCRCLESAI = ""
+  THEN BEGIN
+    ACCEPT PECCLE OF FACPT_A_REC
+    ACCEPT LCRCLE OF FACPT_A_REC
+    LET T_PECCLESAI = PECCLE OF FACPT_A_REC
+    LET T_LCRCLESAI = LCRCLE OF FACPT_A_REC
+  END
+  ELSE BEGIN
+    EDIT PECCLE OF FACPT_A_REC
+    EDIT LCRCLE OF FACPT_A_REC
+    DISPLAY PECCLE OF FACPT_A_REC
+    DISPLAY LCRCLE OF FACPT_A_REC
+  END
+
+  ;
+  ; Type de facture.
+  ;
+  ACCEPT FARTYPECR OF FACPT_A_REC
+  DISPLAY CBIDSC OF VCBI_DSC
+
+  DISPLAY FARDATJOU OF FACPT_A_REC
+  DISPLAY FARHREJOU OF FACPT_A_REC
+  DISPLAY FARSTU    OF FACPT_A_REC
+  DISPLAY CBIDSC    OF A_CBI_FARSTU
+
+  ACCEPT REFCLENUM OF FACPT_A_REC
+  ;
+  ; Gestion des clients divers.
+  ;
+  IF    CLITYP OF VCLC_CLI = "D" &
+    AND (    FARTYPECR OF FACPT_A_REC = "FA" &
+          OR FARTYPECR OF FACPT_A_REC = "CR" )
+  THEN BEGIN
+    ;
+    ; Il faut demander le nom.
+    ;
+    ACCEPT  RADNOM OF MCREF_ADRESSE
+    ;
+    ; Sous-écran pour la saisie de l'adresse.
+    ;
+    RUN SCREEN cr003c PASSING MCREF_ADRESSE MODE E
+    DISPLAY RADADR1  OF MCREF_ADRESSE
+  END
+  ;
+  ; Client régulier.
+  ;
+  ELSE BEGIN
+    DISPLAY RADNOM  OF MCREF_ADRESSE
+    DISPLAY RADCLE  OF FACPT_A_REC
+    DISPLAY RADADR1 OF MCREF_ADRESSE
+  END
+  ;
+  ; Date de la facture.
+  ;
+  ACCEPT FARDAT OF FACPT_A_REC
+  EDIT   FARDAT OF FACPT_A_REC
+  ;
+  ; No référence du client.
+  ;
+  ACCEPT FARCMDCLI OF FACPT_A_REC
+
+  ;
+  ; Le numéro de référence est saisie seulement pour les notes de crédit et les
+  ; ajustements.
+  ;
+  IF   FARTYPECR OF FACPT_A_REC = "NC" &
+    OR FARTYPECR OF FACPT_A_REC = "AJ"
+  THEN BEGIN
+    ACCEPT FARCLEREF OF FACPT_A_REC
+    ;
+    ; Assignation du numéro d'adresse selon le document référé.
+    ;
+    LET     RADCLE  OF FACPT_A_REC = RADCLE OF A_FAR_REFEREE
+    EDIT    RADCLE  OF FACPT_A_REC
+    DISPLAY RADNOM  OF MCREF_ADRESSE
+    DISPLAY RADCLE  OF FACPT_A_REC
+    DISPLAY RADADR1 OF MCREF_ADRESSE
+    ;
+    ;
+    IF FARTYPECR OF FACPT_A_REC = "AJ"
+    THEN BEGIN
+      ;
+      ; Le numéro d'ajustement est composé du numéro de document plus
+      ; un numéro de séquence. Le numéro de séquence est séparé du numéro
+      ; du document par un #.
+      ;
+      ; Exemple: Facture    ==> A1234
+      ;          Ajustement ==> A1234#01
+      ;
+      LET T_NUMAJT = "00"
+      GET A_FAR_AJ VIA   CIECLE   , &
+                         FARCLEREF, &
+                         FARTYPECR  &
+                   USING CIECLE    OF FACPT_A_REC, &
+                         FARCLEREF OF FACPT_A_REC, &
+                         FARTYPECR OF FACPT_A_REC  &
+                   ORDERBY CIECLE , &
+                           FARCLEREF DESCENDING    &
+                   OPTIONAL
+      IF ACCESSOK
+      THEN LET T_NUMAJT = &
+           FARCLE OF A_FAR_AJ[SIZE(TRUNCATE(FARCLE OF A_FAR_AJ)) - 1 : 2]
+      LET FARCLE OF FACPT_A_REC = TRUNCATE( FARCLEREF OF FACPT_A_REC ) + "#" + &
+                                  ASCII( NCONVERT(T_NUMAJT) + 1 ,2 )
+      DISPLAY FARCLE OF FACPT_A_REC
+    END
+  END
+  ;
+  ; Le terme-net ou la date due pour le net sont obligatoire.
+  ;
+  IF 0 = SIZE( TRUNCATE( FARTERNET OF FACPT_A_REC ) )
+  THEN BEGIN
+    ACCEPT FARTERNET OF FACPT_A_REC
+    ACCEPT FARDATNET OF FACPT_A_REC
+  END
+  ;
+  ; Description de la facture.
+  ;
+  ACCEPT FARDSC1 OF FACPT_A_REC
+  ACCEPT FARDSC2 OF FACPT_A_REC
+  ;
+  ; Montant avec taxe.
+  ;
+  DISPLAY FARMNT OF FACPT_A_REC
+
+  RUN SCREEN fa004e MODE SAME &
+                    PASSING T_CIECLEMNU  , &
+                            T_CIENOM     , &
+                            T_PECCLEMNU  , &
+                            FACPT_A_REC  , &
+                            MCREF_ADRESSE
+  RUN SCREEN fa004a MODE E &
+                    PASSING T_CIECLEMNU  , &
+                            T_CIENOM     , &
+                            T_PECCLEMNU  , &
+                            FACPT_A_REC  , &
+                            MCREF_ADRESSE
+  DISPLAY FARMNT    OF FACPT_A_REC
+  DISPLAY FARMNTTPS OF FACPT_A_REC
+  DISPLAY FARMNTTVQ OF FACPT_A_REC
+  DISPLAY D_DEVCAR
+  DISPLAY FARCLE
+  DISPLAY FARMNTREC OF FACPT_A_REC
+  DISPLAY V_FARMNTAJT OF VFAR_SLD
+  DISPLAY V_FARMNTCRT OF VFAR_SLD
+  DISPLAY D_SLD_A_REC
+  DISPLAY FARMNTESC OF FACPT_A_REC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Le nom de la référence est modifiable si le document est non-approuvé et
+; s'applique que pour le client de type divers.
+;
+;
+PROCEDURE DESIGNER 15
+BEGIN
+  IF FARSTU OF FACPT_A_REC = "P"
+  THEN BEGIN
+    IF     CLITYP OF VCLC_CLI = "D" &
+       AND (    FARTYPECR OF FACPT_A_REC = "FA" &
+             OR FARTYPECR OF FACPT_A_REC = "CR" )
+    THEN ACCEPT RADNOM OF MCREF_ADRESSE
+  END
+  ELSE WARNING 2735
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Le numéro d'adresse est modifiable si le document n'est pas approuvé.
+;
+;
+PROCEDURE DESIGNER 20
+BEGIN
+  IF    FARSTU OF FACPT_A_REC = "P" &
+    AND (    FARTYPECR OF FACPT_A_REC = "FA" &
+          OR FARTYPECR OF FACPT_A_REC = "CR" )
+  THEN ACCEPT RADCLE OF FACPT_A_REC
+  ELSE WARNING 2735
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; La date est modifiable si le document n'est pas approuvé.
+;
+;
+PROCEDURE DESIGNER 25
+BEGIN
+  IF FARSTU OF FACPT_A_REC = "P"
+  THEN ACCEPT FARDAT OF FACPT_A_REC
+  ELSE WARNING 2735
+END
+
+
+PROCEDURE DESIGNER 30
+BEGIN
+  IF FARSTU OF FACPT_A_REC = "P"
+  THEN ACCEPT FARCMDCLI OF FACPT_A_REC
+  ELSE WARNING 2735
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Termes d'encaissements.
+;
+;
+PROCEDURE DESIGNER 35
+BEGIN
+  IF FARSTU OF FACPT_A_REC = "P"
+  THEN BEGIN
+       ACCEPT FARTERNET OF FACPT_A_REC
+       ACCEPT FARDATNET OF FACPT_A_REC
+       ;
+       ; Le terme-escompte(1) est optionel et la date due est modifiable.
+       ;
+       ACCEPT FARTERESC1 OF FACPT_A_REC
+
+       ;
+       ; Le terme-escompte(2) est optionel et la date due est modifiable.
+       ;
+       IF 0 <> SIZE( TRUNCATE( FARTERESC1 OF FACPT_A_REC ) )
+       THEN BEGIN
+            ACCEPT FARDATESC1 OF FACPT_A_REC
+            ACCEPT FARTERESC2 OF FACPT_A_REC
+
+            IF 0 <> SIZE( TRUNCATE( FARTERESC2 OF FACPT_A_REC ) )
+            THEN ACCEPT FARDATESC2 OF FACPT_A_REC
+       END
+       ;
+       ; Le terme-frais est optionel et la date due est modifiable.
+       ;
+       ACCEPT FARTERFRS OF FACPT_A_REC
+
+       IF 0 <> SIZE( TRUNCATE( FARTERFRS OF FACPT_A_REC ) )
+       THEN ACCEPT FARDATFRS OF FACPT_A_REC
+   END
+   ELSE WARNING 2735
+END
+
+
+PROCEDURE DESIGNER 40
+BEGIN
+  IF FARDATJOU OF FACPT_A_REC = 0
+  THEN BEGIN
+       ACCEPT FARDSC1 OF FACPT_A_REC
+       ACCEPT FARDSC2 OF FACPT_A_REC
+  END
+  ELSE WARNING 2735
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Détail de la facture
+;
+;
+PROCEDURE DESIGNER D001
+BEGIN
+  RUN SCREEN fa004a MODE SAME &
+                    PASSING T_CIECLEMNU  , &
+                            T_CIENOM     , &
+                            T_PECCLEMNU  , &
+                            FACPT_A_REC  , &
+                            MCREF_ADRESSE
+  DISPLAY FARMNT    OF FACPT_A_REC
+  DISPLAY FARMNTTPS OF FACPT_A_REC
+  DISPLAY FARMNTTVQ OF FACPT_A_REC
+  DISPLAY FARMNTREC OF FACPT_A_REC
+  DISPLAY V_FARMNTAJT OF VFAR_SLD
+  DISPLAY V_FARMNTCRT OF VFAR_SLD
+  DISPLAY D_DEVCAR
+  DISPLAY D_SLD_A_REC
+  DISPLAY FARMNTESC OF FACPT_A_REC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Adresse - client divers.
+;
+;
+PROCEDURE DESIGNER D002
+BEGIN
+  IF CLITYP OF VCLC_CLI = "D"
+  THEN RUN SCREEN cr003c MODE SAME &
+                         PASSING MCREF_ADRESSE
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Vérification
+;
+;
+PROCEDURE DESIGNER D003
+BEGIN
+  RUN SCREEN fa004b PASSING FACPT_A_REC &
+                    MODE SAME
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Entête de la facture
+;
+;
+PROCEDURE DESIGNER D004
+BEGIN
+  IF FARCLE OF FACPT_A_REC <> " "
+  THEN BEGIN
+       RUN SCREEN fa004e MODE SAME &
+                         PASSING T_CIECLEMNU  , &
+                                 T_CIENOM     , &
+                                 T_PECCLEMNU  , &
+                                 FACPT_A_REC  , &
+                                 MCREF_ADRESSE
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran  Approbation
+;
+;
+PROCEDURE DESIGNER D005
+BEGIN
+  IF FARSTU OF FACPT_A_REC = "P"
+  THEN BEGIN
+    IF (     FARMNTNET OF FACPT_A_REC > 0 &
+         AND (    FARTYPECR OF FACPT_A_REC = "NC" &
+               OR FARTYPECR OF FACPT_A_REC = "CR" ) &
+       ) &
+        OR &
+       (     FARMNTNET OF FACPT_A_REC < 0 &
+         AND FARTYPECR OF FACPT_A_REC = "FA" &
+       )
+    THEN ERROR 642 ; Le signe du montant est invalide pour ce type de trasanction;
+    ;
+    ; VAlidation de la sécurité.
+    ;
+    LET TZ_XELNOM = "FARSTU"
+    USE ussecele NOLIST
+
+    LET FARSTU    OF FACPT_A_REC = "A"
+    LET FARDATAPP OF FACPT_A_REC = SYSDATE
+    DISPLAY FARSTU OF FACPT_A_REC
+    DISPLAY CBIDSC OF A_CBI_FARSTU
+    DISPLAY FARDATJOU OF FACPT_A_REC
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran  Remise au statut préliminaire
+;
+;
+PROCEDURE DESIGNER D006
+BEGIN
+  IF    FARSTU OF FACPT_A_REC = "A" &
+    AND FARIMP OF FACPT_A_REC = "0"
+  THEN BEGIN
+    ;
+    ; VAlidation de la sécurité.
+    ;
+    LET TZ_XELNOM = "FARSTU"
+    USE ussecele NOLIST
+
+    LET FARSTU OF FACPT_A_REC = "P"
+    LET FARDATAPP OF FACPT_A_REC = 0
+    DISPLAY FARSTU OF FACPT_A_REC
+    DISPLAY CBIDSC OF A_CBI_FARSTU
+    DISPLAY FARDATJOU OF FACPT_A_REC
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran  Annulation
+;
+;
+PROCEDURE DESIGNER D007
+BEGIN
+  IF    FARSTU OF FACPT_A_REC <> "T" &
+    AND FARIMP OF FACPT_A_REC = "0"
+  THEN BEGIN
+    ;
+    ; VAlidation de la sécurité.
+    ;
+    LET TZ_XELNOM = "FARSTU"
+    USE ussecele NOLIST
+
+    LET FARSTU OF FACPT_A_REC = "X"
+    DISPLAY FARSTU OF FACPT_A_REC
+    DISPLAY CBIDSC OF A_CBI_FARSTU
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Copie de facture
+;
+;
+PROCEDURE DESIGNER D008
+BEGIN
+  IF   ALTEREDRECORD OF FACPT_A_REC &
+    OR ALTEREDRECORD OF MCREF_ADRESSE
+  THEN ERROR 2716 ; Faire une mise à jour avant d'aller au sous-écran
+
+  RUN SCREEN fa004f MODE E &
+                         PASSING T_CIECLEMNU  , &
+                                 T_CIENOM     , &
+                                 T_CLICIECLE  , &
+                                 T_PECCLEMNU  , &
+                                 T_PECCLECOU  , &
+                                 FACPT_A_REC
+END
+
+
+PROCEDURE PATH
+BEGIN
+  IF T_FARCLEFND <> " "
+  THEN LET PATH = 99
+  ELSE BEGIN
+    REQUEST FARCLE OF FACPT_A_REC
+    IF PROMPTOK
+    THEN LET PATH = 1
+
+   IF PATH = 0
+    THEN BEGIN
+      REQUEST PECCLE OF FACPT_A_REC
+      IF PROMPTOK
+      THEN REQUEST LCRCLE OF FACPT_A_REC
+      IF PROMPTOK
+      THEN LET PATH = 2
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST PECCLE OF FACPT_A_REC
+      IF PROMPTOK
+      THEN LET PATH = 3
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST REFCLENUM OF FACPT_A_REC
+      IF PROMPTOK
+      THEN LET PATH = 4
+    END
+
+    IF PATH = 0
+    THEN LET PATH = 5
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE POSTPATH
+BEGIN
+  LET T_CNSLAB = "Connaissement.:"
+  LET T_CNS    = ""
+  DISPLAY T_CNSLAB
+  ACCEPT  T_CNS
+
+  IF 0 = SIZE( TRUNCATE( T_CNS ) )
+  THEN LET T_CNSLAB = " "
+  DISPLAY T_CNSLAB
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; La procédure FIND est pour gérer l'appel en sous-écran (PATH=99)
+; et aussi pour sélectionner la facture selon un numéro de connaissement
+;
+PROCEDURE FIND
+BEGIN
+  IF PATH = 1
+  THEN GET FACPT_A_REC VIA CIECLE, &
+                           FARCLE  &
+                       USING T_CIECLEMNU , &
+                             FARCLE OF FACPT_A_REC
+  IF PATH = 2
+  THEN GET FACPT_A_REC VIA CIECLE, &
+                           PECCLE, &
+                           LCRCLE  &
+                       USING T_CIECLEMNU , &
+                             PECCLE OF FACPT_A_REC, &
+                             LCRCLE OF FACPT_A_REC  &
+                       ORDERBY CIECLE, &
+                               FARCLE
+
+  IF PATH = 3
+  THEN GET FACPT_A_REC VIA CIECLE, &
+                           PECCLE  &
+                       USING T_CIECLEMNU , &
+                             PECCLE OF FACPT_A_REC  &
+                       ORDERBY CIECLE, &
+                               FARCLE
+
+  IF PATH = 4
+  THEN GET FACPT_A_REC VIA REFCIECLE, &
+                           REFCLENUM  &
+                       USING T_CLICIECLE , &
+                             REFCLENUM OF FACPT_A_REC &
+                       ORDERBY CIECLE, &
+                               FARCLE
+
+  IF PATH = 5
+  THEN GET FACPT_A_REC VIA CIECLE &
+                       USING T_CIECLEMNU &
+                       ORDERBY CIECLE, &
+                               FARCLE
+
+  IF PATH = 99
+  THEN GET FACPT_A_REC VIA CIECLE, &
+                           FARCLE  &
+                       USING T_CIECLEMNU,&
+                             T_FARCLEFND &
+                       ORDERBY CIECLE, &
+                               FARCLE
+
+  IF 0 <> SIZE( TRUNCATE( T_CNS ) )
+  THEN GET FAFAR_ENTETE
+  GET MCREF_ADRESSE OPTIONAL
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF FACPT_A_REC &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF (   ALTEREDRECORD     OF FACPT_A_REC   &
+      OR ALTEREDRECORD     OF MCREF_ADRESSE &
+     ) &
+     AND NOT NEWRECORD     OF FACPT_A_REC &
+     AND NOT DELETEDRECORD OF FACPT_A_REC &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  ;IF FARMNTREC OF FACPT_A_REC > FARMNT OF FACPT_A_REC
+  ;THEN ERROR 2736 ;Le montant recu doit être inférieur ou égal au montant tot.
+
+  ;
+  ; Empêcher la destruction d'une facture journalisé
+  ;
+  IF     DELETEDRECORD OF FACPT_A_REC &
+     AND FARSTU OF FACPT_A_REC <> "P"
+  THEN ERROR 2747 ;Impossible de détruire une transaction Journalisé
+  ;
+  ; Empêcher la modification des paiement non-appliqué car
+  ; ces type de document sont seulement pour consultation.
+  ;
+  IF FARTYPECR OF FACPT_A_REC = "NA"
+  THEN ERROR 648 ;Impossible de Mettre à jour, aucune modification pos-
+                 ;sible pour paiement non-appliqué.
+  ;
+  ; On informe l'usager si l'imputation de balance pas avec le montant du
+  ; document.
+  ;
+;  IF FARMNT OF FACPT_A_REC <> FARCUMMNT OF FACPT_A_REC
+;  THEN WARNING 649 ; L'imputation ne balance pas.
+  ;
+  ; On incrémente le numéro d'adresse pour les clients divers.
+  ;
+  IF     CLITYP OF VCLC_CLI = "D" &
+     AND RADCLE OF FACPT_A_REC = 0
+  THEN BEGIN
+    START TRANSACTION GEN_RAD_SEQ
+    GET MCRAD_SEQ VIA REFCIECLE, &
+                      REFCLETYP, &
+                      REFCLENUM  &
+                  USING REFCIECLE OF FACPT_A_REC, &
+                        REFCLETYP OF FACPT_A_REC, &
+                        REFCLENUM OF FACPT_A_REC  &
+                  OPTIONAL
+    LET REFCIECLE OF MCRAD_SEQ = REFCIECLE OF FACPT_A_REC
+    LET REFCLETYP OF MCRAD_SEQ = REFCLETYP OF FACPT_A_REC
+    LET REFCLENUM OF MCRAD_SEQ = REFCLENUM OF FACPT_A_REC
+    LET RASNUMSEQ OF MCRAD_SEQ = RASNUMSEQ OF MCRAD_SEQ + 1
+    LET RADCLE    OF FACPT_A_REC = RASNUMSEQ OF MCRAD_SEQ
+    PUT MCRAD_SEQ
+    COMMIT TRANSACTION GEN_RAD_SEQ
+  END
+
+  LET T_INFFAR = "N"
+  IF FARCLE OF FACPT_A_REC = " "
+  THEN BEGIN
+    START TRANSACTION GEN_NUM_SEQ
+    GET FAFAR_SEQ VIA   CIECLE, &
+                        FSEANNCLE  &
+                  USING T_CIECLEMNU,&
+                        T_PECCLEMNU[1:2] &
+                  OPTIONAL
+    LET CIECLE    OF FAFAR_SEQ = T_CIECLEMNU
+    LET FSEANNCLE OF FAFAR_SEQ = T_PECCLEMNU[1:2]
+    ;LET FSENUMSEQ OF FAFAR_SEQ = FSENUMSEQ OF FAFAR_SEQ + 1
+;an 2000
+    IF NEWRECORD OF FAFAR_SEQ
+    THEN LET FSENUMSEQ OF FAFAR_SEQ = 0
+    LET FSENUMSEQ OF FAFAR_SEQ = FSENUMSEQ OF FAFAR_SEQ + 1
+
+    LET FARCLE OF FACPT_A_REC = FSEANNCLE + &
+           ASCII(FSENUMSEQ OF FAFAR_SEQ, FSELONNUM OF FAFAR_SEQ -2)
+    PUT FAFAR_SEQ
+    COMMIT TRANSACTION GEN_NUM_SEQ
+    LET T_INFFAR = "O"
+  END
+  IF     FARSTU OF FACPT_A_REC = "A"
+  THEN BEGIN
+    WHILE RETRIEVING FAFAR_DETAIL
+    BEGIN
+      GET FAFAR_HIST OPTIONAL
+      LET CIECLE    OF FAFAR_HIST = CIECLE    OF FACPT_A_REC
+      LET FHIFARCLE OF FAFAR_HIST = FARCLE    OF FACPT_A_REC
+      LET FFDCLELIG OF FAFAR_HIST = FFDCLELIG OF FAFAR_DETAIL
+      LET FHIORI    OF FAFAR_HIST = "0"
+      LET FHITRPCLE OF FAFAR_HIST = TRPCLE    OF FAFAR_DETAIL
+      LET FHIETACLE OF FAFAR_HIST = ETACLE    OF FAFAR_DETAIL
+      LET FHIDAT    OF FAFAR_HIST = FARDAT    OF FACPT_A_REC
+      LET FHIDSC    OF FAFAR_HIST = FFDDSC    OF FAFAR_DETAIL
+      LET FHIQTEFAC OF FAFAR_HIST = FFDQTEFAC OF FAFAR_DETAIL
+      LET FHIPRIUNI OF FAFAR_HIST = FFDPRIUNI OF FAFAR_DETAIL
+      LET FHIMNTESC OF FAFAR_HIST = FFDMNTESC OF FAFAR_DETAIL
+      LET FHIMNTTPS OF FAFAR_HIST = FFDMNTTPS OF FAFAR_DETAIL
+      LET FHIMNTTVQ OF FAFAR_HIST = FFDMNTTVQ OF FAFAR_DETAIL
+      LET FHICLICLE OF FAFAR_HIST = REFCLENUM OF FACPT_A_REC
+      LET FHICOU    OF FAFAR_HIST = FFDMNTNET OF FAFAR_DETAIL
+      LET FHICMDCLE OF FAFAR_HIST = FARCMDCLI OF FACPT_A_REC
+      LET FHICODPOS OF FAFAR_HIST = FARCODPOS OF FACPT_A_REC
+
+      GET FAPERIODE OPTIONAL
+      LET FHIPERCLE OF FAFAR_HIST = PERCLE    OF FAPERIODE
+      LET FHIPERJOU OF FAFAR_HIST = ASCII( MOD( &
+                                 DAYS( FARDAT OF FACPT_A_REC ) ,7 ) )
+      LET FHIANN    OF FAFAR_HIST = ASCII( PERANN OF FAPERIODE ,2 )
+
+      PUT FAFAR_HIST RESET
+    END
+  END
+END
+
+PROCEDURE POSTUPDATE
+BEGIN
+   IF T_INFFAR = "O"
+   THEN BEGIN
+        DISPLAY FARCLE
+        INFORMATION MESSAGE = "" NOW RESP
+   END
+END
+
+BUILD
+@IF FORMAT
+*********************************** Factures ***********************************
+* Période ......: xxxxx                         Lot...........: xxxx           *
+* Type facture..: xx xxxxxxxxxxxxxxxxxxxxxxxxx  Statut........: x xxxxxxxxxxxxx*
+*                                               Date du statut: xxxxxxxx xxxxxx*
+* No client.....: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              *
+* No adresse....: xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              *
+*                                                                              *
+* Facture.......: xxxxxxxxxxxx                  Date facture..: xxxxxxxx       *
+* No réf. client: xxxxxxxxxxxxxxx                                              *
+* Terme net.....: xxxx xxxxxxxx Escompte(1): xxxx xxxxxxxx Fr: xxxx XXxxxxxxxx *
+*                               Escompte(2): xxxx xxxxxxxx                     *
+* Description...: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+* Code pos., Zip: xxxxxxxxxxxxxxxx                                             *
+*                                                                              *
+* Montant brut..: xxxxxxxxxxxxxx xxxx           Montant T.P.S.: xxxxxxxxxxxxxx *
+* Montant recu..: xxxxxxxxxxxxxx                Montant T.V.Q.: xxxxxxxxxxxxxx *
+* Ajustement....: xxxxxxxxxxxxxx                Escompte......: xxxxxxxxxxxxxx *
+* Crédit........: xxxxxxxxxxxxxx                                               *
+* Solde à rec...: xxxxxxxxxxxxxx                                               *
+********************************************************************************
+@ENDIF
+

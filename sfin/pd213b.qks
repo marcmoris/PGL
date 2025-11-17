@@ -1,0 +1,1053 @@
+;/T/ 2.5.6 Ventes directes. (Tranche)
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1995-03-10
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   les ventes directes de tranche.
+;
+;/M/ François Déry, 12 mai 1999
+;       Ajout du in dict sur la transaction des séquences.
+;
+;/M/ Programmeur..: Nancy Breton
+;    Date Modifi..: 1998-11-06
+;
+;    Description..: Modification du calcul de TRFSURMC2VEN OF PDTRANCHE_FAC si
+;                   la mesure est P2.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date..............: 05 avril 2000
+;    Description.......: Incrémentation du numéro de facture par compagnie.
+;
+;    Référence.........: Stabilisation du module Gestion de blocs (point 2).
+;
+;    Signet............: MP-00-04-05_S02.
+;
+;    ----------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date..............: 22 septembre 2000.
+;    Description.......: Permettre à l'utilisateur de modifier la longeur et la hauteur de la tranche.
+;
+;    Référence.........: Demande de changement D000092.
+;
+;    Signet............: MP-00-09-22_D92.
+;
+;    ----------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date..............: 13 novembre 2000.
+;    Description.......: Correction du calcul de la surface au pied carré pour les données déjà existantes.
+;
+;    Référence.........: Demande de changement D000108.
+;
+;    Signet............: MP-00-11-13_D108.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd213b ACTIONBAR                     &
+              MODE LABEL "" AT 2,80         &
+              NOACTION                      &
+              FIELDMARK RETAIN STARTUP      &
+              HELP POPUP FROM 4,9 TO 20,72  &
+              RECEIVING T_CIECLEMNU,        &
+                        T_CIENOM,           &
+                        PDFACTURE
+
+
+;-------------------------------------------------------------------------------
+;
+; Déclaration de la transaction pour donner un numéro séquentiel
+;
+
+TRANSACTION NO_SEQ READ WRITE &
+                   RESERVING FOR PROTECTED WRITE PDSEQ_FACTURE IN DICT
+
+
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD213B"
+
+
+;-------------------------------------------------------------------------------
+; Documentation de l'écran.
+;
+USE pd213b.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Commentaire tranche             " ACTION DESIGNER D001 MARK
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%Commentaire tranche          " ACTION DESIGNER D001 MARK
+@ENDIF
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire au traitement
+;
+
+TEMPORARY T_TYPE_PROD CHARACTER SIZE 02 INITIAL "TR" RESET AT STARTUP ; Type de produit traiter par l'écran
+
+TEMPORARY T_FTRSURMC2TRA FLOAT SIZE 8 RESET AT STARTUP
+
+;-------------------------------------------------------------------------------
+;
+; Variable temporaire du programme pour les pop-up
+;
+
+TEMPORARY T_TPDTYPPRD        CHARACTER SIZE 04 ; Type de produit
+TEMPORARY T_UNMCODUNM        CHARACTER SIZE 04 ; Unité de mesure
+
+TEMPORARY T_TRANUMTRA002     CHARACTER SIZE 07 ; Numéro de tranche
+TEMPORARY T_COD              INTEGER UNSIGNED  &
+                                       SIZE 02 ; Code de recherche
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du volume d'une pièce de granit
+;
+
+USE usvarvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du prix d'une ligne de détail bon de commande
+;
+USE usvarprigra NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Temporaires necessaires au calcul des taxes
+;
+
+USE ustaxtmp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Dimension maximum et minimum des pièces de granit
+;
+
+USE usdimprd NOLIST
+
+;-------------------------------------------------------------------------------
+;
+; Facture
+;
+
+FILE PDFACTURE MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Facture bloc
+;
+
+FILE PDTRANCHE_FAC PRIMARY &
+                   NOITEM &
+                   OCCURS 11 TIMES
+
+  ACCESS VIA     CIECLE,           &
+                 FTRNUMFAC         &
+         USING   T_CIECLEMNU,                           &
+                 FTRNUMFAC         OF PDFACTURE         &
+         ORDERBY CIECLE,           &
+                 FTRNUMFAC,        &
+                 TRANUMTRA002
+
+
+  ITEM CIECLE    OF PDTRANCHE_FAC INITIAL  T_CIECLEMNU
+  ITEM FTRNUMFAC OF PDTRANCHE_FAC INITIAL  FTRNUMFAC OF PDFACTURE FIXED
+  ITEM TRFMNT    OF PDTRANCHE_FAC SUM INTO FTRMNTBRU OF PDFACTURE
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro séquentiel pour les factures
+;
+
+FILE PDSEQ_FACTURE DESIGNER TRANSACTION NO_SEQ
+  ACCESS VIA CIECLE USING T_CIECLEMNU ; MP-00-04-05_S02.
+
+;-------------------------------------------------------------------------------
+;
+; Tranche
+;
+
+FILE PDTRANCHE SECONDARY &
+               NOITEM &
+               OCCURS WITH PDTRANCHE_FAC NODELETE
+
+  ACCESS VIA     CIECLE,           &
+                 TRANUMTRA002      &
+         USING   T_CIECLEMNU,      &
+                 TRANUMTRA002      OF PDTRANCHE_FAC
+
+
+  ITEM CIECLE    OF PDTRANCHE INITIAL T_CIECLEMNU
+  ITEM FTRNUMFAC OF PDTRANCHE FINAL FTRNUMFAC OF PDFACTURE IF NOT DELETEDRECORD OF PDTRANCHE_FAC &
+                                                        ELSE 0
+
+  ITEM TRADATMAJ OF PDTRANCHE FINAL SYSDATE
+
+  ITEM TRAHREMAJ OF PDTRANCHE FINAL SYSTIME / 10000
+
+  ITEM TRAUSRMAJ OF PDTRANCHE FINAL LOGONID
+
+
+;-------------------------------------------------------------------------------
+;
+; Client
+;
+
+FILE VCLC_CLI        REFERENCE
+
+  ACCESS VIA     CLICIECLE,        &
+                 CLICLE,           &
+                 CIECLE            &
+         USING   "----",                                &
+                 CLICLE            OF PDFACTURE,        &
+                 T_CIECLEMNU
+
+
+;-------------------------------------------------------------------------------
+;
+; Unité de mesure (Vente)
+;
+
+FILE PDUNITE_MESURE REFERENCE &
+                    ALIAS UNM_VENTE &
+                    OCCURS WITH PDTRANCHE_FAC
+
+  ACCESS VIA     CIECLE,          &
+                 UNMCODUNM        &
+         USING   T_CIECLEMNU,     &
+                 TRFUNMVEN        OF PDTRANCHE_FAC
+
+
+;-------------------------------------------------------------------------------
+;
+; Type de produit
+;
+
+FILE PDTYPE_PRODUIT DESIGNER
+
+  ACCESS VIA     CIECLE,          &
+                 TPDTYPPRD        &
+         USING   T_CIECLEMNU,     &
+                 T_TYPE_PROD
+
+
+;-------------------------------------------------------------------------------
+;
+; Conversion unité mesure de commande à unité mesure production
+;
+
+FILE PDCONVERT_UN_M DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+; Validation des codes de taxes fédéral.
+;
+
+FILE MCTAXE           REFERENCE &
+                      ALIAS A_TAX_TPS
+
+  ACCESS  VIA   TAXCLETYP,       &
+                TAXCLECOD        &
+          USING FTRTAXTYPTPS     OF PDFACTURE,        &
+                FTRTAXCODTPS     OF PDFACTURE
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation des codes de taxes provincial.
+;
+
+FILE MCTAXE           REFERENCE &
+                      ALIAS A_TAX_TVP
+
+  ACCESS  VIA   TAXCLETYP,       &
+                TAXCLECOD        &
+          USING FTRTAXTYPTVQ     OF PDFACTURE,        &
+                FTRTAXCODTVQ     OF PDFACTURE
+
+
+;-------------------------------------------------------------------------------
+FILE PDLOT_TRANSFERT DESIGNER
+;-------------------------------------------------------------------------------
+FILE PDLOT_FACTURE DESIGNER
+;-------------------------------------------------------------------------------
+
+FILE PDBLOC DESIGNER ; MP-00-09-22_D92.
+
+FILE PDTRANCHE_FAC ALIAS A_PDTRANCHE_FAC DESIGNER
+FILE PDTRANCHE     ALIAS A_PDTRANCHE     DESIGNER
+
+;-------------------------------------------------------------------------------
+; MP-00-09-22_D92
+;
+; Variable nécessaire au traitement
+
+DEFINE D_M2_BRU FLOAT SIZE 8 =  ROUND((TRALON OF PDTRANCHE * TRAHAU OF PDTRANCHE), -2 ) / 100
+
+;-------------------------------------------------------------------------------
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+
+SKIP
+
+
+TITLE &
+@IF FRANCAIS
+      " Ventes directes " &
+@ELSE
+      " %%%Ventes directes " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+
+ALIGN (,3,19)
+
+
+FIELD FTRNUMFAC        OF PDFACTURE        &
+        DISPLAY                            &
+        FIXED
+
+
+ALIGN (,3,19) (,,28)
+
+
+FIELD CLICLE           OF PDFACTURE        &
+        DISPLAY                            &
+        FIXED
+
+
+FIELD CLINOM           OF VCLC_CLI         &
+        FIXED
+
+
+DRAW 8,2 TO 8,79
+
+
+SKIP TO LINE 8
+
+
+TITLE &
+@IF FRANCAIS
+      " Tranche " &
+@ELSE
+      " %%%Tranche " &
+@ENDIF
+      CENTERED AT ,1
+
+
+SKIP TO LINE 10
+
+
+TITLE &
+@IF FRANCAIS
+      "Tranche Gra Fi Long Haut Epai    Surface     Prix vente U/M        Montant C" &
+@ELSE
+      "%%%nche Gra Fi Long Haut Epai    Surface     Prix vente U/M        Montant C" &
+@ENDIF
+      AT ,3
+
+
+ALIGN (02,02,03) (,,11) (,,15) (,,18) (,,23) (,,28) (,,33) (,,44) (,,59) (,,62) (78,,78)
+
+
+CLUSTER OCCURS WITH PDTRANCHE_FAC ID BASE 90
+
+
+FIELD TRANUMTRA002     OF PDTRANCHE_FAC    &
+        HIDDEN                             &
+        LABEL " "                          &
+        REQUIRED                           &
+        NUMERIC                            &
+        LOOKUP NOTON PDTRANCHE_FAC         &
+          VIA    CIECLE,                   &
+                 TRANUMTRA002              &
+          USING  T_CIECLEMNU,                                &
+                 TRANUMTRA002    OF PDTRANCHE_FAC            &
+          MESSAGE 2005 , & ; Cette tranche est déjà traitée
+                ON PDTRANCHE               &
+          VIA    CIECLE  ,                 &
+                 TRANUMTRA002              &
+          USING  T_CIECLEMNU,                                &
+                 TRANUMTRA002    OF PDTRANCHE_FAC            &
+          MESSAGE 1840 ; Ce numéro de tranche n'existe pas
+
+
+FIELD TGRCODGRA        OF PDTRANCHE        &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD TYFCODFIN        OF PDTRANCHE        &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD TRALON           OF PDTRANCHE        & ; MP-00-09-22_D92.
+        HIDDEN                             
+
+
+FIELD TRAHAU           OF PDTRANCHE        & ; MP-00-09-22_D92.
+        HIDDEN                             
+
+
+FIELD TRAEPA           OF PDTRANCHE        &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD TRASURMC2        OF PDTRANCHE        &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD TRFPRIVEN        OF PDTRANCHE_FAC    &
+        HIDDEN                             &
+        ID SAME                            &
+        REQUIRED                           &
+        PICTURE " ^,^^^,^^^.^^ "           &
+        LEADING SIGN "-"
+
+
+FIELD TRFUNMVEN        OF PDTRANCHE_FAC    &
+        HIDDEN                             &
+        ID SAME                            &
+        DEFAULT UNMCODUNM OF PDTYPE_PRODUIT &
+        LOOKUP ON UNM_VENTE                &
+          MESSAGE 1928 ; Cette unité de mesure n'existe pas
+
+
+FIELD TRFMNT           OF PDTRANCHE_FAC    &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD TRFCOM           OF PDTRANCHE_FAC    &
+        HIDDEN                             &
+        ID SAME
+
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul du volume d'une pièce de granit
+;
+
+USE uscalvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul du prix d'une ligne de détail bon commande
+;
+
+USE uscalprigra NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur (pop-up) pour le champ
+;
+
+PROCEDURE INPUT TRANUMTRA002
+BEGIN
+
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_COD          = 1
+    LET T_TRANUMTRA002 = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd122 MODE F &
+                     PASSING T_TRANUMTRA002, &
+                             T_COD, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_TRANUMTRA002 )
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide le statut de la tranche
+;
+
+PROCEDURE EDIT TRANUMTRA002
+BEGIN
+  IF "I" <> TRASTU OF PDTRANCHE
+  THEN BEGIN
+    ERROR 1968 ; Le statut ne permet pas cette opération
+  END
+END
+
+;-------------------------------------------------------------------------------
+; MP-00-09-22_D92.
+;
+; Validations sur la longueur de la tranche.
+;
+
+PROCEDURE EDIT TRALON OF PDTRANCHE
+BEGIN
+  ;
+  ; Simule l'option REQUIRED pour le champ
+  ;
+  IF 0 = SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    ERROR 3044 ; Ce champ est requis
+  END
+  ;
+  ; Valide que la dimension saisie est comprise dans l'intervalle permis
+  ;
+  IF FIELDVALUE > T_DIM_MAX_LON_TR OR &
+     FIELDVALUE < T_DIM_MIN_LON_TR
+  THEN BEGIN
+    ERROR 2947 ; Cette dimension hors des dimensions limites
+  END
+
+
+  ;
+  ; Valide que le champ n'est pas plus grand que celui de la tranche
+  ;
+  ; Validation a faire ...
+  ;
+  ; Verifier avec la longueur brut du bloc plutot que celui de la tranche
+  ; sinon ne pas valider ...
+  ; Prendre le bloc dans la tranche pour faire le lien
+
+  GET PDBLOC VIA CIECLE,                               &
+                 BLONUMGRA001APR,                      &
+                 BLONUMGRA002APR,                      &
+                 BLORECAPR                             &
+         USING   T_CIECLEMNU,                          &
+                 BLONUMGRA001APR OF PDTRANCHE,         &
+                 BLONUMGRA002APR OF PDTRANCHE,         &
+                 BLORECAPR       OF PDTRANCHE             OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    IF FIELDVALUE > BLOLONBRU OF PDBLOC
+    THEN BEGIN
+      ERROR 3196 ; La dimension saisie est suppérieure à la dimension de la tranche
+    END
+  END
+
+END
+
+procedure process tralon of pdtranche
+begin
+  let trasurmc2 of pdtranche = d_m2_bru / 10000
+  display field trasurmc2 of pdtranche
+  edit trfpriven
+end
+
+;-------------------------------------------------------------------------------
+; MP-00-09-22_D92.
+;
+; Validations sur la hauteur de la tranche.
+;
+
+PROCEDURE EDIT TRAHAU OF PDTRANCHE
+BEGIN
+  ;
+  ; Simule l'option REQUIRED pour le champ
+  ;
+  IF 0 = SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    ERROR 3044 ; Ce champ est requis
+  END
+  ;
+  ; Valide que la dimension saisie est comprise dans l'intervalle permis
+  ;
+  IF FIELDVALUE > T_DIM_MAX_HAU_TR OR &
+     FIELDVALUE < T_DIM_MIN_HAU_TR
+  THEN BEGIN
+    ERROR 2947 ; Cette dimension hors des dimensions limites
+  END
+
+  ;
+  ; Valide que le champ n'est pas plus grand que celui de la tranche
+  ;
+  ; Verifier avec la longueur brut du bloc plutot que celui de la tranche
+  ; sinon ne pas valider ...
+  ; Prendre le bloc dans la tranche pour faire le lien
+
+  GET PDBLOC VIA CIECLE,                               &
+                 BLONUMGRA001APR,                      &
+                 BLONUMGRA002APR,                      &
+                 BLORECAPR                             &
+         USING   T_CIECLEMNU,                          &
+                 BLONUMGRA001APR OF PDTRANCHE,         &
+                 BLONUMGRA002APR OF PDTRANCHE,         &
+                 BLORECAPR       OF PDTRANCHE             OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    IF FIELDVALUE > BLOHAUBRU OF PDBLOC
+    THEN BEGIN
+      ERROR 3196 ; La dimension saisie est suppérieure à la dimension de la tranche
+    END
+  END
+
+END
+
+procedure process trahau of pdtranche
+begin
+  let trasurmc2 of pdtranche = d_m2_bru / 10000
+  display field trasurmc2 of pdtranche
+  edit trfpriven
+end
+
+;-------------------------------------------------------------------------------
+;
+; Valide le format du champ
+;
+
+PROCEDURE EDIT TRFPRIVEN
+BEGIN
+  ;
+  ; Valide la partie décimale.
+  ;
+  USE usvaldec NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du prix
+;
+
+PROCEDURE PROCESS TRFPRIVEN
+BEGIN
+  ;
+  ; Recherche l'unité de mesuse par défaut pour le type de produit
+  ;
+  GET PDTYPE_PRODUIT OPTIONAL &
+    VIA     CIECLE,           &
+            TPDTYPPRD         &
+    USING   T_CIECLEMNU,      &
+            T_TYPE_PROD
+  IF NOT ACCESSOK
+  THEN BEGIN
+    ERROR 1863 ; Ce code de produit n'existe pas
+  END
+
+  ;
+  ; Recherche une occurence contenant le facteur par défaut et le facteur
+  ; saisie au panorama
+  ;
+  GET PDCONVERT_UN_M OPTIONAL &
+    VIA    CIECLE,           &
+           CUMCODUNMINT,     &
+           CUMCODUNMEXT      &
+    USING  T_CIECLEMNU,                         &
+           UNMCODUNM         OF PDTYPE_PRODUIT, &
+           TRFUNMVEN         OF PDTRANCHE_FAC
+  IF NOT ACCESSOK &
+     AND &
+     0 <> SIZE (TRUNCATE ( TRFUNMVEN ) )
+  THEN BEGIN
+    ERROR 2004 ; Le facteur de conversion n'existe pas pour cette combinaison
+  END
+
+  ;
+  ; Calcul du prix total pour la ligne de détail
+  ;
+  LET TZ_CPG_COD_PRD          = TPDTYPPRD         OF PDTYPE_PRODUIT
+  LET TZ_CPG_FAC_CON          = CUMFACCON         OF PDCONVERT_UN_M
+  LET TZ_CPG_PRI_UNI          = TRFPRIVEN         OF PDTRANCHE_FAC
+  LET TZ_CPG_UNM              = UNMCODUNM         OF PDTYPE_PRODUIT
+  LET TZ_CPG_VOL_MC3          = 0
+  LET TZ_CPG_VOL_MC2          = TRASURMC2         OF PDTRANCHE
+  LET TZ_CPG_QTE              = 1
+  DO INTERNAL CALPRIGRA
+  LET     TRFMNT OF PDTRANCHE_FAC  = TZ_CPG_PRI_TOT
+  DISPLAY TRFMNT OF PDTRANCHE_FAC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour le champ.
+;
+
+PROCEDURE INPUT TRFUNMVEN
+BEGIN
+  ;
+  ; Appel du dépisteur
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_UNMCODUNM = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd113 MODE F &
+                     PASSING T_UNMCODUNM, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_UNMCODUNM )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que l'unité de mesure saisie peut être utiliser pour le calcul du prix
+;
+
+PROCEDURE PROCESS TRFUNMVEN
+BEGIN
+  ;
+  ; Recherche l'unité de mesuse par défaut pour le type de produit
+  ;
+  GET PDTYPE_PRODUIT OPTIONAL &
+    VIA     CIECLE,           &
+            TPDTYPPRD         &
+    USING   T_CIECLEMNU,      &
+            T_TYPE_PROD
+  IF NOT ACCESSOK
+  THEN BEGIN
+    ERROR 1863 ; Ce code de produit n'existe pas
+  END
+
+  ;
+  ; Recherche une occurence contenant le facteur par défaut et le facteur
+  ; saisie au panorama
+  ;
+  GET PDCONVERT_UN_M OPTIONAL &
+    VIA    CIECLE,           &
+           CUMCODUNMINT,     &
+           CUMCODUNMEXT      &
+    USING  T_CIECLEMNU,                         &
+           UNMCODUNM         OF PDTYPE_PRODUIT, &
+           TRFUNMVEN         OF PDTRANCHE_FAC
+  IF NOT ACCESSOK
+  THEN BEGIN
+    ERROR 2004 ; Le facteur de conversion n'existe pas pour cette combinaison
+  END
+
+
+  ;
+  ; Calcul du prix total pour la ligne de détail
+  ;
+  LET TZ_CPG_COD_PRD          = TPDTYPPRD         OF PDTYPE_PRODUIT
+  LET TZ_CPG_FAC_CON          = CUMFACCON         OF PDCONVERT_UN_M
+  LET TZ_CPG_PRI_UNI          = TRFPRIVEN         OF PDTRANCHE_FAC
+  LET TZ_CPG_UNM              = UNMCODUNM         OF PDTYPE_PRODUIT
+  LET TZ_CPG_VOL_MC3          = 0
+  LET TZ_CPG_VOL_MC2          = TRASURMC2         OF PDTRANCHE
+  LET TZ_CPG_QTE              = 1
+  DO INTERNAL CALPRIGRA
+  LET     TRFMNT OF PDTRANCHE_FAC  = TZ_CPG_PRI_TOT
+  DISPLAY TRFMNT OF PDTRANCHE_FAC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour convertir OUI,NON en 1,0
+;
+
+PROCEDURE INPUT TRFCOM
+BEGIN
+  USE usflginp NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour convertir 1,0 en OUI,NON
+;
+PROCEDURE OUTPUT TRFCOM
+BEGIN
+  USE usflgout NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du sous-écran de commentaire pour le bloc
+;
+
+PROCEDURE PROCESS TRFCOM
+BEGIN
+  IF "0" <> TRFCOM OF PDTRANCHE_FAC
+  THEN BEGIN
+    RUN SCREEN  pd213f &
+                PASSING T_CIECLEMNU,        &
+                        T_CIENOM,           &
+                        PDFACTURE,          &
+                        PDTRANCHE_FAC       &
+                MODE SAME
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Saisie d'une ligne de détail
+;
+
+PROCEDURE DESIGNER 90
+BEGIN
+  ACCEPT TRANUMTRA002     OF PDTRANCHE_FAC
+
+  ACCEPT TRALON           OF PDTRANCHE ; MP-00-09-22_D92.
+  ACCEPT TRAHAU           OF PDTRANCHE ; MP-00-09-22_D92.
+
+  ACCEPT TRFPRIVEN        OF PDTRANCHE_FAC
+  ACCEPT TRFUNMVEN        OF PDTRANCHE_FAC
+  ACCEPT TRFCOM           OF PDTRANCHE_FAC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Commentaire bloc
+;
+
+PROCEDURE DESIGNER D001
+BEGIN
+  RUN SCREEN  pd213f &
+              PASSING T_CIECLEMNU,        &
+                      T_CIENOM,           &
+                      PDFACTURE,          &
+                      PDTRANCHE_FAC       &
+              MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Cumul de la surface facturée.
+;
+Procedure Internal iCumSur
+Begin
+  let ftrsurmc2tra of pdfacture = 0
+
+  while retrieving a_pdtranche_fac via ciecle     , &
+                                       ftrnumfac    &
+                                 using t_cieclemnu, &
+                                       ftrnumfac of pdfacture
+  begin
+    get a_pdtranche via ciecle      , &
+                        tranumtra002  &
+                  using t_cieclemnu , &
+                        tranumtra002 of a_pdtranche_fac optional
+     
+     let ftrsurmc2tra of pdfacture = ftrsurmc2tra of pdfacture &
+                                   + trasurmc2    of a_pdtranche
+  end
+End
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDTRANCHE_FAC &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDTRANCHE_FAC &
+     AND NOT NEWRECORD     OF PDTRANCHE_FAC &
+     AND NOT DELETEDRECORD OF PDTRANCHE_FAC &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+
+  ;
+ ;--validation du status du lot
+ ;
+  GET PDLOT_FACTURE OPTIONAL &
+    VIA   CIECLE,          &
+          FTRNUMFAC        &
+    USING T_CIECLEMNU,     &
+          FTRNUMFAC        OF PDFACTURE
+  IF ACCESSOK
+  THEN BEGIN
+   GET PDLOT_TRANSFERT OPTIONAL &
+    VIA   CIECLE,          &
+          LTRNUMLOT        &
+    USING CIECLE,     &
+          LTRNUMLOT        OF PDLOT_FACTURE
+    IF ACCESSOK
+    THEN BEGIN
+     IF LTRSTU OF PDLOT_TRANSFERT = "T"
+      THEN ERROR 2
+
+    END
+  END
+
+  ;
+  ; Mise à jour du statut de la tranche
+  ;
+
+  FOR PDTRANCHE_FAC
+  BEGIN
+    if not deletedrecord of pdtranche_fac ; MP-00-11-13_D108.
+    THEN BEGIN
+      LET TRASTU OF PDTRANCHE = "T"
+      LET T_FTRSURMC2TRA      = T_FTRSURMC2TRA + &
+                                TRASURMC2 OF PDTRANCHE
+
+      LET FTRSURMC2TRA OF PDFACTURE = T_FTRSURMC2TRA
+
+      IF TRFUNMVEN  OF PDTRANCHE_FAC = "P2"
+      THEN LET TRFSURMC2VEN OF PDTRANCHE_FAC = (TRASURMC2 OF PDTRANCHE * 10) &
+                                               * 10.764262
+      ELSE LET TRFSURMC2VEN OF PDTRANCHE_FAC = TRASURMC2 OF PDTRANCHE
+    END
+    IF DELETEDRECORD OF PDTRANCHE_FAC
+    THEN BEGIN
+      LET TRASTU OF PDTRANCHE = "I"
+      LET T_FTRSURMC2TRA      = T_FTRSURMC2TRA - &
+                                TRASURMC2 OF PDTRANCHE
+
+      LET FTRSURMC2TRA OF PDFACTURE = T_FTRSURMC2TRA
+    END
+
+  END
+  ;
+  ; Calcul des taxes.
+  ;
+  LET TZ_MNTTXB = FTRMNTBRU OF PDFACTURE
+  ;
+  ; Use standart pour le calcul des taxes
+  ;
+  USE ustaxcal NOLIST
+
+  LET FTRMNTTPS OF PDFACTURE = TZ_MNTTPS
+  LET FTRMNTTVQ OF PDFACTURE = TZ_MNTTVP
+  LET FTRMNT    OF PDFACTURE = FTRMNTBRU OF PDFACTURE + &
+                               FTRMNTTPS OF PDFACTURE + &
+                               FTRMNTTVQ OF PDFACTURE
+  ;
+  ; Incrémentation du numéro de séquence
+  ;
+  IF 0 = FTRNUMFAC OF PDFACTURE
+  THEN BEGIN
+    START TRANSACTION NO_SEQ
+    GET PDSEQ_FACTURE OPTIONAL                      ; MP-00-04-05_S02.
+    LET CIECLE        OF PDSEQ_FACTURE = T_CIECLEMNU; MP-00-04-05_S02.
+    LET SEFNUMRAP     OF PDSEQ_FACTURE = SEFNUMRAP OF PDSEQ_FACTURE + 1
+    LET FTRNUMFAC     OF PDFACTURE     = SEFNUMRAP OF PDSEQ_FACTURE
+    PUT PDSEQ_FACTURE
+    DISPLAY FTRNUMFAC OF PDFACTURE
+  END
+
+END
+
+
+PROCEDURE UPDATE
+BEGIN
+  FOR PDTRANCHE_FAC
+  BEGIN
+    PUT PDTRANCHE
+    PUT PDTRANCHE_FAC
+  END
+  do internal iCumSur ; Cumul de la surface facturée.
+  PUT PDFACTURE
+ END
+
+
+
+BUILD
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+******************************* Ventes directes ********************************
+*                                                                              *
+* No. facture...: xxxxxxxxx                                                    *
+* Client........: xxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            *
+*                                                                              *
+*********************************** Tranche ************************************
+*                                                                              *
+* Tranche Gra Fi Long Haut Epai    Surface     Prix vente U/M        Montant C *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxxx xxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxxx xxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxxx xxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxxx xxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxxx xxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxxx xxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxxx xxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxxx xxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxxx xxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxxx xxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x *
+* xxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxxx xxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x *
+*                                                                              *
+********************************************************************************
+@ENDIF

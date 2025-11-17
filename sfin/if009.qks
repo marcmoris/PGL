@@ -1,0 +1,749 @@
+;/T/ Ecran général de la facture
+;
+; ECRAN  ECRAN GENERAL DE LA FACTURE
+; FONC.: IL EST POSSIBLE DE GENERER LES LIGNES DE DETAILS DE FACTURE SI
+;        IL N'Y A PAS D'AJUSTEMENT A LA FACTURE OU SI LA FACTURE N'EST
+;        PAS FINALE OU ANNULEE.
+;
+;/M/ François Déry, 25 mai 1999
+;       Conversio unix/interbase.
+;       Ajout de l'impression de facture et duplicata à l'écran.
+;
+; 91/06/27
+; PAR   : Patrick Bourbeau
+; BUT   : Correction du bug concernant les montants de taxes qui ne sont
+;         pas corrects lorsqu'on delete des lignes de details de la facture.
+;         ---> On recalcule les taxes dans la PROCEDURE DESIGNER 8.
+SCREEN if009 ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             ACTIVITIES ENTRY,FIND,CHANGE &
+             RECEIVING T_CIECLE, &
+                       T_CIENOM
+
+USE ussectmp  NOLIST
+    "IF009"
+
+USE if009.hlp NOLIST
+
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE IFSEQUENCE IN DICT
+                                                ; Le IN DICT est pour unix
+
+
+USE usactecr  NOLIST
+ACTIONMENU LABEL "Traitement"
+  MENUITEM LABEL "Génération automatique" ACTION DESIGNER D001
+  MENUITEM LABEL "Impression de facture " ACTION DESIGNER D002
+  MENUITEM LABEL "Duplicata de facture  " ACTION DESIGNER D003
+ACTIONMENU LABEL "Sous-écran"
+  MENUITEM LABEL "Lignes de facture  " ACTION DESIGNER D004
+  MENUITEM LABEL "Ajustements facture" ACTION DESIGNER D005
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_CIECLE CHARACTER SIZE 4  ; Numéro de cie
+TEMPORARY T_CIENOM CHARACTER SIZE 40 ; Nom de la compagnie
+
+FILE IFFACTURE        PRIMARY NOITEM
+  ACCESS VIA     CIECLE, &
+                 FCECLE  &
+         USING   T_CIECLE, &
+                 FCECLE OF IFFACTURE &
+         REQUEST FCECLE OF IFFACTURE &
+         ORDERBY CIECLE, &
+                 FCECLE
+  ACCESS VIA     CIECLE &
+         USING   T_CIECLE &
+         ORDERBY CIECLE, &
+                 FCECLE
+  ITEM CIECLE OF IFFACTURE INIT T_CIECLE
+  ITEM FCEFIN OF IFFACTURE INIT "N"
+  ITEM FCEIMP OF IFFACTURE INIT "N"
+  ITEM FCEANNUL OF IFFACTURE INIT "N"
+  ITEM FCETRANSFERT OF IFFACTURE INIT "N"
+
+
+FILE IFCLIENT         REFERENCE
+  ACCESS VIA   CIECLE, &
+               CLTCLE  &
+         USING T_CIECLE, &
+               CLTCLE OF IFFACTURE
+
+FILE CRCLIENT         REFERENCE
+  ACCESS VIA   CLICIECLE, &
+               CLICLE &
+         USING CLICIECLE OF IFCLIENT, &
+               CLICLE OF IFCLIENT
+
+;
+; Table pour les adresses
+;
+FILE MCREF_ADRESSE    REFERENCE
+ ACCESS VIA   REFCIECLE, &
+              REFCLETYP, &
+              REFCLENUM, &
+              RADCLE &
+        USING CLICIECLE OF CRCLIENT, &
+              CLIREFTYP OF CRCLIENT, &
+              CLICLE    OF CRCLIENT, &
+              1
+;
+; Information du client par compagnie
+;
+FILE CRCLI_CIE        REFERENCE
+  ACCESS VIA   CLICIECLE, &
+               CLICLE, &
+               CIECLE  &
+         USING CLICIECLE OF IFCLIENT, &
+               CLICLE OF IFCLIENT, &
+               T_CIECLE
+;
+; % de taxe fédéral
+;
+FILE VTAX_DSC         REFERENCE ALIAS A_TAXFED
+  ACCESS VIA   TAXCLETYP, &
+               TAXCLECOD &
+         USING CLCTAXTYPTPS OF CRCLI_CIE, &
+               CLCTAXCODTPS OF CRCLI_CIE
+;
+; % de taxe provincial
+;
+FILE VTAX_DSC         REFERENCE ALIAS A_TAXPRO
+  ACCESS VIA   TAXCLETYP, &
+               TAXCLECOD &
+         USING CLCTAXTYPTVP OF CRCLI_CIE, &
+               CLCTAXCODTVP OF CRCLI_CIE
+
+FILE IFBLOC           DESIGNER
+
+FILE IFFACTURE_DETAIL DESIGNER
+  ACCESS VIA   CIECLE, &
+               FCECLE  &
+         USING T_CIECLE, &
+               FCECLE OF IFFACTURE
+
+FILE IFCONTRAT REFERENCE
+  ACCESS VIA   CIECLE, &
+               CLTCLE, &
+               CRRCLENUM, &
+               CRRCLEANN  &
+         USING T_CIECLE, &
+               CLTCLE OF IFFACTURE, &
+               CRRCLENUM OF IFFACTURE, &
+               CRRCLEANN OF IFFACTURE
+
+FILE IFCONTRAT_LIGNE DESIGNER
+  ACCESS VIA   CIECLE, &
+               CLTCLE, &
+               CRRCLENUM, &
+               CRRCLEANN, &
+               CATCLE, &
+               COEDATDEB &
+         USING T_CIECLE, &
+               CLTCLE OF IFBLOC, &
+               BLCCRRCLENUM OF IFBLOC, &
+               BLCCRRCLEANN OF IFBLOC, &
+               CATCLE OF IFBLOC, &
+               COEDATDEB OF IFBLOC
+
+FILE IFFACTURE_AJUST DESIGNER
+  ACCESS VIA   CIECLE, &
+               FCECLE  &
+         USING T_CIECLE, &
+               FCECLE OF IFFACTURE
+
+FILE IFCARRIERE DESIGNER
+
+FILE IFSEQUENCE DESIGNER &
+                TRANSACTION GEN_NUM_SEQ
+
+FILE IFANNEE_COURANTE DESIGNER
+
+FILE MCPERIODE_CTB  DESIGNER
+ SELECT IF (FCEDAT OF IFFACTURE <= PECDATFIN OF MCPERIODE_CTB AND &
+            FCEDAT OF IFFACTURE >= PECDATDEB OF MCPERIODE_CTB)
+
+FILE MCDEVISE DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4  = T_CIECLE
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+DEFINE D_IMPFAC CHARACTER SIZE 7   = "IF322A" ; Impression de facture
+DEFINE D_DUPFAC CHARACTER SIZE 7   = "IF323" ; duplicata de facture
+;
+; Liste des paramètres.
+;
+DEFINE D_LISPAR CHARACTER SIZE 204 = "F_CIECLEMNU     |F_CIENOM        |" + &
+                                     "FCECLE          |"
+DEFINE D_INDLON CHARACTER SIZE 112 = "001004|005040|045005"
+DEFINE D_LISVAL CHARACTER SIZE 300 = T_CIECLE &
+                                   + DZ_CIENOM    &
+                                   + ASCII( FCECLE OF IFFACTURE , 5 )
+;
+TEMP TMP-FCEANNUL  CHAR SIZE 1 INIT FCEANNUL OF IFFACTURE
+TEMP TMP-FIN       CHAR SIZE 1 INIT FCEFIN OF IFFACTURE
+
+DEF T-SOUS-TOTAL2  INTEGER SIZE 4 = FCETOTAL OF IFFACTURE + FCEMNTTPSFED &
+      OF IFFACTURE
+
+DEF T-TOTAL-FAC    INTEGER SIZE 4 = T-SOUS-TOTAL2 + FCEMNTTVQPRO &
+      OF IFFACTURE
+
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+      "Informations sur la facturation " &
+      CENTERED AT ,1
+SKIP TO LINE 4
+
+ALIGN(2,5,19)(,26,31)(,41,56)(,59,69)(,72,78)
+FIELD FCECLE OF IFFACTURE &
+        HIDDEN ID 1 &
+        LABEL "No facture..:" &
+        DISPLAY
+FIELD FCEDAT OF IFFACTURE &
+        LABEL "Date:" &
+        NOCHANGE &
+        DEFAULT SYSDATE
+FIELD FCEFIN OF IFFACTURE &
+        LABEL "Code fin:"
+FIELD FCEIMP OF IFFACTURE &
+        LABEL "Code imp:" &
+        DISPLAY
+FIELD FCEANNUL OF IFFACTURE &
+        LABEL "Annul:"
+
+ALIGN(2,5,19)(,,21)(,,23)(,26,38)(,41,53)(,66,78)
+FIELD CLTCLE OF IFFACTURE &
+        HIDDEN ID 2 &
+        LABEL "No contrat..:" &
+        REQUIRED &
+        NOCHANGE
+FIELD CRRCLENUM OF IFFACTURE &
+        REQUIRED &
+        NOCHANGE
+FIELD CRRCLEANN OF IFFACTURE &
+        REQUIRED &
+        NOCHANGE
+FIELD FCECAT OF IFFACTURE &
+        LABEL "Categorie:" &
+        REQUIRED &
+        NOCHANGE
+FIELD COEDATDEB OF IFFACTURE &
+        LABEL "Date debut:" &
+        REQUIRED &
+        NOCHANGE
+FIELD FCEEXP OF IFFACTURE &
+        LABEL "Expedie (E):"
+SKIP
+
+ALIGN(,5,19)(,41,52)(,66,78)
+FIELD PECCLE OF IFFACTURE &
+        LABEL "No Période..:" &
+        DISPLAY
+FIELD LCRCLE OF IFFACTURE &
+        LABEL "No Lot..:" &
+        DISPLAY
+FIELD FCETRANSFERT OF IFFACTURE &
+        LABEL "Transférée.:" &
+        DISPLAY
+SKIP
+ALIGN(,5,20)
+FIELD CLINOMABR OF CRCLIENT &
+        LABEL "Nom du client:" &
+        DISPLAY
+ALIGN(2,5,10) (,43,49)
+FIELD RADADR1 OF MCREF_ADRESSE &
+        HIDDEN ID 3 &
+        DISPLAY &
+        SIZE 30 &
+        LABEL "Adr:"
+FIELD FCEADR1 OF IFFACTURE &
+        DEFAULT RADADR1 OF MCREF_ADRESSE &
+        LABEL "Adr.:"
+FIELD RADADR2 OF MCREF_ADRESSE &
+        ID SAME &
+        SIZE 30 &
+        DISPLAY &
+        NOLABEL
+FIELD FCEADR2 OF IFFACTURE &
+        DEFAULT RADADR2 OF MCREF_ADRESSE &
+        ID SAME &
+        LABEL "Fact:"
+FIELD RADADR3 OF MCREF_ADRESSE &
+        ID SAME &
+        DISPLAY &
+        SIZE 30 &
+        NOLABEL
+FIELD FCEADR3 OF IFFACTURE &
+        DEFAULT RADADR3 OF MCREF_ADRESSE &
+        ID SAME &
+        NOLABEL
+FIELD RADCP OF MCREF_ADRESSE &
+        ID SAME &
+        DISPLAY &
+        NOLABEL
+FIELD FCECP OF IFFACTURE &
+        DEFAULT RADCP OF MCREF_ADRESSE &
+        ID SAME &
+        NOLABEL
+SKIP 1
+
+ALIGN (,5,13)(,50,68)
+FIELD CLILNG OF CRCLIENT &
+        LABEL "Langue :"  &
+        DISPLAY
+FIELD FCETOTAL OF IFFACTURE &
+        LABEL "Sous tot. facture:" &
+        DISPLAY PIC " ^^^,^^^.^^"
+SKIP
+
+ALIGN (,52,56)(66,69,69)
+FIELD TAXPCT OF A_TAXFED &
+        DISPLAY &
+        LABEL "TPS" &
+        PIC "^^^.^^%"
+FIELD FCEMNTTPSFED OF IFFACTURE &
+        HIDDEN ID 5 &
+        LABEL " " &
+        DISPLAY PIC "^^^,^^^.^^"
+SKIP
+
+ALIGN (,5,19)
+FIELD COEREFCLI OF IFCONTRAT_LIGNE &
+        LABEL "No ref client:" &
+        DISPLAY
+TITLE "__________" AT ,69
+SKIP
+
+ALIGN (,51,68)
+FIELD T-SOUS-TOTAL2 &
+        LABEL "Sous total......:" &
+        DISPLAY &
+        PIC " ^^^,^^^.^^"
+SKIP
+
+ALIGN(,5,24) (,52,56)(66,69,69)
+FIELD CLCEXPTVP OF CRCLI_CIE &
+        DISPLAY &
+        LABEL "No exemp. TX prov:"
+FIELD TAXPCT OF A_TAXPRO &
+        DISPLAY &
+        LABEL "TVQ" PIC "^^^.^^%"
+FIELD FCEMNTTVQPRO OF IFFACTURE &
+        HIDDEN ID 6 &
+        LABEL " " &
+        DISPLAY PIC "^^^,^^^.^^"
+SKIP
+
+ALIGN (,5,19)
+FIELD CONCONDITION1 OF IFCONTRAT &
+        LABEL "Conditions:" &
+        DISPLAY
+TITLE "__________" AT ,69
+
+ALIGN (,,19)(,51,68)
+FIELD CONCONDITION2 OF IFCONTRAT &
+        ID SAME &
+        NOLABEL &
+        DISPLAY
+FIELD T-TOTAL-FAC &
+        DISPLAY &
+        LABEL "Total facture...:" PIC " ^^^,^^^.^^"
+SKIP
+
+ALIGN (2,5,19)
+FIELD FCECOM1 OF IFFACTURE  &
+        HIDDEN ID 7 &
+        LABEL "Commentaires:"
+SKIP
+ALIGN (,,19)
+FIELD FCECOM2 OF IFFACTURE &
+        ID SAME &
+        NOLABEL
+SKIP
+
+
+;
+; SAISIE DU MONTANT DE TPS POUR MODIFICATION
+;
+PROCEDURE DESIGNER 5
+BEGIN
+  IF FCETOTAL <> 0
+  THEN BEGIN
+    ACCEPT FCEMNTTPSFED OF IFFACTURE
+    LET FCEMNTTVQPRO OF IFFACTURE = ROUND((FCETOTAL OF IFFACTURE + &
+       FCEMNTTPSFED OF IFFACTURE) * TAXPCT OF A_TAXPRO )
+    DISPLAY FCEMNTTVQPRO
+    DISPLAY T-SOUS-TOTAL2
+    DISPLAY T-TOTAL-FAC
+  END
+END
+
+;
+; SAISIE DU MONTANT TVQ POUR MODIFICATION
+;
+PROCEDURE DESIGNER 6
+BEGIN
+  IF FCETOTAL <> 0
+  THEN BEGIN
+    ACCEPT FCEMNTTVQPRO OF IFFACTURE
+    DISPLAY T-TOTAL-FAC
+  END
+END
+
+
+PROCEDURE DESIGNER D001
+BEGIN
+   IF FCEFIN OF IFFACTURE = "O"
+   THEN ERROR "*E* La génération auto. est invalide car la facture est finale..."
+   IF FCEANNUL OF IFFACTURE = "O"
+   THEN ERROR "*E* La génération auto. est invalide car la facture est annullée..."
+   IF ALTEREDRECORD OF IFFACTURE
+   THEN ERROR "*E* Faire une mise a jour avant la génération des lignes..."
+
+   GET IFFACTURE_AJUST OPTIONAL
+   IF ACCESSOK
+   THEN ERROR "*E* Génération impossible car il y a des ajustements..."
+   ;
+   ; Destruction du detail de la IFFACTURE avant de refaire le detail
+   ;
+   WHILE RETRIEVING IFFACTURE_DETAIL
+   BEGIN
+     DELETE IFFACTURE_DETAIL
+     PUT IFFACTURE_DETAIL
+   END
+   ;
+   ; Contruction du detail de la IFFACTURE pour les blocs qui ne sont pas
+   ; IFFACTUREs.
+   ;
+   LET FCETOTAL OF IFFACTURE = 0
+
+   WHILE RETRIEVING IFBLOC &
+                    VIA   CIECLE, CLTCLE, BLCCRRCLENUM, BLCCRRCLEANN, CATCLE, &
+                          COEDATDEB &
+                    USING T_CIECLE, CLTCLE OF IFFACTURE, CRRCLENUM OF IFFACTURE, &
+                          CRRCLEANN OF IFFACTURE, FCECAT OF IFFACTURE, &
+                          COEDATDEB OF IFFACTURE
+   BEGIN
+     IF FCECLE OF IFBLOC = 0 AND &
+        (FCEEXP OF IFFACTURE <> "E" OR &
+        (FCEEXP OF IFFACTURE = "E" AND EXNCLE OF IFBLOC <> 0))
+     THEN BEGIN
+       GET IFCONTRAT_LIGNE
+       LET CIECLE       OF IFFACTURE_DETAIL = CIECLE         OF IFFACTURE
+       LET FCECLE       OF IFFACTURE_DETAIL = FCECLE         OF IFFACTURE
+       LET CRRCLENUM    OF IFFACTURE_DETAIL = CRRCLENUM         OF IFBLOC
+       LET CRRCLEANN    OF IFFACTURE_DETAIL = CRRCLEANN         OF IFBLOC
+       LET BLCCLE       OF IFFACTURE_DETAIL = BLCCLE         OF IFBLOC
+       LET FDEDIMHAU    OF IFFACTURE_DETAIL = BLCVENDUHAU  OF IFBLOC
+       LET FDEDIMLON    OF IFFACTURE_DETAIL = BLCVENDULONG OF IFBLOC
+       LET FDEDIMLAR    OF IFFACTURE_DETAIL = BLCVENDULAR  OF IFBLOC
+       LET FDEM3PROD    OF IFFACTURE_DETAIL = BLCM3TOT     OF IFBLOC
+       LET FDEPRIXFOB   OF IFFACTURE_DETAIL = COEPRIXFOB   OF IFCONTRAT_LIGNE
+       LET FDEPRIXFAS   OF IFFACTURE_DETAIL = COEPRIXFAS   OF IFCONTRAT_LIGNE
+       LET DEVCLE       OF IFFACTURE_DETAIL = DEVCLE       OF CRCLIENT
+       LET FDETOTAL     OF IFFACTURE_DETAIL = &
+                        FLOOR( FDEPRIXFOB OF IFFACTURE_DETAIL * &
+                               FDEM3PROD OF IFFACTURE_DETAIL/100+0.5 ) + &
+                        FLOOR( FDEPRIXFAS OF IFFACTURE_DETAIL * &
+                               FDEM3PROD OF IFFACTURE_DETAIL/100+0.5 )
+       ; Mise a jour du total de la IFFACTURE
+       ;
+       LET FCETOTAL OF IFFACTURE = FCETOTAL OF IFFACTURE + FDETOTAL OF IFFACTURE_DETAIL
+       PUT IFFACTURE_DETAIL RESET
+     END
+   END
+   ;
+   ; Calcul des montants de taxes
+   ;
+   LET FCEMNTTPSFED OF IFFACTURE = ROUND(FCETOTAL OF IFFACTURE * &
+       TAXPCT OF A_TAXFED )
+   LET FCEMNTTVQPRO OF IFFACTURE = ROUND((FCETOTAL OF IFFACTURE + &
+       FCEMNTTPSFED OF IFFACTURE) * TAXPCT OF A_TAXPRO )
+
+   PUT IFFACTURE
+   DISPLAY FCETOTAL OF IFFACTURE
+   DISPLAY FCEMNTTPSFED OF IFFACTURE
+   DISPLAY FCEMNTTVQPRO OF IFFACTURE
+   DISPLAY T-SOUS-TOTAL2
+   DISPLAY T-TOTAL-FAC
+   COMMIT
+END
+;
+; Impression de la facture
+;
+PROCEDURE DESIGNER D002
+BEGIN
+  IF ALTEREDRECORD OF IFFACTURE
+  THEN ERROR "*E* Faire une mise a jour avant l'impression de facture"
+
+  IF FCEIMP OF IFFACTURE = "O"
+  THEN ERROR "*E* Cette facture est déjà imprimée"
+
+  IF     FCEFIN   OF IFFACTURE <> "O" &
+     AND FCEANNUL OF IFFACTURE <> "O"
+  THEN ERROR "*E* La facture doit être finale pour être imprimée."
+
+  RUN SCREEN gs091 &
+             MODE E &
+             PASSING D_IMPFAC, &
+                     D_LISPAR, &
+                     D_INDLON, &
+                     D_LISVAL
+  LET FCEIMP OF IFFACTURE = "O"
+  PUT IFFACTURE
+  DISPLAY FCEIMP OF IFFACTURE
+END
+;
+; Duplicata de facture
+;
+PROCEDURE DESIGNER D003
+BEGIN
+  IF ALTEREDRECORD OF IFFACTURE
+  THEN ERROR "*E* Faire une mise a jour avant l'impression de facture"
+
+  IF    (     FCEFIN OF IFFACTURE = "O" &
+          AND FCEIMP OF IFFACTURE = "O" &
+        ) &
+     OR FCEANNUL OF IFFACTURE = "O"
+  THEN BEGIN
+    RUN SCREEN gs091 &
+             MODE E &
+             PASSING D_DUPFAC, &
+                     D_LISPAR, &
+                     D_INDLON, &
+                     D_LISVAL
+  END
+  ELSE ERROR "*E* La facture doit être finale/imprimée ou annulée."
+END
+;;
+;; Sous-ecran des lignes de details de la IFFACTURE.
+;; On recalcule les montants de taxes lors du retour
+;; de l'ecran.
+;;
+PROCEDURE DESIGNER D004
+BEGIN
+   RUN SCREEN if009a &
+        PASSING T_CIECLE, &
+                T_CIENOM, &
+                IFFACTURE &
+        MODE F
+
+   LET FCEMNTTPSFED OF IFFACTURE = ROUND(FCETOTAL OF IFFACTURE * &
+       TAXPCT OF A_TAXFED )
+   LET FCEMNTTVQPRO OF IFFACTURE = ROUND((FCETOTAL OF IFFACTURE + &
+       FCEMNTTPSFED OF IFFACTURE) * TAXPCT OF A_TAXPRO )
+
+   DISPLAY FCETOTAL OF IFFACTURE
+   DISPLAY FCEMNTTPSFED OF IFFACTURE
+   DISPLAY FCEMNTTVQPRO OF IFFACTURE
+   DISPLAY T-SOUS-TOTAL2
+   DISPLAY T-TOTAL-FAC
+END
+
+PROCEDURE DESIGNER D005
+BEGIN
+   RUN SCREEN if009b &
+        PASSING T_CIECLE, &
+                T_CIENOM, &
+                IFFACTURE &
+        MODE F
+   DISPLAY FCETOTAL OF IFFACTURE
+   DISPLAY FCEMNTTPSFED OF IFFACTURE
+   DISPLAY T-SOUS-TOTAL2
+   DISPLAY FCEMNTTVQPRO OF IFFACTURE
+   DISPLAY T-TOTAL-FAC
+END
+
+
+PROCEDURE PREUPDATE
+BEGIN
+  IF TMP-FIN = "O"
+  THEN ERROR "*E* La facture est déjà finale ..."
+  IF TMP-FCEANNUL = "O"
+  THEN ERROR "*E* La facture est annulée ..."
+  IF FCEFIN OF IFFACTURE = "O" AND FCEANNUL OF IFFACTURE = "O"
+  THEN ERROR "*E* On ne peut pas annuler une facture finale..."
+
+  GET CRCLIENT OPTIONAL
+  IF ACCESSOK
+  THEN LET DEVCLE OF IFFACTURE =  DEVCLE OF CRCLIENT
+
+  GET MCDEVISE VIA DEVCLE USING DEVCLE OF IFFACTURE OPT
+  IF ACCESSOK
+  THEN BEGIN
+    LET DEVTAU OF IFFACTURE = DEVTAU OF MCDEVISE
+  END
+
+  IF DEVCLE OF IFFACTURE = "CAN" OR DEVCLE OF IFFACTURE = ""
+     THEN LET FCEMNTCAN OF IFFACTURE = FCETOTAL
+     ELSE LET FCEMNTCAN OF IFFACTURE = &
+      ROUND(FCETOTAL OF IFFACTURE * DEVTAU OF IFFACTURE)
+
+  IF NEWRECORD OF IFFACTURE
+  THEN BEGIN
+    START TRANSACTION GEN_NUM_SEQ
+    GET IFSEQUENCE VIA   CIECLE, &
+                         SEQCODE &
+                   USING T_CIECLE, &
+                         "FAC#" &
+                   OPTIONAL
+    LET CIECLE   OF IFSEQUENCE = T_CIECLE
+    LET SEQCODE  OF IFSEQUENCE = "FAC#"
+    LET SEQNO    OF IFSEQUENCE = SEQNO OF IFSEQUENCE + 1
+    LET FCECLE   OF IFFACTURE  = SEQNO OF IFSEQUENCE
+    PUT IFSEQUENCE
+  END
+END
+
+PROCEDURE UPDATE
+BEGIN
+
+  IF FCEANNUL = "O" AND TMP-FCEANNUL = "N"
+  THEN BEGIN
+    WHILE RETRIEVING IFFACTURE_DETAIL
+    BEGIN
+      DELETE IFFACTURE_DETAIL
+      PUT IFFACTURE_DETAIL
+    END
+    WHILE RETRIEVING IFFACTURE_AJUST
+    BEGIN
+      DELETE IFFACTURE_AJUST
+      PUT IFFACTURE_AJUST
+    END
+
+    LET FCETOTAL OF IFFACTURE = 0
+
+  END
+
+  IF FCEFIN = "N"
+  THEN PUT IFFACTURE
+  ELSE BEGIN
+    WHILE RETRIEVING IFFACTURE_DETAIL
+    BEGIN
+      GET IFBLOC VIA   CIECLE, &
+                       CRRCLENUM, &
+                       CRRCLEANN, &
+                       BLCCLE &
+                 USING T_CIECLE, &
+                       CRRCLENUM OF IFFACTURE_DETAIL, &
+                       CRRCLEANN OF IFFACTURE_DETAIL, &
+                       BLCCLE OF IFFACTURE_DETAIL
+      GET IFCONTRAT_LIGNE
+
+      LET COEQTEFAC = COEQTEFAC + FDEM3PROD OF IFFACTURE_DETAIL
+      LET FCECLE OF IFBLOC = FCECLE OF IFFACTURE
+      IF BLCINVINIT = "O "
+      THEN BEGIN
+        GET IFANNEE_COURANTE VIA   CIECLE, &
+                                   ANNCODE &
+                             USING T_CIECLE, &
+                                   "ANCO"
+        GET IFCARRIERE VIA   CIECLE, &
+                             CRRCLENUM, &
+                             CRRCLEANN  &
+                       USING T_CIECLE, &
+                             CRRCLENUM OF IFBLOC, &
+                             ANNNO OF IFANNEE_COURANTE OPTIONAL
+        IF NOT ACCESSOK
+        THEN ERROR "*E* Probleme de carriere..."
+        ELSE BEGIN
+          LET CRRM3INIAUJOU  OF IFCARRIERE =    &
+           CRRM3INIAUJOU OF IFCARRIERE - FDEM3PROD OF IFFACTURE_DETAIL
+          LET CRRNBBLOINIT OF IFCARRIERE = CRRNBBLOINIT OF IFCARRIERE - 1
+          PUT IFCARRIERE
+        END
+      END
+      PUT IFCONTRAT_LIGNE
+      PUT IFBLOC
+    END
+    PUT IFFACTURE
+  END
+END
+
+PROCEDURE POSTUPDATE
+BEGIN
+   DISPLAY FCECLE OF IFFACTURE
+   DISPLAY FCETOTAL OF IFFACTURE
+   LET TMP-FIN = FCEFIN OF IFFACTURE
+   LET TMP-FCEANNUL = FCEANNUL OF IFFACTURE
+END
+
+PROCEDURE ENTRY
+  BEGIN
+    DISPLAY FCECLE OF IFFACTURE
+    ACCEPT FCEDAT OF IFFACTURE
+    GET MCPERIODE_CTB SEQUENTIAL OPTIONAL
+    LET PECCLE OF IFFACTURE = PECCLE OF MCPERIODE_CTB
+    ACCEPT FCEFIN OF IFFACTURE
+    DISPLAY FCEIMP OF IFFACTURE
+    ACCEPT FCEANNUL OF IFFACTURE
+    ACCEPT CLTCLE OF IFFACTURE
+    ACCEPT CRRCLENUM OF IFFACTURE
+    ACCEPT CRRCLEANN OF IFFACTURE
+    ACCEPT FCECAT OF IFFACTURE
+    ACCEPT COEDATDEB OF IFFACTURE
+    ACCEPT FCEEXP OF IFFACTURE
+    DISPLAY PECCLE OF IFFACTURE
+    DISPLAY LCRCLE OF IFFACTURE
+    DISPLAY FCETRANSFERT OF IFFACTURE
+    DISPLAY CLINOMABR OF CRCLIENT
+    DISPLAY RADADR1 OF MCREF_ADRESSE
+    ACCEPT FCEADR1 OF IFFACTURE
+    DISPLAY RADADR2 OF MCREF_ADRESSE
+    ACCEPT FCEADR2 OF IFFACTURE
+    DISPLAY RADADR3 OF MCREF_ADRESSE
+    ACCEPT FCEADR3 OF IFFACTURE
+    DISPLAY RADCP OF MCREF_ADRESSE
+    ACCEPT FCECP OF IFFACTURE
+    DISPLAY CONCONDITION1 OF IFCONTRAT
+    DISPLAY FCETOTAL OF IFFACTURE
+    DISPLAY CONCONDITION2 OF IFCONTRAT
+    DISPLAY COEREFCLI OF IFCONTRAT_LIGNE
+    DISPLAY TAXPCT OF A_TAXFED
+    DISPLAY CLCEXPTVP OF CRCLI_CIE
+    DISPLAY CLILNG  OF CRCLIENT
+    ACCEPT FCECOM1 OF IFFACTURE
+    ACCEPT FCECOM2 OF IFFACTURE
+    END
+
+BUILD
+@IF FORMAT
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+************************Informations sur la facturation ************************
+*   No facture..: xxxxxx Date:xxxxxxxx  Code fin:      x  Code imp: x  Annul:x *
+*   No contrat..: xxxxx  Categorie:  x  Date debut: xxxxxxxx     Expedie (E):x *
+*   No Période..: xxxxx                 No Lot..:  xxxx          Transférée.:x *
+*   Nom du client: xxxxxxxxxxxxxxxxxxxx                                        *
+*   Adr: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   Adr.: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx *
+*        xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   Fact: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx *
+*        xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx *
+*        xxxxxxx                                xxxxxxx                        *
+*                                                                              *
+*   Langue :x                                    Sous tot. facture:xxxxxxxxxxx *
+*                                                  TPS xxxxxxx      xxxxxxxxxx *
+*   No ref client:xxxxxxxxxx                                        __________ *
+*                                                 Sous total......:xxxxxxxxxxx *
+*   No exemp. TX prov: xxxxxxxxxxxxxxxx            TVQ xxxxxxx      xxxxxxxxxx *
+*   Conditions:   xxxxxxxxxxxxxxxxxxxxxxxxx                         __________ *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxx       Total facture...:xxxxxxxxxxx *
+*   Commentaires: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx *
+*                                                                              *
+********************************************************************************
+@ENDIF

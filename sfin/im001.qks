@@ -1,0 +1,956 @@
+;/T/ Fiches d'immobilisations
+;
+;/P/ Programmeur..: Alain Côté
+;    Date création: 18 février 1994
+;
+;/M/ François Déry, 30 avril 1999
+;       Modifier l'accèss au fichier de séquence car il a
+;       été converti en format interbase au lieu d'indexé.
+;
+;/V3.02.00/ Alain Côté, 18 février 1994, Immobilisation
+;
+;    Description..: Cet écran sert à la définition d'une immobilisation.
+;
+;                   Le numéro d'immobilisation peut être saisie par l'usager
+;                   ou attribué automatiquement par l'écran.
+;
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN im001 ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION &
+             FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU , &
+                       T_CIENOM    , &
+                       T_FOUCIECLE
+
+;
+; Variables pour la sécurité.
+;
+USE ussectmp NOLIST
+    "IM001"
+
+;
+; Documentation de l'écran.
+;
+USE im001.hlp NOLIST
+
+USE usactecr NOLIST
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Informations comptables         " ACTION DESIGNER D001
+  MENUITEM LABEL "Amortissement / Aliénation      " ACTION DESIGNER D002
+  MENUITEM LABEL "Ajustements                     " ACTION DESIGNER D003
+  MENUITEM LABEL "Cédule d'entretien              " ACTION DESIGNER D004
+  MENUITEM LABEL "Informations complémentaires    " ACTION DESIGNER D005
+  MENUITEM LABEL "Suivi des écritures             " ACTION DESIGNER D006
+  MENUITEM LABEL "Historique achats/déboursés     " ACTION DESIGNER D007
+  MENUITEM LABEL "Vérification                    " ACTION DESIGNER D008
+  MENUITEM LABEL "Information opération           " ACTION DESIGNER D009
+  MENUITEM LABEL "Information comptable           " ACTION DESIGNER D010
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%Informations comptables      " ACTION DESIGNER D001
+  MENUITEM LABEL "%%%Amortissement / Aliénation   " ACTION DESIGNER D002
+  MENUITEM LABEL "%%%Ajustements                  " ACTION DESIGNER D003
+  MENUITEM LABEL "%%%Cédule d'entretien           " ACTION DESIGNER D004
+  MENUITEM LABEL "%%%Informations complémentaires " ACTION DESIGNER D005
+  MENUITEM LABEL "%%%Suivi des écritures          " ACTION DESIGNER D006
+  MENUITEM LABEL "%%%Historique achats/déboursés  " ACTION DESIGNER D007
+  MENUITEM LABEL "%%%Vérification                 " ACTION DESIGNER D008
+  MENUITEM LABEL "%%%Information opération        " ACTION DESIGNER D009
+  MENUITEM LABEL "%%%Information comptable        " ACTION DESIGNER D010
+@ENDIF
+
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_FLGDEL CHARACTER SIZE 1 ; Flag pour le sous-écran de destruction
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Compagnie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie du menu.
+TEMPORARY T_FOUCIECLE CHARACTER SIZE 4  ; Compagnie de la charte fournisseur.
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE IMIMM_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+
+
+;-------------------------------------------------------------------------------
+;
+FILE IMIMMOBILISATION PRIMARY
+  ACCESS REQUEST IMMCLE OF IMIMMOBILISATION &
+         VIA     CIECLE , &
+                 IMMCLE   &
+         USING   CIECLE OF IMIMMOBILISATION , &
+                 IMMCLE OF IMIMMOBILISATION   &
+         ORDERBY CIECLE , &
+                 IMMCLE
+
+  ACCESS REQUEST IMCCLE OF IMIMMOBILISATION &
+         VIA     CIECLE , &
+                 IMCCLE   &
+         USING   CIECLE OF IMIMMOBILISATION, &
+                 IMCCLE OF IMIMMOBILISATION  &
+         ORDERBY CIECLE , &
+                 IMMCLE
+
+  ACCESS VIA     CIECLE &
+         USING   CIECLE OF IMIMMOBILISATION &
+         ORDERBY CIECLE , &
+                 IMMCLE
+
+  ITEM CIECLE    OF IMIMMOBILISATION INITIAL T_CIECLEMNU
+  ITEM IMMSTU    OF IMIMMOBILISATION INITIAL "A"         ; Actif
+  ITEM REFCIECLE OF IMIMMOBILISATION INITIAL T_FOUCIECLE
+  ITEM IMMDATCRE OF IMIMMOBILISATION INITIAL SYSDATE
+  ITEM IMMHRECRE OF IMIMMOBILISATION INITIAL SYSTIME / 10000
+  ITEM IMMUSRCRE OF IMIMMOBILISATION INITIAL LOGONID
+  ITEM IMMDATMOD OF IMIMMOBILISATION FINAL   SYSDATE        &
+                                      IF NOT NEWRECORD OF IMIMMOBILISATION AND &
+                                         ALTEREDRECORD OF IMIMMOBILISATION
+  ITEM IMMHREMOD OF IMIMMOBILISATION FINAL   SYSTIME / 10000 &
+                                      IF NOT NEWRECORD OF IMIMMOBILISATION AND &
+                                         ALTEREDRECORD OF IMIMMOBILISATION
+  ITEM IMMUSRMOD OF IMIMMOBILISATION FINAL   LOGONID         &
+                                      IF NOT NEWRECORD OF IMIMMOBILISATION AND &
+                                         ALTEREDRECORD OF IMIMMOBILISATION
+
+;
+; Destruction des fichiers de détail de l'immobilisation.
+;
+FILE IMIMM_AJUSTEMENT DELETE &
+                      NOITEM
+  ACCESS VIA   CIECLE , &
+               IMMCLE   &
+         USING CIECLE OF IMIMMOBILISATION , &
+               IMMCLE OF IMIMMOBILISATION
+;
+FILE IMIMM_CEDULE     DELETE &
+                      NOITEM
+  ACCESS VIA   CIECLE , &
+               IMMCLE   &
+         USING CIECLE OF IMIMMOBILISATION , &
+               IMMCLE OF IMIMMOBILISATION
+;
+FILE IMIMM_DESC       DELETE &
+                      NOITEM
+  ACCESS VIA   CIECLE , &
+               IMMCLE   &
+         USING CIECLE OF IMIMMOBILISATION , &
+               IMMCLE OF IMIMMOBILISATION
+;
+FILE IMIMM_SUIVI      DELETE &
+                      NOITEM
+  ACCESS VIA   CIECLE , &
+               IMMCLE   &
+         USING CIECLE OF IMIMMOBILISATION , &
+               IMMCLE OF IMIMMOBILISATION
+;
+FILE CPCAP_IMM        DELETE &
+                      NOITEM
+  ACCESS VIA   CIECLE , &
+               IMMCLE   &
+         USING CIECLE OF IMIMMOBILISATION , &
+               IMMCLE OF IMIMMOBILISATION
+
+;
+; Permet de validé la catégorie d'immobilisation.
+;
+FILE IMCATEGORIE      REFERENCE
+  ACCESS VIA   CIECLE , &
+               IMCCLE   &
+         USING CIECLE OF IMIMMOBILISATION , &
+               IMCCLE OF IMIMMOBILISATION
+
+;
+; Validation du statut.
+;
+DEFINE    D_IMMSTU CHARACTER SIZE 16 = "IMMSTU"
+TEMPORARY T_IMMSTU CHARACTER SIZE 4
+
+FILE VCBI_DSC         REFERENCE
+  ACCESS VIA   XELNOM, &
+               CBICLE &
+         USING D_IMMSTU, &
+               IMMSTU OF IMIMMOBILISATION
+
+;
+;
+; Validation du type.
+;
+DEFINE    D_IMMTYP CHARACTER SIZE 16 = "IMMTYP"
+TEMPORARY T_IMMTYP CHARACTER SIZE 4
+
+FILE VCBI_DSC         REFERENCE &
+                      ALIAS VCBI_DSC_TYP
+  ACCESS VIA   XELNOM, &
+               CBICLE &
+         USING D_IMMTYP, &
+               IMMTYP OF IMIMMOBILISATION
+
+;
+; Validation du code Achat/Bail.
+;
+DEFINE    D_IMMACHBAI CHARACTER SIZE 16 = "IMMACHBAI"
+TEMPORARY T_IMMACHBAI CHARACTER SIZE 4
+
+FILE VCBI_DSC         REFERENCE &
+                      ALIAS A_CBI_ACHBAI
+  ACCESS VIA   XELNOM, &
+               CBICLE &
+         USING D_IMMACHBAI, &
+               IMMACHBAI OF IMIMMOBILISATION
+
+;
+; Validation du code Neuf/Usagé.
+;
+DEFINE    D_IMMNEUUSG CHARACTER SIZE 16 = "IMMNEUUSG"
+TEMPORARY T_IMMNEUUSG CHARACTER SIZE 4
+
+FILE VCBI_DSC         REFERENCE &
+                      ALIAS A_CBI_NEUUSG
+  ACCESS VIA   XELNOM, &
+               CBICLE &
+         USING D_IMMNEUUSG, &
+               IMMNEUUSG OF IMIMMOBILISATION
+
+;
+; Permet de valider le numéro du fournisseur.
+;
+FILE CPFOURNISSEUR    REFERENCE
+  ACCESS VIA   FOUCIECLE , &
+               FOUCLE      &
+         USING REFCIECLE OF IMIMMOBILISATION , &
+               FOUCLE    OF IMIMMOBILISATION
+
+;
+; Permet de valider le numéro du fournisseur d'assurance.
+;
+FILE CPFOURNISSEUR    REFERENCE &
+                      ALIAS A_FOU_ASS
+  ACCESS VIA   FOUCIECLE , &
+               FOUCLE      &
+         USING REFCIECLE OF IMIMMOBILISATION , &
+               IMMFOUASS OF IMIMMOBILISATION
+
+;
+;
+FILE MCUNITE_ADM      REFERENCE
+  ACCESS VIA CIECLE , &
+             UNACLE   &
+         USING CIECLE OF IMIMMOBILISATION , &
+               UNACLE OF IMIMMOBILISATION
+
+;
+; Numéro séquentiel des immobilisations, fichier indexé.
+;
+FILE IMIMM_SEQ        DESIGNER &
+                      TRANSACTION GEN_NUM_SEQ
+  ACCESS VIA   CIECLE &
+         USING CIECLE OF IMIMM_SEQ
+  ITEM CIECLE OF IMIMM_SEQ INITIAL CIECLE OF IMIMMOBILISATION
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4  = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+TEMPORARY T_UNACLE    CHARACTER SIZE 8 ; Popup sur les unités adm.
+TEMPORARY T_IMCCLE    CHARACTER SIZE 4 ; Popup sur les catégories.
+TEMPORARY T_REFCLETYP CHARACTER SIZE 1 ; Popup sur les fournisseurs.
+TEMPORARY T_REFCLENUM CHARACTER SIZE 6 ; Popup sur les fournisseurs.
+TEMPORARY T_REFSTUPAT CHARACTER SIZE 5 ; Popup sur les fournisseurs.
+
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Fiches d'immobilisations " &
+@ELSE
+      " %%%Fiches d'immobilisations " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP
+
+ALIGN (19,3,19) (,,32)
+
+FIELD IMMCLE OF IMIMMOBILISATION ID 05 HIDDEN &
+      REQUIRED NOCHANGE                               &
+      LOOKUP NOTON IMIMMOBILISATION                   &
+        VIA   CIECLE,                                 &
+              IMMCLE                                  &
+        USING T_CIECLEMNU,                            &
+              IMMCLE OF IMIMMOBILISATION              &
+        MESSAGE 1604
+
+FIELD IMMDSC OF IMIMMOBILISATION &
+        REQUIRED
+
+FIELD IMCCLE OF IMIMMOBILISATION ID 10 HIDDEN &
+        REQUIRED &
+        LOOKUP ON IMCATEGORIE &
+          MESSAGE 1602 ; Ce code n'existe pas
+
+FIELD &
+@IF FRANCAIS
+      IMCDSCFRA &
+@ELSE
+      IMCDSCANG &
+@ENDIF
+                OF IMCATEGORIE &
+        DISPLAY
+
+FIELD UNACLE OF IMIMMOBILISATION  ID 15 HIDDEN &
+        REQUIRED &
+        LOOKUP ON MCUNITE_ADM &
+          MESSAGE 1614 ; Cette unité adm n'existe pas
+
+FIELD UNANOM OF MCUNITE_ADM &
+        DISPLAY
+
+ALIGN (19,3,19) (,,21) (,44,60)
+
+FIELD IMMSTU OF IMIMMOBILISATION ID 20 HIDDEN &
+        DISPLAY ON ENTRY &
+        LOOKUP ON VCBI_DSC &
+          MESSAGE 1618 ; Code invalide.
+
+FIELD CBIDSC OF VCBI_DSC &
+        DISPLAY &
+        SIZE 10
+
+FIELD IMMFLGTRS OF IMIMMOBILISATION &
+        SIZE 3 &
+        DEFAULT "1"
+
+ALIGN (19,3,19) (,44,60) (,,62)
+
+FIELD IMMMNTINI  OF IMIMMOBILISATION ID 30 HIDDEN &
+        DISPLAY &
+        REFRESH
+
+FIELD IMMACHBAI  OF IMIMMOBILISATION &
+        LOOKUP ON A_CBI_ACHBAI &
+          MESSAGE 1618
+
+FIELD CBIDSC OF A_CBI_ACHBAI &
+        DISPLAY &
+        SIZE 10
+
+FIELD IMMDATACQ  OF IMIMMOBILISATION  HIDDEN ID 40  FORMAT YYYYMMDD &
+        REQUIRED PATTERN "####/##/##"
+
+FIELD IMMNEUUSG  OF IMIMMOBILISATION &
+        LOOKUP ON A_CBI_NEUUSG &
+          MESSAGE 1618 ; Code invalide.
+
+FIELD CBIDSC OF A_CBI_NEUUSG &
+        DISPLAY &
+        SIZE 10
+
+ALIGN (19,3,19) (,,21)
+
+FIELD IMMTYP OF IMIMMOBILISATION ID 43 HIDDEN &
+        REQUIRED NOCHANGE &
+        LOOKUP ON VCBI_DSC_TYP &
+          MESSAGE 1617
+
+FIELD CBIDSC OF VCBI_DSC_TYP &
+        DISPLAY &
+        SIZE 20
+
+
+SKIP
+DRAW ,1 TO ,80
+
+TITLE &
+@IF FRANCAIS
+      " Entretien " &
+@ELSE
+      " %%%ENTRETIEN " &
+@ENDIF
+      AT ,1 CENTERED
+
+SKIP
+
+ALIGN (19,3,19) (,,26)
+
+FIELD FOUCLE OF IMIMMOBILISATION ID 45 HIDDEN
+
+FIELD FOUNOM OF CPFOURNISSEUR &
+        DISPLAY
+
+ALIGN (19,3,19) (,44,60)
+
+FIELD IMMCNTENT OF IMIMMOBILISATION ID 50 HIDDEN
+
+SKIP
+
+FIELD IMMMDL         OF IMIMMOBILISATION ID 55 HIDDEN
+FIELD IMMDATDEBCON   OF IMIMMOBILISATION FORMAT YYYYMMDD PATTERN "####/##/##"
+
+FIELD IMMSER         OF IMIMMOBILISATION ID 60 HIDDEN
+FIELD IMMDATRNVCON   OF IMIMMOBILISATION FORMAT YYYYMMDD PATTERN "####/##/##"
+FIELD IMMCONDSC      OF IMIMMOBILISATION ID 65 HIDDEN
+FIELD IMMDATFINGAR   OF IMIMMOBILISATION FORMAT YYYYMMDD PATTERN "####/##/##"
+
+FIELD IMMUTL         OF IMIMMOBILISATION ID 70 HIDDEN
+FIELD IMMMNTCONENT   OF IMIMMOBILISATION
+
+FIELD IMMLOC         OF IMIMMOBILISATION ID 75 HIDDEN
+
+SKIP
+DRAW ,1 TO ,80
+
+TITLE &
+@IF FRANCAIS
+      " Assurances " &
+@ELSE
+      " %%%ASSURANCES " &
+@ENDIF
+      AT ,1 CENTERED
+
+SKIP
+
+ALIGN (19,3,19) (,,26)
+
+FIELD IMMFOUASS OF IMIMMOBILISATION ID 80 HIDDEN
+
+FIELD FOUNOM    OF  A_FOU_ASS &
+        DISPLAY
+
+ALIGN (19,3,19) (,44,60)
+
+FIELD IMMCNTASS    OF IMIMMOBILISATION ID 85 HIDDEN
+FIELD IMMDATFINASS OF IMIMMOBILISATION FORMAT YYYYMMDD PATTERN "####/##/##"
+
+FIELD IMMMNTASS    OF IMIMMOBILISATION ID 90 HIDDEN
+FIELD IMMMNTPRIASS OF IMIMMOBILISATION
+
+;
+; Informations comptables.
+;
+SUBSCREEN im001a NOLABEL   &
+                 NOID      &
+                 MODE SAME &
+                 AUTO      &
+                 IF IMMFLGTRS OF IMIMMOBILISATION = "1" &
+                 PASSING IMIMMOBILISATION , &
+                         T_CIECLEMNU      , &
+                         T_CIENOM
+;
+; Amortissement / Aliénation.
+;
+SUBSCREEN im001b NOLABEL   &
+                 NOID      &
+                 MODE SAME &
+                 AUTO      &
+                 IF IMMFLGTRS OF IMIMMOBILISATION = "1" &
+                 PASSING IMIMMOBILISATION , &
+                         T_CIECLEMNU      , &
+                         T_CIENOM
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les catégorie d'immobilisations.
+;
+;
+PROCEDURE INPUT IMCCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_IMCCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN im101 MODE F &
+                     PASSING T_CIECLEMNU , &
+                             T_IMCCLE
+    LET FIELDTEXT = TRUNCATE( T_IMCCLE )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT UNACLE
+BEGIN
+  ;
+  ; Popup sur les unités administrative.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_UNACLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    ;
+    ; On prend le popup qui ne tient pas compte des la charte d'unité adm.
+    ;
+    RUN SCREEN mc104 MODE F &
+                     PASSING T_CIECLEMNU , &
+                             T_UNACLE
+    LET FIELDTEXT = TRUNCATE(T_UNACLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Appel du popup pour les codes bilingues, statut.
+;
+;
+PROCEDURE INPUT IMMSTU
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_IMMSTU = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F &
+                     PASSING D_IMMSTU , &
+                             T_IMMSTU
+    LET FIELDTEXT = TRUNCATE( T_IMMSTU )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Appel du popup pour les codes bilingues, type.
+;
+;
+PROCEDURE INPUT IMMTYP
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_IMMTYP = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F &
+                     PASSING D_IMMTYP , &
+                             T_IMMTYP
+    LET FIELDTEXT = TRUNCATE( T_IMMTYP )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Traitement pour les indicateurs dont la valeur est Oui ou Non.
+; Le procédure INPUT transpose les valeurs sous un code universel soit 1 et 0.
+;
+;
+PROCEDURE INPUT IMMFLGTRS
+BEGIN
+  USE usflginp NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; La procédure OUTPUT affiche les valeurs sous la forme Oui/Non.
+;
+;
+PROCEDURE OUTPUT IMMFLGTRS
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Appel du popup pour les codes bilingues, code Achat/Bail.
+;
+;
+PROCEDURE INPUT IMMACHBAI
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_IMMACHBAI = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F &
+                     PASSING D_IMMACHBAI , &
+                             T_IMMACHBAI
+    LET FIELDTEXT = TRUNCATE( T_IMMACHBAI )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Appel du popup pour les codes bilingues, code Neuf/Usage.
+;
+;
+PROCEDURE INPUT IMMNEUUSG
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_IMMNEUUSG = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F &
+                     PASSING D_IMMNEUUSG , &
+                             T_IMMNEUUSG
+    LET FIELDTEXT = TRUNCATE( T_IMMNEUUSG )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Fournisseur pour l'entretien, popup sur les fournisseurs.
+;
+;
+PROCEDURE INPUT FOUCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_REFCLETYP = "F"
+    LET T_REFCLENUM = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_REFSTUPAT = "@"
+    RUN SCREEN mc112 MODE F &
+                     PASSING T_FOUCIECLE , &
+                             T_REFCLETYP , &
+                             T_REFCLENUM , &
+                             T_REFSTUPAT
+    LET FIELDTEXT = TRUNCATE( T_REFCLENUM )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du numéro de fournisseur, ce champ est optionel.
+;
+;
+PROCEDURE EDIT FOUCLE
+BEGIN
+  GET CPFOURNISSEUR OPTIONAL
+  IF    "" <> TRUNCATE( FIELDTEXT ) &
+    AND NOT ACCESSOK
+  THEN ERROR 1608 ; Ce numéro de fournisseur n'existe pas.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Fournisseur pour l'assurance, popup sur les fournisseurs.
+;
+;
+PROCEDURE INPUT IMMFOUASS
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_REFCLETYP = "F"
+    LET T_REFCLENUM = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_REFSTUPAT = "@"
+    RUN SCREEN mc112 MODE F &
+                     PASSING T_FOUCIECLE , &
+                             T_REFCLETYP , &
+                             T_REFCLENUM , &
+                             T_REFSTUPAT
+    LET FIELDTEXT = TRUNCATE( T_REFCLENUM )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du numéro de fournisseur, ce champ est optionel.
+;
+;
+PROCEDURE EDIT IMMFOUASS
+BEGIN
+  GET A_FOU_ASS OPTIONAL
+  IF    "" <> TRUNCATE( FIELDTEXT ) &
+    AND NOT ACCESSOK
+  THEN ERROR 1608 ; Ce numéro de fournisseur n'existe pas.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Informations comptables.
+;
+;
+PROCEDURE DESIGNER D001
+BEGIN
+  RUN SCREEN im001a MODE F &
+                    PASSING IMIMMOBILISATION , &
+                            T_CIECLEMNU      , &
+                            T_CIENOM
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Amortissement / Aliénation.
+;
+;
+PROCEDURE DESIGNER D002
+BEGIN
+  RUN SCREEN im001b MODE F &
+                    PASSING IMIMMOBILISATION , &
+                            T_CIECLEMNU      , &
+                            T_CIENOM
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Ajustements.
+;
+;
+PROCEDURE DESIGNER D003
+BEGIN
+  IF NOT NEWRECORD OF IMIMMOBILISATION
+  THEN RUN SCREEN im001c MODE F &
+                         PASSING IMIMMOBILISATION , &
+                                 T_CIECLEMNU      , &
+                                 T_CIENOM
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Cédule d'entretien.
+;
+;
+PROCEDURE DESIGNER D004
+BEGIN
+  IF NOT NEWRECORD OF IMIMMOBILISATION
+  THEN RUN SCREEN im001d MODE F &
+                         PASSING IMIMMOBILISATION , &
+                                 T_CIECLEMNU      , &
+                                 T_CIENOM
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Informations complémentaires.
+;
+;
+PROCEDURE DESIGNER D005
+BEGIN
+  IF NOT NEWRECORD OF IMIMMOBILISATION
+  THEN RUN SCREEN im001e MODE F &
+                         PASSING IMIMMOBILISATION , &
+                                 T_CIECLEMNU      , &
+                                 T_CIENOM
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Suivi des écritures journal.
+;
+;
+PROCEDURE DESIGNER D006
+BEGIN
+  RUN SCREEN im001f MODE F &
+                    PASSING IMIMMOBILISATION , &
+                            T_CIECLEMNU      , &
+                            T_CIENOM
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Historique achats/déboursés.
+;
+;
+PROCEDURE DESIGNER D007
+BEGIN
+  RUN SCREEN im001g MODE F &
+                    PASSING IMIMMOBILISATION , &
+                            T_CIECLEMNU      , &
+                            T_CIENOM
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Vérification
+;
+;
+PROCEDURE DESIGNER D008
+BEGIN
+  RUN SCREEN im001h PASSING IMIMMOBILISATION &
+                    MODE SAME
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du sous-écran d'information opération.
+;
+PROCEDURE DESIGNER D009
+BEGIN
+  RUN SCREEN im001i PASSING &
+                        T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        IMIMMOBILISATION &
+                MODE F
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du sous-écran d'information comptable.
+;
+PROCEDURE DESIGNER D010
+BEGIN
+  RUN SCREEN im001j PASSING &
+                        T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        IMIMMOBILISATION &
+                MODE F
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF   DELETEDRECORD OF IMIMMOBILISATION &
+    AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification
+  ;
+  IF    ALTEREDRECORD OF IMIMMOBILISATION &
+    AND NOT NEWRECORD OF IMIMMOBILISATION &
+    AND NOT DELETEDRECORD OF IMIMMOBILISATION &
+    AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  ;
+  ; Destruction du projet
+  ;
+  IF DELETEDRECORD OF IMIMMOBILISATION
+  THEN BEGIN
+    ;
+    ; On initialise le flag de retour pour savoir si le sous-écran a
+    ; bien fonctionné.
+    ;
+    LET T_FLGDEL = ""
+    ;
+    ; Appel du sous-écran qui valide si le projet est
+    ; référée dans la définition CPCAP_IMPUTATION,
+    ; CRCAR_IMPUTATION, CPPAM_IMPUTATION et CRDPO_IMPUTATION.
+    ;
+    RUN SCREEN im001x MODE SAME &
+                      PASSING IMIMMOBILISATION, &
+                              T_FLGDEL
+    ;
+    ; Si la valeur de retour égale 1, cela indique que le sous-écran
+    ; n'a trouvé aucune référence pour l'identifiant demandé.
+    ;
+    IF T_FLGDEL = ""
+    THEN ERROR " "
+  END
+
+  ;
+  ;
+  ; On assigne un numéro à la fiche d'immobilisation.
+  ;
+  IF "" = TRUNCATE( IMMCLE OF IMIMMOBILISATION )
+  THEN BEGIN
+    START TRANSACTION GEN_NUM_SEQ
+    GET IMIMM_SEQ OPTIONAL
+    LET IMSNUMSEQ OF IMIMM_SEQ = ASCII( &
+                                        NCONVERT(IMSNUMSEQ OF IMIMM_SEQ) + 1 , &
+                                        IMSLONNUM OF IMIMM_SEQ )
+    LET IMMCLE    OF IMIMMOBILISATION = IMSNUMSEQ OF IMIMM_SEQ
+    PUT IMIMM_SEQ
+    COMMIT TRANSACTION GEN_NUM_SEQ
+  END
+END
+
+BUILD
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+*************************** Fiches d'immobilisations ***************************
+* Immobilisation: xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        *
+* Catégorie.....: xxxx         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  *
+* Unité adm.....: xxxxxxxx     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        *
+* Statut........: x xxxxxxxxxx             Transfert G/L.: xxx                 *
+* Coût initial..: xxxxxxxxxxxxx            Achat/Bail....: x xxxxxxxxxx        *
+* Date d'achat..: xxxxxxxx                 Neuf/Usagé....: x xxxxxxxxxx        *
+*                                                                              *
+********************************** Entretien ***********************************
+* Fournisseur...: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              *
+* Contact.......: xxxxxxxxxxxxxxxxxxxx                                         *
+* Modèle........: xxxxxxxxxxxxxxx          Début contrat.: xxxxxxxx            *
+* No de série...: xxxxxxxxxxxxxxxxxxxx     Renouvellement: xxxxxxxx            *
+* Remarque......: xxxxxxxxxxxxxxxxxxxx     Fin garantie..: xxxxxxxx            *
+* Utilisateur...: xxxxxxxxxxxxxxxxxxxx     Montant.......: xxxxxxxxxxxxx       *
+* Localisation..: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                               *
+********************************** Assurances **********************************
+* No fournisseur: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              *
+* Contact.......: xxxxxxxxxxxxxxxxxxxx     Renouvellement: xxxxxxxx            *
+* Montant assuré: xxxxxxxxxxxxx            Prime.........: xxxxxxxxxxxxx       *
+********************************************************************************
+@ENDIF

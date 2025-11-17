@@ -1,0 +1,158 @@
+;/T/ Journal des ventes sommaire
+;
+;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur...: Josée Bédard
+;    Date Création.: 30 mai 1994
+;
+;    Description...: Préparation du journal des ventes sommaires. Le journal
+;                    inclus les factures, les crédits, les notes de crédits et
+;                    les ajustements. On imprime que les transactions qui sont
+;                    journalisées.
+;
+;    Paramètres....: Compagnie
+;                    Periode CTB (Une, Plusieurs )
+;
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST     ; Permet de faire les SET PROCESS NOLIMIT...
+
+RUN cr311t
+
+;------------------------------------------------------------------------------
+;
+; Sélection des pièces pour les calculs.
+;
+REQUEST SELECTION_PIECE
+
+ACCESS CRCPT_A_REC
+
+
+
+CHOOSE CIECLE PARM, & ; Compagnie du menu
+       PECCLE PARM     RANGE; Période ctb
+
+; Ajustement pour le changement de siècle
+DEFINE D_ANNSIE CHARACTER SIZE 4 = PARM
+
+; Ajustement pour le changement de siècle
+SELECT IF PECCLE OF CRCPT_A_REC[1:2] = D_ANNSIE[3:2]
+
+
+SELECT CRCPT_A_REC IF CARDATJOU OF CRCPT_A_REC <> 0
+
+SUBFILE WCR311P &
+        INCLUDE CIECLE    OF CRCPT_A_REC , &
+                PECCLE    OF CRCPT_A_REC , &
+                CARCPTCAR OF CRCPT_A_REC , &
+                HISCLE    OF CRCPT_A_REC
+
+;------------------------------------------------------------------------------
+;
+; Sélection des écritures comptables.
+;
+REQUEST SELECTION_CTB
+
+ACCESS *WCR311P &
+  ;
+  ; Ecriture au Grand Livre.
+  ;
+  LINK  HISCLE OF WCR311P &
+    TO  HISCLE OF                 MCHIS_ECR OPTIONAL
+
+TEMPORARY T_PRJCLE CHARACTER SIZE 08
+TEMPORARY T_PRACLE CHARACTER SIZE 03
+TEMPORARY T_IMMCLE CHARACTER SIZE 12
+TEMPORARY T_MNTDBT FLOAT     SIZE 08 ; Total des montants débiteurs
+TEMPORARY T_MNTCRT FLOAT     SIZE 08 ; Total des montants créditeurs
+TEMPORARY T_FLGIMP CHARACTER SIZE 01 ; Flag pour indiquer si projet ou ctb.
+
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE CHARACTER SIZE 5 = "1" + PECCLE OF WCR311P &
+         IF PECCLE OF WCR311P[1:1] < "8" &
+         ELSE "0" + PECCLE OF WCR311P
+
+SORT ON CIECLE OF WCR311P   &
+     ON D_PECCLE_SIE &
+     ON CARCPTCAR OF WCR311P   &
+     ON CPTCLE    OF MCHIS_ECR &
+     ON UNACLE    OF MCHIS_ECR
+
+ITEM T_FLGIMP RESET AT INITIAL TO "1"
+
+ITEM T_MNTDBT SUBTOTAL HECMNTDBT OF MCHIS_ECR RESET AT UNACLE
+ITEM T_MNTCRT SUBTOTAL HECMNTCRT OF MCHIS_ECR RESET AT UNACLE
+
+;
+; Insertion des imputations du grand livre
+;
+SUBFILE WCR311 KEEP AT UNACLE &
+        INCLUDE CIECLE    OF WCR311P     , &
+                PECCLE    OF WCR311P     , &
+                CARCPTCAR OF WCR311P     , &
+                T_PRJCLE  ALIAS PRJCLE   , &
+                T_PRACLE  ALIAS PRACLE   , &
+                T_IMMCLE  ALIAS IMMCLE   , &
+                CPTCLE    OF MCHIS_ECR   , &
+                UNACLE    OF MCHIS_ECR   , &
+                T_MNTDBT  ALIAS ECRMNTDBT, &
+                T_MNTCRT  ALIAS ECRMNTCRT, &
+                T_FLGIMP
+
+
+
+;------------------------------------------------------------------------------
+;
+; Sélection des écritures aux projes.
+;
+REQUEST SELECTION_PROJET
+
+ACCESS *WCR311P &
+  ;
+  ; Ecriture aux projets.
+  ;
+  LINK  HISCLE OF WCR311P &
+    TO  HISCLE OF                 MCHIS_PROJET OPTIONAL
+
+TEMPORARY T_MNTDBT FLOAT SIZE 08
+TEMPORARY T_MNTCRT FLOAT SIZE 08
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE2 CHARACTER SIZE 5 = "1" + PECCLE OF WCR311P &
+         IF PECCLE OF WCR311P[1:1] < "8" &
+         ELSE "0" + PECCLE OF WCR311P
+
+SORT ON CIECLE    OF WCR311P      &
+     ON D_PECCLE_SIE2      &
+     ON CARCPTCAR OF WCR311P      &
+     ON PRJCLE    OF MCHIS_PROJET &
+     ON PRACLE    OF MCHIS_PROJET &
+     ON IMMCLE    OF MCHIS_PROJET
+
+ITEM T_MNTDBT SUBTOTAL HIPMNTDBT OF MCHIS_PROJET RESET AT IMMCLE
+ITEM T_MNTCRT SUBTOTAL HIPMNTCRT OF MCHIS_PROJET RESET AT IMMCLE
+
+;
+; Ajout des imputations de projets.
+;
+OUTPUT *WCR311 ADD NOITEM AT IMMCLE
+
+  ITEM CIECLE    OF WCR311 FINAL CIECLE    OF WCR311P
+  ITEM PECCLE    OF WCR311 FINAL PECCLE    OF WCR311P
+  ITEM CARCPTCAR OF WCR311 FINAL CARCPTCAR OF WCR311P
+  ITEM PRJCLE    OF WCR311 FINAL PRJCLE    OF MCHIS_PROJET
+  ITEM PRACLE    OF WCR311 FINAL PRACLE    OF MCHIS_PROJET
+  ITEM IMMCLE    OF WCR311 FINAL IMMCLE    OF MCHIS_PROJET
+
+  ITEM ECRMNTDBT OF WCR311 FINAL T_MNTDBT
+  ITEM ECRMNTCRT OF WCR311 FINAL T_MNTCRT
+  ITEM T_FLGIMP  OF WCR311 FINAL "2"
+
+BUILD

@@ -1,0 +1,262 @@
+;/T/ 5.3 Quart de travail (Pilotage)
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date création: 1994-11-25
+;
+;    Description..: Ce panorama permet de saisir les quarts de travail ainsi
+;                   que les heures de début et de fin
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd201 ACTIONBAR                    &
+             MODE LABEL "" AT 2,80        &
+             NOACTION                     &
+             FIELDMARK RETAIN STARTUP     &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU ,      &
+                       T_CIENOM
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD201"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+
+USE pd201.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire au traitement
+;
+
+TEMPORARY T_VAR_CBI   CHARACTER SIZE 16 INIT "QRTCODQRT" RESET AT STARTUP
+DEFINE    D_QRTCODQRT CHARACTER SIZE 16 = "QRTCODQRT"
+TEMPORARY T_QRTCODQRT CHARACTER SIZE 04
+TEMPORARY T_FLGDEL    CHARACTER SIZE 1 ; Flag pour le sous-écran de destruction
+
+
+;-------------------------------------------------------------------------------
+;
+; Recherche de la valeur du code bilingue
+;
+FILE MCCODE_BILINGUE  PRIMARY &
+                      OCCURS 16 &
+                      NOITEMS
+
+  ACCESS  VIA     XELNOM, &
+                  CBICLE &
+          USING   T_VAR_CBI, &
+                  CBICLE OF MCCODE_BILINGUE &
+          REQUEST CBICLE &
+          ORDERBY CBICLE
+
+  ACCESS  VIA     XELNOM &
+          USING   T_VAR_CBI &
+          ORDERBY CBICLE
+
+  ITEM XELNOM OF MCCODE_BILINGUE INITIAL T_VAR_CBI
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Quart de travail " &
+@ELSE
+      " %%%Quart de travail " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST ; Pour placer le TITLE OFF
+
+TITLE &
+@IF FRANCAIS
+    "Code  Description française         Description anglaise" &
+@ELSE
+    "Cod   French description            English description " &
+@ENDIF
+  AT 5,8
+
+SKIP TO LINE 6
+
+ALIGN(8,6,8)(,,13)(,,44)
+
+CLUSTER OCCUR WITH MCCODE_BILINGUE ID BASE 10
+
+FIELD CBICLE OF MCCODE_BILINGUE &
+        LABEL " " HIDDEN &
+        REQUIRED NOCHANGE &
+        LOOKUP NOTON MCCODE_BILINGUE &
+          VIA   XELNOM, CBICLE &
+          USING XELNOM OF MCCODE_BILINGUE, &
+                CBICLE OF MCCODE_BILINGUE &
+          MESSAGE  3049 ; Ce code de quart de travail existe déjà
+
+FIELD CBIDSCFRA    OF MCCODE_BILINGUE
+
+FIELD CBIDSCANG    OF MCCODE_BILINGUE &
+      DEFAULT CBIDSCFRA OF MCCODE_BILINGUE
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup le champs dureté du granit (codes bilingues)
+;
+
+PROCEDURE INPUT CBICLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_QRTCODQRT = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd119 MODE F &
+                     PASSING D_QRTCODQRT , &
+                             T_QRTCODQRT,&
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_QRTCODQRT )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  FOR MCCODE_BILINGUE
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF DELETEDRECORD OF MCCODE_BILINGUE &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification
+    ;
+    IF    ALTEREDRECORD     OF MCCODE_BILINGUE &
+      AND NOT NEWRECORD     OF MCCODE_BILINGUE &
+      AND NOT DELETEDRECORD OF MCCODE_BILINGUE &
+      AND TZ_SECMOD = "0"
+    THEN ERROR 2
+    ;
+    ; Destruction d'une couleur de granit.
+    ;
+;;;    IF DELETEDRECORD OF MCCODE_BILINGUE
+;;;    THEN BEGIN
+;;;      ;
+;;;      ; On initialise le flag de retour pour savoir si le sous-écran a
+;;;      ; bien fonctionné.
+;;;      ;
+;;;      LET T_FLGDEL = ""
+;;;      ;
+;;;      ; Appel du sous-écran qui valide si la catégorie est référée.
+;;;      ;
+;;;      RUN SCREEN pd201x MODE SAME &
+;;;                        PASSING MCCODE_BILINGUE, &
+;;;                                T_FLGDEL,&
+;;;                                T_CIECLEMNU
+;;;      ;
+;;;      ; Si la valeur de retour égale 1, cela indique que le sous-écran
+;;;      ; n'a trouvé aucune référence pour l'identifiant demandé.
+;;;      ;
+;;;      IF T_FLGDEL = ""
+;;;      THEN ERROR " "
+;;;    END
+  END
+END
+
+
+BUILD
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+******************************* Quart de travail *******************************
+*                                                                              *
+*      Code  Description française         Description anglaise                *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*                                                                              *
+********************************************************************************
+@ENDIF

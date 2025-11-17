@@ -1,0 +1,156 @@
+;/T/ Ecran de vérification de la sécurité
+;
+;/P/ Programmeur..: Guy Chabot
+;    Date Création: 19-Feb-1992
+;
+;    Description..: Cet écran permet de vérifier si l'usager a accès ou
+;                   que l'usager est restreint à certain traitement.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN gs000 NOMODE ACTION LABEL " " &
+             FROM 23,70 TO 23,80 &
+             RECEIVING TZ_NOMECR, & ; Nom de l'écran
+                       TZ_SECACC, & ; Accès
+                       TZ_SECENT, & ; Entrée
+                       TZ_SECMOD, & ; Modification
+                       TZ_SECDEL    ; Destruction
+
+TEMPORARY TZ_NOMECR CHARACTER SIZE 7
+TEMPORARY TZ_SECACC CHARACTER SIZE 1
+TEMPORARY TZ_SECENT CHARACTER SIZE 1
+TEMPORARY TZ_SECMOD CHARACTER SIZE 1
+TEMPORARY TZ_SECDEL CHARACTER SIZE 1
+
+
+;-------------------------------------------------------------------------------
+;
+; Vérification sur l'usager.
+;
+FILE GSUSAGER         DESIGNER
+
+;
+; Sécurité du programme référé.
+;
+FILE GSUSAGER_PROG    DESIGNER
+
+;
+; Pour savoir le type de programme.
+;
+FILE GSPROGRAMME      DESIGNER
+
+;-------------------------------------------------------------------------------
+
+file gslog designer
+
+;-------------------------------------------------------------------------------
+;
+;
+; validation de la sécurité d'accès au écran et traitement
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  ;
+  ; Enregistrer l'accès de l'usager
+  ;
+  get gslog via gslusrcod, gslflglog using logonid, "L"   optional
+  if accessok
+  then begin
+    let gslflglog of gslog = " "
+    put gslog reset
+  end
+
+  get gsusager    via usrcle using logonid   optional
+  get gsprogramme via xprnom using tz_nomecr optional
+
+  let gsldatacc of gslog = sysdate
+  let gslusrcod of gslog = logonid
+  let gsltracod of gslog = tz_nomecr
+  let gslhreacc of gslog = systime
+  let gsltranom of gslog = xprdscfra of gsprogramme
+  let gslusrnom of gslog = usrempnom of gsusager
+  let gslflglog of gslog = "L" ; Log le plus récent
+
+  put gslog reset
+
+  ;
+  ; GET sur l'usager pour vérifier si l'usager est disponible pour le systeme
+  ;
+  GET GSUSAGER   VIA USRCLE USING LOGONID   OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    ;
+    ; La date de fin d'accès a été atteint
+    ;
+    IF SYSDATE > USRDATFIN OF GSUSAGER AND &
+          0   <> USRDATFIN OF GSUSAGER
+    THEN BEGIN
+      LET TZ_SECACC = "2"
+      RETURN
+    END
+  END
+  ;
+  ; L'usager n'est pas définie au système
+  ;
+  ELSE BEGIN
+    LET TZ_SECACC = "3"
+    RETURN
+  END
+  ;
+  ;
+  ; GET sur le programme pour savoir de quel type d'écran, menu de premier
+  ; niveau (M) ou ecran normal (E).
+  ;
+  ;
+  GET GSUSAGER_PROG VIA USRCLE, XPRNOM USING LOGONID, TZ_NOMECR OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    ;
+    ; Dans les variables de traitement on redonne à l'écran appellant les
+    ; traitement disponible de l'usager
+    ;
+    LET TZ_SECACC = USPFLGACS OF GSUSAGER_PROG
+    LET TZ_SECENT = USPFLGENT OF GSUSAGER_PROG
+    LET TZ_SECMOD = USPFLGMOD OF GSUSAGER_PROG
+    LET TZ_SECDEL = USPFLGDEL OF GSUSAGER_PROG
+  END
+  ;
+  ; S'il n'a pas de GET alors l'usager peut tout faire
+  ;
+  ELSE BEGIN
+    ;
+    ; S'il n'y a pas eu de GET sur le programme et que le programme
+    ; est un menu de premier niveau (M) alors il peut rien faire si-non tout
+    ;                                                 ----
+    GET GSPROGRAMME VIA XPRNOM USING TZ_NOMECR OPTIONAL
+    IF NOT ACCESSOK
+    THEN BEGIN
+      LET TZ_SECACC = "0"
+      LET TZ_SECENT = "0"
+      LET TZ_SECMOD = "0"
+      LET TZ_SECDEL = "0"
+    END
+    ELSE BEGIN
+      IF XPRGNR OF GSPROGRAMME = "M"
+      THEN BEGIN
+        LET TZ_SECACC = "0"
+        LET TZ_SECENT = "0"
+        LET TZ_SECMOD = "0"
+        LET TZ_SECDEL = "0"
+      END
+      ELSE BEGIN
+        LET TZ_SECACC = "1"
+        LET TZ_SECENT = "1"
+        LET TZ_SECMOD = "1"
+        LET TZ_SECDEL = "1"
+      END
+    END
+  END
+  RETURN
+END
+
+BUILD

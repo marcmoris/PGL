@@ -1,0 +1,2554 @@
+;/T/ Carte des blocs
+;
+;/P/ Programmeur..: Francois Richard
+;    Date Creation: 22 septembre 1999
+;
+;    Description..: Cet ecran permet de saisir les informations
+;                   concernant les blocs. Cet ecran provient de l'ancien
+;                   module columbia et a ete repense pour l'inclure dans
+;                   PGL
+;
+;    ATTENTION : Les procedures PATH, FIND et DELETE sont recodes
+;
+;/M/ Programmeur..: Francois Richard
+;    Date.........: 2000-01-05
+;    Description..: Lorsqu'un bloc est assigne a un projet multiple,
+;                   il faut le placer le client de la commande sur la
+;                   carte de bloc
+;
+;***********************************************************************************************************************************
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date..............: 15 mars 2000
+;    Description.......: Autoriser l'accès au chmaps Facture C/P (élément CAPCLE) en tout temps.
+;
+;    Référence.........: Demande de changement 000029.
+;
+;    Signet............: MP-00-03-15_D29.
+;
+;    ------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date..............: 15 mars 2000
+;    Description.......: Corriger le calcul des quantités en M3 des blocs assignés au niveau des commandes internes.
+;
+;    Référence.........: Stabilisation du module Gestion de blocs / Columbia (point 02).
+;
+;    Signet............: MP-00-03-15_SC02.
+;
+;    ------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date..............: 22 mars 2000
+;    Description.......: Génération automatique du code d'entrepôt à partir du code de granit.
+;
+;    Référence.........: Stabilisation du module Gestion de blocs / Columbia (point 04).
+;
+;    Signet............: MP-00-03-22_SC04.
+;
+;    ------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date..............: 22 mars 2000
+;    Description.......: Après une mise à jour, replacer automatiquement en mode recherche.
+;
+;    Référence.........: Stabilisation du module Gestion de blocs / Columbia (point 05).
+;
+;    Signet............: MP-00-03-22_SC05.
+;
+;    ------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date..............: 22 mars 2000
+;    Description.......: Éliminer le signal sonore généré par la système sur la date du bloc.
+;
+;    Référence.........: Stabilisation du module Gestion de blocs / Columbia (point 06).
+;
+;    Signet............: MP-00-03-22_SC06.
+;
+;    ------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date..............: 22 mars 2000
+;    Description.......: Le bloc peut être réservé si et seulement si aucun projet n'a encore été spécifié.
+;
+;    Référence.........: Stabilisation du module Gestion de blocs / Columbia (point 07).
+;
+;    Signet............: MP-00-03-22_SC07.
+;
+;    ------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date..............: 29 mars 2000
+;    Description.......: Le montant d'expédition n'est plus accessible par l'usager, Ce montant
+;                        est uniquement en affichage.
+;
+;    Référence.........: Demande de changement 000033.
+;
+;    Signet............: MP-00-03-22_D33.
+;
+;    ------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date..............: 24 mai 2000
+;    Description.......: Mise à jour automatique du chmaps "Facture C/P" en fonction de la valeur du code de granit.
+;
+;    Référence.........: Demande de changement 000062.
+;
+;    Signet............: MP-00-05-24_D62.
+;
+;    ------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date..............: 24 janvier 2001
+;    Description.......: Éliminer la valeur assignée par défaut (date du jour) sur la date de création du bloc si
+;                        l'utilisateur est en mode selection ("select") ou recherche ("find").
+;
+;    Référence.........: Demande de changement 000121.
+;
+;    Signet............: MP-01-01-24_D121.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+SCREEN if001 ACTIONBAR                 &
+     MODE LABEL "" AT 2,80             &
+     NOACTION FIELDMARK RETAIN STARTUP &
+     HELP POPUP FROM 4,9 TO 20,72      &
+     RECEIVING T_CIECLEMNU           , &
+               T_CIENOM              , &
+               T_TGRCODGRA_ORI       , &
+               T_IFCCLE_ORI          , &
+               T_BLCCLE_ORI          , &
+               T_BLCRED_ORI
+
+SET LIST TRANSACTION
+
+USE ussectmp  NOLIST
+"IF001"
+
+USE if001.hlp NOLIST
+
+USE usactecr  NOLIST
+
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Recherche no. référence    "  ACTION DESIGNER D005
+  MENUITEM LABEL "Réservation d'un bloc      "  ACTION DESIGNER D003
+  MENUITEM LABEL "Historique des mouvements  "  ACTION DESIGNER D001
+  MENUITEM LABEL "Historique des réservations"  ACTION DESIGNER D004
+  MENUITEM LABEL "Vérification               "  ACTION DESIGNER D002
+
+ACTIONMENU LABEL "Procedures"
+  MENUITEM LABEL "Dé-assigner bloc" ACTION DESIGNER P001
+
+;-------------------------------------------------------------------------------
+;
+; Variable recu en parametre
+;
+TEMPORARY T_CIECLEMNU        CHARACTER SIZE 4  ; Numéro de cie
+TEMPORARY T_CIENOM           CHARACTER SIZE 40 ; Nom de la compagnie
+TEMPORARY T_CLICIECLE        CHARACTER SIZE 4    RESET AT STARTUP
+TEMPORARY T_FOUCIECLE        CHARACTER SIZE 4    RESET AT STARTUP
+TEMPORARY T_TGRCODGRA_ORI    CHARACTER SIZE 3
+TEMPORARY T_IFCCLE_ORI       CHARACTER SIZE 2
+TEMPORARY T_BLCCLE_ORI       CHARACTER SIZE 6
+TEMPORARY T_BLCRED_ORI       CHARACTER SIZE 1
+
+
+;-------------------------------------------------------------------------------
+;
+; Carte de bloc
+FILE IFBLOC IN DICT PRIMARY NOITEM
+
+; Procedure PATH et FIND recodes
+
+ITEM CIECLE OF IFBLOC INITIAL T_CIECLEMNU
+
+;-----------------------------------------------------------------------------
+;
+; Type de granit
+;
+FILE PDTYPE_GRANIT REFERENCE
+
+ACCESS VIA   CIECLE,             &
+             TGRCODGRA           &
+       USING T_CIECLEMNU,        &
+             TGRCODGRA OF IFBLOC
+
+;-----------------------------------------------------------------------------
+;
+; Entrepot
+;
+FILE IFENTREPOT REFERENCE
+
+ACCESS VIA   CIECLE,      &
+             ETRCLE       &
+       USING T_CIECLEMNU, &
+             ETRCLE OF IFBLOC
+
+;-----------------------------------------------------------------------------
+;
+; Categorie de granit
+;
+FILE IFCATEGORIE REFERENCE
+
+ACCESS VIA   CIECLE,      &
+             CATCLE       &
+       USING T_CIECLEMNU, &
+             CATCLE OF IFBLOC
+
+;-----------------------------------------------------------------------------
+;
+; Qualite de granit
+;
+FILE IFQUALITE REFERENCE
+
+ACCESS VIA   CIECLE,       &
+             QLTCLE        &
+       USING T_CIECLEMNU,  &
+             QLTCLE OF IFBLOC
+
+;-----------------------------------------------------------------------------
+;
+; Couleur
+;
+FILE IFCOULEUR REFERENCE
+
+ACCESS VIA   CIECLE,      &
+             CLRCLE       &
+       USING T_CIECLEMNU, &
+             CLRCLE OF IFBLOC
+
+;-----------------------------------------------------------------------------
+;
+; Projet de production
+;
+FILE PDPROJET REFERENCE
+
+ACCESS VIA   CIECLE,       &
+             PJTABR        &
+       USING T_CIECLEMNU,  &
+             PJTABR OF IFBLOC
+
+;-----------------------------------------------------------------------------
+;
+; Client des comptes a recevoir
+;
+FILE CRCLIENT REFERENCE
+
+ ACCESS VIA   CLICIECLE,    &
+              CLICLE        &
+        USING T_CLICIECLE,  &
+              CLICLE OF IFBLOC
+
+;-----------------------------------------------------------------------------
+;
+; Commandes interne
+;
+FILE PDCOMMAN_INTERNE REFERENCE
+
+  ACCESS VIA   CIECLE,           &
+               PJTABR,           &
+               PJTANN,           &
+               COMNUMCOMINT      &
+         USING T_CIECLEMNU,      &
+               PJTABR OF IFBLOC, &
+               PJTANN OF IFBLOC, &
+               COMNUMCOMINT OF IFBLOC
+
+;-----------------------------------------------------------------------------
+;
+; Ligne de detail d'une commande
+;
+FILE PDDETAIL_C_I REFERENCE
+
+   ACCESS VIA   CIECLE,                 &
+                PJTABR,                 &
+                PJTANN,                 &
+                COMNUMCOMINT,           &
+                DCINUMLIG,              &
+                TPDTYPPRD,              &
+                TGRCODGRA               &
+          USING T_CIECLEMNU,            &
+                PJTABR OF IFBLOC,       &
+                PJTANN OF IFBLOC,       &
+                COMNUMCOMINT OF IFBLOC, &
+                DCINUMLIG OF IFBLOC,    &
+                "BL",                   &
+                TGRCODGRA OF IFBLOC
+
+;-----------------------------------------------------------------------------
+;
+; Lot d'expedition
+;
+FILE IFLOT REFERENCE
+
+  ACCESS VIA   CIECLE,      &
+               IFLCLE       &
+         USING T_CIECLEMNU, &
+               IFLCLE OF IFBLOC
+
+;-----------------------------------------------------------------------------
+;
+; Fournisseur des comptes a payer
+;
+FILE CPFOURNISSEUR REFERENCE
+
+  ACCESS VIA   FOUCIECLE,   &
+               FOUCLE       &
+         USING T_FOUCIECLE, &
+               FOUCLE OF IFBLOC
+
+;-----------------------------------------------------------------------------
+;
+; Informations sur le Holding.
+;
+FILE MCHOLDING        REFERENCE
+  ACCESS VIA CIENMC &
+         USING "1"
+
+;-----------------------------------------------------------------------------
+;
+; Reservation du bloc
+;
+FILE IFRESERVATION  DESIGNER
+
+  ACCESS VIA   CIECLE,              &
+               TGRCODGRA,           &
+               IFCCLE,              &
+               BLCCLE,              &
+               BLCRED               &
+         USING T_CIECLEMNU,         &
+               TGRCODGRA OF IFBLOC, &
+               IFCCLE OF IFBLOC,    &
+               BLCCLE OF IFBLOC,    &
+               BLCRED OF IFBLOC
+
+;-----------------------------------------------------------------------------
+;
+; Table des facteurs de conversion
+;
+FILE PDCONVERT_UN_M DESIGNER
+
+;-----------------------------------------------------------------------------
+;
+; Charte de numerotation des blocs
+;
+FILE IFCHARTE DESIGNER
+
+;-----------------------------------------------------------------------------
+;
+; Validation du numero de bloc
+;
+FILE IFBLOC DESIGNER ALIAS A_IFBLOC
+
+;------------------------------------------------------------------------------
+;
+; Commande interne
+;
+FILE PDCOMMAN_INTERNE DESIGNER ALIAS COM_VALIDE
+
+;-----------------------------------------------------------------------------
+;
+; Quantite de la ligne de commande a mettre a jour
+;
+FILE PDDETAIL_C_I DESIGNER ALIAS A_LIGNE_COMMANDE
+
+;------------------------------------------------------------------------------
+;
+; Historique des mouvements de blocs
+;
+FILE IFHISTO_MOUBLOC DESIGNER OPEN 1
+
+;------------------------------------------------------------------------------
+;
+; Historique des mouvements de blocs - Pour validation de presence unitaire
+;
+FILE IFHISTO_MOUBLOC DESIGNER ALIAS A_VALID_HMB OPEN 2
+
+;------------------------------------------------------------------------------
+;
+; Verifie si la reservation est encore bonne
+;
+FILE IFRESERVATION DESIGNER ALIAS A_RESERVATION
+
+;------------------------------------------------------------------------------
+;
+; Historique des mouvements de blocs - Pour conserver l'integrite des donnees
+;
+FILE IFHISTO_MOUBLOC DELETE ALIAS A_DEL_HMB  OPEN 3
+
+  ACCESS VIA CIECLE             , &
+             TGRCODGRA          , &
+             IFCCLE             , &
+             BLCCLE             , &
+             BLCRED               &
+       USING CIECLE    OF IFBLOC, &
+             TGRCODGRA OF IFBLOC, &
+             IFCCLE    OF IFBLOC, &
+             BLCCLE    OF IFBLOC, &
+             BLCRED    OF IFBLOC
+
+;------------------------------------------------------------------------------
+;
+; Suppression de la reservation
+;
+FILE IFRESERVATION DELETE ALIAS A_DEL_BLR OPEN 4
+
+  ACCESS VIA CIECLE             , &
+             TGRCODGRA          , &
+             IFCCLE             , &
+             BLCCLE             , &
+             BLCRED               &
+       USING T_CIECLEMNU        , &
+             TGRCODGRA OF IFBLOC, &
+             IFCCLE    OF IFBLOC, &
+             BLCCLE    OF IFBLOC, &
+             BLCRED    OF IFBLOC
+
+;-----------------------------------------------------------------------------
+;
+; Suppression de l'historique de la reservation
+;
+FILE IFHISTO_RESERV DELETE ALIAS A_DEL_IFH OPEN 5
+
+  ACCESS VIA CIECLE             , &
+             TGRCODGRA          , &
+             IFCCLE             , &
+             BLCCLE             , &
+             BLCRED               &
+       USING T_CIECLEMNU        , &
+             TGRCODGRA OF IFBLOC, &
+             IFCCLE    OF IFBLOC, &
+             BLCCLE    OF IFBLOC, &
+             BLCRED    OF IFBLOC
+
+;-----------------------------------------------------------------------------
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4  = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+; Calcul du cout total
+DEFINE D_COUT_TOTAL FLOAT SIZE 8 = &
+      ((BLCMNTM3 OF IFBLOC + BLCMNTEXPM3 OF IFBLOC) &
+      * BLCM3TOT OF IFBLOC) * 100
+
+; Usager courant
+DEFINE D_USAGER CHARACTER SIZE 8 = LOGONID                                         &
+                                IF 0 <> SIZE(TRUNCATE(BLRUSRRES OF IFRESERVATION)) &
+                              ELSE ""
+
+; temporarire servant a afficher le numero de projet du numero de commande
+TEMPORARY T_PJTABR_DISP CHARACTER SIZE 2
+
+TEMPORARY T_DATNUM NUMERIC*8  ; Sert pour inserer la date dans le numero de bloc
+TEMPORARY T_FACTEUR_PL FLOAT SIZE 8 RESET AT STARTUP
+
+;------------------------------------------------------------------------------
+;
+; Temporaire pour l'appel des pop-up ou de sous-ecran
+;
+TEMPORARY T_CIECLE       CHARACTER SIZE 4
+TEMPORARY T_TGRCODGRA    CHARACTER SIZE 3
+TEMPORARY T_ETRCLE       CHARACTER SIZE 4
+TEMPORARY T_CATCLE       CHARACTER SIZE 3
+TEMPORARY T_QLTCLE       CHARACTER SIZE 3
+TEMPORARY T_CLRCLE       CHARACTER SIZE 3
+TEMPORARY T_PJTABR       CHARACTER SIZE 2
+TEMPORARY T_PJTANN       CHARACTER SIZE 2
+TEMPORARY T_COMNUMCOMINT CHARACTER SIZE 3
+TEMPORARY T_CLICLE       CHARACTER SIZE 6
+TEMPORARY T_DCINUMLIG    CHARACTER SIZE 3
+TEMPORARY T_TPDTYPPRD    CHARACTER SIZE 2
+TEMPORARY T_IFLCLE       CHARACTER SIZE 9
+TEMPORARY T_FOUCLE       CHARACTER SIZE 6
+TEMPORARY T_USINE_SEC    CHARACTER SIZE 1
+TEMPORARY T_IFCCLE       CHARACTER SIZE 2
+TEMPORARY T_RECHERCHE    CHARACTER SIZE 10 RESET AT STARTUP
+
+;-----------------------------------------------------------------------------
+;
+; Champs silent
+;
+TEMPORARY T_SILENT1 CHARACTER SIZE 1
+TEMPORARY T_SILENT2 CHARACTER SIZE 1
+TEMPORARY T_SILENT3 CHARACTER SIZE 1
+
+;-----------------------------------------------------------------------------
+;
+; Temporaire associee a l'entrepot - Historique des mouvements de blocs
+;
+TEMPORARY T_OLD_ETRCLE CHARACTER SIZE 4   RESET AT STARTUP
+TEMPORARY T_HHMMSSMM   CHARACTER SIZE 8
+
+;------------------------------------------------------------------------------
+;
+; Temporaire servant aux recalculs des totaux dans les lignes
+; de commande
+;
+TEMPORARY T_PJTABR_DEP       CHARACTER SIZE 2 RESET AT STARTUP
+TEMPORARY T_PJTANN_DEP       CHARACTER SIZE 2 RESET AT STARTUP
+TEMPORARY T_COMNUMCOMINT_DEP CHARACTER SIZE 3 RESET AT STARTUP
+TEMPORARY T_DCINUMLIG_DEP    CHARACTER SIZE 3 RESET AT STARTUP
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_FLG_US           INTEGER   SIZE 2 RESET AT STARTUP ; MP-00-03-22_SC05.
+
+;-------------------------------------------------------------------------------
+;
+USE usvarprd NOLIST
+
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+DRAW THIN 12,36 TO 16,77
+SKIP
+
+TITLE &
+" Gestion des cartes de bloc " &
+CENTERED AT ,1
+
+HILITE TITLE OFF
+
+SKIP TO LINE 4
+
+ALIGN (2,3,19)(,,22)(,24,25)(,31,32)(,41,52)(,63,77)
+FIELD TGRCODGRA OF IFBLOC          &
+      ID 05                        &
+      REQUIRED                     &
+      NOCHANGE                     &
+      HIDDEN                       &
+      LABEL "No bloc.......:"      &
+      LOOKUP ON PDTYPE_GRANIT      &
+      VIA   CIECLE,                &
+            TGRCODGRA              &
+      USING T_CIECLEMNU,           &
+            TGRCODGRA OF IFBLOC    &
+      MESSAGE 3257 ; PD357 Ce type de granit est inexistant
+
+FIELD IFCCLE OF IFBLOC &
+      DISPLAY
+
+FIELD BLCCLE OF IFBLOC &
+      REQUIRED         &
+      PATTERN "######" &
+      NOCHANGE         &
+      LABEL "-"
+
+FIELD BLCRED OF IFBLOC &
+      DEFAULT " "      &
+      NOCHANGE         &
+      LABEL "-"
+
+FIELD BLCDAT OF IFBLOC   &
+      LABEL "Date.....:" &
+      REQUIRED           &
+      FORMAT YYYYMMDD    &
+      NOCHANGE
+
+FIELD T_SILENT1 SILENT
+
+FIELD BLCINVINIT OF IFBLOC  &
+      LABEL "Inv. initial:" &
+      NOCHANGE
+
+ALIGN (2,3,19)(,,24)
+
+FIELD ETRCLE OF IFBLOC            &
+      ID 10                       &
+      LABEL "Entrepôt......:"  &
+      HIDDEN                      &
+      REQUIRED                    &
+      LOOKUP ON IFENTREPOT        &
+         VIA   CIECLE,            &
+               ETRCLE             &
+         USING T_CIECLEMNU,       &
+               ETRCLE OF IFBLOC   &
+         MESSAGE 3260 ; PD360 Cet entrepôt est inexistante
+
+FIELD ETRDSCFRA001 OF IFENTREPOT &
+      DISPLAY
+
+FIELD T_SILENT3 SILENT
+
+ALIGN (2,3,19)(,,24)(,41,52)(,,56)
+
+FIELD TGRCODGRA OF PDTYPE_GRANIT &
+      ID 15                      &
+      HIDDEN                     &
+      LABEL "Type granit...:"    &
+      DISPLAY
+
+FIELD TGRDSCFRA001 OF PDTYPE_GRANIT &
+      DISPLAY                       &
+      SIZE 16
+
+FIELD CATCLE OF IFBLOC         &
+      REQUIRED                 &
+      LABEL "Catégorie:"    &
+      LOOKUP ON IFCATEGORIE    &
+        VIA   CIECLE,          &
+              CATCLE           &
+        USING T_CIECLEMNU,     &
+              CATCLE OF IFBLOC &
+        MESSAGE 3261 ; PD361 Cette catégorie de granit est inexistante
+
+FIELD CATDSCFRA OF IFCATEGORIE &
+      DISPLAY                  &
+      SIZE 23
+
+FIELD QLTCLE OF IFBLOC            &
+      REQUIRED                    &
+      ID 20                       &
+      HIDDEN                      &
+      LABEL "Qualité.......:"  &
+      LOOKUP ON IFQUALITE         &
+        VIA   CIECLE,             &
+              QLTCLE              &
+        USING T_CIECLEMNU,        &
+              QLTCLE OF IFBLOC    &
+        MESSAGE 3262 ; PD362E Ce code de qualité est inexistant
+
+FIELD QLTDSCFRA OF IFQUALITE &
+      DISPLAY                &
+      SIZE 16
+
+FIELD CLRCLE OF IFBLOC         &
+      REQUIRED                 &
+      HIDDEN                   &
+      LABEL "Couleur..:"       &
+      LOOKUP ON IFCOULEUR      &
+        VIA   CIECLE,          &
+              CLRCLE           &
+        USING T_CIECLEMNU,     &
+              CLRCLE OF IFBLOC &
+        MESSAGE 3263 ; PD363E Cette couleur est inexistante
+
+FIELD CLRDSCFRA OF IFCOULEUR &
+      DISPLAY                &
+      SIZE 23
+
+ALIGN (,41,52)
+
+FIELD BLCDATTRANS OF IFBLOC    &
+      LABEL "Transféré:" &
+      FORMAT YYYYMMDD          &
+      DISPLAY
+
+SKIP
+TITLE "Dim vendues" AT ,3
+TITLE "LONG   HAUT   LARG" AT ,20
+TITLE "LONG       HAUT       LARG" AT ,49
+
+ALIGN(2,3,20)(,25,27)(,32,34)(,39,47)(,56,58)(,67,69)
+
+FIELD BLCVENDULONG OF IFBLOC &
+      ID 25                  &
+      HIDDEN                 &
+      VALUE 1 TO 9999        &
+      LABEL "En millimètre.:"
+
+FIELD BLCVENDUHAU OF IFBLOC      &
+      LABEL "x"                  &
+      VALUE 1 TO 9999            &
+      ENTRY IF BLCVENDULONG <> 0
+
+FIELD BLCVENDULAR OF IFBLOC      &
+      ENTRY IF BLCVENDULONG <> 0 &
+      VALUE 1 TO 9999            &
+      LABEL "x"
+
+FIELD BLCVENLONPCE OF IFBLOC    &
+      LABEL "Pouce.:"           &
+      ENTRY IF BLCVENDULONG = 0 &
+      VALUE 0 TO 393.6614
+
+FIELD BLCVENHAUPCE OF IFBLOC   &
+      ENTRY IF BLCVENDUHAU = 0 &
+      LABEL "x"                &
+      VALUE 0 TO 393.6614
+
+FIELD BLCVENLARPCE OF IFBLOC   &
+      ENTRY IF BLCVENDULAR = 0 &
+      LABEL "x"                &
+      VALUE 0 TO 399.6614
+
+SKIP 1
+ALIGN(,3,22)
+FIELD BLCM3TOT OF IFBLOC       &
+      LABEL "Total M3......:"  &
+      PICTURE "^^^.^^"         &
+      SIGNIFICANCE 4           &
+      DISPLAY
+
+ALIGN(2,3,19)(,40,58)
+
+FIELD BLCTM OF IFBLOC              &
+      ID 27                        &
+      HIDDEN                       &
+      LABEL "Tonnes mét T/M:"   &
+      DISPLAY
+
+FIELD BLCMNTM3 OF IFBLOC           &
+      LABEL "Coût bloc......: " &
+      PICTURE " ^^,^^^.^^"         &
+      FLOAT "$"                    &
+      LEADING "-"                  &
+      SIGNIFICANCE 4
+
+TITLE "/M3" AT ,70
+
+ALIGN(2,3,21)(,40,58)
+
+FIELD BLCTMREG OF IFBLOC          &
+      ID 30                       &
+      HIDDEN                      &
+      LABEL "T/M régul.....:"  &
+      SIGNIFICANCE 4              &
+      LEADING "-"
+
+FIELD BLCMNTEXPM3 OF IFBLOC    &
+      LABEL "Montant Exp....:" &
+      PICTURE " ^^,^^^.^^"     &
+      FLOAT "$"                &
+      DISPLAY ; MP-00-03-22_D33.
+
+TITLE "/M3" AT ,70
+
+ALIGN(,3,19)(,40,57)
+
+FIELD BLCTFINAL OF IFBLOC      &
+      DISPLAY                  &
+      SIGNIFICANCE 4           &
+      LABEL "Val finale T/M:"
+
+FIELD D_COUT_TOTAL                 &
+      LABEL "Coût total.....: " &
+      PICTURE " ^^^,^^^.^^"        &
+      FLOAT "$"                    &
+      OUTPUT SCALE -4              &
+      DISPLAY
+
+SKIP 1
+ALIGN(2,3,19)(,,22)
+
+FIELD PJTABR OF IFBLOC              &
+      ID 35                         &
+      HIDDEN                        &
+      LABEL "No projet.....:"       &
+      LOOKUP ON PDPROJET            &
+          VIA   CIECLE,             &
+                PJTABR              &
+          USING T_CIECLEMNU,        &
+                PJTABR OF PDPROJET  &
+          MESSAGE 3268 ; PD368 Cette abréviation de projet n'existe pas
+
+FIELD PJTNOM OF PDPROJET &
+      DISPLAY
+
+ALIGN(2,3,19)(,,26)(,55,69)
+
+FIELD CLICLE OF IFBLOC                            &
+      ENTRY IF 0 <> SIZE(TRUNC(PJTABR OF IFBLOC)) &
+      ID 40                                       &
+      HIDDEN                                      &
+      LABEL "Client........:"                     &
+      LOOKUP ON CRCLIENT                          &
+        VIA   CLICIECLE,                          &
+              CLICLE                              &
+        USING T_CLICIECLE,                        &
+              CLICLE OF IFBLOC                    &
+        MESSAGE 2968 ; PD068 Ce client n'existe pas
+
+FIELD CLINOMABR OF CRCLIENT &
+      DISPLAY
+
+FIELD BLCDATASSIG OF IFBLOC &
+      LABEL "Date assig..:" &
+      FORMAT YYYYMMDD       &
+      DISPLAY
+
+SKIP
+
+ALIGN (2,3,19)(,21,22)(,24,25)(,31,46)(,55,69)
+
+FIELD T_PJTABR_DISP             &
+      LABEL "Num. commande.:"   &
+      ID 45                     &
+      HIDDEN                    &
+      DISPLAY
+
+FIELD PJTANN OF IFBLOC  &
+      LABEL "-"         &
+      DISPLAY
+
+FIELD COMNUMCOMINT OF IFBLOC                      &
+      ENTRY IF 0 <> SIZE(TRUNC(PJTABR OF IFBLOC)) &
+      LABEL "-"                                   &
+      LOOKUP ON PDCOMMAN_INTERNE                  &
+        VIA   CIECLE,                             &
+              PJTABR,                             &
+              PJTANN,                             &
+              COMNUMCOMINT,                       &
+              COMFLGBLC                           &
+        USING T_CIECLEMNU,                        &
+              PJTABR OF IFBLOC,                   &
+              PJTANN OF IFBLOC,                   &
+              COMNUMCOMINT OF IFBLOC,             &
+              "BL"                                &
+        MESSAGE 3008 ; PD108 Cette commande interne est inexistante
+
+FIELD DCINUMLIG OF IFBLOC                               &
+      ENTRY IF 0 <> SIZE(TRUNC(COMNUMCOMINT OF IFBLOC)) &
+      LABEL "No ligne.....:"                            &
+      LOOKUP ON PDDETAIL_C_I                            &
+         VIA   CIECLE,                                  &
+               PJTABR,                                  &
+               PJTANN,                                  &
+               COMNUMCOMINT,                            &
+               DCINUMLIG,                               &
+               TPDTYPPRD,                               &
+               TGRCODGRA                                &
+         USING T_CIECLEMNU,                             &
+               PJTABR OF IFBLOC,                        &
+               PJTANN OF IFBLOC,                        &
+               COMNUMCOMINT OF IFBLOC,                  &
+               DCINUMLIG OF IFBLOC,                     &
+               "BL",                                    &
+               TGRCODGRA OF IFBLOC                      &
+         MESSAGE 3271 ; PD371E Cette ligne n'est pas rattache a la commande
+
+FIELD COEDATDEB OF IFBLOC                               &
+      DEFAULT SYSDATE                                   &
+      ENTRY IF 0 <> SIZE(TRUNC(COMNUMCOMINT OF IFBLOC)) &
+      LABEL "Date début..:"                          &
+      FORMAT YYYYMMDD
+
+ALIGN (2,3,19)(,31,46)(,55,69)
+
+FIELD IFLCLE OF IFBLOC         &
+      ID 50                    &
+      DISPLAY                  &
+      HIDDEN                   &
+      LABEL "No lot........:"
+
+FIELD EXNCLE       OF IFBLOC     &
+      BWZ                        &
+      PICTURE "^^^^^"            &
+      NUMERIC                    &
+      SIGNIFICANCE 5             &
+      LABEL "No expédition:"  &
+      DISPLAY
+
+FIELD BLCDATREC OF IFBLOC   &
+      LABEL "Date trans..:" &
+      FORMAT YYYYMMDD       &
+      DISPLAY
+
+ALIGN (2,3,19)(,,26)(,55,69)
+
+FIELD FOUCLE OF IFBLOC                            &
+      ENTRY IF 0 <> SIZE(TRUNC(PJTABR OF IFBLOC)) &
+      ID 55                                       &
+      HIDDEN                                      &
+      LOOKUP ON CPFOURNISSEUR                     &
+        VIA   FOUCIECLE,                          &
+              FOUCLE                              &
+        USING T_FOUCIECLE,                        &
+              FOUCLE OF IFBLOC                    &
+        MESSAGE 2917 ; PD017E Ce fournisseur n'existe pas
+
+FIELD FOUNOM OF CPFOURNISSEUR &
+      SIZE 25                 &
+      DISPLAY
+
+FIELD BLRUSRRES OF IFRESERVATION  &
+      LABEL "Réservé par.:" &
+      DISPLAY
+
+SKIP
+
+ALIGN (2,3,19)(,31,46)
+FIELD FTRNUMFAC    OF IFBLOC  &
+      ID 60                   &
+      BWZ                     &
+      HIDDEN                  &
+      DISPLAY
+
+FIELD CAPCLE OF IFBLOC                                     &  ; MP-00-03-15_D29.
+      LABEL "Facture C/P..:"                               &
+      ENTRY IF NOT ((CIECLE    OF IFBLOC  = "2000"     AND &  ; MP-00-05-24_D62.
+                    (TGRCODGRA OF IFBLOC  = "001"       OR &  ; MP-00-05-24_D62.
+                     TGRCODGRA OF IFBLOC  = "002"       OR &  ; MP-00-05-24_D62.
+                     TGRCODGRA OF IFBLOC  = "004"       OR &  ; MP-00-05-24_D62.
+                     TGRCODGRA OF IFBLOC  = "007"       OR &  ; MP-00-05-24_D62.
+                     TGRCODGRA OF IFBLOC  = "008"       OR &  ; MP-00-05-24_D62.
+                     TGRCODGRA OF IFBLOC  = "009"       OR &  ; MP-00-05-24_D62.
+                     TGRCODGRA OF IFBLOC  = "011"       OR &  ; MP-00-05-24_D62.
+                     TGRCODGRA OF IFBLOC  = "020"       OR &  ; MP-00-05-24_D62.
+                     TGRCODGRA OF IFBLOC  = "025"))        &  ; MP-00-05-24_D62.
+                               OR                          &  ; MP-00-05-24_D62.
+                    (CIECLE    OF IFBLOC  = "1100"     AND &  ; MP-00-05-24_D62.
+                     TGRCODGRA OF IFBLOC  = "013"))           ; MP-00-05-24_D62.
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'acc\350s de l'écran.
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+
+  ; Facteur de conversion servant a convertir les millimetres en pouce et
+  ; vice-versa
+  GET PDCONVERT_UN_M     &
+     VIA   CIECLE,       &
+           CUMCODUNMINT, &
+           CUMCODUNMEXT  &
+     USING T_CIECLEMNU,  &
+           "PL",         &
+           "ML"          &
+     OPTIONAL
+
+  IF NOT ACCESSOK
+  THEN ERROR 2004 ; Le facteur de conversion n'existe pas pour cette combinaison
+  ELSE LET T_FACTEUR_PL = (CUMFACCON OF PDCONVERT_UN_M / 12)
+
+  ; Verifier si il existe ou nom une compagnie pour le client
+  ; dans le holding
+  IF HLDCHTCLI OF MCHOLDING = "1"
+  THEN LET T_CLICIECLE = T_CIECLEMNU
+  ELSE LET T_CLICIECLE = HLDCHRSUB OF MCHOLDING
+
+  ; Verifier si il existe ou nom une compagnie pour le fournisseur
+  ; dans le holding
+  IF HLDCHTFOU OF MCHOLDING = "1"
+  THEN LET T_FOUCIECLE = T_CIECLEMNU
+  ELSE LET T_FOUCIECLE = HLDCHRSUB OF MCHOLDING
+
+END
+
+;-----------------------------------------------------------------------------
+;
+; Ajustement de la procedure path dans le cas ou l'ecran est appelle par
+; une ligne de detail de commande
+;
+PROCEDURE PATH
+BEGIN
+
+   IF 0 = SIZE(TRUNCATE(T_TGRCODGRA_ORI)) AND &
+      0 = SIZE(TRUNCATE(T_RECHERCHE))
+   THEN BEGIN
+     REQUEST TGRCODGRA OF IFBLOC
+
+     IF PROMPTOK
+     THEN REQUEST IFCCLE OF IFBLOC
+
+     IF PROMPTOK
+     THEN REQUEST BLCCLE OF IFBLOC
+
+     IF PROMPTOK
+     THEN REQUEST BLCRED OF IFBLOC
+
+     IF PROMPTOK
+     THEN LET PATH = 1
+
+     IF PATH = 0
+     THEN BEGIN
+       REQUEST TGRCODGRA OF IFBLOC
+
+       IF PROMPTOK
+       THEN REQUEST IFCCLE OF IFBLOC
+
+       IF PROMPTOK
+       THEN REQUEST BLCCLE OF IFBLOC
+
+       IF PROMPTOK
+       THEN LET PATH = 2
+     END
+
+     IF PATH = 0
+     THEN BEGIN
+       REQUEST TGRCODGRA OF IFBLOC
+
+       IF PROMPTOK
+       THEN REQUEST IFCCLE OF IFBLOC
+
+       IF PROMPTOK
+       THEN LET PATH = 3
+     END
+
+     IF PATH = 0
+     THEN BEGIN
+       REQUEST TGRCODGRA OF IFBLOC
+       IF PROMPTOK
+       THEN LET PATH = 4
+     END
+
+     IF PATH = 0
+     THEN BEGIN
+       LET PATH = 5
+     END
+   END
+   ELSE &
+     IF 0 <> SIZE(TRUNCATE(T_RECHERCHE)) AND &
+        0 = SIZE(TRUNCATE(T_TGRCODGRA_ORI))
+     THEN LET PATH = 98
+     ELSE LET PATH = 99
+
+END
+
+;-----------------------------------------------------------------------------
+;
+; Procedure find recode dans le cas ou l'ecran est appelle par une ligne de
+; detail de commande
+;
+PROCEDURE FIND
+BEGIN
+
+   IF PATH = 1
+   THEN GET IFBLOC VIA     CIECLE,              &
+                           TGRCODGRA,           &
+                           IFCCLE,              &
+                           BLCCLE,              &
+                           BLCRED               &
+                   USING   T_CIECLEMNU,         &
+                           TGRCODGRA OF IFBLOC, &
+                           IFCCLE OF IFBLOC,    &
+                           BLCCLE OF IFBLOC,    &
+                           BLCRED OF IFBLOC     &
+                   ORDERBY CIECLE,              &
+                           TGRCODGRA,           &
+                           IFCCLE,              &
+                           BLCCLE,              &
+                           BLCRED
+
+   IF PATH = 2
+   THEN GET IFBLOC VIA     CIECLE,              &
+                           TGRCODGRA,           &
+                           IFCCLE,              &
+                           BLCCLE               &
+                   USING   T_CIECLEMNU,         &
+                           TGRCODGRA OF IFBLOC, &
+                           IFCCLE OF IFBLOC,    &
+                           BLCCLE OF IFBLOC     &
+                   ORDERBY CIECLE,              &
+                           TGRCODGRA,           &
+                           IFCCLE,              &
+                           BLCCLE,              &
+                           BLCRED
+
+   IF PATH = 3
+   THEN GET IFBLOC VIA     CIECLE,              &
+                           TGRCODGRA ,          &
+                           IFCCLE               &
+                   USING   T_CIECLEMNU ,        &
+                           TGRCODGRA OF IFBLOC, &
+                           IFCCLE OF IFBLOC     &
+                   ORDERBY CIECLE,              &
+                           TGRCODGRA,           &
+                           IFCCLE,              &
+                           BLCCLE,              &
+                           BLCRED
+
+   IF PATH = 4
+   THEN GET IFBLOC VIA     CIECLE,             &
+                           TGRCODGRA           &
+                   USING   T_CIECLEMNU,        &
+                           TGRCODGRA OF IFBLOC &
+                   ORDERBY CIECLE,             &
+                           TGRCODGRA,          &
+                           IFCCLE,             &
+                           BLCCLE,             &
+                           BLCRED
+
+   IF PATH = 5
+   THEN GET IFBLOC VIA     CIECLE        &
+                   USING   T_CIECLEMNU   &
+                   ORDERBY CIECLE,       &
+                           TGRCODGRA,    &
+                           IFCCLE,       &
+                           BLCCLE,       &
+                           BLCRED
+
+   ; Dans le cas ou la recherche proviens du sous-ecran if001e
+   IF PATH = 98
+   THEN BEGIN
+
+     ; Recherche le bloc par le numero de reference de l'historique des
+     ; mouvements de bloc
+     GET IFHISTO_MOUBLOC  &
+       VIA   CIECLE,      &
+             HMBNUMREF    &
+       USING T_CIECLEMNU, &
+             T_RECHERCHE  &
+       OPTIONAL
+
+     IF ACCESSOK
+     THEN BEGIN
+       GET IFBLOC VIA    CIECLE,                       &
+                         TGRCODGRA,                    &
+                         IFCCLE,                       &
+                         BLCCLE,                       &
+                         BLCRED                        &
+                   USING T_CIECLEMNU,                  &
+                         TGRCODGRA OF IFHISTO_MOUBLOC, &
+                         IFCCLE OF IFHISTO_MOUBLOC,    &
+                         BLCCLE OF IFHISTO_MOUBLOC,    &
+                         BLCRED OF IFHISTO_MOUBLOC
+
+       LET T_RECHERCHE = ""
+     END
+   END
+
+   ; Dans le cas ou la recherche proviens du detail de la commande
+   IF PATH = 99
+   THEN GET IFBLOC VIA   CIECLE,          &
+                         TGRCODGRA,       &
+                         IFCCLE,          &
+                         BLCCLE,          &
+                         BLCRED           &
+                   USING T_CIECLEMNU,     &
+                         T_TGRCODGRA_ORI, &
+                         T_IFCCLE_ORI,    &
+                         T_BLCCLE_ORI,    &
+                         T_BLCRED_ORI
+
+
+   ; Recherche des réservations possibles
+   GET IFRESERVATION              &
+       VIA   CIECLE,              &
+             TGRCODGRA,           &
+             IFCCLE,              &
+             BLCCLE,              &
+             BLCRED               &
+       USING T_CIECLEMNU,         &
+             TGRCODGRA OF IFBLOC, &
+             IFCCLE OF IFBLOC,    &
+             BLCCLE OF IFBLOC,    &
+             BLCRED OF IFBLOC     &
+       OPTIONAL
+
+END
+
+;------------------------------------------------------------------------------
+;
+; Affiche du projet pour le numero de commande
+; Conserve le code d'entrepot original
+; Conserve le numero de commande et la ligne de commande original
+;
+PROCEDURE POSTFIND
+BEGIN
+  LET T_PJTABR_DISP = PJTABR OF IFBLOC
+  DISPLAY T_PJTABR_DISP
+
+  ; Conserve l'ancien code d'entrepot
+  LET T_OLD_ETRCLE = ETRCLE OF IFBLOC
+
+  ; Numero de commande d'origine
+  LET T_PJTABR_DEP = PJTABR OF IFBLOC
+  LET T_PJTANN_DEP = PJTANN OF IFBLOC
+  LET T_COMNUMCOMINT_DEP = COMNUMCOMINT OF IFBLOC
+  LET T_DCINUMLIG_DEP = DCINUMLIG OF IFBLOC
+
+  ; Verifie pour savoir s'il y a une reservation sur le bloc
+  ; et si cette derniere est encore bonne
+
+  IF 0 <> SIZE(TRUNCATE(BLRUSRRES OF IFRESERVATION))
+  THEN BEGIN
+    GET A_RESERVATION             &
+       VIA   CIECLE,              &
+             TGRCODGRA,           &
+             IFCCLE,              &
+             BLCCLE,              &
+             BLCRED               &
+       USING T_CIECLEMNU,         &
+             TGRCODGRA OF IFBLOC, &
+             IFCCLE OF IFBLOC,    &
+             BLCCLE OF IFBLOC,    &
+             BLCRED OF IFBLOC     &
+       OPTIONAL
+
+    ; si la reservation est passe elle est efface
+    IF SYSDATE > BLRDATRESFIN OF A_RESERVATION
+    THEN BEGIN
+      DELETE A_RESERVATION
+      PUT A_RESERVATION RESET
+
+      GET IFRESERVATION OPTIONAL
+      DISPLAY BLRUSRRES OF IFRESERVATION
+    END
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Pop-up sur le type de granite
+;
+PROCEDURE INPUT TGRCODGRA
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+
+    IF ENTRYMODE
+    THEN BEGIN
+       LET T_CIECLE = T_CIECLEMNU
+       LET T_TGRCODGRA =  FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+       RUN SCREEN if104 PASSING  T_CIECLE, &
+                                 T_TGRCODGRA &
+                        MODE F
+       LET FIELDTEXT = TRUNCATE(T_TGRCODGRA)
+     END
+  END
+
+  ; Complete le code de granit par des zeros
+  USE usinpgen NOLIST
+END
+
+;------------------------------------------------------------------------------
+;
+; Affichage de la description du granit ainsi que du cout au metres cube
+;
+PROCEDURE PROCESS TGRCODGRA
+BEGIN
+
+  ; Code et description du type de granit
+  DISPLAY TGRCODGRA OF PDTYPE_GRANIT
+  DISPLAY TGRDSCFRA001 OF PDTYPE_GRANIT
+
+  ; Prix au metre cube provenant du type de granit
+  LET BLCMNTM3 OF IFBLOC = TGRCOUGRABRU OF PDTYPE_GRANIT
+  DISPLAY BLCMNTM3 OF IFBLOC
+END
+
+;-----------------------------------------------------------------------------
+;
+; Pop-up sur la charte de bloc
+;
+PROCEDURE INPUT IFCCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = T_CIECLEMNU
+    LET T_IFCCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN if113 PASSING  T_CIECLE, &
+                              T_IFCCLE &
+                     MODE F
+    LET FIELDTEXT = TRUNCATE(T_IFCCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Complete le numero de bloc par des zeros
+;
+PROCEDURE INPUT BLCCLE
+BEGIN
+
+  ; Complete le code de granit par des zeros
+  USE usinpgen2 NOLIST
+
+END
+
+;------------------------------------------------------------------------------
+;
+; Message d'avertissement signalant que le numero de bloc sera complete avec la
+; saisie de la date
+;
+PROCEDURE PROCESS BLCRED
+BEGIN
+  INFO 3259 ; PD359 Le numéro de bloc sera complété après la saisie de la date ; MP-00-03-22_SC06.
+END
+
+;------------------------------------------------------------------------------
+;
+; Valeur par defaut pour la date (uniquement en saisie ou en correction).
+;
+PROCEDURE INPUT BLCDAT
+BEGIN
+  IF 0 = SIZE(TRUNCATE(FIELDTEXT)) and not findmode ; MP-01-01-24_D121.
+  THEN LET FIELDTEXT = ASCII(SYSDATE,8)
+END
+
+;------------------------------------------------------------------------------
+;
+; Validation de la date pour s'assurer que cette derniere a un correspondance
+; dans la charte des blocs
+;
+PROCEDURE EDIT BLCDAT
+BEGIN
+
+  ; Permet de rechercher la correspondance dans la charte de numerotation
+  LET T_DATNUM = NCONVERT(ASCII(BLCDAT OF IFBLOC)[1:6] + "00")
+
+  GET IFCHARTE         &
+    VIA   CIECLE,      &
+          IFCDAT       &
+    USING T_CIECLEMNU, &
+          T_DATNUM     &
+    OPTIONAL
+
+  IF NOT ACCESSOK
+  THEN ERROR 3258 ; PD358 Il n'y a pas de correspondance dans
+                  ;       la charte des blocs
+  ; Attribution de l'année dans le numéro de bloc
+  ELSE BEGIN
+    LET IFCCLE OF IFBLOC = IFCCLE OF IFCHARTE
+    DISPLAY IFCCLE OF IFBLOC
+  END
+END
+
+;----------------------------------------------------------------------------
+;
+; Validation du numero de bloc apres que la date soit saisie
+;
+PROCEDURE PROCESS T_SILENT1
+BEGIN
+  IF ENTRYMODE
+  THEN BEGIN
+    GET A_IFBLOC VIA CIECLE,              &
+                     TGRCODGRA,           &
+                     IFCCLE,              &
+                     BLCCLE,              &
+                     BLCRED               &
+               USING CIECLE    OF IFBLOC, &
+                     TGRCODGRA OF IFBLOC, &
+                     IFCCLE    OF IFBLOC, &
+                     BLCCLE    OF IFBLOC, &
+                     BLCRED    OF IFBLOC  OPTIONAL
+    IF ACCESSOK
+    THEN ERROR 3001 ; PD101 Ce numero de bloc existe deja
+
+;
+;   Validations du numéro de bloc concernant son unicité selon le type de granit et
+;   dans le contexte des blocs de seconde qualité (code XX).
+;
+    IF IFCCLE OF IFBLOC = "XX"
+    THEN BEGIN
+      GET A_IFBLOC VIA CIECLE             , &
+                       TGRCODGRA          , &
+                       IFCCLE             , &
+                       BLCCLE             , &
+                       BLCRED               &
+                 USING CIECLE    OF IFBLOC, &
+                       TGRCODGRA OF IFBLOC, &
+                       "@"                , &
+                       BLCCLE    OF IFBLOC, &
+                       BLCRED    OF IFBLOC  OPTIONAL
+      IF ACCESSOK
+      THEN WARNING = "IF998E Le numéro de séquence " + blccle of ifbloc + " existe déja pour ce type de granit"
+    END
+    ELSE BEGIN
+      GET A_IFBLOC VIA CIECLE             , &
+                       TGRCODGRA          , &
+                       IFCCLE             , &
+                       BLCCLE             , &
+                       BLCRED               &
+                 USING CIECLE    OF IFBLOC, &
+                       TGRCODGRA OF IFBLOC, &
+                       "XX"               , &
+                       BLCCLE    OF IFBLOC, &
+                       BLCRED    OF IFBLOC  OPTIONAL
+      IF ACCESSOK
+      THEN WARNING = "IF999E Le numéro de séquence " + blccle of ifbloc + " existe déja avec le code XX"
+    END
+
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Pop-up sur l'entrepot
+;
+PROCEDURE INPUT ETRCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = T_CIECLEMNU
+    LET T_ETRCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN if105 PASSING  T_CIECLE, &
+                              T_ETRCLE &
+                     MODE F
+    LET FIELDTEXT = TRUNCATE(T_ETRCLE)
+  END
+
+  ;----------------------------------------------------------
+  ; MP-00-03-22_SC04.
+
+  IF ENTRYMODE AND 0=SIZE(TRUNCATE(FIELDTEXT))
+  THEN LET FIELDTEXT = LJ(ASC(NCONVERT(TGRCODGRA OF IFBLOC)))
+  ;----------------------------------------------------------
+
+END
+
+;-------------------------------------------------------------------------------
+;
+; Validation de l'entrepot
+;
+PROCEDURE EDIT ETRCLE
+BEGIN
+  IF ETRSTU OF IFENTREPOT = "F"
+  THEN ERROR 3265 ; PD365 Cet entrepôt est fermé
+END
+
+;------------------------------------------------------------------------
+;
+; Mise a jour de l'historique des mouvements de blocs
+;
+PROCEDURE INTERNAL MAJ_MOVBLOC
+BEGIN
+  IF ETRCLE OF IFBLOC <> T_OLD_ETRCLE ; En cas de creation ou de changement
+  THEN BEGIN
+    GET A_VALID_HMB VIA CIECLE             , &     ; Validation de presence
+                        TGRCODGRA          , &
+                        IFCCLE             , &
+                        BLCCLE             , &
+                        BLCRED               &
+                  USING T_CIECLEMNU        , &
+                        TGRCODGRA OF IFBLOC, &
+                        IFCCLE    OF IFBLOC, &
+                        BLCCLE    OF IFBLOC, &
+                        BLCRED    OF IFBLOC  OPTIONAL
+
+    IF NOT ACCESSOK
+    THEN BEGIN
+      LET HMBUSRCRE OF IFHISTO_MOUBLOC = BLCUSRCRE OF IFBLOC ;Usager (creation)
+      LET HMBTYPMOU OF IFHISTO_MOUBLOC = "E" ; Type mouvement - Entree
+    END
+    ELSE BEGIN
+      LET HMBUSRCRE OF IFHISTO_MOUBLOC = LOGONID ; Usager (modif)
+      LET HMBTYPMOU OF IFHISTO_MOUBLOC = "T";Type mouvement - Transfert (sortie)
+    END
+
+    LET CIECLE      OF IFHISTO_MOUBLOC = CIECLE    OF IFBLOC ; Code de compagnie
+    LET TGRCODGRA   OF IFHISTO_MOUBLOC = TGRCODGRA OF IFBLOC ; Code de granit
+    LET IFCCLE      OF IFHISTO_MOUBLOC = IFCCLE    OF IFBLOC ; Annee-mois de
+                                                             ; creation
+    LET BLCCLE      OF IFHISTO_MOUBLOC = BLCCLE    OF IFBLOC ; Numero de bloc
+    LET BLCRED      OF IFHISTO_MOUBLOC = BLCRED    OF IFBLOC ; Code de
+                                                             ; redimensionnement
+    LET ETRCLE      OF IFHISTO_MOUBLOC = ETRCLE    OF IFBLOC ; Code d'entrepot
+
+    LET FOUCLE      OF IFHISTO_MOUBLOC = " "                 ; Transporteur &
+                                                             ; (fournisseur)
+    LET HMBDATCRE   OF IFHISTO_MOUBLOC = SYSDATE             ; Date de creation
+    LET T_HHMMSSMM = ASC(SYSTIME,8)
+    LET HMBHRECRE   OF IFHISTO_MOUBLOC = NCO(T_HHMMSSMM)     ; Heure de creation
+    LET HMBFRSTRP   OF IFHISTO_MOUBLOC = 0                   ; Frais de
+                                                             ; transport
+    LET HMBNUMREF   OF IFHISTO_MOUBLOC = " "                 ; Numero de
+                                                             ; reference
+
+    PUT IFHISTO_MOUBLOC RESET ; Creation d'un historique de mouvement
+
+    LET T_OLD_ETRCLE = ETRCLE OF IFBLOC ; Conserver le nouveau code d'entrepot
+  END
+END
+
+;------------------------------------------------------------------------------
+;
+; Si il y a un changement d'entrepot alors l'ecran d'historique de mouvement
+; de bloc apparait
+;
+PROCEDURE PROCESS T_SILENT3
+BEGIN
+  IF NOT NEWRECORD OF IFBLOC AND T_OLD_ETRCLE <> ETRCLE OF IFBLOC
+  THEN BEGIN
+
+    ; Mise a jour de l'historique des mouvements de blocs
+    DO INTERNAL MAJ_MOVBLOC
+
+   if "jackleca" <> logonid and "marcpoul" <> logonid
+   then begin
+     RUN SCREEN if001b PASSING T_CIECLEMNU, &
+                               T_CIENOM,    &
+                               IFBLOC       &
+                        MODE F
+   end
+
+    ; Reaffichage des donnees
+    DISPLAY BLCMNTM3 OF IFBLOC
+    DISPLAY D_COUT_TOTAL
+
+    LET T_FLG_US = 1 ; MP-00-03-22_SC05.
+    PUSH UPDATE STAY
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Pop-up sur la categorie
+;
+PROCEDURE INPUT CATCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = T_CIECLEMNU
+    LET T_CATCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN if106 PASSING  T_CIECLE, &
+                              T_CATCLE &
+                     MODE F
+    LET FIELDTEXT = TRUNCATE(T_CATCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Pop-up sur la qualite
+;
+PROCEDURE INPUT QLTCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = T_CIECLEMNU
+    LET T_QLTCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN if107 PASSING  T_CIECLE, &
+                              T_QLTCLE &
+                     MODE F
+
+    LET FIELDTEXT = TRUNCATE(T_QLTCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Pop-up sur la qualite
+;
+PROCEDURE INPUT CLRCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = T_CIECLEMNU
+    LET T_CLRCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN if108 PASSING  T_CIECLE, &
+                              T_CLRCLE &
+                     MODE F
+    LET FIELDTEXT = TRUNCATE(T_CLRCLE)
+  END
+END
+
+;------------------------------------------------------------------------------
+;
+; Calcul du total en metre cube
+;
+PROCEDURE INTERNAL CALCUL_M3
+BEGIN
+  IF BLCVENDULONG OF IFBLOC <> 0 AND &
+     BLCVENDUHAU OF IFBLOC <> 0 AND &
+     BLCVENDULAR OF IFBLOC <> 0
+  THEN BEGIN
+
+    ; Calcul du nombre de metre cube total
+    LET BLCM3TOT OF IFBLOC = &
+        ROUND(((BLCVENDULONG OF IFBLOC * &
+         BLCVENDUHAU OF IFBLOC * &
+         BLCVENDULAR OF IFBLOC) / 10000000))
+
+    DISPLAY BLCM3TOT OF IFBLOC
+
+    ; Calcul de la tonnes metrique
+    LET BLCTM OF IFBLOC = &
+     ROUND(((BLCM3TOT OF IFBLOC/100) * (TGRPOIBRU OF PDTYPE_GRANIT/100)) / 1000)
+
+    DISPLAY BLCTM OF IFBLOC
+
+    ; Calcul de la valeur final du bloc
+    LET BLCTFINAL OF IFBLOC = BLCTM OF IFBLOC + (BLCTMREG OF IFBLOC * 100)
+
+    DISPLAY BLCTFINAL OF IFBLOC
+
+    ; Affiche le nouveau cout total du bloc
+    DISPLAY D_COUT_TOTAL
+  END
+END
+
+;------------------------------------------------------------------------------
+;
+; Convertit en pouce la longueur inscrite en millimetre
+;
+PROCEDURE PROCESS BLCVENDULONG
+BEGIN
+  LET BLCVENLONPCE = FIELDVALUE / (T_FACTEUR_PL * 1000)
+  DISPLAY BLCVENLONPCE
+
+  ; Calcul du total en M3
+  DO INTERNAL CALCUL_M3
+
+END
+
+;------------------------------------------------------------------------------
+;
+; Convertit en pouce la hauteur inscrite en millimetre
+;
+PROCEDURE PROCESS BLCVENDUHAU
+BEGIN
+  LET BLCVENHAUPCE = FIELDVALUE / (T_FACTEUR_PL * 1000)
+  DISPLAY BLCVENHAUPCE
+
+  ; Calcul du total en M3
+  DO INTERNAL CALCUL_M3
+
+END
+
+;------------------------------------------------------------------------------
+;
+; Convertit en pouce la largeur inscrite en millimetre
+;
+PROCEDURE PROCESS BLCVENDULAR
+BEGIN
+  LET BLCVENLARPCE = FIELDVALUE / (T_FACTEUR_PL * 1000)
+  DISPLAY BLCVENLARPCE
+
+  ; Calcul du total en M3
+  DO INTERNAL CALCUL_M3
+
+END
+
+;------------------------------------------------------------------------------
+;
+; Convertit en millimetre la longueur inscrite en pouce
+;
+PROCEDURE PROCESS BLCVENLONPCE
+BEGIN
+  LET BLCVENDULONG = ROUND(T_FACTEUR_PL * FIELDVALUE * 1000)
+  DISPLAY BLCVENDULONG
+
+  ; Calcul du total en M3
+  DO INTERNAL CALCUL_M3
+
+END
+
+;------------------------------------------------------------------------------
+;
+; Convertit en millimetre la hauteur inscrite en pouce
+;
+PROCEDURE PROCESS BLCVENHAUPCE
+BEGIN
+  LET BLCVENDUHAU = ROUND(T_FACTEUR_PL * FIELDVALUE * 1000)
+  DISPLAY BLCVENDUHAU
+
+  ; Calcul du total en M3
+  DO INTERNAL CALCUL_M3
+
+END
+
+;------------------------------------------------------------------------------
+;
+; Convertit en millimetre la largeur inscrite en pouce
+;
+PROCEDURE PROCESS BLCVENLARPCE
+BEGIN
+  LET BLCVENDULAR = ROUND(T_FACTEUR_PL * FIELDVALUE * 1000)
+  DISPLAY BLCVENDULAR
+
+  ; Calcul du total en M3
+  DO INTERNAL CALCUL_M3
+
+END
+
+;------------------------------------------------------------------------------
+;
+; Affiche le nouveau cout total
+;
+PROCEDURE PROCESS BLCMNTM3
+BEGIN
+  DISPLAY D_COUT_TOTAL
+END
+
+;------------------------------------------------------------------------------
+;
+; Affichage de la valeur finale en tonne metrique
+;
+PROCEDURE PROCESS BLCTMREG
+BEGIN
+  ; Calcul du total en M3
+  DO INTERNAL CALCUL_M3
+END
+
+;------------------------------------------------------------------------------
+;
+; Recalcul des montants
+;
+PROCEDURE PROCESS BLCMNTEXPM3
+BEGIN
+  ; Calcul du total en M3
+  DO INTERNAL CALCUL_M3
+END
+
+;-------------------------------------------------------------------------------
+;
+; Pop-up sur le projet
+;
+PROCEDURE INPUT PJTABR
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = T_CIECLEMNU
+    LET T_PJTABR = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN if109 PASSING  T_CIECLE, &
+                              T_PJTABR  &
+                     MODE F
+    LET FIELDTEXT = TRUNCATE(T_PJTABR)
+  END
+END
+
+;------------------------------------------------------------------------------
+;
+; Valeur par defaut pour le client si il y a eu une commande deja de
+; rattache a ce dernier
+;
+PROCEDURE PROCESS PJTABR
+BEGIN
+
+  ; Valeur par defaut pour le client
+  GET COM_VALIDE           &
+    VIA   CIECLE,          &
+          PJTABR           &
+    USING T_CIECLEMNU,     &
+          PJTABR OF IFBLOC &
+    OPTIONAL
+
+  IF ACCESSOK
+  THEN BEGIN
+    LET CLICLE OF IFBLOC = CLICLE OF COM_VALIDE
+    DISPLAY CLICLE OF IFBLOC
+    DISPLAY CLINOMABR OF CRCLIENT
+  END
+
+  ; Date assignation
+  LET BLCDATASSIG OF IFBLOC = SYSDATE
+  DISPLAY BLCDATASSIG OF IFBLOC
+
+  ; Affichage du projet pour le numero de commande
+  LET T_PJTABR_DISP = PJTABR OF IFBLOC
+  DISPLAY T_PJTABR_DISP
+
+  ; Affichage de l'annee du projet
+  LET PJTANN OF IFBLOC = PJTANN OF PDPROJET
+  DISPLAY PJTANN OF IFBLOC
+
+  ; Initialisation du numero de commande et de la ligne
+  ; de detail de commande
+  LET COMNUMCOMINT OF IFBLOC = " "
+  DISPLAY COMNUMCOMINT OF IFBLOC
+
+  LET DCINUMLIG OF IFBLOC = " "
+  DISPLAY DCINUMLIG OF IFBLOC
+
+END
+
+;------------------------------------------------------------------------------
+;
+; Appel du pop-up pour le numero de client
+;
+PROCEDURE INPUT CLICLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CLICLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd210n MODE F &
+                      PASSING T_CIECLEMNU ,      &
+                              T_CIENOM ,         &
+                              T_CLICLE
+    LET FIELDTEXT = TRUNCATE(T_CLICLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide le client
+;
+PROCEDURE EDIT CLICLE
+BEGIN
+  ; Valide que le client est actif
+  IF CLISTU OF CRCLIENT = "I"
+  THEN BEGIN
+    ERROR 2966 ; Ce client est inactif
+  END
+
+  ; Valide que toutes les commandes du projet appartiennent au meme client
+  WHILE RETRIEVING COM_VALIDE &
+    VIA   CIECLE,       &
+          PJTABR        &
+    USING T_CIECLEMNU,  &
+          PJTABR OF IFBLOC
+  BEGIN
+    IF CLICLE OF COM_VALIDE <> FIELDTEXT AND &
+       PJTPROMUL OF PDPROJET = "0"
+    THEN BEGIN
+      ERROR 3269 ; PD369 Ce client n'est pas rattache a ce projet
+    END
+  END
+END
+
+;------------------------------------------------------------------------------
+;
+; Pop-up sur le numero de commande
+;
+PROCEDURE INPUT COMNUMCOMINT
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PJTABR = PJTABR OF IFBLOC
+    LET T_PJTANN = PJTANN OF IFBLOC
+    LET T_COMNUMCOMINT = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN if110  MODE F                     &
+                      PASSING T_CIECLEMNU ,      &
+                              T_PJTABR ,         &
+                              T_PJTANN ,         &
+                              T_COMNUMCOMINT
+
+    LET FIELDTEXT = TRUNCATE(T_COMNUMCOMINT)
+  END
+
+  ; Complete le numero de commande par des zeros
+  USE usinpgen NOLIST
+
+END
+
+;------------------------------------------------------------------------------
+;
+; Validation de la commande
+;
+PROCEDURE EDIT COMNUMCOMINT
+BEGIN
+  IF COMSTU OF PDCOMMAN_INTERNE = "T"  OR &
+     COMSTU OF PDCOMMAN_INTERNE = "A"
+  THEN ERROR 3270 ; PD370E Cette commande est fermée
+END
+
+;------------------------------------------------------------------------------
+;
+; - Efface le numero de ligne si le numero de commande change
+; - Si le projet est multiple ajuste le client selon le client de la
+;   commande
+;
+PROCEDURE PROCESS COMNUMCOMINT
+BEGIN
+
+  IF OLDVALUE(COMNUMCOMINT OF IFBLOC) <> FIELDTEXT
+  THEN BEGIN
+    LET DCINUMLIG OF IFBLOC = " "
+    DISPLAY DCINUMLIG OF IFBLOC
+  END
+
+  ; Si le projet est un projet multiple alors le client de la carte
+  ; de bloc sera celui de la commande
+  IF PJTPROMUL OF PDPROJET = "1"
+  THEN BEGIN
+    ; Assignation du client sur la carte de bloc
+    LET CLICLE OF IFBLOC = CLICLE OF PDCOMMAN_INTERNE
+    DISPLAY CLICLE OF IFBLOC
+  END
+END
+
+;----------------------------------------------------------------------------
+;
+; Pop-up sur le numero de ligne de la commande
+;
+PROCEDURE INPUT DCINUMLIG
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PJTABR = PJTABR OF IFBLOC
+    LET T_PJTANN = PJTANN OF IFBLOC
+    LET T_COMNUMCOMINT = COMNUMCOMINT OF IFBLOC
+    LET T_TGRCODGRA = TGRCODGRA OF IFBLOC
+    LET T_TPDTYPPRD = "BL"
+    LET T_DCINUMLIG = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN if111  MODE F                     &
+                      PASSING T_CIECLEMNU ,      &
+                              T_PJTABR ,         &
+                              T_PJTANN ,         &
+                              T_COMNUMCOMINT ,   &
+                              T_DCINUMLIG ,      &
+                              T_TPDTYPPRD ,      &
+                              T_TGRCODGRA
+
+    LET FIELDTEXT = TRUNCATE(T_DCINUMLIG)
+  END
+
+  ; Complete le numero de ligne par des zeros
+  USE usinpgen NOLIST
+END
+
+;------------------------------------------------------------------------------
+;
+; Validation du numero de ligne qui doit correspondre au type, qualite,
+; couleur, categorie qui est inscrit sur la ligne de commande
+;
+PROCEDURE EDIT DCINUMLIG
+BEGIN
+
+  IF ( &
+       CATCLE OF IFBLOC <> CATCLE OF PDDETAIL_C_I &
+       OR &
+       0 = SIZE(TRUNCATE(CATCLE OF PDDETAIL_C_I)) &
+     ) &
+     OR &
+     ( &
+       CLRCLE OF IFBLOC <> CLRCLE OF PDDETAIL_C_I &
+       OR &
+       0 = SIZE(TRUNCATE(CLRCLE OF PDDETAIL_C_I)) &
+     ) &
+     OR &
+     ( &
+       QLTCLE OF IFBLOC <> QLTCLE OF PDDETAIL_C_I &
+       OR &
+       0 = SIZE(TRUNCATE(QLTCLE OF PDDETAIL_C_I)) &
+     )
+THEN ERROR "PD401E Impossible d'utilisé cette ligne de commande pour ce bloc"
+END
+
+;------------------------------------------------------------------------------
+;
+; Ajout du numero de lot qui viens de la ligne de detail de la commande
+;
+PROCEDURE PROCESS DCINUMLIG
+BEGIN
+
+   ; Detail de la ligne de commande
+   GET A_LIGNE_COMMANDE             &
+      VIA   CIECLE,                 &
+            PJTABR,                 &
+            PJTANN,                 &
+            COMNUMCOMINT,           &
+            DCINUMLIG               &
+      USING T_CIECLEMNU,            &
+            PJTABR OF IFBLOC,       &
+            PJTANN OF IFBLOC,       &
+            COMNUMCOMINT OF IFBLOC, &
+            DCINUMLIG OF IFBLOC     &
+      OPTIONAL
+
+   LET IFLCLE OF IFBLOC = IFLCLE OF A_LIGNE_COMMANDE
+   DISPLAY IFLCLE OF IFBLOC
+END
+
+;------------------------------------------------------------------------------
+;
+; Pop-up sur le fournisseur
+;
+PROCEDURE INPUT FOUCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_FOUCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd117 MODE F &
+                     PASSING T_CIECLEMNU, &
+                             T_FOUCLE, &
+                             T_USINE_SEC
+    LET FIELDTEXT = TRUNCATE( T_FOUCLE )
+  END
+END
+
+;------------------------------------------------------------------------------
+;
+; Validation sur le fournisseur
+;
+PROCEDURE EDIT FOUCLE
+BEGIN
+  IF FOUSTU OF CPFOURNISSEUR = "I"
+  THEN ERROR 3274 ; PD374E Ce fournisseur est inactif
+END
+
+;------------------------------------------------------------------------------
+;
+; Sous-ecran associe a l'historique des mouvements de blocs
+;
+PROCEDURE DESIGNER D001
+BEGIN
+  IF ALTEREDRECORD OF IFBLOC
+  THEN ERROR 1390 ; Vous devez faire une mise a jour avant d'acceder
+                  ; le sous-ecran.
+
+  RUN SCREEN if001b PASSING T_CIECLEMNU, &
+                            T_CIENOM,    &
+                            IFBLOC       &
+                       MODE F
+
+  ; Reaffichage des donnees
+  DISPLAY BLCMNTM3 OF IFBLOC
+  DISPLAY D_COUT_TOTAL
+
+  LET T_FLG_US = 1 ; MP-00-03-22_SC05.
+  PUSH UPDATE STAY
+END
+
+;------------------------------------------------------------------------------
+;
+; Sous-ecran de verification
+;
+PROCEDURE DESIGNER D002
+BEGIN
+   RUN SCREEN if001a &
+     PASSING IFBLOC  &
+     MODE F
+END
+
+;------------------------------------------------------------------------------
+;
+; Sous-ecran de reservation de bloc
+;
+PROCEDURE DESIGNER D003
+BEGIN
+  IF 0 = SIZE(TRUNCATE(PJTABR OF IFBLOC)) ; MP-00-03-22_SC07.
+  THEN BEGIN
+    RUN SCREEN if001c PASSING T_CIECLEMNU, &
+                              T_CIENOM,    &
+                              IFBLOC       &
+                         MODE F
+
+    ; Mise a jour de l'usager de la reservation
+    GET IFRESERVATION OPTIONAL
+    DISPLAY BLRUSRRES OF IFRESERVATION
+  END
+  ELSE WARNING 3288 ; PD388E Le bloc ne doit pas être associé à un projet pour le réserver ; MP-00-03-22_SC07.
+END
+
+;------------------------------------------------------------------------------
+;
+; Sous-ecran de l'historique de la reservation de bloc
+;
+PROCEDURE DESIGNER D004
+BEGIN
+
+  RUN SCREEN if001d      &
+    PASSING T_CIECLEMNU, &
+            T_CIENOM,    &
+            IFBLOC       &
+    MODE F
+
+END
+
+;------------------------------------------------------------------------------
+;
+; Sous-ecran permettant de faire une recherche sur le numero de reference
+; de l'historique des mouvements de blocs
+;
+PROCEDURE DESIGNER D005 NODATA
+BEGIN
+
+  ; Cet ecran ne s'appelle pas lorsque la carte de bloc est appelle
+  ; de la commande
+  IF 0 = SIZE(TRUNCATE(T_TGRCODGRA_ORI))
+  THEN BEGIN
+
+    RUN SCREEN if001e      &
+      PASSING T_RECHERCHE  &
+      MODE E
+
+    IF 0 <> SIZE(TRUNCATE(T_RECHERCHE))
+    THEN PUSH FIND
+
+  END
+END
+;------------------------------------------------------------------------------
+;
+; Procedure de desassignation du bloc
+;
+PROCEDURE DESIGNER P001
+BEGIN
+  IF 0  = EXNCLE OF IFBLOC                    AND &
+     0 <> SIZE(TRUNCATE(DCINUMLIG OF IFBLOC)) AND &
+     BLRUSRRES   OF IFRESERVATION = D_USAGER
+  THEN BEGIN
+    LET COMNUMCOMINT OF IFBLOC = " "
+    LET DCINUMLIG    OF IFBLOC = " "
+    LET COEDATDEB    OF IFBLOC = 0
+    LET IFLCLE       OF IFBLOC = " "
+
+    LET BLCIFLORI    OF IFBLOC = "0"  ; Indiquer que le lot pourra etre
+                                      ; creer a l'origine via la carte de blocs.
+    LET BLCFOUORI    OF IFBLOC = "0"  ; Indiquer que le fournisseur pourra
+                                      ; etre creer a l'origine via la carte
+                                      ; de blocs.
+
+
+
+    LET CLICLE        OF IFBLOC = " "
+    LET PJTABR        OF IFBLOC = " "
+    LET PJTANN        OF IFBLOC = " "
+    LET BLCDATASSIG   OF IFBLOC =  0
+    LET T_PJTABR_DISP           = " "
+
+    DISPLAY CLICLE      OF IFBLOC
+    DISPLAY CLINOMABR   OF CRCLIENT
+    DISPLAY PJTABR      OF IFBLOC
+    DISPLAY PJTNOM      OF PDPROJET
+    DISPLAY PJTANN      OF IFBLOC
+    DISPLAY BLCDATASSIG OF IFBLOC
+    DISPLAY T_PJTABR_DISP
+
+
+    DISPLAY COMNUMCOMINT OF IFBLOC
+    DISPLAY DCINUMLIG    OF IFBLOC
+    DISPLAY COEDATDEB    OF IFBLOC
+    DISPLAY IFLCLE       OF IFBLOC
+
+    LET T_FLG_US = 1 ; MP-00-03-22_SC05.
+    PUSH UPDATE STAY
+  END
+  ELSE ERROR 3278 ;PD378 Impossible de de-assigner ce bloc
+END
+
+;-----------------------------------------------------------------------------
+;
+; Validation de la saisie en changemode
+;
+PROCEDURE DESIGNER 10
+BEGIN
+
+  IF 0 = SIZE(TRUNCATE(DCINUMLIG OF IFBLOC)) AND &
+     0 = SIZE(TRUNCATE(T_TGRCODGRA_ORI)) AND &
+     BLRUSRRES OF IFRESERVATION = D_USAGER
+  THEN BEGIN
+    ACCEPT ETRCLE OF IFBLOC
+    DISPLAY ETRDSCFRA001 OF IFENTREPOT
+    EDIT T_SILENT3
+  END
+END
+
+;------------------------------------------------------------------------------
+;
+; Validation de la saisie en changemode
+;
+PROCEDURE DESIGNER 15
+BEGIN
+
+  IF 0 = SIZE(TRUNCATE(DCINUMLIG OF IFBLOC)) AND &
+     0 = SIZE(TRUNCATE(T_TGRCODGRA_ORI)) AND &
+     BLRUSRRES OF IFRESERVATION = D_USAGER
+  THEN BEGIN
+    ACCEPT CATCLE OF IFBLOC
+    DISPLAY CATDSCFRA OF IFCATEGORIE
+  END
+END
+
+;------------------------------------------------------------------------------
+;
+; Validation de la saisie en changemode
+;
+PROCEDURE DESIGNER 20
+BEGIN
+
+  IF 0 = SIZE(TRUNCATE(DCINUMLIG OF IFBLOC)) AND &
+     0 = SIZE(TRUNCATE(T_TGRCODGRA_ORI)) AND &
+     BLRUSRRES OF IFRESERVATION = D_USAGER
+  THEN BEGIN
+    ACCEPT QLTCLE OF IFBLOC
+    DISPLAY QLTDSCFRA OF IFQUALITE
+
+    ACCEPT CLRCLE OF IFBLOC
+    DISPLAY CLRDSCFRA OF IFCOULEUR
+  END
+END
+
+;------------------------------------------------------------------------------
+;
+; Validation de la saisie en changemode
+;
+PROCEDURE DESIGNER 25
+BEGIN
+
+  IF 0 = SIZE(TRUNCATE(DCINUMLIG OF IFBLOC))  AND &
+     0 = SIZE(TRUNCATE(T_TGRCODGRA_ORI)) AND &
+     BLRUSRRES OF IFRESERVATION = D_USAGER
+  THEN BEGIN
+    ACCEPT BLCVENDULONG OF IFBLOC
+    ACCEPT BLCVENDUHAU OF IFBLOC
+    ACCEPT BLCVENDULAR OF IFBLOC
+    ACCEPT BLCVENLONPCE OF IFBLOC
+    ACCEPT BLCVENHAUPCE OF IFBLOC
+    ACCEPT BLCVENLARPCE OF IFBLOC
+  END
+
+END
+
+;------------------------------------------------------------------------------
+;
+; Validation de la saisie en changemodee
+;
+PROCEDURE DESIGNER 27
+BEGIN
+  IF BLRUSRRES OF IFRESERVATION = D_USAGER
+  THEN BEGIN
+    ACCEPT BLCMNTM3 OF IFBLOC
+  END
+END
+
+;------------------------------------------------------------------------------
+;
+; Validation de la saisie en changemodee
+;
+PROCEDURE DESIGNER 30
+BEGIN
+  IF BLRUSRRES OF IFRESERVATION = D_USAGER
+  THEN BEGIN
+    ACCEPT  BLCTMREG    OF IFBLOC
+    DISPLAY BLCMNTEXPM3 OF IFBLOC ; MP-00-03-22_D33.
+  END
+END
+
+;-----------------------------------------------------------------------------
+;
+; Validation de la saisie en changemode
+;
+PROCEDURE DESIGNER 35
+BEGIN
+
+  IF 0 = SIZE(TRUNCATE(DCINUMLIG OF IFBLOC)) AND &
+     0 = SIZE(TRUNCATE(T_TGRCODGRA_ORI)) AND &
+     BLRUSRRES OF IFRESERVATION = D_USAGER
+  THEN BEGIN
+    ACCEPT PJTABR OF IFBLOC
+    DISPLAY PJTNOM OF PDPROJET
+  END
+END
+
+;------------------------------------------------------------------------------
+;
+;  Validation de la saisie en changemode
+;
+PROCEDURE DESIGNER 40
+BEGIN
+
+  IF 0 <> SIZE(TRUNCATE(PJTABR OF IFBLOC)) AND &
+     0 = SIZE(TRUNCATE(DCINUMLIG OF IFBLOC))  AND &
+     0 = SIZE(TRUNCATE(T_TGRCODGRA_ORI)) AND &
+     BLRUSRRES OF IFRESERVATION = D_USAGER
+  THEN BEGIN
+    ACCEPT CLICLE OF IFBLOC
+    DISPLAY CLINOMABR OF CRCLIENT
+  END
+
+END
+
+;------------------------------------------------------------------------------
+;
+;  Validation de la saisie en changemode
+;
+PROCEDURE DESIGNER 45
+BEGIN
+
+  IF 0 <> SIZE(TRUNCATE(PJTABR OF IFBLOC)) AND &
+     0 = SIZE(TRUNCATE(DCINUMLIG OF IFBLOC)) AND &
+     0 = SIZE(TRUNCATE(T_TGRCODGRA_ORI)) AND &
+     0 = FTRNUMFAC OF IFBLOC AND &
+     BLRUSRRES OF IFRESERVATION = D_USAGER
+  THEN ACCEPT COMNUMCOMINT OF IFBLOC
+
+  IF 0 <> SIZE(TRUNCATE(COMNUMCOMINT OF IFBLOC)) AND &
+     0 = SIZE(TRUNCATE(DCINUMLIG OF IFBLOC)) AND &
+     0 = SIZE(TRUNCATE(T_TGRCODGRA_ORI)) AND &
+     0 = FTRNUMFAC OF IFBLOC AND &
+     BLRUSRRES OF IFRESERVATION = D_USAGER
+  THEN BEGIN
+    ACCEPT DCINUMLIG OF IFBLOC
+    ACCEPT COEDATDEB OF IFBLOC
+  END
+END
+
+;------------------------------------------------------------------------------
+;
+;  Validation de la saisie en changemode
+;
+PROCEDURE DESIGNER 55
+BEGIN
+
+  IF 0 <> SIZE(TRUNCATE(PJTABR OF IFBLOC)) AND &
+     0 = SIZE(TRUNCATE(DCINUMLIG OF IFBLOC))  AND &
+     0 = SIZE(TRUNCATE(T_TGRCODGRA_ORI)) AND &
+     BLRUSRRES OF IFRESERVATION = D_USAGER
+  THEN ACCEPT FOUCLE OF IFBLOC
+
+END
+
+;------------------------------------------------------------------------------
+;
+;  Validation de la saisie en changemode
+;
+PROCEDURE DESIGNER 60
+BEGIN
+  IF BLRUSRRES OF IFRESERVATION = D_USAGER ; MP-00-03-15_D29.
+  THEN ACCEPT CAPCLE OF IFBLOC
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+PROCEDURE PREENTRY
+BEGIN
+
+  USE ussecent NOLIST
+
+  ; Initialisation de l'entrepot d'origine
+  LET T_OLD_ETRCLE = " "
+END
+
+;------------------------------------------------------------------------------
+;
+; Validation de la suppression
+;
+PROCEDURE DELETE
+BEGIN
+
+  IF D_USAGER <> BLRUSRRES OF IFRESERVATION
+  THEN ERROR 3286 ; PD386E Impossible de supprimer ce bloc, il est reserve
+
+  IF 0 <> SIZE(TRUNCATE(DCINUMLIG OF IFBLOC))
+  THEN ERROR 3275 ; PD375E Impossible de supprimer ce bloc,
+                  ;        il doit ne plus etre assigne
+  ELSE &
+    IF 0 = SIZE(TRUNCATE(T_TGRCODGRA_ORI))
+    THEN BEGIN
+      DELETE IFBLOC
+      DELETE A_DEL_HMB
+      DELETE A_DEL_BLR
+      DELETE A_DEL_IFH
+    END
+END
+
+;------------------------------------------------------------------------------
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF      DELETEDRECORD OF IFBLOC &
+      AND TZ_SECDEL = "0"
+  THEN ERROR 1
+
+  ;
+  ; Validation de la modification
+  ;
+  IF     ALTEREDRECORD     OF IFBLOC &
+     AND NOT NEWRECORD     OF IFBLOC &
+     AND NOT DELETEDRECORD OF IFBLOC &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  ; ---------------------------------------------------
+  ; Validation du lot
+  get a_ligne_commande via ciecle                , &
+                           pjtabr                , &
+                           pjtann                , &
+                           comnumcomint          , &
+                           dcinumlig               &
+                     using t_cieclemnu           , &
+                           pjtabr       of ifbloc, &
+                           pjtann       of ifbloc, &
+                           comnumcomint of ifbloc, &
+                           dcinumlig    of ifbloc  optional
+
+   if accessok and iflcle of ifbloc <> iflcle of a_ligne_commande
+   then error "PD967E Le lot ne correspond pas à celui inscrit sur la ligne de commande"
+
+
+
+  ; ---------------------------------------------------
+  ; MP-00-05-24_D62.
+
+  IF CIECLE    OF IFBLOC  = "2000"     AND &
+     CAPCLE    OF IFBLOC  = " "        AND &
+    (TGRCODGRA OF IFBLOC  = "001"       OR &
+     TGRCODGRA OF IFBLOC  = "002"       OR &
+     TGRCODGRA OF IFBLOC  = "004"       OR &
+     TGRCODGRA OF IFBLOC  = "007"       OR &
+     TGRCODGRA OF IFBLOC  = "008"       OR &
+     TGRCODGRA OF IFBLOC  = "009"       OR &
+     TGRCODGRA OF IFBLOC  = "011"       OR &
+     TGRCODGRA OF IFBLOC  = "020"       OR &
+     TGRCODGRA OF IFBLOC  = "025")
+  THEN BEGIN
+    LET CAPCLE OF IFBLOC = "INTERNE"
+  END
+  ELSE BEGIN
+    IF CIECLE    OF IFBLOC  = "1100"    AND &
+       CAPCLE    OF IFBLOC  = " "       AND &
+       TGRCODGRA OF IFBLOC  = "013"
+    THEN BEGIN
+      LET CAPCLE OF IFBLOC  = "INTERNE"
+    END
+  END
+
+  ; ---------------------------------------------------
+
+  GET IFRESERVATION OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    IF BLRUSRRES OF IFRESERVATION <> LOGONID
+    THEN ERROR 3285 ; PD385E Ce bloc est deja reserver, impossible de le modifier
+  END
+
+  ; Affectation de l'usager, de la date et de l'heure de creation
+  IF NEWRECORD OF IFBLOC AND NOT DELETEDRECORD OF IFBLOC
+  THEN BEGIN
+    LET BLCUSRCRE OF IFBLOC = LOGONID
+    LET BLCDATCRE OF IFBLOC = SYSDATE
+    LET BLCHRECRE OF IFBLOC = SYSTIME / 10000
+  END
+
+  ; Affectation de l'usager, de la date et de l'heure de modification
+  IF NOT NEWRECORD OF IFBLOC AND NOT DELETEDRECORD OF IFBLOC AND ALTEREDRECORD OF IFBLOC
+  THEN BEGIN
+    LET BLCUSAGERMOD  OF IFBLOC = LOGONID
+    LET BLCDATDERNMOD OF IFBLOC = SYSDATE
+    LET BLCHREDERNMOD OF IFBLOC = SYSTIME / 10000
+  END
+
+  ; Mise a jour de l'historique d'un mouvement de bloc
+  IF ETRCLE OF IFBLOC <> T_OLD_ETRCLE ; En cas de creation ou de changement
+  THEN DO INTERNAL MAJ_MOVBLOC
+END
+
+;------------------------------------------------------------------------------
+;
+; Mise a jour des quantite sur les lignes de commande correspondante
+;
+PROCEDURE INTERNAL MAJ_LIGNE_COMMANDE
+BEGIN
+
+   ; Mise-a-jour de la quantite et du montant de la ligne de commande
+   GET A_LIGNE_COMMANDE     &
+      VIA   CIECLE,         &
+            PJTABR,         &
+            PJTANN,         &
+            COMNUMCOMINT,   &
+            DCINUMLIG       &
+      USING T_CIECLEMNU,    &
+            T_PJTABR,       &
+            T_PJTANN,       &
+            T_COMNUMCOMINT, &
+            T_DCINUMLIG     &
+      OPTIONAL
+
+   ; Attention ne pas enlever cette ligne car elle risque de servir
+   ; a nouveau
+   ;LET DCIPRIVEN OF A_LIGNE_COMMANDE = 0
+   LET DCIQTEUNMPRD OF A_LIGNE_COMMANDE = 0
+
+   ; Recherche tous les blocs rattache a la commande
+   WHILE RETRIEVING A_IFBLOC &
+     VIA   CIECLE,           &
+           PJTABR,           &
+           PJTANN,           &
+           COMNUMCOMINT,     &
+           DCINUMLIG         &
+     USING T_CIECLEMNU,      &
+           T_PJTABR,         &
+           T_PJTANN,         &
+           T_COMNUMCOMINT,   &
+           T_DCINUMLIG
+   BEGIN
+
+      ; Attention ne pas enlever cette ligne car elle risque de servir
+      ; a nouveau
+
+      LET DCIQTEUNMPRD OF A_LIGNE_COMMANDE = &
+          DCIQTEUNMPRD OF A_LIGNE_COMMANDE + (BLCM3TOT OF A_IFBLOC / 100) ; MP-00-03-15_SC02.
+   END
+
+   ; Mise a jour de la ligne de commande
+   PUT A_LIGNE_COMMANDE RESET
+END
+
+;------------------------------------------------------------------------------
+;
+; Mise a jour de la quantite sur la ligne de bloc
+;
+PROCEDURE POSTUPDATE
+BEGIN
+
+  ; Si il existe un numero de ligne de commande le calcul pour
+  ; les quantites et les montant s'execute de nouveau pour
+  ; la ligne
+  IF 0 <> SIZE(TRUNCATE(DCINUMLIG OF IFBLOC))
+  THEN BEGIN
+
+    ; Initialisation des variables pour l'execution de la
+    ; procedure MAJ_LIGNE_COMMANDE
+    LET T_PJTABR = PJTABR OF IFBLOC
+    LET T_PJTANN = PJTANN OF IFBLOC
+    LET T_COMNUMCOMINT = COMNUMCOMINT OF IFBLOC
+    LET T_DCINUMLIG = DCINUMLIG OF IFBLOC
+
+    ; Recalcul de la ligne
+    DO INTERNAL MAJ_LIGNE_COMMANDE
+
+  END
+
+  ; Si il existe une difference entre le numero de commande orginal et
+  ; et l'ancien numero de commande alors on recalcul la ligne de la
+  ; commande original
+  IF ( T_PJTABR_DEP       <> PJTABR       OF IFBLOC OR &
+       T_PJTANN_DEP       <> PJTANN       OF IFBLOC OR &
+       T_COMNUMCOMINT_DEP <> COMNUMCOMINT OF IFBLOC OR &
+       T_DCINUMLIG_DEP    <> DCINUMLIG    OF IFBLOC    &
+     ) AND &
+       0 <> SIZE(TRUNCATE(T_DCINUMLIG_DEP))
+  THEN BEGIN
+
+    ; Initialisation des variables pour l'execution de la
+    ; procedure MAJ_LIGNE_COMMANDE
+    LET T_PJTABR = T_PJTABR_DEP
+    LET T_PJTANN = T_PJTANN_DEP
+    LET T_COMNUMCOMINT = T_COMNUMCOMINT_DEP
+    LET T_DCINUMLIG = T_DCINUMLIG_DEP
+
+    ; Recalcul de la ligne
+    DO INTERNAL MAJ_LIGNE_COMMANDE
+  END
+
+  ; Re-initialisation de la commande et du numero de ligne de la commande
+  ; dans le cas ou l'usager ferait un update stay
+  LET T_PJTABR_DEP = PJTABR OF IFBLOC
+  LET T_PJTANN_DEP = PJTANN OF IFBLOC
+  LET T_COMNUMCOMINT_DEP = COMNUMCOMINT OF IFBLOC
+  LET T_DCINUMLIG_DEP = DCINUMLIG OF IFBLOC
+
+  ;--------------------------------------
+  ; MP-00-03-22_SC05.
+
+  IF CHANGEMODE AND T_FLG_US = 0
+  THEN PUSH FIND
+
+  LET T_FLG_US = 0
+  ;--------------------------------------
+
+  DISPLAY FIELD CAPCLE OF IFBLOC  ; MP-00-05-24_D62.
+END
+
+
+BUILD
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+************************** Gestion des cartes de bloc **************************
+* No bloc.......: xxxxx-xxxxxx-x        Date.....: xxxxxxxxxx Inv. initial: xx *
+* Entrepôt......: xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                *
+* Type granit...: xxx  xxxxxxxxxxxxxxxx Catégorie: xxx xxxxxxxxxxxxxxxxxxxxxxx *
+* Qualité.......: xxx  xxxxxxxxxxxxxxxx Couleur..: xxx xxxxxxxxxxxxxxxxxxxxxxx *
+*                                       Transféré: xxxxxxxxxx                  *
+* Dim vendues      LONG   HAUT   LARG           LONG       HAUT       LARG     *
+* En millimètre.:  xxxx x xxxx x xxxx Pouce.: xxxxxxxx x xxxxxxxx x xxxxxxxx   *
+*                                                                              *
+* Total M3......:    xxxxxx        ******************************************  *
+* Tonnes mét T/M: xxxxxxxxx        *   Coût bloc......:  xxxxxxxxxx  /M3    *  *
+* T/M régul.....:   xxxxxxx        *   Montant Exp....:  xxxxxxxxxx  /M3    *  *
+* Val finale T/M: xxxxxxxxx        *   Coût total.....: xxxxxxxxxxx         *  *
+*                                  ******************************************  *
+* No projet.....: xx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  *
+* Client........: xxxxxx xxxxxxxxxxxxxxxxxxxx         Date assig..: xxxxxxxxxx *
+* Num. commande.: xx-xx-xxx   No ligne.....: xxx      Date début..: xxxxxxxxxx *
+* No lot........: xxxxxxxxx   No expédition: xxxxx    Date trans..: xxxxxxxxxx *
+* Fournisseur...: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxx    Réservé par.: xxxxxxxxxx *
+* No. facture...: xxxxxxx     Facture C/P..: xxxxxxxxxxxxxxx                   *
+********************************************************************************
+
+@ENDIF

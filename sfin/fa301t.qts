@@ -1,0 +1,216 @@
+;/T/ Impression de la facture
+;
+;/P/ Programmeur...: Steeve Duguay
+;    Date Création.: 3 mai 1995
+;
+;    Description...: Ce programme permet de faire l'impression des factures.
+;                    Suite à la première impression, on peut
+;                    faire la réimpression de la facture
+;
+;    Paramètres....: Compagnie          (Compagnie du menu)
+;                    Numéro de facture  (Borne de début)
+;                    Numéro de facture  (Borne de fin)
+;
+;    Particularités: Un compteur de réimpression et de duplicatas est
+;                    constamment mis à jour.
+;
+;/M/ Marie-Josée Hamel, 96.02.08, sélectionner les factures selon leur statut
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST   ; set process nolimit
+
+
+
+RUN fa301t
+
+GLOBAL TEMPORARY G_REIIMP CHARACTER SIZE 1  PARM ; Indicateur de réimpression
+GLOBAL TEMPORARY G_DUPIMP CHARACTER SIZE 1  PARM ; Indicateur de duplicatas
+
+
+REQUEST EXTRAIRE_FACTURE
+
+ACCESS FACPT_A_REC &
+  ; Pour connaitre la date de validation du lot
+  LINK CIECLE OF FACPT_A_REC        , &
+       PECCLE OF FACPT_A_REC        , &
+       LCRCLE OF FACPT_A_REC          &
+   TO  CIECLE                       , &
+       PECCLE                       , &
+       LCRCLE                     OF CRLOT  &
+
+  LINK  CIECLE OF FACPT_A_REC, &
+        FARCLE OF FACPT_A_REC  &
+    TO  CIECLE, &
+        FARCLE                 OF FAFAR_DETAIL &
+
+  LINK  REFCIECLE OF FACPT_A_REC, &
+        REFCLENUM OF FACPT_A_REC, &
+        CIECLE    OF FACPT_A_REC  &
+    TO  CLICIECLE, &
+        CLICLE   , &
+        CIECLE                 OF VCLC_CLI &
+
+  LINK  CIECLE OF FACPT_A_REC, &
+        FARCLE OF FACPT_A_REC  &
+    TO  CIECLE, &
+        FARCLE                 OF FAFAR_ENTETE OPTIONAL &
+
+  LINK  FFDTAXTYPTPS OF FAFAR_DETAIL, &
+        FFDTAXCODTPS OF FAFAR_DETAIL  &
+    TO  TAXCLETYP,                    &
+        TAXCLECOD              OF MCTAXE ALIAS A_TAX_TPS OPTIONAL &
+
+  LINK  FFDTAXTYPTVQ OF FAFAR_DETAIL, &
+        FFDTAXCODTVQ OF FAFAR_DETAIL  &
+    TO  TAXCLETYP,                    &
+        TAXCLECOD              OF MCTAXE ALIAS A_TAX_TVQ OPTIONAL &
+
+  LINK  CIECLE    OF FAFAR_DETAIL, &
+        FARCLE    OF FAFAR_DETAIL, &
+        FFDCLELIG OF FAFAR_DETAIL, &
+        "1"                     &
+    TO  CIECLE, &
+        FARCLE, &
+        FFDCLELIG, &
+        FFNIMP                 OF FAFAR_NOTE  OPTIONAL
+
+
+CHOOSE CIECLE PARM,       & ; Compagnie du menu
+       FARCLE PARM          ; Numéro de facture
+
+SELECT FACPT_A_REC IF  (   (G_REIIMP = "1" AND FARIMP OF FACPT_A_REC = "1") &
+                        OR (G_DUPIMP = "1" AND FARIMP OF FACPT_A_REC = "1") &
+                        OR (G_REIIMP = "0" AND G_DUPIMP = "0" AND FARIMP OF FACPT_A_REC = "0")) &
+                   AND (   FARSTU OF FACPT_A_REC = "A" &
+                        OR FARSTU OF FACPT_A_REC = "T" ) &
+                   AND FARTYPECR OF FACPT_A_REC <> "AJ"
+
+SELECT CRLOT        IF LCRDATVAL OF CRLOT <> 0
+
+SELECT FAFAR_DETAIL IF FFDTYP OF FAFAR_DETAIL <> "3" AND &
+                       "!" <> FFDDSC OF FAFAR_DETAIL[1:1]
+
+TEMPORARY T_NBRLIG    INTEGER SIZE 4
+TEMPORARY T_FLGDRN    CHARACTER SIZE 1
+TEMPORARY T_PCTTPS    CHARACTER SIZE 4
+TEMPORARY T_CODTPS    CHARACTER SIZE 5
+TEMPORARY T_PCTTVQ    CHARACTER SIZE 4
+TEMPORARY T_CODTVQ    CHARACTER SIZE 5
+TEMPORARY T_MNTBRU    FLOAT     SIZE 8
+TEMPORARY T_MNTBRUTOT FLOAT     SIZE 8
+TEMPORARY T_CPTLIG    INTEGER   SIZE 4
+
+SORT ON CIECLE    OF FACPT_A_REC  &
+     ON FARCLE    OF FACPT_A_REC  &
+     ON FFDCLELIG OF FAFAR_DETAIL &
+     ON FFNSEQ    OF FAFAR_NOTE
+
+ITEM T_NBRLIG = T_NBRLIG + 1 AT FFDCLELIG RESET AT FARCLE TO 1
+
+ITEM T_CPTLIG = T_CPTLIG + 1 RESET AT FFDCLELIG TO 0
+
+ITEM T_PCTTPS =  RJ( ASCII( TAXPCT OF A_TAX_TPS * 100 )[1:2] ) + "." + &
+                 ASCII( ROUND( MOD( TAXPCT OF A_TAX_TPS * 10000 ,100 ) ,-1) )[1:1]
+
+ITEM T_CODTPS = CENTER( T_PCTTPS &
+              + TAXMOD OF A_TAX_TPS ) &
+             IF TAXMOD OF A_TAX_TPS <> "E" &
+             ELSE CENTER( "E" )
+
+ITEM T_PCTTVQ = RJ( ASCII( TAXPCT OF A_TAX_TVQ * 100 )[1:2] ) + "." + &
+                  ASCII( ROUND( MOD( TAXPCT OF A_TAX_TVQ * 10000 ,100 ) , -1) )[1:1]
+
+ITEM T_CODTVQ = CENTER( T_PCTTVQ &
+              + TAXMOD OF A_TAX_TVQ ) &
+             IF TAXMOD OF A_TAX_TVQ <> "E" &
+             ELSE CENTER( "E" )
+
+ITEM T_MNTBRU = FFDMNTNET OF FAFAR_DETAIL - &
+                FFDMNTTPS OF FAFAR_DETAIL - &
+                FFDMNTTVQ OF FAFAR_DETAIL
+
+ITEM T_MNTBRUTOT = T_MNTBRUTOT               + &
+                   FFDMNTNET OF FAFAR_DETAIL - &
+                   FFDMNTTPS OF FAFAR_DETAIL - &
+                   FFDMNTTVQ OF FAFAR_DETAIL   &
+                IF T_CPTLIG = 1 RESET AT FARCLE TO 0
+
+
+
+SUBFILE WFA301A KEEP  IF 0 <> (  FARMNT OF FACPT_A_REC     &
+                               - FARMNTREC OF FACPT_A_REC) &
+  INCLUDE CIECLE       OF FACPT_A_REC  , &
+          FARCLE       OF FACPT_A_REC  , &
+          REFCIECLE    OF FACPT_A_REC  , &
+          REFCLETYP    OF FACPT_A_REC  , &
+          REFCLENUM    OF FACPT_A_REC  , &
+          RADCLE       OF FACPT_A_REC  , &
+          FARDAT       OF FACPT_A_REC  , &
+          FARMNTREC    OF FACPT_A_REC  , &
+          FARMNTNET    OF FACPT_A_REC  , &
+          FARMNTTPS    OF FACPT_A_REC  , &
+          FARMNTTVQ    OF FACPT_A_REC  , &
+          FARNBRIMP    OF FACPT_A_REC  , &
+          FARNBRDUP    OF FACPT_A_REC  , &
+          FARCMDCLI    OF FACPT_A_REC  , &
+          FARTYPECR    OF FACPT_A_REC  , &
+          FFEPORORI    OF FAFAR_ENTETE , &
+          FFEPORDES    OF FAFAR_ENTETE , &
+          FFELIUTRV    OF FAFAR_ENTETE , &
+          FFEDES       OF FAFAR_ENTETE , &
+          FFECNS1      OF FAFAR_ENTETE , &
+          FFECNS2      OF FAFAR_ENTETE , &
+          FFECNS3      OF FAFAR_ENTETE , &
+          FFECNS4      OF FAFAR_ENTETE , &
+          FFECNS5      OF FAFAR_ENTETE , &
+          FFECNS6      OF FAFAR_ENTETE , &
+          FFECNS7      OF FAFAR_ENTETE , &
+          CLILNG       OF VCLC_CLI     , &
+          DEVCLE       OF VCLC_CLI     , &
+          FFDCLELIG    OF FAFAR_DETAIL , &
+          IMMCLE       OF FAFAR_DETAIL , &
+          FFDIMPIMM    OF FAFAR_DETAIL , &
+          FFDQTEFAC    OF FAFAR_DETAIL , &
+          FFDPRIUNI    OF FAFAR_DETAIL , &
+          FFDMNTESC    OF FAFAR_DETAIL , &
+          FFDTERESC    OF FAFAR_DETAIL , &
+          FFDDSC       OF FAFAR_DETAIL , &
+          FFNSEQ       OF FAFAR_NOTE   , &
+          FFNDSC       OF FAFAR_NOTE   , &
+          G_REIIMP                     , &
+          G_DUPIMP                     , &
+          T_FLGDRN                     , &
+          T_MNTBRU                     , &
+          T_CODTPS                     , &
+          T_CODTVQ                     , &
+          T_MNTBRUTOT                  , &
+          T_NBRLIG
+
+OUTPUT FACPT_A_REC  UPDATE AT FARCLE
+  ITEM FARIMP OF FACPT_A_REC    FINAL "1"
+  ITEM FARNBRIMP OF FACPT_A_REC FINAL FARNBRIMP OF FACPT_A_REC + 1 &
+                                      IF G_REIIMP = "1"
+  ITEM FARNBRDUP OF FACPT_A_REC FINAL FARNBRDUP OF FACPT_A_REC + 1 &
+                                      IF G_DUPIMP = "1"
+
+;-------------------------------------------------------------------------------
+;
+;
+; Cette étape met à jour le flag qui indique le dernier record de la facture.
+;
+;
+REQUEST MAJ_DERNIER_FAC
+
+ACCESS *WFA301A
+
+
+SORTED ON CIECLE    OF WFA301A &      ; Compagnie
+       ON FARCLE    OF WFA301A &      ; facture
+       ON FFDCLELIG OF WFA301A &
+       ON FFNSEQ    OF WFA301A
+
+OUTPUT WFA301A UPDATE AT FARCLE
+  ITEM T_FLGDRN OF WFA301A FINAL "1"
+
+
+BUILD fa301t

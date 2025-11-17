@@ -1,0 +1,254 @@
+;/T/ Réception de commande d'achat - Imputation
+;
+;/P/ Programmeur..: Nancy Marceau
+;    Date Création: 12 avril 1994
+;
+;    Description..: Cet écran permet de saisir l'imputation de la réception
+;                   de commande d'achat.  Il est à noter que l'imputation est
+;                   initialement générée par un "Ghost screen"  (AR009E) lors
+;                   de l'approbation de la réception de commande d'achat.
+;
+;
+;/M/ Programmeur.......: Patrick Langlois
+;    Date modification.: 09 Juin 1999
+;    Description.......: Migration Achat/Réception/Inventaire de l'environnement (BOC) 
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN ar009c ACTIONBAR &
+              MODE LABEL "" AT 2,80 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              ACTIVITIES FIND &
+              RECEIVING T_CIECLEMNU, &
+                        T_CIENOM,    &
+                        T_RECSTUOLD, &
+                        D_LARATRJOU, &
+                        ARRECEPTION
+
+USE ustrasse NOLIST ; Transaction QUERY pour les sous-écrans
+
+USE ussectmp NOLIST     ; Variable pour la sécurité
+    "AR009C"            ; Nom de l'écran
+
+USE ar009c.hlp NOLIST ; Use servant à la documentation de l'écran
+
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-écrans
+
+;-------------------------------------------------------------------------------
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de compagnie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie du menu.
+TEMPORARY T_RECSTUOLD CHARACTER SIZE 1  ; Ancien statut de la réception.
+DEFINE D_LARATRJOU    CHARACTER SIZE 1  ; Si le lot est autorisé.
+;-------------------------------------------------------------------------------
+
+FILE ARRECEPTION  MASTER
+
+FILE ARREC_IMPUTATION   PRIMARY OCCUR 14 NOITEM
+  ACCESS VIA   CIECLE, &
+               RECCLE  &
+         USING CIECLE OF ARRECEPTION, &
+               RECCLE OF ARRECEPTION  &
+         ORDERBY CIECLE, &
+                 RECCLE, &
+                 REITIMSTP
+
+
+;-------------------------------------------------------------------------------
+;
+; Pour avoir les codes de taxes de défaut du fournisseur, le type de
+; fournisseur et la devise du fournisseur.
+;
+FILE VFOC_FOU          REFERENCE
+
+  ACCESS VIA FOUCIECLE, &
+             FOUCLE   , &
+             FOCCIECLE  &
+         USING FOUCIECLE OF ARRECEPTION, &
+               FOUCLE    OF ARRECEPTION, &
+               T_CIECLEMNU
+
+
+;
+; Paramètres pour la compagnie consolidée(holding)
+;
+FILE MCHOLDING  REFERENCE
+  ACCESS VIA CIENMC USING "1"
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul de l'écart entre le montant brut et la sommation de l'imputation.
+;
+DEFINE D_ECART FLOAT SIZE 8 = RECMNTTOT OF ARRECEPTION - &
+                              RECCUMMNT OF ARRECEPTION
+
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4  = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST     ; Hilite pour tous les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Imputation " &
+@ELSE
+      " Charge " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+ALIGN (,3,19) (,47,63)
+
+FIELD RECCLE    OF ARRECEPTION &
+        FIXED
+
+FIELD RECMNTTOT OF ARRECEPTION &
+        FIXED &
+@IF FRANCAIS
+        LABEL "Montant total.:"
+@ELSE
+        LABEL "Total amount..:"
+@ENDIF
+
+FIELD RECMNTTPS OF ARRECEPTION &
+        DISPLAY &
+        PREDISPLAY
+
+FIELD RECCUMMNT OF ARRECEPTION &
+        DISPLAY &
+        PREDISPLAY
+
+FIELD RECMNTTVQ OF ARRECEPTION &
+        DISPLAY &
+        PREDISPLAY
+
+FIELD D_ECART &
+        DISPLAY &
+        PREDISPLAY &
+@IF FRANCAIS
+        LABEL "Solde à vent..:" &
+@ELSE
+        LABEL "Balance.......:" &
+@ENDIF
+        PICTURE "^^^,^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5
+
+SKIP
+
+DRAW ,1 TO ,80
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+"Compte Unité       Montant TF TP    TPS     TVQ  Projet/ss-pr Équipement" &
+@ELSE
+"%%%pte Unité         Montant  TF TP          TPS           TVQ  Proj/ss-pr" &
+@ENDIF
+  AT ,3
+
+ALIGN (3,2,3) (,,10) (,,19)(,,30) (,,33) (,,36) (,,45) (,,54) (,,63) (,,67)
+
+CLUSTER OCCURS WITH ARREC_IMPUTATION ID BASE 05
+
+FIELD CPTCLE       OF ARREC_IMPUTATION  &
+        HIDDEN LABEL " "
+
+FIELD UNACLE       OF ARREC_IMPUTATION
+
+FIELD REIMNT       OF ARREC_IMPUTATION  &
+        DEFAULT D_ECART &
+        PICTURE "^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5
+
+FIELD REITAXCODTPS OF ARREC_IMPUTATION &
+        DUPLICATE
+
+FIELD REITAXCODTVQ OF ARREC_IMPUTATION &
+        DUPLICATE
+
+FIELD REIMNTTPS    OF ARREC_IMPUTATION &
+        PICTURE "^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5
+
+FIELD REIMNTTVQ    OF ARREC_IMPUTATION &
+        PICTURE "^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5
+
+
+FIELD PRJCLE       OF ARREC_IMPUTATION
+
+FIELD PRACLE       OF ARREC_IMPUTATION
+                 
+FIELD IMMCLE       OF ARREC_IMPUTATION                 
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Averti l'usager si l'écriture ne balance pas.
+;
+;
+PROCEDURE EXIT
+BEGIN
+  IF RECMNTTOT OF ARRECEPTION <> RECCUMMNT OF ARRECEPTION
+  THEN WARNING 1421 ; L'imputation ne balance pas.
+END
+
+
+
+BUILD
+@IF FORMAT 
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+********************************** Imputation **********************************
+* Réception.....: xxxxxxxxxxxx                Montant total.: xxxxxxxxxxxxxxx  *
+* Montant TPS...: xxxxxxxxxxxxxxx             Montant cumulé: xxxxxxxxxxxxxxx  *
+* Montant TVQ...: xxxxxxxxxxxxxxx             Solde à vent..: xxxxxxxxxxxxxxx  *
+********************************************************************************
+* Compte Unité       Montant TF TP    TPS     TVQ  Projet/ss-pr Équipement     *
+* xxxxxx xxxxxxxx xxxxxxxxxxxxx xx xxxxxxxxxxxxxxxxxxxxxxxxxx xxx xxxxxxxxxxxx *
+* xxxxxx xxxxxxxx xxxxxxxxxxxxx xx xxxxxxxxxxxxxxxxxxxxxxxxxx xxx xxxxxxxxxxxx *
+* xxxxxx xxxxxxxx xxxxxxxxxxxxx xx xxxxxxxxxxxxxxxxxxxxxxxxxx xxx xxxxxxxxxxxx *
+* xxxxxx xxxxxxxx xxxxxxxxxxxxx xx xxxxxxxxxxxxxxxxxxxxxxxxxx xxx xxxxxxxxxxxx *
+* xxxxxx xxxxxxxx xxxxxxxxxxxxx xx xxxxxxxxxxxxxxxxxxxxxxxxxx xxx xxxxxxxxxxxx *
+* xxxxxx xxxxxxxx xxxxxxxxxxxxx xx xxxxxxxxxxxxxxxxxxxxxxxxxx xxx xxxxxxxxxxxx *
+* xxxxxx xxxxxxxx xxxxxxxxxxxxx xx xxxxxxxxxxxxxxxxxxxxxxxxxx xxx xxxxxxxxxxxx *
+* xxxxxx xxxxxxxx xxxxxxxxxxxxx xx xxxxxxxxxxxxxxxxxxxxxxxxxx xxx xxxxxxxxxxxx *
+* xxxxxx xxxxxxxx xxxxxxxxxxxxx xx xxxxxxxxxxxxxxxxxxxxxxxxxx xxx xxxxxxxxxxxx *
+* xxxxxx xxxxxxxx xxxxxxxxxxxxx xx xxxxxxxxxxxxxxxxxxxxxxxxxx xxx xxxxxxxxxxxx *
+* xxxxxx xxxxxxxx xxxxxxxxxxxxx xx xxxxxxxxxxxxxxxxxxxxxxxxxx xxx xxxxxxxxxxxx *
+* xxxxxx xxxxxxxx xxxxxxxxxxxxx xx xxxxxxxxxxxxxxxxxxxxxxxxxx xxx xxxxxxxxxxxx *
+* xxxxxx xxxxxxxx xxxxxxxxxxxxx xx xxxxxxxxxxxxxxxxxxxxxxxxxx xxx xxxxxxxxxxxx *
+* xxxxxx xxxxxxxx xxxxxxxxxxxxx xx xxxxxxxxxxxxxxxxxxxxxxxxxx xxx xxxxxxxxxxxx *
+********************************************************************************
+@ENDIF

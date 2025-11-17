@@ -1,0 +1,258 @@
+;/T/ Comptes à recevoir en souffrance
+;
+;/P/ Programmeur...: Nancy Marceau
+;    Date Création.: 5 avril 1994
+;
+;    Description...: Ce rapport présente les Comptes à recevoir en souffrance.
+;                    Ce rapport permet d'avoir une vision globale des soldes à
+;                    recevoir en souffrance.
+;
+;                    Les transactions sont sélectionnées selon la date
+;                    demandée par l'usager, les soldes sont répartis dans la
+;                    bonne colonne selon l'intervalle déterminé par l'usager.
+;
+;
+;    Paramètres....: Intervalle   (Obligatoire)
+;                    Jusqu'au     (Obligatoire)
+;                    Compte CAR   (Optionnel : un, plusieurs ou tous)
+;                    Client       (Optionnel : un, plusieurs ou tous)
+;                    Représentant (Optionnel : un, plusieurs ou tous)
+;
+;
+;    Particularités: ...
+;
+;/M/ Modifié par...: Guy Chabot le 11 aout 1994
+;    Description...: Le compte à recevoir en souffrance a maintenant son
+;                    type '4'.
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST   ; set process nolimit
+
+
+RUN cr600t
+
+GLOBAL TEMPORARY G_ITVCOD    CHARACTER SIZE 1 PARM ; Code identifiant l'intervalle
+                                                   ; choisi pour les colonnes.
+GLOBAL TEMPORARY G_DATFIN    DATE             PARM ; Date de fin de sélection.
+
+
+;-------------------------------------------------------------------------------
+
+REQUEST AGES_COMPTE_CAR
+
+ACCESS VCAR_CLI &     ; Vue logique de CRCPT_A_REC et CRCLIENT
+  ;
+  ; Intervalle choisi par l'usager. Le code 4 identifie que c'est un compte
+  ; à recevoir en souffrance.
+  ;
+  LINK  CIECLE OF VCAR_CLI, &
+        "4"               , &
+        G_ITVCOD            &
+    TO CIECLE , &
+       ITVTYP , &
+       ITVCOD OF             CRINTERVALLE &
+
+  ; Limite de crédit du client.
+  LINK CLICIECLE OF VCAR_CLI, &
+       CLICLE    OF VCAR_CLI, &
+       CIECLE    OF VCAR_CLI  &
+    TO CLICIECLE , &
+       CLICLE    , &
+       CIECLE OF CRCLI_CIE &
+
+  ;
+  ; Nom du client/divers.
+  ;
+  LINK REFCIECLE OF VCAR_CLI, &
+       REFCLETYP OF VCAR_CLI, &
+       REFCLENUM OF VCAR_CLI, &
+       RADCLE    OF VCAR_CLI  &
+    TO REFCIECLE , &
+       REFCLETYP , &
+       REFCLENUM , &
+       RADCLE OF                 MCREF_ADRESSE OPTIONAL &
+ ;
+ ; Cédule d'encaissement, date due, montant à recevoir.
+ ;
+ LINK CIECLE OF VCAR_CLI, &
+      CARCLE OF VCAR_CLI  &
+   TO CIECLE , &
+      CARCLE OF                  CRCAR_CEDULE &
+ ;
+ ; Transactions associées à la cédule(ajust., encaissement...)
+ ;
+ LINK CIECLE    OF CRCAR_CEDULE, &
+      CARCLE    OF CRCAR_CEDULE, &
+      CCDCLELIG OF CRCAR_CEDULE  &
+   TO CIECLE , &
+      CARCLE , &
+      CCDCLELIG OF               CRCAR_HISTO OPTIONAL
+
+
+CHOOSE CIECLE    PARM, &  ; Compagnie du menu.
+       CARCPTCAR PARM, &  ; Compte ctb à recevoir.
+       REFCLENUM PARM, &  ; Numéro de client.
+       CLCREP    PARM     ; Code représentant du client.
+
+
+SELECT VCAR_CLI    IF CARDAT OF VCAR_CLI <= G_DATFIN
+
+SELECT CRCAR_HISTO IF     CRHDATJOU OF CRCAR_HISTO <> 0 &
+                      AND CRHDAT OF CRCAR_HISTO <= G_DATFIN
+
+
+TEMPORARY T_CRHMNT  FLOAT SIZE 8 ; Sommation des trs. associées.
+TEMPORARY T_SLD_TOT FLOAT SIZE 8 ; Solde de la ligne de cédule.
+
+TEMPORARY T_DPODAT       DATE         ; Date du dernier chèque (encaissement)
+TEMPORARY T_DPOMNTPAM    FLOAT SIZE 8 ; Montant du dernier chèque (encaissement)
+TEMPORARY T_DPOMNTPAMTOT FLOAT SIZE 8 ; Montant total du dernier chèque (encaissement)
+
+TEMPORARY T_SLD_CLI    FLOAT   SIZE 8 ; Solde au compte du client
+TEMPORARY T_DIF_DAT    INTEGER SIZE 4 ; Nombre de jours date due
+TEMPORARY T_SLD_NON_DU FLOAT   SIZE 8 ; Solde non dû.
+TEMPORARY T_SLD_01     FLOAT   SIZE 8 ; Solde intervalle 1
+TEMPORARY T_SLD_02     FLOAT   SIZE 8 ; Solde intervalle 2
+
+
+SORT ON CIECLE    OF VCAR_CLI , & ; No compagnie
+        CARCPTCAR OF VCAR_CLI , & ; Compte ctb à recevoir
+        CLCREP    OF VCAR_CLI , & ; Code de représentant.
+        REFCLENUM OF VCAR_CLI , & ; Numéro de client
+        CARDAT    OF VCAR_CLI , & ; Date de la facture
+        CARCLE    OF VCAR_CLI , & ; No facture
+        CCDCLELIG OF CRCAR_CEDULE,&   ; No Cédule
+        CRHDAT    OF CRCAR_HISTO  ; Date du paiement
+
+
+;
+; Si c'est un encaissement ou une mauvaise créance il faut soustraire
+; le montant du montant brut.
+;
+ITEM T_CRHMNT = 0 - CRHMNTCAR OF CRCAR_HISTO &
+                         IF    CRHTYPTRA OF CRCAR_HISTO = "EN" &
+                            OR CRHTYPTRA OF CRCAR_HISTO = "MC" &
+           ELSE CRHMNTCAR OF CRCAR_HISTO
+
+;
+; Solde de la cédule.
+;
+ITEM T_SLD_TOT SUBTOTAL T_CRHMNT &
+               RESET AT CCDCLELIG TO CCDMNT OF CRCAR_CEDULE
+
+;
+; Solde au compte du client.
+;
+ITEM T_SLD_CLI SUBTOTAL T_SLD_TOT AT CCDCLELIG &
+               RESET AT REFCLENUM
+
+
+;
+; On calcule le nombre de jours entre la date due et la date de fin.
+;
+ITEM T_DIF_DAT = DAYS(G_DATFIN) - DAYS(CCDDATDUE OF CRCAR_CEDULE)
+
+
+;
+; Solde non dû, c'est les factures dont la date due est supérieure à la date
+; de fin de période. Exemple, si on demande un âge pour le mois de mai, alors
+; les factures dues en juin, juillet... sont non dûes.
+;
+ITEM T_SLD_NON_DU SUBTOTAL T_SLD_TOT  &
+                    IF T_DIF_DAT < ITVDEB1 OF CRINTERVALLE &
+                    AT CCDCLELIG &
+                    RESET AT REFCLENUM
+
+;
+; Répartition du solde dans la bonne colonne selon les intervalles de la
+; table CRINTERVALLE définie par l'usager.
+;
+ITEM T_SLD_01 SUBTOTAL T_SLD_TOT &
+                      IF     T_DIF_DAT >= ITVDEB1 OF CRINTERVALLE &
+                         AND T_DIF_DAT <= ITVFIN1 OF CRINTERVALLE &
+                      AT CCDCLELIG &
+                      RESET AT REFCLENUM
+;
+ITEM T_SLD_02 SUBTOTAL T_SLD_TOT &
+                    IF       T_DIF_DAT >= ITVDEB2 OF CRINTERVALLE  &
+                    AT CCDCLELIG &
+                    RESET AT REFCLENUM
+
+
+
+SUBFILE WCR600 KEEP &
+               AT REFCLENUM &
+               IF   ((T_SLD_02 > 0 &
+                 OR T_SLD_CLI > CLCLIMCRT OF CRCLI_CIE) &
+                 AND T_SLD_CLI > 0) &
+INCLUDE CIECLE    OF VCAR_CLI   , &
+        CARCPTCAR OF VCAR_CLI   , &
+        REFCLENUM OF VCAR_CLI   , &
+        CLICIECLE OF VCAR_CLI   , &
+        CLICLE    OF VCAR_CLI   , &
+        CLCREP    OF VCAR_CLI   , &
+        RADNOM    OF MCREF_ADRESSE , &
+        RADNOMABR OF MCREF_ADRESSE , &
+        CLCLIMCRT OF CRCLI_CIE     , &
+        ITVDSC    OF CRINTERVALLE  , &
+        ITVCOLTIT1 OF CRINTERVALLE , &
+        ITVCOLTIT2 OF CRINTERVALLE , &
+        G_DATFIN                   , &
+        T_SLD_CLI                  , &
+        T_SLD_NON_DU               , &
+        T_SLD_01                   , &
+        T_SLD_02                   , &
+        T_DPODAT                   , &
+        T_DPOMNTPAMTOT
+
+;-------------------------------------------------------------------------------
+; Cette étape permet de déterminer le dernier encaissement de chacun des clients.
+; On doit faire une étape supplémentaire, car le tri de la première étape est
+; différent.
+;
+REQUEST DERNIER_PAIEMENT
+
+ACCESS *WCR600 &
+  LINK CIECLE,   &
+       REFCLENUM &
+    TO CIECLE,   &
+       REFCLENUM OF CRDEPOT
+
+SORT ON CIECLE    OF WCR600, &
+        CARCPTCAR OF WCR600, &
+        CLCREP    OF WCR600, &
+        REFCLENUM OF WCR600, &
+        DPODAT    OF CRDEPOT
+
+
+SELECT CRDEPOT IF DPOTYPECR OF CRDEPOT = "EN"
+
+TEMPORARY T_DPODAT        DATE         ; Date du dernier chèque (encaissement)
+TEMPORARY T_DPOMNTPAM     FLOAT SIZE 8 ; Montant du dernier chèque (encaissement)
+TEMPORARY T_DPOMNTPAMTOT  FLOAT SIZE 8 ; Montant total du dernier chèque (encaissement)
+
+;
+; Montant du dernier chèque (encaissement)
+;
+ITEM T_DPOMNTPAM = DPOMNTPAM OF CRDEPOT &
+                   IF DPODAT OF CRDEPOT > T_DPODAT &
+                   RESET AT REFCLENUM
+
+;
+; Date du dernier chèque (encaissement)
+;
+ITEM T_DPODAT = DPODAT OF CRDEPOT &
+                IF DPODAT OF CRDEPOT > T_DPODAT &
+                RESET AT REFCLENUM
+
+
+ITEM T_DPOMNTPAMTOT SUBTOTAL DPOMNTPAM OF CRDEPOT &
+                      IF DPODAT OF CRDEPOT = T_DPODAT &
+                      RESET AT DPODAT
+
+OUTPUT WCR600  UPDATE AT REFCLENUM
+ITEM T_DPOMNTPAMTOT OF WCR600 FINAL T_DPOMNTPAMTOT
+ITEM T_DPODAT       OF WCR600 FINAL T_DPODAT
+
+
+BUILD cr600t

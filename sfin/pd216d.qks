@@ -1,0 +1,826 @@
+;/T/ 2.5.1 Transfert de produit de dimension à diagramme
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1995-07-21
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   le transfert d'un caisson de produit de dimension en
+;                   diagramme.
+;
+;
+;/M/ Programmeur..: Claudie Doyon
+;    Date.........: 1999/10/12
+;    Description..: Modification de la procédure préupdate pour empêcher la
+;                   modification de l'enregistrement si caisson expédié.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd216d ACTIONBAR                     &
+              MODE LABEL "" AT 2,80         &
+              NOACTION                      &
+              FIELDMARK RETAIN STARTUP      &
+              ACTIVITIES CHANGE,FIND        &
+              HELP POPUP FROM 4,9 TO 20,72  &
+              RECEIVING T_CIECLEMNU,        &
+                        T_CIENOM,           &
+                        PDCAISSON,          &
+                        PDCOMMAN_INTERNE
+
+
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD216D"
+
+
+;-------------------------------------------------------------------------------
+; Documentation de l'écran.
+;
+USE pd216d.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Sert à valider les codes bilingue et pour les sous-écrans de consultation
+;
+DEFINE    D_CAISTU    CHARACTER SIZE 16 = "CAISTU"
+TEMPORARY T_CAISTU    CHARACTER SIZE 04
+DEFINE    D_CAIETA    CHARACTER SIZE 16 = "CAIETA"
+TEMPORARY T_CAIETA    CHARACTER SIZE 04
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire au traitement
+;
+
+TEMPORARY T_COMNOM        CHARACTER      SIZE 40
+TEMPORARY T_TOT_QTE_IMP   INTEGER SIGNED SIZE 04
+TEMPORARY T_TOT_QTE_A_IMP INTEGER SIGNED SIZE 04
+TEMPORARY T_QTE_IMP       INTEGER SIGNED SIZE 04
+TEMPORARY T_TOTSURMC2     FLOAT          SIZE 08 RESET AT STARTUP ; Total surface des pièces de granit
+TEMPORARY T_DIANUM002     CHARACTER      SIZE 07
+
+
+;-------------------------------------------------------------------------------
+;
+; Caisson
+;
+
+FILE PDCAISSON MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Commande interne
+;
+
+FILE PDCOMMAN_INTERNE MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; FICHIER BIDON
+;
+
+FILE PDTYPE_GRANIT PRIMARY &
+                   NOITEM &
+                   OPEN READ SHARE
+
+  ACCESS VIA     CIECLE       &
+         USING   T_CIECLEMNU  &
+         ORDERBY CIECLE,      &
+                 TGRCODGRA
+
+  ITEM CIECLE OF PDTYPE_GRANIT INITIAL T_CIECLEMNU
+
+;-------------------------------------------------------------------------------
+;
+; Emballage produit dimension
+;
+
+FILE PDEMBAL_PROD_DIM DESIGNER
+
+
+;-------------------------------------------------------------------------------
+;
+; Emballage diagramme
+;
+
+FILE PDEMBAL_DIAG DESIGNER
+
+
+;-------------------------------------------------------------------------------
+;
+; Diagramme
+;
+
+FILE PDDIAGRAMME DESIGNER
+
+
+;-------------------------------------------------------------------------------
+;
+; Diagramme
+;
+
+FILE PDDIAGRAMME DESIGNER ALIAS A_DIA_MAJ
+
+
+;-------------------------------------------------------------------------------
+;
+; Priorité diagramme
+;
+
+FILE PDPRIORITE_DIAG DESIGNER
+
+
+;-------------------------------------------------------------------------------
+;
+; Priorité diagramme
+;
+
+FILE PDPRIORITE_DIAG DESIGNER ALIAS A_PRD_PRIO_DIAG
+
+
+;-------------------------------------------------------------------------------
+;
+; Priorité diagramme
+;
+
+FILE PDPRIORITE_DIAG DESIGNER ALIAS A_PRD_PRIO_DIAG_2
+
+
+;-------------------------------------------------------------------------------
+;
+; Commande interne
+;
+
+FILE PDCOMMAN_INTERNE DESIGNER ALIAS A_COM_COMMANDE
+
+
+;-------------------------------------------------------------------------------
+;
+; Code bilingue (Statut)
+;
+
+FILE VCBI_DSC  REFERENCE &
+               ALIAS A_CBI_CAISTU
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_CAISTU,                             &
+               CAISTU              OF PDCAISSON
+
+
+;-------------------------------------------------------------------------------
+;
+; Code bilingue (État)
+;
+
+FILE VCBI_DSC  REFERENCE &
+               ALIAS A_CBI_CAIETA
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_CAIETA,                             &
+               CAIETA              OF PDCAISSON
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables nécessaire au traitement
+;
+
+TEMPORARY T_ALTREC      CHARACTER        SIZE 01 OCCURS WITH PDEMBAL_DIAG
+TEMPORARY T_NEWREC      CHARACTER        SIZE 01 OCCURS WITH PDEMBAL_DIAG
+TEMPORARY T_DELREC      CHARACTER        SIZE 01 OCCURS WITH PDEMBAL_DIAG
+TEMPORARY T_QTE_EMB     INTEGER SIGNED   SIZE 04 OCCURS WITH PDEMBAL_DIAG
+
+
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Caisson " &
+@ELSE
+      " %%%Caisson " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+
+ALIGN (,03,19)
+
+
+FIELD CAINUMCAI        OF PDCAISSON        &
+        NUM SIGNIF 9 &
+        DISPLAY                            &
+        FIXED
+
+
+;ALIGN (,03,19) (,,29)
+
+ALIGN (,03,19) (,21,22) (24,24,25) (,,29)
+
+
+FIELD PJTABR           OF PDCAISSON        &
+        DISPLAY FIXED &
+        LABEL "Num. commande.:"
+
+FIELD PJTANN           OF PDCAISSON        &
+        LABEL "-"                          &
+        DISPLAY FIXED
+
+
+FIELD COMNUMCOMINT     OF PDCAISSON        &
+        LABEL "-"                          &
+        NUMERIC                            &
+        BWZ DISPLAY FIXED
+
+;FIELD COMNUMCOM        OF PDCAISSON        &
+;        DISPLAY                            &
+;        FIXED
+
+FIELD T_COMNOM                             &
+        DISPLAY
+
+
+ALIGN (,03,19) (,,22)
+
+
+FIELD CAISTU           OF PDCAISSON        &
+        DISPLAY                            &
+        FIXED
+
+
+FIELD CBIDSC           OF A_CBI_CAISTU     &
+        DISPLAY                            &
+        FIXED
+
+
+ALIGN (,03,19) (,,22) (,48,64)
+
+
+FIELD CAIETA           OF PDCAISSON        &
+        DISPLAY                            &
+        FIXED
+
+
+FIELD CBIDSC           OF A_CBI_CAIETA     &
+        DISPLAY                            &
+        FIXED
+
+
+FIELD CAIMC2           OF PDCAISSON        &
+        DISPLAY                            &
+        FIXED
+
+
+ALIGN (,03,19) (,48,64)
+
+
+FIELD CAIPOIEST        OF PDCAISSON        &
+        DISPLAY                            &
+        FIXED
+
+
+FIELD CAIPOIREE        OF PDCAISSON        &
+        DISPLAY                            &
+        FIXED
+
+
+DRAW 11,01 TO 11,80
+
+
+SKIP TO LINE 11
+
+
+TITLE &
+@IF FRANCAIS
+      " Transfert produit dimension en diagramme " &
+@ELSE
+      "%%%ansfert produit dimension en diagramme " &
+@ENDIF
+      CENTERED AT ,1
+
+
+SKIP TO LINE 14
+
+
+ALIGN (,03,19)
+
+
+FIELD PDILON           OF PDEMBAL_PROD_DIM &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD PDIHAU           OF PDEMBAL_PROD_DIM &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD PDIEPA           OF PDEMBAL_PROD_DIM &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD TGRCODGRA        OF PDEMBAL_PROD_DIM &
+        HIDDEN                             &
+        NUMERIC                            &
+        DISPLAY
+
+
+FIELD TYFCODFIN        OF PDEMBAL_PROD_DIM &
+        HIDDEN                             &
+        NUMERIC                            &
+        DISPLAY
+
+
+FIELD EMPQTEPRD        OF PDEMBAL_PROD_DIM &
+        HIDDEN                             &
+        DISPLAY
+
+
+SKIP TO LINE 14
+
+
+ALIGN (40,41,57)
+
+
+FIELD DIANUM002        OF PDEMBAL_DIAG     &
+        HIDDEN                             &
+        REQUIRED
+
+
+
+FIELD PRICODPRI        OF PDEMBAL_DIAG     &
+        HIDDEN                             &
+        REQUIRED                           &
+        NUMERIC
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Permet de saisir que le numéro de diagramme et que le code de diagramme soit
+; complèt.
+;
+
+PROCEDURE INPUT DIANUM002
+BEGIN
+  IF 5 >= SIZE(TRUNCATE(FIELDTEXT)) &
+     AND &
+     0 = INDEX(FIELDTEXT,"@") &
+     AND &
+     NOT FINDMODE
+  THEN BEGIN
+    LET FIELDTEXT = PJTABR OF PDDIAGRAMME + &
+                    TRUNCATE(FIELDTEXT[1:SIZE(TRUNCATE(FIELDTEXT))+1])
+  END
+  ;
+  ; Appel du dépisteur (pop-up) pour le champ.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_DIANUM002 = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd126 MODE F &
+                     PASSING T_DIANUM002, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_DIANUM002 )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Permet d'accéder à l'emballage de diagramme si existe déjà
+;
+
+PROCEDURE EDIT DIANUM002
+BEGIN
+  ;
+  ; Recherche du diagramme dans la table
+  ;
+  GET PDDIAGRAMME OPTIONAL &
+    VIA CIECLE,          &
+        DIANUM002        &
+    USING T_CIECLEMNU,   &
+          FIELDTEXT
+  IF NOT ACCESSOK
+  THEN BEGIN
+    ERROR 2998 ; Ce numéro de diagramme n'existe pas
+  END
+  ;
+  ; Validation du diagramme
+  ;
+  IF PDILON OF PDEMBAL_PROD_DIM <> DIALON OF PDDIAGRAMME
+  THEN BEGIN
+    ERROR 3200 ; La longueur du produit de dimension diffère de celle du diagramme
+  END
+  IF PDIHAU OF PDEMBAL_PROD_DIM <> DIAHAU OF PDDIAGRAMME
+  THEN BEGIN
+    ERROR 3201 ; La hauteur du produit de dimension diffère de celle du diagramme
+  END
+  IF PDIEPA OF PDEMBAL_PROD_DIM <> DIAEPA OF PDDIAGRAMME
+  THEN BEGIN
+    ERROR 3202 ; L'épaisseur du produit de dimension diffère de celle du diagramme
+  END
+  IF TGRCODGRA OF PDEMBAL_PROD_DIM <> TGRCODGRA OF PDDIAGRAMME
+  THEN BEGIN
+    ERROR 3203 ; Le type de granit du produit de dimension diffère du diagramme
+  END
+  IF TYFCODFIN OF PDEMBAL_PROD_DIM <> TYFCODFIN OF PDDIAGRAMME
+  THEN BEGIN
+    ERROR 3204 ; Le type de fini du produit de dimension diffère du diagramme
+  END
+  IF 0 = SIZE(TRUNCATE(COMNUMCOM OF PDCAISSON))
+  THEN BEGIN
+    LET COMNUMCOM    OF PDCAISSON = COMNUMCOM    OF PDDIAGRAMME
+    LET COMNUMCOMINT OF PDCAISSON = COMNUMCOMINT OF PDDIAGRAMME
+    LET PJTABR       OF PDCAISSON = PJTABR       OF PDDIAGRAMME
+    LET PJTANN       OF PDCAISSON = PJTANN       OF PDDIAGRAMME
+    LET PJTNUMSEQ    OF PDCAISSON = PJTNUMSEQ    OF PDDIAGRAMME
+    LET PJTNUMPRO    OF PDCAISSON = PJTNUMPRO    OF PDDIAGRAMME
+;    DISPLAY COMNUMCOM OF PDCAISSON
+    GET A_COM_COMMANDE &
+      VIA CIECLE,           &
+          COMNUMCOM         &
+      USING T_CIECLEMNU,    &
+            COMNUMCOM OF PDDIAGRAMME
+    LET T_COMNOM = COMNOM OF A_COM_COMMANDE
+    DISPLAY T_COMNOM
+  END
+  DISPLAY DIANUM002 OF PDEMBAL_DIAG
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+
+PROCEDURE ENTRY
+BEGIN
+  ACCEPT DIANUM002 OF PDEMBAL_DIAG
+  EDIT DIANUM002 OF PDEMBAL_DIAG
+  ACCEPT PRICODPRI OF PDEMBAL_DIAG
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation du caisson
+;
+
+PROCEDURE POSTFIND
+BEGIN
+  IF TPDTYPPRD OF PDCAISSON <> "PD"
+  THEN BEGIN
+    ERROR 3206 ; Le caisson contient des diagrammes ou des tranches
+  END
+  IF CAISTU OF PDCAISSON <> "I"
+  THEN BEGIN
+    ERROR 3205 ; Le caisson ne permet pas cette opération
+  END
+  ;
+  ; Affiche le produit de dimension
+  ;
+  GET PDEMBAL_PROD_DIM &
+    VIA CIECLE,          &
+        CAINUMCAI        &
+    USING T_CIECLEMNU,   &
+          CAINUMCAI OF PDCAISSON
+  DISPLAY PDILON    OF PDEMBAL_PROD_DIM
+  DISPLAY PDIHAU    OF PDEMBAL_PROD_DIM
+  DISPLAY PDIEPA    OF PDEMBAL_PROD_DIM
+  DISPLAY TGRCODGRA OF PDEMBAL_PROD_DIM
+  DISPLAY TYFCODFIN OF PDEMBAL_PROD_DIM
+  DISPLAY EMPQTEPRD OF PDEMBAL_PROD_DIM
+  LET T_COMNOM = COMNOM OF PDCOMMAN_INTERNE
+  DISPLAY T_COMNOM
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  IF CAISTU OF PDCAISSON = "E"
+  THEN ERROR "Vous ne pouvez modifier/saisir/d\351truire car caisson expédié"
+
+  IF CAISTU OF PDCAISSON = "A"
+  THEN ERROR "Vous ne pouvez modifier/saisir/détruire car caisson annulé"
+
+
+  ; Mise à jour des informations du caisson
+  ;
+  LET TPDTYPPRD OF PDCAISSON = "DI"
+  LET CAITRF    OF PDCAISSON = "1"
+  LET CAISITEMB OF PDCAISSON = "GR"
+  LET CAIETA    OF PDCAISSON = "F"
+  ;
+  ; Création du lien CAISSON - DIAGRAMME
+  ;
+  LET CAINUMCAI        OF PDEMBAL_DIAG = CAINUMCAI OF PDCAISSON
+  LET DIANUM002        OF PDEMBAL_DIAG = DIANUM002 OF PDEMBAL_DIAG
+  LET DIANUMDIA002     OF PDEMBAL_DIAG = DIANUM002 OF PDEMBAL_DIAG[3:5]
+  LET EMDQTEVEN        OF PDEMBAL_DIAG = 0
+  LET EMDQTEPRD        OF PDEMBAL_DIAG = EMPQTEPRD OF PDEMBAL_PROD_DIM
+  LET EMDQTERET        OF PDEMBAL_DIAG = 0
+  LET EMDPRIUNI        OF PDEMBAL_DIAG = 0.00
+  LET EMDLONVEN        OF PDEMBAL_DIAG = 0
+  LET EMDHAUVEN        OF PDEMBAL_DIAG = 0
+  LET EMDEPAVEN        OF PDEMBAL_DIAG = 0
+  LET PRICODPRI        OF PDEMBAL_DIAG = PRICODPRI OF PDEMBAL_DIAG
+  LET PJTABR           OF PDEMBAL_DIAG = PJTABR OF A_COM_COMMANDE
+  LET PJTANN           OF PDEMBAL_DIAG = PJTANN OF A_COM_COMMANDE
+  LET PJTNUMSEQ        OF PDEMBAL_DIAG = PJTNUMSEQ OF A_COM_COMMANDE
+  LET PJTNUMPRO        OF PDEMBAL_DIAG = PJTNUMPRO OF A_COM_COMMANDE
+  LET COMNUMCOMINT     OF PDEMBAL_DIAG = COMNUMCOMINT OF A_COM_COMMANDE
+  LET COMNUMCOM        OF PDEMBAL_DIAG = COMNUMCOM OF A_COM_COMMANDE
+  PUT PDEMBAL_DIAG
+  ;
+  ; Destruction du lien CAISSON - PRODUIT DIMENSION
+  ;
+  DELETE PDEMBAL_PROD_DIM
+  ;
+  ; Mise à jour des quantités pour chaque priorité
+  ;
+  LET T_QTE_IMP = 0
+  LET T_TOT_QTE_A_IMP = EMDQTEPRD        OF PDEMBAL_DIAG
+
+  WHILE RETRIEVING A_PRD_PRIO_DIAG    &
+    VIA     CIECLE,          &
+            DIANUM002        &
+    USING   T_CIECLEMNU,                          &
+            DIANUM002        OF PDEMBAL_DIAG      &
+    ORDERBY CIECLE,                               &
+            DIANUM002        ASCENDING,           &
+            PRICODPRI        ASCENDING
+  BEGIN
+    IF PRICODPRI OF A_PRD_PRIO_DIAG >= PRICODPRI OF PDEMBAL_DIAG
+    THEN BEGIN
+      ;
+      ; Calcul de la quantité à imputer à GRANICOR pour la priorité
+      ;
+      IF CAISITEMB OF PDCAISSON = "GR"
+      THEN BEGIN
+        ;
+        ; Calcul de la quantité restante
+        ;
+        LET T_QTE_IMP = T_TOT_QTE_A_IMP - T_TOT_QTE_IMP
+        ;
+        ; Si la QTE est plus petite que la QTE planifiée pour la priorité
+        ;
+        IF T_QTE_IMP < (PDGQTEPLAFINGRA OF A_PRD_PRIO_DIAG - PDGQTEFINPRDGRA OF A_PRD_PRIO_DIAG)
+        THEN BEGIN
+          LET PDGQTEFINPRDGRA OF A_PRD_PRIO_DIAG = PDGQTEFINPRDGRA OF A_PRD_PRIO_DIAG + T_QTE_IMP
+          LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+        END
+        ELSE BEGIN
+          ;
+          ; Vérifie qu'il reste une QTE à imputer pour la priorité
+          ;
+          IF PDGQTEPLAFINGRA OF A_PRD_PRIO_DIAG > PDGQTEFINPRDGRA OF A_PRD_PRIO_DIAG
+          THEN BEGIN
+            ;
+            ; Impute la QTE emballer pour la priorité
+            ;
+            LET T_QTE_IMP = PDGQTEPLAFINGRA OF A_PRD_PRIO_DIAG - PDGQTEFINPRDGRA OF A_PRD_PRIO_DIAG
+            LET PDGQTEFINPRDGRA OF A_PRD_PRIO_DIAG = PDGQTEFINPRDGRA OF A_PRD_PRIO_DIAG + T_QTE_IMP
+            LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+          END
+        END
+      END
+      PUT A_PRD_PRIO_DIAG RESET
+    END
+  END
+  ;
+  ; boucle pour imputer QTE restante
+  ;
+  IF T_TOT_QTE_IMP < T_TOT_QTE_A_IMP
+  THEN BEGIN
+    WHILE RETRIEVING A_PRD_PRIO_DIAG    &
+      VIA     CIECLE,          &
+              PJTABR,          &
+              DIANUMDIA002     &
+      USING   T_CIECLEMNU,                          &
+              PJTABR           OF PDEMBAL_DIAG,     &
+              DIANUMDIA002     OF PDEMBAL_DIAG      &
+      ORDERBY CIECLE,                               &
+              PJTABR           ASCENDING,           &
+              DIANUMDIA002     ASCENDING,           &
+              PRICODPRI        ASCENDING
+    BEGIN
+      IF PRICODPRI OF A_PRD_PRIO_DIAG < PRICODPRI OF PDEMBAL_DIAG
+      THEN BEGIN
+        ;
+        ; Calcul de la quantité à imputer à GRANICOR pour la priorité
+        ;
+        IF CAISITEMB OF PDCAISSON = "GR"
+        THEN BEGIN
+          ;
+          ; Calcul de la quantité restante
+          ;
+          LET T_QTE_IMP = T_TOT_QTE_A_IMP - T_TOT_QTE_IMP
+          ;
+          ; Si la QTE est plus petite que la QTE planifiée pour la priorité
+          ;
+          IF T_QTE_IMP < (PDGQTEPLAFINGRA OF A_PRD_PRIO_DIAG - PDGQTEFINPRDGRA OF A_PRD_PRIO_DIAG)
+          THEN BEGIN
+            LET PDGQTEFINPRDGRA OF A_PRD_PRIO_DIAG = PDGQTEFINPRDGRA OF A_PRD_PRIO_DIAG + T_QTE_IMP
+            LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+          END
+          ELSE BEGIN
+            ;
+            ; Vérifie qu'il reste une QTE à imputer pour la priorité
+            ;
+            IF PDGQTEPLAFINGRA OF A_PRD_PRIO_DIAG > PDGQTEFINPRDGRA OF A_PRD_PRIO_DIAG
+            THEN BEGIN
+              ;
+              ; Impute la QTE emballer pour la priorité
+              ;
+              LET T_QTE_IMP = PDGQTEPLAFINGRA OF A_PRD_PRIO_DIAG - PDGQTEFINPRDGRA OF A_PRD_PRIO_DIAG
+              LET PDGQTEFINPRDGRA OF A_PRD_PRIO_DIAG = PDGQTEFINPRDGRA OF A_PRD_PRIO_DIAG + T_QTE_IMP
+              LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+            END
+          END
+        END
+        PUT A_PRD_PRIO_DIAG RESET
+      END
+    END
+  END
+  ;
+  ; La quantité emballer est suppérieur à la quantité requise
+  ;
+  IF T_TOT_QTE_IMP < T_TOT_QTE_A_IMP
+  THEN BEGIN
+    GET A_PRD_PRIO_DIAG_2 &
+      VIA     CIECLE,          &
+              PJTABR,          &
+              DIANUMDIA002,    &
+              PRICODPRI        &
+      USING   T_CIECLEMNU,                          &
+              PJTABR           OF PDEMBAL_DIAG,     &
+              DIANUMDIA002     OF PDEMBAL_DIAG,     &
+              "99"
+    IF ACCESSOK
+    THEN BEGIN
+      ;
+      ; Calcul de la quantité à imputer à GRANICOR pour la priorité
+      ;
+      IF CAISITEMB OF PDCAISSON = "GR"
+      THEN BEGIN
+        ;
+        ; Calcul de la quantité restante
+        ;
+        LET T_QTE_IMP = T_TOT_QTE_A_IMP - T_TOT_QTE_IMP
+        LET PDGQTEFINPRDGRA OF A_PRD_PRIO_DIAG_2 = PDGQTEFINPRDGRA OF A_PRD_PRIO_DIAG_2 + T_QTE_IMP
+        LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+      END
+      PUT A_PRD_PRIO_DIAG_2 RESET
+    END
+  END
+
+  ;
+  ; Mise à jour de la quantité total de diagramme emballé
+  ;
+  GET A_DIA_MAJ              &
+    VIA     CIECLE,          &
+            DIANUM002        &
+    USING   T_CIECLEMNU,     &
+            DIANUM002        OF PDEMBAL_DIAG
+  IF ACCESSOK
+  THEN BEGIN
+    ;
+    ; Mise à jour du compteur QUANTITÉ EMBALLÉ
+    ;
+    IF ("F" = CAIETA OF PDCAISSON OR "C" = CAIETA OF PDCAISSON)
+    THEN BEGIN
+      LET DIAQTEEMB OF A_DIA_MAJ = DIAQTEEMB OF A_DIA_MAJ + T_TOT_QTE_IMP
+    END
+    ;
+    ; Mise à jour du compteur QUANTITÉ PRÊT GRANICOR
+    ;
+    IF "GR" = CAISITEMB OF PDCAISSON &
+       AND &
+       ("F" = CAIETA OF PDCAISSON OR "C" =CAIETA OF PDCAISSON)
+    THEN BEGIN
+      LET DIAQTEPREGRA OF A_DIA_MAJ = DIAQTEPREGRA OF A_DIA_MAJ + T_TOT_QTE_IMP
+    END
+    PUT A_DIA_MAJ RESET
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Retour au programme appelant
+;
+
+PROCEDURE POSTUPDATE
+BEGIN
+  RETURN
+END
+
+
+BUILD
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+*********************************** Caisson ************************************
+*                                                                              *
+* Num. caisson..: xxxxxxxxxxx                                                  *
+* Commande int..: xxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           *
+* Statut........: x  xxxxxxxxxxxxxxxxxxxxxxxxx                                 *
+* État..........: x  xxxxxxxxxxxxxxxxxxxxxxxxx Surface.......: xxxxxxxxxx      *
+* Poids estimer.: xxxxxxxxxxxxx                Poids réel....: xxxxxxxxxxxxx   *
+*                                                                              *
+*************** Transfert de produit de dimension à diagramme ******************
+*                                                                              *
+* Longueur......: xxxx                  Num. diagramme: xxxxxxx                *
+* Hauteur.......: xxxx                  Priorité......: xx                     *
+* Épaisseur.....: xxxx                                                         *
+* Code granit...: xxx                                                          *
+* Code fini.....: xx                                                           *
+* Qte. product..: xxxxx                                                        *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+********************************************************************************
+@ENDIF

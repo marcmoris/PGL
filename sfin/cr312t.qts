@@ -1,0 +1,149 @@
+;/T/ Journal du caisse recette.
+;
+;/P/ Programmeur...: Guy Chabot
+;    Date Création.: 30 juin 1994
+;
+;    Description...: Préparation du journal du caisse recette sommaire.
+;                    On imprime que les transactions qui sont journalisées.
+;
+;    Paramètres....: Compagnie
+;                    Periode CTB (Une, Plusieurs )
+;
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST     ; Permet de faire les SET PROCESS NOLIMIT...
+
+RUN cr312t
+
+;------------------------------------------------------------------------------
+;
+; Sélection des pièces pour les calculs.
+;
+REQUEST SELECTION_PIECE
+
+ACCESS CRDEPOT
+
+
+
+CHOOSE CIECLE PARM, & ; Compagnie du menu
+       PECCLE PARM     RANGE; Période ctb
+
+; Ajustement pour le changement de siècle
+DEFINE D_ANNSIE CHARACTER SIZE 4 = PARM
+
+; Ajustement pour le changement de siècle
+SELECT IF PECCLE OF CRDEPOT[1:2] = D_ANNSIE[3:2]
+
+
+SELECT CRDEPOT IF     DPODATJOU OF CRDEPOT <> 0 &
+                  AND DPOTYPECR OF CRDEPOT = "EN"
+
+SUBFILE WCR312P &
+        INCLUDE CIECLE    OF CRDEPOT , &
+                PECCLE    OF CRDEPOT , &
+                LBQCPTENC OF CRDEPOT , &
+                HISCLE    OF CRDEPOT
+
+;------------------------------------------------------------------------------
+;
+; Sélection des écritures comptables.
+;
+REQUEST SELECTION_CTB
+
+ACCESS *WCR312P &
+  ;
+  ; Ecriture au Grand Livre.
+  ;
+  LINK  HISCLE OF WCR312P &
+    TO  HISCLE OF                 MCHIS_ECR OPTIONAL
+
+TEMPORARY T_PRJCLE CHARACTER SIZE 08
+TEMPORARY T_PRACLE CHARACTER SIZE 03
+TEMPORARY T_IMMCLE CHARACTER SIZE 12
+TEMPORARY T_MNTDBT FLOAT     SIZE 08 ; Total des montants débiteurs
+TEMPORARY T_MNTCRT FLOAT     SIZE 08 ; Total des montants créditeurs
+TEMPORARY T_FLGIMP CHARACTER SIZE 01 ; Flag pour indiquer si projet ou ctb.
+
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE CHARACTER SIZE 5 = "1" + PECCLE OF WCR312P &
+         IF PECCLE OF WCR312P[1:1] < "8" &
+         ELSE "0" + PECCLE OF WCR312P
+
+SORT ON CIECLE    OF WCR312P   &
+     ON D_PECCLE_SIE   &
+     ON LBQCPTENC OF WCR312P   &
+     ON CPTCLE    OF MCHIS_ECR &
+     ON UNACLE    OF MCHIS_ECR
+
+ITEM T_FLGIMP RESET AT INITIAL TO "1"
+
+ITEM T_MNTDBT SUBTOTAL HECMNTDBT OF MCHIS_ECR RESET AT UNACLE
+ITEM T_MNTCRT SUBTOTAL HECMNTCRT OF MCHIS_ECR RESET AT UNACLE
+
+;
+; Insertion des imputations du grand livre
+;
+SUBFILE WCR312 KEEP AT UNACLE &
+        INCLUDE CIECLE    OF WCR312P     , &
+                PECCLE    OF WCR312P     , &
+                LBQCPTENC OF WCR312P     , &
+                T_PRJCLE  ALIAS PRJCLE   , &
+                T_PRACLE  ALIAS PRACLE   , &
+                T_IMMCLE  ALIAS IMMCLE   , &
+                CPTCLE    OF MCHIS_ECR   , &
+                UNACLE    OF MCHIS_ECR   , &
+                T_MNTDBT  ALIAS ECRMNTDBT, &
+                T_MNTCRT  ALIAS ECRMNTCRT, &
+                T_FLGIMP
+
+
+;------------------------------------------------------------------------------
+;
+; Sélection des écritures aux projes.
+;
+REQUEST SELECTION_PROJET
+
+ACCESS *WCR312P &
+  ;
+  ; Ecriture aux projets.
+  ;
+  LINK  HISCLE OF WCR312P &
+    TO  HISCLE OF                 MCHIS_PROJET OPTIONAL
+
+TEMPORARY T_MNTDBT FLOAT SIZE 08
+TEMPORARY T_MNTCRT FLOAT SIZE 08
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE2 CHARACTER SIZE 5 = "1" + PECCLE OF WCR312P &
+         IF PECCLE OF WCR312P[1:1] < "8" &
+         ELSE "0" + PECCLE OF WCR312P
+
+SORT ON CIECLE    OF WCR312P      &
+     ON D_PECCLE_SIE2      &
+     ON LBQCPTENC OF WCR312P      &
+     ON PRJCLE    OF MCHIS_PROJET &
+     ON PRACLE    OF MCHIS_PROJET &
+     ON IMMCLE    OF MCHIS_PROJET
+
+ITEM T_MNTDBT SUBTOTAL HIPMNTDBT OF MCHIS_PROJET RESET AT IMMCLE
+ITEM T_MNTCRT SUBTOTAL HIPMNTCRT OF MCHIS_PROJET RESET AT IMMCLE
+
+;
+; Ajout des imputations de projets.
+;
+OUTPUT *WCR312 ADD NOITEM AT IMMCLE
+
+  ITEM CIECLE    OF WCR312 FINAL CIECLE    OF WCR312P
+  ITEM PECCLE    OF WCR312 FINAL PECCLE    OF WCR312P
+  ITEM LBQCPTENC OF WCR312 FINAL LBQCPTENC OF WCR312P
+  ITEM PRJCLE    OF WCR312 FINAL PRJCLE    OF MCHIS_PROJET
+  ITEM PRACLE    OF WCR312 FINAL PRACLE    OF MCHIS_PROJET
+  ITEM IMMCLE    OF WCR312 FINAL IMMCLE    OF MCHIS_PROJET
+
+  ITEM ECRMNTDBT OF WCR312 FINAL T_MNTDBT
+  ITEM ECRMNTCRT OF WCR312 FINAL T_MNTCRT
+  ITEM T_FLGIMP  OF WCR312 FINAL "2"
+
+BUILD

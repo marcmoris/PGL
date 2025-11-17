@@ -1,0 +1,465 @@
+;/T/ Vérification des factures / Notes de crédit / Ajustement
+;
+;/P/ Programmeur...: Chantal Martineau
+;    Date Création.: 14-juin-1993
+;
+;    Description...: Pour faire la vérification des lots de factures, note de
+;                    crédit et ajustement non journalisées. Remarqué que ce
+;                    rapport peut-être exécuté même si le lot à déjà été
+;                    journalisé.
+;
+;    Particularités:
+;
+;/M/ François Déry, 4 mai 1999
+;       Modifier le défine de balance car unix ne prend pas de fonction à gauche
+;       d'une condition.
+;
+;/M/ Marie-Josée Hamel, 96.02.13, remplacer élément par produit/élém. tarif.
+;-------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST   ; permet de faire les SET REPORT DEV....
+SET NOBLANK
+
+
+;===============================================================================
+;  Rapport Vérification des factures / Notes de crédit /ajustement
+;===============================================================================
+
+ACCESS *WCR330 &
+  LINK REFCIECLE OF WCR330, &
+       REFCLETYP OF WCR330, &
+       REFCLENUM OF WCR330, &
+       RADCLE    OF WCR330  &
+    TO REFCIECLE          , &
+       REFCLETYP          , &
+       REFCLENUM          , &
+       RADCLE             OF MCREF_ADRESSE OPTIONAL &
+
+  LINK REFCIECLE OF WCR330, &
+       REFCLETYP OF WCR330, &
+       REFCLENUM OF WCR330  &
+    TO REFCIECLE          , &
+       REFCLETYP          , &
+       REFCLENUM          OF MCREFERENCE OPTIONAL &
+
+  LINK CPTCLE   OF WCR330   &
+    TO CPTCLE             OF VCPT_DSC    OPTIONAL &
+
+  LINK CIECLE   OF WCR330 , &
+       UNACLE   OF WCR330   &
+    TO CIECLE             , &
+       UNACLE             OF MCUNITE_ADM OPTIONAL &
+
+  LINK CIECLE OF WCR330   , &
+       PRJCLE OF WCR330     &
+    TO CIECLE             , &
+       PRJCLE             OF GPPROJETS    OPTIONAL &
+
+  LINK CIECLE OF WCR330   , &
+       PRJCLE OF WCR330   , &
+       PRACLE OF WCR330     &
+    TO CIECLE             , &
+       PRJCLE             , &
+       PRACLE             OF GPPRO_ACTIVITE  OPTIONAL &
+
+  LINK CIECLE OF WCR330   , &
+       IMMCLE OF WCR330     &
+    TO CIECLE             , &
+       IMMCLE             OF IMIMMOBILISATION OPTIONAL
+
+
+
+;-------------------------------------------------------------------------------
+
+;
+; Titre du rapport.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+                   "Vérification des factures / Notes de crédit / Ajustements"
+@ELSE
+                   "%%%Vérification des factures / Notes de crédit / Ajustement"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = " "
+
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "CR330A"
+
+;
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM
+
+
+
+USE usflgdet NOLIST                    ;Flag Bilingue (O/N)
+
+DEFINE D_HRSBLC    CHARACTER SIZE 3 =  DZ_FLGAFFO IF 0 <> LCRNBRTRSERR OF WCR330 &
+                                  ELSE DZ_FLGAFFN IF LCRNBRTRSERR OF WCR330 = 0
+
+;
+; Indique si Journalisé
+;
+DEFINE D_JOURNALISE CHAR SIZE 12 = &
+@IF FRANCAIS
+                            "Journalisé" &
+@ELSE
+                            "Posted" &
+@ENDIF
+                            IF LCRDATJOU OF WCR330 <> 0 ELSE " "
+
+;***********************
+; Pour le rendre à 20 caractères.
+;
+DEFINE D_PRJTIT    CHARACTER SIZE 20 = PRJDSC1 OF GPPROJETS
+
+DEFINE D_PRATIT    CHARACTER SIZE 20 = PRADSC1 OF GPPRO_ACTIVITE
+
+DEFINE D_IMMTIT    CHARACTER SIZE 18 = IMMDSC  OF IMIMMOBILISATION
+;***********************
+
+;
+; Différence nbre transactions réel et nbre transactions évalué
+;
+DEFINE D_LCRNBRTRSDIF INTEGER SIZE 4 = LCRNBRTRSVER OF WCR330 - &
+                                       LCRNBRTRS    OF WCR330
+
+;
+; Différence Montant transaction réel et Montant transaction évalué
+;
+DEFINE D_LCRCUMMNTDIF FLOAT   SIZE 8 = ROUND(LCRCUMMNTVER OF WCR330) - &
+                                       ROUND(LCRCUMMNT    OF WCR330)
+
+;
+; Vérification si montant entré par l'usager balance avec le total imputation si
+; ne balance pas on imprime un "*"
+;
+DEFINE D_BALANCE  CHARACTER SIZE 1 = "*" IF 0 <> ROUND(CARMNT    OF WCR330) - &
+                                                 ROUND(CARCUMMNT OF WCR330)
+
+
+SORT ON LCRCLE    OF WCR330, &          ; No lot
+        CARDATCRE OF WCR330, &          ; Date de création
+        CARHRECRE OF WCR330, &          ; Heure de création
+        CARCLE    OF WCR330             ; Numéro de facture
+
+
+;
+; Impression de l'en-tête.
+;
+USE ustit240 NOLIST
+SKIP 2&
+@IF FRANCAIS
+ TAB 001 "Lot....: "   &
+@ELSE
+ TAB 001 "Batch..: "   &
+@ENDIF
+ TAB 011 LCRCLE OF WCR330 &
+ TAB 016 LCRDSC OF WCR330 &
+ TAB 060 D_JOURNALISE &
+ SKIP &
+@IF FRANCAIS
+ TAB 001 "Période: " &
+@ELSE
+ TAB 001 "Period.: " &
+@ENDIF
+ TAB 010 PECCLE OF WCR330 &
+SKIP 2 &
+ TAB 001 &
+@IF FRANCAIS
+"                                                       Facture                          Net       Escompte (1)" &
+@ELSE
+"%%%                                                    Facture                          Net       Escompte (1)" &
+@ENDIF
+ SKIP &
+ TAB 001 &
+@IF FRANCAIS
+"*            Client           Type     Facture         référé      Cédule    Date      Frais      Escompte (2)  Dev      Brut           TPS            TVQ         Escomptable" &
+@ELSE
+"*%%%         Client           Type     Facture         référé      Cédule    Date      Frais      Escompte (2)  Dev      Brut           TPS            TVQ         Escomptable" &
+@ENDIF
+ SKIP &
+  TAB 001 &
+"- --------------------------- ---- --------------- --------------- ------  -------- ------------- ------------- --- -------------- -------------- -------------- --------------"
+
+HEADING AT CARCLE &
+  TAB 001  D_BALANCE             &
+  TAB 003  REFCLENUM   OF WCR330 &
+  TAB 010  RADNOMABR   OF MCREF_ADRESSE &
+  TAB 032  CARTYPECR   OF WCR330 &
+  TAB 036  CARCLE      OF WCR330 &
+  TAB 052  T_CARCLEREF OF WCR330 &
+  TAB 070  T_CCDCLELIG OF WCR330 PICTURE "^^" BWZ &
+  TAB 076  CARDAT      OF WCR330 &
+  TAB 085  CARTERNET   OF WCR330 &
+  TAB 090  CARDATNET   OF WCR330 &
+  TAB 099  CARTERESC1  OF WCR330 &
+  TAB 104  CARDATESC1  OF WCR330 &
+  TAB 113  DEVCLE      OF MCREFERENCE &
+  TAB 117  CARMNT      OF WCR330 &
+  TAB 132  CARMNTTPS   OF WCR330 &
+  TAB 147  CARMNTTVP   OF WCR330 &
+  TAB 162  CARMNTNET   OF WCR330 &
+ SKIP &
+  TAB  003 "Description : " &
+  TAB  017 CARDSC1 OF WCR330 &
+  TAB 085  CARTERFRS   OF WCR330 &
+  TAB 090  CARDATFRS   OF WCR330 &
+  TAB 099  CARTERESC2  OF WCR330 &
+  TAB 104  CARDATESC2  OF WCR330 &
+SKIP &
+  TAB  017 CARDSC2 OF WCR330 &
+ SKIP 2 &
+ TAB 003 "----Unité administrative----- --- Produit / Elément ---" &
+ TAB 059 "----------Compte----------- -------Montant  TF TP -----------TPS  -----------TVQ" &
+SKIP
+
+REPORT &
+ SKIP &
+;  TAB 003 PRJCLE     OF WCR330      &
+;  TAB 012 D_PRJTIT   &
+;  TAB 033 PRACLE     OF WCR330      &
+;  TAB 037 D_PRATIT   &
+;  TAB 058 IMMCLE     OF WCR330      &
+;  TAB 071 D_IMMTIT   &
+  TAB 003 UNACLE     OF WCR330      &
+  TAB 012 UNANOMABR  OF MCUNITE_ADM &
+  TAB 039 TRPCLE     OF WCR330      &
+  TAB 048 ETACLE     OF WCR330      &
+  TAB 059 CPTCLE     OF WCR330      &
+  TAB 066 CPTDSCABR  OF VCPT_DSC    &
+  TAB 087 CRIMNT       OF WCR330       PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 5 &
+  TAB 103 CRITAXCODTPS OF WCR330 &
+  TAB 106 CRITAXCODTVP OF WCR330 &
+  TAB 109 CRIMNTTPS    OF WCR330       PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 5 &
+  TAB 125 CRIMNTTVP    OF WCR330       PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 5
+
+FOOTING AT CARCLE &
+  TAB 087 "---------------" &
+  TAB 109 "---------------" &
+  TAB 125 "---------------" &
+  SKIP &
+  TAB 087 CRIMNT     OF WCR330       SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 5 &
+  TAB 109 CRIMNTTPS  OF WCR330       SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 5 &
+  TAB 125 CRIMNTTVP  OF WCR330       SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 5 &
+ SKIP &
+  TAB 001  "------------------------------------------------------------------------------------------------------------------" &
+  TAB 025  "---------------------------------------------------------------------"
+
+
+FOOTING AT LCRCLE &
+  TAB 087 "---------------" &
+  TAB 109 "---------------" &
+  TAB 125 "---------------" &
+ SKIP &
+@IF FRANCAIS
+  TAB 023 "Total du Lot:" &
+@ELSE
+  TAB 023 "Batch Total :" &
+@ENDIF
+  TAB 087 CRIMNT     OF WCR330       SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 5 &
+  TAB 109 CRIMNTTPS  OF WCR330       SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 5 &
+  TAB 125 CRIMNTTVP  OF WCR330       SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 5 &
+ SKIP &
+  TAB 087 "===============" &
+  TAB 109 "===============" &
+  TAB 125 "===============" &
+ SKIP 2 &
+@IF FRANCAIS
+  TAB 050   "    Vérifiés         Cumulés             Ecart        Hors balance(*)" &
+@ELSE
+  TAB 050   "%%% Vérifiés         Cumulés             Ecart        Hors balance(*)" &
+@ENDIF
+ SKIP 1 &
+  TAB 050   "--------------    --------------    --------------    --------------- "&
+ SKIP &
+@IF FRANCAIS
+  TAB 023   "Montant total.........:" &
+@ELSE
+  TAB 023   "%%%tant total.........:" &
+@ENDIF
+  TAB 050 LCRCUMMNTVER OF WCR330   PICTURE "^^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5 &
+  TAB 068 LCRCUMMNT    OF WCR330   PICTURE "^^ ,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5 &
+  TAB 087 D_LCRCUMMNTDIF           PICTURE "^^,^^^,^^^.^^ "  TRAILING SIGN "-" SIGNIFICANCE 5 &
+  TAB 109 D_HRSBLC &
+SKIP &
+@IF FRANCAIS
+  TAB 023   "Nombre de transactions:" &
+@ELSE
+  TAB 023   "%%%bre de transactions:" &
+@ENDIF
+  TAB 056 LCRNBRTRSVER   OF WCR330 PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+  TAB 074 LCRNBRTRS      OF WCR330 PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+  TAB 092 D_LCRNBRTRSDIF           PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+ SKIP 1 &
+  TAB 001  "------------------------------------------------------------------------------------------------------------------" &
+  TAB 025  "---------------------------------------------------------------------" &
+  SKIP PAGE
+
+BUILD cr330za
+
+
+
+
+;===============================================================================
+; Rapport sommaire à la fin du rapport
+;===============================================================================
+
+
+ACCESS *WCR330 &
+  LINK CPTCLE   OF WCR330   &
+    TO CPTCLE             OF VCPT_DSC OPTIONAL &
+  LINK CIECLE   OF WCR330 , &
+       UNACLE   OF WCR330   &
+    TO CIECLE             , &
+       UNACLE             OF MCUNITE_ADM OPTIONAL
+
+
+;
+; Titre du rapport.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+        "Vérification des factures / Notes de crédit / Ajustements"
+@ELSE
+        "%%%Vérification des factures / Notes de crédit / Ajustement"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60  =  &
+@IF FRANCAIS
+        "Sommaire"
+@ELSE
+        "Summary"
+@ENDIF
+
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "CR330B"
+
+;
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40  = PARM
+
+DEFINE D_JOURN     CHARACTER SIZE 12 = &                   ;Indique si le lot est journalisé
+@IF FRANCAIS
+    "Journalisé" &
+@ELSE
+    "Posted" &
+@ENDIF
+    IF LCRDATJOU OF WCR330 <> 0 ELSE " "
+
+
+SORT   ON  LCRCLE    OF WCR330, & ;Lot
+           UNACLE    OF WCR330, & ;Unité
+           CPTCLE    OF WCR330    ;Compte
+
+
+ USE ustit180 NOLIST  ; Titre standard pour l'application a 180
+@IF FRANCAIS
+SKIP 2 &
+@IF FRANCAIS
+ TAB 001 "Lot.....: "   &
+@ELSE
+ TAB 001 "Batch...: "   &
+@ENDIF
+ TAB 010 LCRCLE  OF WCR330      &
+ TAB 016 LCRDSC  OF WCR330      &
+ TAB 060 D_JOURN                 &
+SKIP &
+@IF FRANCAIS
+ TAB 001 "Periode.: " &
+@ELSE
+ TAB 001 "Period..: " &
+@ENDIF
+ TAB 010 PECCLE  OF WCR330      &
+SKIP 2 &
+@IF FRANCAIS
+ TAB 018 " Unité administrative          Compte                              Montant              TPS              TVP" &
+@ELSE
+ TAB 018 " Unité administrative%%%       Compte                              Montant              TPS              TVP" &
+@ENDIF
+ SKIP &
+ TAB 018 "-----------------------------  ---------------------------  ---------------  ---------------  ---------------"
+
+FOOTING AT CPTCLE &
+  TAB 018 UNACLE     OF WCR330      &
+  TAB 027 UNANOMABR  OF MCUNITE_ADM &
+  TAB 049 CPTCLE     OF WCR330      &
+  TAB 056 CPTDSCABR  OF VCPT_DSC    &
+  TAB 078 CRIMNT     OF WCR330       SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 5 &
+  TAB 095 CRIMNTTPS  OF WCR330       SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 5 &
+  TAB 112 CRIMNTTVP  OF WCR330       SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 5
+
+FOOTING AT LCRCLE &
+  TAB 078 "---------------  ---------------  ---------------" &
+ SKIP &
+@IF FRANCAIS
+       TAB 061 "Total Lot :" &
+@ELSE
+       TAB 061 "Batch Total:" &
+@ENDIF
+  TAB 078 CRIMNT     OF WCR330       SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 5 &
+  TAB 095 CRIMNTTPS  OF WCR330       SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 5 &
+  TAB 112 CRIMNTTVP  OF WCR330       SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 5 &
+ SKIP &
+  TAB 078 "===============  ===============  ===============" &
+ SKIP PAGE
+
+BUILD cr330zb
+@IF FORMAT
+                                                                                                   1         1         1         1         1         1         1         1         1
+         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8
+123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+
+CR330Z
+
+
+CR330A                                                                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+99/99/99 HH:MM xxxxxxxxxxxx                                   Vérification des factures / Notes de crédit / Ajustements
+                                                            xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+Lot....:  xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    Journalisé
+Période: 99-99
+
+                                                       Facture                          Net       Escompte (1)
+*            Client           Type     Facture         référé      Cédule    Date      Frais      Escompte (2)  Dev      Brut           CTI            RTI         Escomptable
+- --------------------------- ---- --------------- --------------- ------  -------- ------------- ------------- --- -------------- -------------- -------------- --------------
+x xxxxxx xxxxxxxxxxxxxxxxxxxx  xx  123456789012345 123456789012345   99    xx/xx/xx xxxx xx/xx/xx xxxx xx/xx/xx xxx ^^,^^^,^^^.^^- ^^,^^^,^^^.^^- ^^,^^^,^^^.^^- ^^,^^^,^^^.^^-
+  Description : xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                             xxxx xx/xx/xx xxxx xx/xx/xx
+                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  ----------- Projet ---------- ----- Sous-projet ------ -------- Equipement ----------- ----Unité administrative----- --- Produit / Elément --- ----------Compte----------- -------Montant  TF TP -----------TPS  -----------TVQ  Fac. ---------- Client ---------
+  12345678 xxxxxxxxxxxxxxxxxxxx 123 xxxxxxxxxxxxxxxxxxxx 1212345678 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx       xxx      xxxx       123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx xx 999,999,999.99- 999,999,999.99- xxx  123456 xxxxxxxxxxxxxxxxxxxx
+  12345678 xxxxxxxxxxxxxxxxxxxx 123 xxxxxxxxxxxxxxxxxxxx 1212345678 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx       xxx      xxxx       123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx xx 999,999,999.99- 999,999,999.99- xxx  123456 xxxxxxxxxxxxxxxxxxxx
+  12345678 xxxxxxxxxxxxxxxxxxxx 123 xxxxxxxxxxxxxxxxxxxx 1212345678 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx       xxx      xxxx       123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx xx 999,999,999.99- 999,999,999.99- xxx  123456 xxxxxxxxxxxxxxxxxxxx
+
+                                                                                                                                                                             ---------------       --------------- ---------------
+                                                                                                                                                                             999,999,999.99-       999,999,999.99- 999,999,999.99-
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+x xxxxxx xxxxxxxxxxxxxxxxxxxx  xx  123456789012345 123456789012345   99    xx/xx/xx xxxx xx/xx/xx xxxx xx/xx/xx xxx ^^,^^^,^^^.^^- ^^,^^^,^^^.^^- ^^^^^,^^^.^^- ^^,^^^,^^^.^^-
+  Description : xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                             xxxx xx/xx/xx xxxx xx/xx/xx
+                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+
+
+CR330B                                                                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                             Page:9999
+99/99/99 HH:MM xxxxxxxxxxxx                                   Vérification des factures / Notes de crédit / Ajustements
+                                                                                      Sommaire
+
+Lot....:  xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    Journalisé
+Période: 99-99
+
+                     Unité administrative                 Compte                    Montant              TPS              TVP
+                 -----------------------------  ---------------------------  ---------------  ---------------  ---------------
+                 12345678 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx  999,999,999.99-  999,999,999.99-  999,999,999.99-
+                 12345678 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx  999,999,999.99-  999,999,999.99-  999,999,999.99-
+                 12345678 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx  999,999,999.99-  999,999,999.99-  999,999,999.99-
+                                                                             ---------------  ---------------  ---------------
+                                                            Total Lot :      999,999,999.99-  999,999,999.99-  999,999,999.99-
+                                                                             ===============  ===============  ===============
+
+@ENDIF

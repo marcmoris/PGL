@@ -1,0 +1,293 @@
+;/T/ Gestion des projets
+;
+;/P/ Programmeur..: Steeve Duguay
+;    Date Création: 19 décembre 1994
+;
+;    Description..: Fiche de projet - Copie de sous-projet.
+;
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN gp001i ACTIONBAR &
+              MODE LABEL "" AT 2,80 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              FOR 9 LINES &
+              ON LINE 15  &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        GPPROJETS
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie du menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; Compagnie du menu
+TEMPORARY T_PRJCLEORI CHARACTER SIZE 8  RESET AT STARTUP ; Numéro projet origine
+TEMPORARY T_PRJCLE    CHARACTER SIZE 8  RESET AT STARTUP ; Numéro projet
+TEMPORARY T_PRJSTUPAT CHARACTER SIZE 8 ; Popup sur les projets.
+
+
+USE ustrasse NOLIST ; Transaction QUERY pour les sous-écrans
+
+USE ussectmp NOLIST     ; Variable pour la securite
+    "GP001I"            ; Nom de l'écran
+
+USE gp001i.hlp NOLIST   ; Use servant à la documentation de l'écran
+
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-ecran
+
+
+;--------------------
+; Fichier des projets
+;--------------------
+FILE GPPROJETS              MASTER
+
+
+;--------------------
+; Fichier des projets
+;--------------------
+FILE GPPROJETS              REFERENCE &
+                            ALIAS GPPROJETS_2
+
+  ACCESS  VIA     CIECLE, &
+                  PRJCLE  &
+          USING   CIECLE OF GPPROJETS, &
+                  T_PRJCLEORI
+
+
+;-----------------------------------
+; Fichier des sous-projets (lecture)
+;-----------------------------------
+FILE GPPRO_ACTIVITE         DESIGNER &
+                            OPEN 4 &
+                            NOITEMS
+
+;------------------------------------
+; Fichier des sous-projets (ecriture)
+;------------------------------------
+FILE GPPRO_ACTIVITE         DESIGNER &
+                            ALIAS GPPRO_ACTIVITE_2 &
+                            OPEN 2 &
+                            NOITEMS
+
+;-----------------------------------
+; Fichier des descriptions (lecture)
+;-----------------------------------
+FILE GPPRA_DESC             DESIGNER &
+                            OPEN 4 &
+                            NOITEMS
+
+;------------------------------------
+; Fichier des sous-projets (ecriture)
+;------------------------------------
+FILE GPPRA_DESC             DESIGNER &
+                            ALIAS GPPRA_DESC_2 &
+                            OPEN 2 &
+                            NOITEMS
+
+
+
+;-------------------------------------------------------------------------------
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+SKIP
+USE ushilite NOLIST     ; Hilite pour tout les écrans
+
+DRAW FROM  2, 1 TO  2,79
+DRAW FROM  2, 1 TO  9,1
+DRAW FROM  3,80 TO  9,80
+DRAW FROM  9,1  TO  9,80
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+      " Copie de sous-projet " &
+@ELSE
+      " %%% " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP 1
+
+
+ALIGN (3,3,19)
+FIELD T_PRJCLEORI                                     &
+      LABEL "Projet origine:"                         &
+      REQUIRED                                        &
+      LOOKUP ON GPPROJETS_2                           &
+        MESSAGE 857; Ce projet est inexistant.
+
+SKIP 1
+
+ALIGN (,3,19)
+FIELD PRJDSC1 OF GPPROJETS_2                          &
+      ID SAME                                         &
+      DISPLAY
+
+ALIGN (,,19)
+FIELD PRJDSC2 OF GPPROJETS_2                          &
+      ID SAME                                         &
+      DISPLAY
+
+
+
+PROCEDURE INPUT T_PRJCLEORI
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PRJSTUPAT = "A"
+    LET T_PRJCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gp104 MODE F PASSING T_CIECLEMNU, &
+                                    T_PRJCLE   , &
+                                    T_PRJSTUPAT
+    LET FIELDTEXT = TRUNCATE(T_PRJCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+; Procédure qui permet de mettre à jour les description
+; des sous-projets
+PROCEDURE INTERNAL MAJ-DESC
+BEGIN
+   WHILE RETRIEVING GPPRA_DESC &
+          VIA     CIECLE,                   &
+                  PRJCLE,                   &
+                  PRACLE                    &
+          USING   CIECLE OF GPPRO_ACTIVITE, &
+                  PRJCLE OF GPPRO_ACTIVITE, &
+                  PRACLE OF GPPRO_ACTIVITE
+   BEGIN
+      GET GPPRA_DESC_2 &
+          VIA     CIECLE,                   &
+                  PRJCLE,                   &
+                  PRACLE,                   &
+                  PADCLE                    &
+          USING   CIECLE OF GPPROJETS,      &
+                  PRJCLE OF GPPROJETS,      &
+                  PRACLE OF GPPRO_ACTIVITE, &
+                  PADCLE OF GPPRA_DESC      OPTIONAL
+
+      IF NOT ACCESSOK
+      THEN BEGIN
+           LET CIECLE    OF GPPRA_DESC_2 = CIECLE     OF GPPRA_DESC
+           LET PRJCLE    OF GPPRA_DESC_2 = PRJCLE     OF GPPROJETS
+           LET PRACLE    OF GPPRA_DESC_2 = PRACLE     OF GPPRA_DESC
+           LET PADCLE    OF GPPRA_DESC_2 = PADCLE     OF GPPRA_DESC
+           LET PADDSC    OF GPPRA_DESC_2 = PADDSC     OF GPPRA_DESC
+           PUT GPPRA_DESC_2
+      END
+   END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+   ;------------------------------
+   ; Mise à jour des sous-projets
+   ;------------------------------
+   WHILE RETRIEVING GPPRO_ACTIVITE       &
+          VIA     CIECLE,                &
+                  PRJCLE                 &
+          USING   CIECLE OF GPPROJETS_2, &
+                  T_PRJCLEORI
+   BEGIN
+      IF PRACLE OF GPPRO_ACTIVITE <> "000"
+      THEN BEGIN
+        GET GPPRO_ACTIVITE_2                &
+             VIA     CIECLE,                &
+                     PRJCLE,                &
+                     PRACLE                 &
+             USING   CIECLE OF GPPROJETS,   &
+                     PRJCLE OF GPPROJETS,   &
+                     PRACLE OF GPPRO_ACTIVITE OPTIONAL
+        IF NOT ACCESSOK
+        THEN BEGIN
+          LET CIECLE       OF GPPRO_ACTIVITE_2 = CIECLE       OF GPPROJETS
+          LET PRJCLE       OF GPPRO_ACTIVITE_2 = PRJCLE       OF GPPROJETS
+          LET PRACLE       OF GPPRO_ACTIVITE_2 = PRACLE       OF GPPRO_ACTIVITE
+          LET PRASTU       OF GPPRO_ACTIVITE_2 = "A"
+          LET PRACRG       OF GPPRO_ACTIVITE_2 = PRACRG       OF GPPRO_ACTIVITE
+          LET PRARES       OF GPPRO_ACTIVITE_2 = PRJRES       OF GPPROJETS
+          LET PRADSC1      OF GPPRO_ACTIVITE_2 = PRADSC1      OF GPPRO_ACTIVITE
+          LET PRADSC2      OF GPPRO_ACTIVITE_2 = PRADSC2      OF GPPRO_ACTIVITE
+          LET PRAANN       OF GPPRO_ACTIVITE_2 = PRJANN       OF GPPROJETS
+          LET PRADATCRE    OF GPPRO_ACTIVITE_2 = SYSDATE
+          LET PRAHRECRE    OF GPPRO_ACTIVITE_2 = SYSTIME
+          LET PRAUSRCRE    OF GPPRO_ACTIVITE_2 = LOGONID
+          LET PRADATDEPEST OF GPPRO_ACTIVITE_2 = PRJDATDEPEST OF GPPROJETS
+          LET PRAHREDEPEST OF GPPRO_ACTIVITE_2 = PRJHREDEPEST OF GPPROJETS
+          LET PRADATFINEST OF GPPRO_ACTIVITE_2 = PRJDATFINEST OF GPPROJETS
+          LET PRAHREFINEST OF GPPRO_ACTIVITE_2 = PRJHREFINEST OF GPPROJETS
+          LET PRAUNADEP    OF GPPRO_ACTIVITE_2 = PRAUNADEP    OF GPPRO_ACTIVITE
+          LET PRAUNAPAI    OF GPPRO_ACTIVITE_2 = PRAUNAPAI    OF GPPRO_ACTIVITE
+          LET PRAUNAREV    OF GPPRO_ACTIVITE_2 = PRAUNAREV    OF GPPRO_ACTIVITE
+          LET PRAIMMCLE    OF GPPRO_ACTIVITE_2 = PRAIMMCLE    OF GPPRO_ACTIVITE
+          PUT GPPRO_ACTIVITE_2
+        END
+
+        DO MAJ-DESC
+      END
+   END
+END
+
+PROCEDURE POSTUPDATE
+BEGIN
+   RETURN
+END
+
+PROCEDURE FIND
+  DISABLE
+
+PROCEDURE APPEND
+  DISABLE
+
+PROCEDURE DELETE
+  DISABLE
+
+BUILD LIST DETAIL
+@IF FORMAT
+***************************** Copie de sous-projet ****************************x
+*                                                                              *
+* Projet origine: xxxxxxxx                                                     *
+*                                                                              *
+* Description...: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           *
+*                                                                              *
+********************************************************************************
+@ENDIF
+

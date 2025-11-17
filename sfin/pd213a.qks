@@ -1,0 +1,1138 @@
+;/T/ 2.5.6 Ventes directes. (Bloc)
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1995-03-08
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   les ventes directes de bloc.
+;
+;/M/ François Déry, 12 mai 1999
+;       Ajout du in dict sur la transaction des séquences.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date..............: 05 avril 2000
+;    Description.......: Incrémentation du numéro de facture par compagnie.
+;
+;    Référence.........: Stabilisation du module Gestion de blocs (point 2).
+;
+;    Signet............: MP-00-04-05_S02.
+;
+;    ----------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date..............: 9 novembre 2000.
+;    Description.......: Correction de l'affichage du volume.
+;
+;    Référence.........: Demande de changement 000105.
+;
+;    Signet............: MP-00-11-09_S105.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd213a ACTIONBAR                     &
+              MODE LABEL "" AT 2,80         &
+              NOACTION                      &
+              FIELDMARK RETAIN STARTUP      &
+              HELP POPUP FROM 4,9 TO 20,72  &
+              RECEIVING T_CIECLEMNU,        &
+                        T_CIENOM,           &
+                        PDFACTURE
+
+
+;-------------------------------------------------------------------------------
+;
+; Déclaration de la transaction pour donner un numéro séquentiel
+;
+
+TRANSACTION NO_SEQ READ WRITE &
+                   RESERVING FOR PROTECTED WRITE PDSEQ_FACTURE IN DICT
+
+
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD213A"
+
+
+;-------------------------------------------------------------------------------
+; Documentation de l'écran.
+;
+USE pd213a.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Commentaire bloc                " ACTION DESIGNER D001 MARK
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%Commentaire bloc             " ACTION DESIGNER D001 MARK
+@ENDIF
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire au traitement
+;
+
+TEMPORARY T_TYPE_PROD CHARACTER SIZE 02 INITIAL "BL" RESET AT STARTUP ; Type de produit traiter par l'écran
+TEMPORARY T_SILENT    CHARACTER SIZE 01
+TEMPORARY T_SILENT2   CHARACTER SIZE 01
+TEMPORARY T_VOLUME    FLOAT     SIZE 08
+
+;-------------------------------------------------------------------------------
+;
+; Variable temporaire du programme pour les pop-up
+;
+
+TEMPORARY T_BLONUMGRA001APR  CHARACTER SIZE 04        ; Popup numéro bloc
+TEMPORARY T_BLONUMGRA002APR  CHARACTER SIZE 05        ; Popup numéro bloc
+TEMPORARY T_BLORECAPR        CHARACTER SIZE 01        ; Popup numéro bloc
+TEMPORARY T_CHAMP            INTEGER UNSIGNED SIZE 01 ; Popup numéro bloc
+TEMPORARY T_COD              INTEGER UNSIGNED SIZE 02 ; Popup numéro bloc
+TEMPORARY T_STU              CHARACTER SIZE 1
+
+TEMPORARY T_TPDTYPPRD        CHARACTER SIZE 04 ; Type de produit
+TEMPORARY T_UNMCODUNM        CHARACTER SIZE 04 ; Unité de mesure
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du volume d'une pièce de granit
+;
+
+USE usvarvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du prix d'une ligne de détail bon de commande
+;
+
+USE usvarprigra NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Dimension maximum et minimun
+;
+
+USE usdimprd NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Temporaires necessaires au calcul des taxes
+;
+
+USE ustaxtmp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Facture
+;
+
+FILE PDFACTURE MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Facture bloc
+;
+
+FILE PDBLOC_FACTURE PRIMARY &
+                    NOITEM &
+                    OCCURS 11 TIMES
+
+  ACCESS VIA     CIECLE,           &
+                 FTRNUMFAC         &
+         USING   T_CIECLEMNU,                           &
+                 FTRNUMFAC         OF PDFACTURE         &
+         ORDERBY CIECLE,           &
+                 FTRNUMFAC,        &
+                 BLONUMGRA001APR,  &
+                 BLONUMGRA002APR,  &
+                 BLORECAPR
+
+
+  ITEM CIECLE    OF PDBLOC_FACTURE INITIAL  T_CIECLEMNU
+  ITEM FTRNUMFAC OF PDBLOC_FACTURE INITIAL  FTRNUMFAC OF PDFACTURE FIXED
+  ITEM BLFMNT    OF PDBLOC_FACTURE SUM INTO FTRMNTBRU OF PDFACTURE
+
+  ITEM BLFVOLMC3VEN OF PDBLOC_FACTURE SUM INTO FTRVOLMC3BLO OF PDFACTURE
+
+  ITEM BLONUMBLOAPR OF PDBLOC_FACTURE FINAL  BLONUMGRA001APR OF PDBLOC_FACTURE + &
+                                             BLONUMGRA002APR OF PDBLOC_FACTURE + &
+                                             BLORECAPR       OF PDBLOC_FACTURE
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro séquentiel pour les factures
+;
+
+FILE PDSEQ_FACTURE DESIGNER TRANSACTION NO_SEQ
+  ACCESS VIA CIECLE USING T_CIECLEMNU ; MP-00-04-05_S02.
+
+;-------------------------------------------------------------------------------
+;
+; Bloc
+;
+
+FILE PDBLOC SECONDARY &
+            NOITEM &
+            OCCURS WITH PDBLOC_FACTURE NODELETE
+
+  ACCESS VIA     CIECLE,           &
+                 BLONUMGRA001APR,  &
+                 BLONUMGRA002APR,  &
+                 BLORECAPR         &
+         USING   T_CIECLEMNU,                         &
+                 BLONUMGRA001APR   OF PDBLOC_FACTURE, &
+                 BLONUMGRA002APR   OF PDBLOC_FACTURE, &
+                 BLORECAPR         OF PDBLOC_FACTURE
+
+
+  ITEM CIECLE    OF PDBLOC INITIAL T_CIECLEMNU
+  ITEM FTRNUMFAC OF PDBLOC FINAL FTRNUMFAC OF PDFACTURE IF NOT DELETEDRECORD OF PDBLOC_FACTURE  &
+                                                        ELSE 0
+
+  ITEM BLODATDERMAJ OF PDBLOC FINAL SYSDATE
+
+  ITEM BLOHREDERMAJ OF PDBLOC FINAL SYSTIME / 10000
+
+  ITEM BLOUSRDERMAJ OF PDBLOC FINAL LOGONID
+
+
+;-------------------------------------------------------------------------------
+;
+; Client
+;
+
+FILE VCLC_CLI        REFERENCE
+
+  ACCESS VIA     CLICIECLE,        &
+                 CLICLE,           &
+                 CIECLE            &
+         USING   "----",                                &
+                 CLICLE            OF PDFACTURE,        &
+                 T_CIECLEMNU
+
+
+;-------------------------------------------------------------------------------
+;
+; Unité de mesure (Vente)
+;
+
+FILE PDUNITE_MESURE REFERENCE &
+                    ALIAS UNM_VENTE &
+                    OCCURS WITH PDBLOC_FACTURE
+
+  ACCESS VIA     CIECLE,          &
+                 UNMCODUNM        &
+         USING   T_CIECLEMNU,     &
+                 BLFUNMVEN        OF PDBLOC_FACTURE
+
+
+;-------------------------------------------------------------------------------
+;
+; Type de produit
+;
+
+FILE PDTYPE_PRODUIT DESIGNER
+
+  ACCESS VIA     CIECLE,          &
+                 TPDTYPPRD        &
+         USING   T_CIECLEMNU,     &
+                 T_TYPE_PROD
+
+
+;-------------------------------------------------------------------------------
+;
+; Conversion unité mesure de commande à unité mesure production
+;
+
+FILE PDCONVERT_UN_M DESIGNER
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation des codes de taxes fédéral.
+;
+
+FILE MCTAXE           REFERENCE &
+                      ALIAS A_TAX_TPS
+
+  ACCESS  VIA   TAXCLETYP,       &
+                TAXCLECOD        &
+          USING FTRTAXTYPTPS     OF PDFACTURE,        &
+                FTRTAXCODTPS     OF PDFACTURE
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation des codes de taxes provincial.
+;
+
+FILE MCTAXE           REFERENCE &
+                      ALIAS A_TAX_TVP
+
+  ACCESS  VIA   TAXCLETYP,       &
+                TAXCLECOD        &
+          USING FTRTAXTYPTVQ     OF PDFACTURE,        &
+                FTRTAXCODTVQ     OF PDFACTURE
+
+;-------------------------------------------------------------------------------
+FILE PDLOT_TRANSFERT DESIGNER
+
+;-------------------------------------------------------------------------------
+
+FILE PDLOT_FACTURE DESIGNER
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+
+SKIP
+
+
+TITLE &
+@IF FRANCAIS
+      " Ventes directes " &
+@ELSE
+      " %%%Ventes directes " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+
+ALIGN (,3,19)
+
+
+FIELD FTRNUMFAC        OF PDFACTURE        &
+        DISPLAY                            &
+        FIXED
+
+
+ALIGN (,3,19) (,,28)
+
+
+FIELD CLICLE           OF PDFACTURE        &
+        DISPLAY                            &
+        FIXED
+
+
+FIELD CLINOM           OF VCLC_CLI         &
+        DISPLAY                            &
+        FIXED
+
+
+DRAW 8,2 TO 8,79
+
+
+SKIP TO LINE 8
+
+
+TITLE &
+@IF FRANCAIS
+      " Bloc " &
+@ELSE
+      " %%%Bloc " &
+@ENDIF
+      CENTERED AT ,1
+
+
+SKIP TO LINE 10
+
+TITLE "Numéro bloc  Long Haut Epai   Volume     Prix vente  U/M    Montant    C Ret" AT ,3
+
+ALIGN (02,02,03) (,07,08) (,13,14) (,,16) (,,21) (,,26) (,,31) (,,41) (,,57) (,,60) (74,,74) (76,,76)
+
+
+CLUSTER OCCURS WITH PDBLOC_FACTURE ID BASE 90
+
+
+FIELD BLONUMGRA001APR  OF PDBLOC_FACTURE   &
+        HIDDEN                             &
+        AUTONEXT                           &
+        LABEL " "                          &
+        REQUIRED                           &
+        NUMERIC
+
+
+FIELD BLONUMGRA002APR  OF PDBLOC_FACTURE   &
+        HIDDEN                             &
+        AUTONEXT                           &
+        LABEL "-"                          &
+        REQUIRED                           &
+        NUMERIC
+
+
+FIELD BLORECAPR        OF PDBLOC_FACTURE   &
+        HIDDEN                             &
+        LABEL "-"
+
+
+FIELD T_SILENT                             &
+        SILENT                             &
+        LOOKUP NOTON PDBLOC_FACTURE        &
+          VIA    CIECLE,                   &
+                 BLONUMGRA001APR,          &
+                 BLONUMGRA002APR,          &
+                 BLORECAPR                 &
+          USING  T_CIECLEMNU,                                &
+                 BLONUMGRA001APR OF PDBLOC_FACTURE,          &
+                 BLONUMGRA002APR OF PDBLOC_FACTURE,          &
+                 BLORECAPR       OF PDBLOC_FACTURE           &
+          MESSAGE 1852 , & ; Le bloc est déjà traité
+                ON PDBLOC                  &
+          VIA    CIECLE,                   &
+                 BLONUMGRA001APR,          &
+                 BLONUMGRA002APR,          &
+                 BLORECAPR                 &
+          USING  T_CIECLEMNU,                                &
+                 BLONUMGRA001APR OF PDBLOC_FACTURE,          &
+                 BLONUMGRA002APR OF PDBLOC_FACTURE,          &
+                 BLORECAPR       OF PDBLOC_FACTURE           &
+          MESSAGE 1843 ; Ce numéro de bloc n'existe pas
+
+
+FIELD BLFLONVEN        OF PDBLOC_FACTURE   &
+        HIDDEN                             &
+        DEFAULT BLOLONPYE OF PDBLOC
+
+
+FIELD BLFHAUVEN        OF PDBLOC_FACTURE   &
+        HIDDEN                             &
+        DEFAULT BLOHAUPYE OF PDBLOC
+
+
+FIELD BLFLARVEN        OF PDBLOC_FACTURE   &
+        HIDDEN                             &
+        DEFAULT BLOLARPYE OF PDBLOC
+
+
+FIELD T_SILENT2                            &
+        SILENT
+
+
+FIELD BLFVOLMC3VEN     OF PDBLOC_FACTURE   &
+        HIDDEN                             &
+        OUTPUT SCALE 4                     & ; MP-00-11-09_S105.
+        DISPLAY
+
+
+FIELD BLFPRIVEN        OF PDBLOC_FACTURE   &
+        HIDDEN                             &
+        REQUIRED
+
+
+FIELD BLFUNMVEN        OF PDBLOC_FACTURE   &
+        HIDDEN                             &
+        ID SAME                            &
+        DEFAULT UNMCODUNM OF PDTYPE_PRODUIT &
+        LOOKUP ON UNM_VENTE                &
+          MESSAGE 1928 ; Cette unité de mesure n'existe pas
+
+
+FIELD BLFMNT           OF PDBLOC_FACTURE   &
+        HIDDEN                             &
+        DISPLAY                            &
+        PICTURE "^,^^^,^^^.^^ "
+
+FIELD BLFCOM           OF PDBLOC_FACTURE   &
+        HIDDEN                             &
+        ID SAME
+
+
+FIELD RARCODRET        OF PDBLOC_FACTURE   &
+        HIDDEN                             &
+        ID SAME
+
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul du volume d'une pièce de granit
+;
+
+USE uscalvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul du prix d'une ligne de détail bon commande
+;
+
+USE uscalprigra NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel dépisteur No bloc (attemtion cet appel est particulier)
+;
+
+PROCEDURE INPUT BLONUMGRA001APR
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_BLONUMGRA001APR  = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_BLONUMGRA002APR  = ""
+    LET T_BLORECAPR        = ""
+    LET T_CHAMP            = 1
+    LET T_COD              = 1
+    LET T_STU              = ""
+    RUN SCREEN pd121 MODE F &
+                     PASSING T_BLONUMGRA001APR, &
+                             T_BLONUMGRA002APR, &
+                             T_BLORECAPR,       &
+                             T_CHAMP,           &
+                             T_COD,             &
+                             T_STU,             &
+                             T_CIECLEMNU
+    LET FIELDTEXT                 = TRUNCATE( T_BLONUMGRA001APR )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel dépisteur No bloc (attemtion cet appel est particulier)
+;
+
+PROCEDURE INPUT BLONUMGRA002APR
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_BLONUMGRA001APR  = BLONUMGRA001APR OF PDBLOC
+    LET T_BLONUMGRA002APR  = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_BLORECAPR        = ""
+    LET T_CHAMP            = 2
+    LET T_COD              = 1
+    LET T_STU              = ""
+    RUN SCREEN pd121 MODE F &
+                     PASSING T_BLONUMGRA001APR, &
+                             T_BLONUMGRA002APR, &
+                             T_BLORECAPR,       &
+                             T_CHAMP,           &
+                             T_COD,             &
+                             T_STU,             &
+                             T_CIECLEMNU
+    LET BLONUMGRA001APR OF PDBLOC = TRUNCATE( T_BLONUMGRA001APR )
+    LET FIELDTEXT                 = TRUNCATE( T_BLONUMGRA002APR )
+  END
+  IF 0 <> SIZE( TRUNCATE( T_BLONUMGRA002APR ) ) AND &
+     0 =  SIZE( TRUNCATE( FIELDTEXT) )
+  THEN BEGIN
+    LET FIELDTEXT                 = TRUNCATE( T_BLONUMGRA002APR )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel dépisteur No bloc (attemtion cet appel est particulier)
+;
+
+PROCEDURE INPUT BLORECAPR
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_BLONUMGRA001APR  = BLONUMGRA001APR OF PDBLOC
+    LET T_BLONUMGRA002APR  = BLONUMGRA001APR OF PDBLOC
+    LET T_BLORECAPR        = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_CHAMP            = 3
+    LET T_COD              = 1
+    LET T_STU              = ""
+    RUN SCREEN pd121 MODE F &
+                     PASSING T_BLONUMGRA001APR, &
+                             T_BLONUMGRA002APR, &
+                             T_BLORECAPR,       &
+                             T_CHAMP,           &
+                             T_COD,             &
+                             T_STU,             &
+                             T_CIECLEMNU
+    LET BLONUMGRA001APR OF PDBLOC = TRUNCATE( T_BLONUMGRA001APR )
+    LET BLONUMGRA002APR OF PDBLOC = TRUNCATE( T_BLONUMGRA002APR )
+    LET FIELDTEXT                 = TRUNCATE( T_BLORECAPR )
+  END
+  IF 0 <> SIZE( TRUNCATE( T_BLORECAPR ) ) AND &
+     0 = SIZE( TRUNCATE( FIELDTEXT) )
+  THEN BEGIN
+    LET FIELDTEXT                 = TRUNCATE( T_BLORECAPR )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide le statut du bloc
+;
+
+PROCEDURE EDIT T_SILENT
+BEGIN
+  IF "I" <> BLOSTU OF PDBLOC
+  THEN BEGIN
+    ERROR 1968 ; Le statut ne permet pas cette opération
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que le champ à été affecté
+;
+
+PROCEDURE EDIT BLFLONVEN
+BEGIN
+  IF 0 = SIZE(TRUNCATE(FIELDTEXT)) &
+     AND &
+     0 = BLFLONVEN OF PDBLOC_FACTURE
+  THEN BEGIN
+    ERROR 1944 ; Ce champ est requis
+  END
+  ;
+  ; Valide que les dimensions saisie soient comprisent dans l'intervale permis
+  ;
+  IF FIELDVALUE < T_DIM_MIN_LAR_BL OR &
+     FIELDVALUE > T_DIM_MAX_LAR_BL
+  THEN BEGIN
+    ERROR 1847 ; Cette dimension hors des dimensions limites
+  END
+
+  LET TZ_LARGEUR   = FIELDVALUE ; BLFLONVEN OF PDBLOC_FACTURE
+  LET TZ_HAUTEUR   = BLFHAUVEN OF PDBLOC_FACTURE
+  LET TZ_EPAISSEUR = BLFLARVEN OF PDBLOC_FACTURE
+  DO INTERNAL CALVOL
+  LET BLFVOLMC3VEN OF PDBLOC_FACTURE = TZ_VOLUME
+  DISPLAY BLFVOLMC3VEN OF PDBLOC_FACTURE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que le champ à été affecté
+;
+
+PROCEDURE EDIT BLFHAUVEN
+BEGIN
+  IF 0 = SIZE(TRUNCATE(FIELDTEXT)) &
+     AND &
+     0 = BLFHAUVEN OF PDBLOC_FACTURE
+  THEN BEGIN
+    ERROR 1944 ; Ce champ est requis
+  END
+
+  ;
+  ; Valide que les dimensions saisie soient comprisent dans l'intervale permis
+  ;
+  IF FIELDVALUE < T_DIM_MIN_HAU_BL OR &
+     FIELDVALUE > T_DIM_MAX_HAU_BL
+  THEN BEGIN
+    ERROR 1847 ; Cette dimension hors des dimensions limites
+  END
+
+  LET TZ_LARGEUR   = BLFLONVEN OF PDBLOC_FACTURE
+  LET TZ_HAUTEUR   = FIELDVALUE ; BLFHAUVEN OF PDBLOC_FACTURE
+  LET TZ_EPAISSEUR = BLFLARVEN OF PDBLOC_FACTURE
+  DO INTERNAL CALVOL
+  LET BLFVOLMC3VEN OF PDBLOC_FACTURE = TZ_VOLUME
+  DISPLAY BLFVOLMC3VEN OF PDBLOC_FACTURE
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que le champ à été affecté
+;
+
+PROCEDURE EDIT BLFLARVEN
+BEGIN
+  IF 0 = SIZE(TRUNCATE(FIELDTEXT)) &
+     AND &
+     0 = BLFLARVEN OF PDBLOC_FACTURE
+  THEN BEGIN
+    ERROR 1944 ; Ce champ est requis
+  END
+
+  ;
+  ; Valide que les dimensions saisie soient comprisent dans l'intervale permis
+  ;
+  IF FIELDVALUE < T_DIM_MIN_LAR_BL OR &
+     FIELDVALUE > T_DIM_MAX_LAR_BL
+  THEN BEGIN
+    ERROR 1847 ; Cette dimension hors des dimensions limites
+  END
+
+  LET TZ_LARGEUR   = BLFLONVEN OF PDBLOC_FACTURE
+  LET TZ_HAUTEUR   = BLFHAUVEN OF PDBLOC_FACTURE
+  LET TZ_EPAISSEUR = FIELDVALUE ; BLFLARVEN OF PDBLOC_FACTURE
+  DO INTERNAL CALVOL
+  LET BLFVOLMC3VEN OF PDBLOC_FACTURE = TZ_VOLUME
+  DISPLAY BLFVOLMC3VEN OF PDBLOC_FACTURE
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul le volume du bloc
+;
+
+PROCEDURE EDIT T_SILENT2
+BEGIN
+  LET TZ_LARGEUR   = BLFLONVEN OF PDBLOC_FACTURE
+  LET TZ_HAUTEUR   = BLFHAUVEN OF PDBLOC_FACTURE
+  LET TZ_EPAISSEUR = BLFLARVEN OF PDBLOC_FACTURE
+  DO INTERNAL CALVOL
+  LET BLFVOLMC3VEN OF PDBLOC_FACTURE = TZ_VOLUME
+  DISPLAY BLFVOLMC3VEN OF PDBLOC_FACTURE
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide le format du champ
+;
+
+PROCEDURE EDIT BLFPRIVEN
+BEGIN
+  ;
+  ; Valide la partie décimale.
+  ;
+  USE usvaldec NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du prix
+;
+
+PROCEDURE PROCESS BLFPRIVEN
+BEGIN
+  ;
+  ; Recherche l'unité de mesuse par défaut pour le type de produit
+  ;
+  GET PDTYPE_PRODUIT OPTIONAL &
+    VIA     CIECLE,           &
+            TPDTYPPRD         &
+    USING   T_CIECLEMNU,      &
+            T_TYPE_PROD
+  IF NOT ACCESSOK
+  THEN BEGIN
+    ERROR 1863 ; Ce code de produit n'existe pas
+  END
+
+  ;
+  ; Recherche une occurence contenant le facteur par défaut et le facteur
+  ; saisie au panorama
+  ;
+  GET PDCONVERT_UN_M OPTIONAL &
+    VIA    CIECLE,           &
+           CUMCODUNMINT,     &
+           CUMCODUNMEXT      &
+    USING  T_CIECLEMNU,                         &
+           UNMCODUNM         OF PDTYPE_PRODUIT, &
+           BLFUNMVEN         OF PDBLOC_FACTURE
+  IF NOT ACCESSOK &
+     AND &
+     0 <> SIZE (TRUNCATE ( BLFUNMVEN ) )
+  THEN BEGIN
+    ERROR 2004 ; Le facteur de conversion n'existe pas pour cette combinaison
+  END
+
+  ;
+  ; Calcul du prix total précédant pour la ligne de détail
+  ;
+  LET TZ_CPG_COD_PRD          = TPDTYPPRD         OF PDTYPE_PRODUIT
+  LET TZ_CPG_FAC_CON          = CUMFACCON         OF PDCONVERT_UN_M
+  LET TZ_CPG_PRI_UNI          = BLFPRIVEN         OF PDBLOC_FACTURE
+  LET TZ_CPG_UNM              = UNMCODUNM         OF PDTYPE_PRODUIT
+  LET TZ_CPG_VOL_MC3          = BLFVOLMC3VEN      OF PDBLOC_FACTURE
+  LET TZ_CPG_VOL_MC2          = 0
+  LET TZ_CPG_QTE              = 1
+  DO INTERNAL CALPRIGRA
+  LET     BLFMNT OF PDBLOC_FACTURE = TZ_CPG_PRI_TOT
+  DISPLAY BLFMNT OF PDBLOC_FACTURE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour le champ.
+;
+
+PROCEDURE INPUT BLFUNMVEN
+BEGIN
+  ;
+  ; Appel du dépisteur
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_UNMCODUNM = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd113 MODE F &
+                     PASSING T_UNMCODUNM, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_UNMCODUNM )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que l'unité de mesure saisie peut être utiliser pour le calcul du prix
+;
+
+PROCEDURE PROCESS BLFUNMVEN
+BEGIN
+  ;
+  ; Recherche l'unité de mesuse par défaut pour le type de produit
+  ;
+  GET PDTYPE_PRODUIT OPTIONAL &
+    VIA     CIECLE,           &
+            TPDTYPPRD         &
+    USING   T_CIECLEMNU,      &
+            T_TYPE_PROD
+  IF NOT ACCESSOK
+  THEN BEGIN
+    ERROR 1863 ; Ce code de produit n'existe pas
+  END
+
+  ;
+  ; Recherche une occurence contenant le facteur par défaut et le facteur
+  ; saisie au panorama
+  ;
+  GET PDCONVERT_UN_M OPTIONAL &
+    VIA    CIECLE,           &
+           CUMCODUNMINT,     &
+           CUMCODUNMEXT      &
+    USING  T_CIECLEMNU,                         &
+           UNMCODUNM         OF PDTYPE_PRODUIT, &
+           BLFUNMVEN         OF PDBLOC_FACTURE
+  IF NOT ACCESSOK
+  THEN BEGIN
+    ERROR 2004 ; Le facteur de conversion n'existe pas pour cette combinaison
+  END
+
+
+  ;
+  ; Calcul du prix total précédant pour la ligne de détail
+  ;
+  LET TZ_CPG_COD_PRD          = TPDTYPPRD         OF PDTYPE_PRODUIT
+  LET TZ_CPG_FAC_CON          = CUMFACCON         OF PDCONVERT_UN_M
+  LET TZ_CPG_PRI_UNI          = BLFPRIVEN         OF PDBLOC_FACTURE
+  LET TZ_CPG_UNM              = UNMCODUNM         OF PDTYPE_PRODUIT
+  LET TZ_CPG_VOL_MC3          = BLFVOLMC3VEN      OF PDBLOC_FACTURE
+  LET TZ_CPG_VOL_MC2          = 0
+  LET TZ_CPG_QTE              = 1
+  DO INTERNAL CALPRIGRA
+  LET     BLFMNT OF PDBLOC_FACTURE = TZ_CPG_PRI_TOT
+  DISPLAY BLFMNT OF PDBLOC_FACTURE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour convertir OUI,NON en 1,0
+;
+
+PROCEDURE INPUT BLFCOM
+BEGIN
+  USE usflginp NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du sous-écran de commentaire pour le bloc
+;
+
+PROCEDURE PROCESS BLFCOM
+BEGIN
+  IF "0" <> BLFCOM OF PDBLOC_FACTURE
+  THEN BEGIN
+    RUN SCREEN  pd213e &
+                PASSING T_CIECLEMNU,        &
+                        T_CIENOM,           &
+                        PDFACTURE,          &
+                        PDBLOC_FACTURE      &
+                MODE SAME
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour convertir 1,0 en OUI,NON
+;
+PROCEDURE OUTPUT BLFCOM
+BEGIN
+  USE usflgout NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Saisie d'une ligne de détail
+;
+
+PROCEDURE DESIGNER 90
+BEGIN
+  ACCEPT BLONUMGRA001APR  OF PDBLOC_FACTURE
+  ACCEPT BLONUMGRA002APR  OF PDBLOC_FACTURE
+  ACCEPT BLORECAPR        OF PDBLOC_FACTURE
+  ACCEPT BLFLONVEN        OF PDBLOC_FACTURE
+  ACCEPT BLFHAUVEN        OF PDBLOC_FACTURE
+  ACCEPT BLFLARVEN        OF PDBLOC_FACTURE
+  ACCEPT BLFPRIVEN        OF PDBLOC_FACTURE
+  ACCEPT BLFUNMVEN        OF PDBLOC_FACTURE
+
+  ;
+  ; Recherche l'unité de mesuse par défaut pour le type de produit
+  ;
+
+  GET PDTYPE_PRODUIT OPTIONAL &
+    VIA     CIECLE,           &
+            TPDTYPPRD         &
+    USING   T_CIECLEMNU,      &
+            T_TYPE_PROD
+  IF NOT ACCESSOK
+  THEN BEGIN
+    ERROR 1863 ; Ce code de produit n'existe pas
+  END
+
+  ;
+  ; Recherche une occurence contenant le facteur par défaut et le facteur
+  ; saisie au panorama
+  ;
+
+  GET PDCONVERT_UN_M OPTIONAL &
+    VIA    CIECLE,           &
+           CUMCODUNMINT,     &
+           CUMCODUNMEXT      &
+    USING  T_CIECLEMNU,                         &
+           UNMCODUNM         OF PDTYPE_PRODUIT, &
+           BLFUNMVEN         OF PDBLOC_FACTURE
+  IF NOT ACCESSOK
+  THEN BEGIN
+    ERROR 2004 ; Le facteur de conversion n'existe pas pour cette combinaison
+  END
+
+  ;
+  ; Calcul du prix total précédant pour la ligne de détail
+  ;
+
+  LET TZ_CPG_COD_PRD          = TPDTYPPRD         OF PDTYPE_PRODUIT
+  LET TZ_CPG_FAC_CON          = CUMFACCON         OF PDCONVERT_UN_M
+  LET TZ_CPG_PRI_UNI          = BLFPRIVEN         OF PDBLOC_FACTURE
+  LET TZ_CPG_UNM              = UNMCODUNM         OF PDTYPE_PRODUIT
+  LET TZ_CPG_VOL_MC3          = BLFVOLMC3VEN      OF PDBLOC_FACTURE
+  LET TZ_CPG_VOL_MC2          = 0
+  LET TZ_CPG_QTE              = 1
+  DO INTERNAL CALPRIGRA
+  LET     BLFMNT OF PDBLOC_FACTURE = TZ_CPG_PRI_TOT
+  DISPLAY BLFMNT OF PDBLOC_FACTURE
+
+  ACCEPT BLFCOM           OF PDBLOC_FACTURE
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Commentaire bloc
+;
+
+PROCEDURE DESIGNER D001
+BEGIN
+  RUN SCREEN  pd213e &
+              PASSING T_CIECLEMNU,        &
+                      T_CIENOM,           &
+                      PDFACTURE,          &
+                      PDBLOC_FACTURE      &
+              MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDBLOC_FACTURE &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDBLOC_FACTURE &
+     AND NOT NEWRECORD     OF PDBLOC_FACTURE &
+     AND NOT DELETEDRECORD OF PDBLOC_FACTURE &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+
+  ;
+ ;--validation du status du lot
+ ;
+  GET PDLOT_FACTURE OPTIONAL &
+    VIA   CIECLE,          &
+          FTRNUMFAC        &
+    USING T_CIECLEMNU,     &
+          FTRNUMFAC        OF PDFACTURE
+  IF ACCESSOK
+  THEN BEGIN
+   GET PDLOT_TRANSFERT OPTIONAL &
+    VIA   CIECLE,          &
+          LTRNUMLOT        &
+    USING CIECLE,     &
+          LTRNUMLOT        OF PDLOT_FACTURE
+    IF ACCESSOK
+    THEN BEGIN
+     IF LTRSTU OF PDLOT_TRANSFERT = "T"
+      THEN ERROR 2
+
+     END
+  END
+
+  ;
+  ; Mise à jour du statut du bloc et du volume facturé
+  ;
+  FOR PDBLOC_FACTURE
+  BEGIN
+    IF NOT DELETEDRECORD OF PDBLOC_FACTURE ; NEWRECORD OF PDBLOC_FACTURE
+    THEN BEGIN
+      LET BLOSTU       OF PDBLOC = "T"
+    END
+    IF DELETEDRECORD OF PDBLOC_FACTURE
+    THEN BEGIN
+      LET BLOSTU OF PDBLOC = "I"
+    END
+  END
+  ;
+  ; Calcul des taxes.
+  ;
+
+  LET TZ_MNTTXB = FTRMNTBRU OF PDFACTURE
+
+  ;
+  ; Use standart pour le calcul des taxes
+  ;
+  USE ustaxcal NOLIST
+
+  LET FTRMNTTPS OF PDFACTURE = TZ_MNTTPS
+  LET FTRMNTTVQ OF PDFACTURE = TZ_MNTTVP
+  LET FTRMNT    OF PDFACTURE = FTRMNTBRU OF PDFACTURE + &
+                               FTRMNTTPS OF PDFACTURE + &
+                               FTRMNTTVQ OF PDFACTURE
+  ;
+  ; Incrémentation du numéro de séquence
+  ;
+  IF 0 = FTRNUMFAC OF PDFACTURE
+  THEN BEGIN
+    START TRANSACTION NO_SEQ
+    GET PDSEQ_FACTURE OPTIONAL                      ; MP-00-04-05_S02.
+    LET CIECLE        OF PDSEQ_FACTURE = T_CIECLEMNU; MP-00-04-05_S02.
+    LET SEFNUMRAP     OF PDSEQ_FACTURE = SEFNUMRAP OF PDSEQ_FACTURE + 1
+    LET FTRNUMFAC     OF PDFACTURE     = SEFNUMRAP OF PDSEQ_FACTURE
+    PUT PDSEQ_FACTURE
+    DISPLAY FTRNUMFAC OF PDFACTURE
+  END
+
+END
+
+
+BUILD
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+******************************* Ventes directes ********************************
+*                                                                              *
+* No. facture...: xxxxxxx                                                      *
+* Client........: xxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            *
+*                                                                              *
+************************************* Bloc *************************************
+*                                                                              *
+* Num. bloc    Long Haut Epai    Volume      Prix vente U/M        Montant C R *
+* xxxx-xxxxx-x xxxx xxxx xxxx xxxxxxxxx xxxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x x *
+* xxxx-xxxxx-x xxxx xxxx xxxx xxxxxxxxx xxxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x x *
+* xxxx-xxxxx-x xxxx xxxx xxxx xxxxxxxxx xxxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x x *
+* xxxx-xxxxx-x xxxx xxxx xxxx xxxxxxxxx xxxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x x *
+* xxxx-xxxxx-x xxxx xxxx xxxx xxxxxxxxx xxxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x x *
+* xxxx-xxxxx-x xxxx xxxx xxxx xxxxxxxxx xxxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x x *
+* xxxx-xxxxx-x xxxx xxxx xxxx xxxxxxxxx xxxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x x *
+* xxxx-xxxxx-x xxxx xxxx xxxx xxxxxxxxx xxxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x x *
+* xxxx-xxxxx-x xxxx xxxx xxxx xxxxxxxxx xxxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x x *
+* xxxx-xxxxx-x xxxx xxxx xxxx xxxxxxxxx xxxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x x *
+* xxxx-xxxxx-x xxxx xxxx xxxx xxxxxxxxx xxxxxxxxxxxxxxx xx xxxxxxxxxxxxxxx x x *
+*                                                                              *
+********************************************************************************
+@ENDIF

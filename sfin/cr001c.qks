@@ -1,0 +1,239 @@
+;/T/ Clients - Solde par compagnie
+;
+;/P/ Programmeur..: Alain Côté
+;    Date Création: 20 mai 1993
+;
+;    Description..: Cet ecran permet de visionnner les soldes du client
+;                   par cie si on utilise la charte universelle ou son solde
+;                   unique si on utilise un charte par compagnie.
+;
+;/M/ Adatation....: Marc Morissette 10 Nov 1993
+;
+;    Description..: Nom long de la compagnie
+;
+;/M/ Modifié par..: Guy Chabot le 11 aout 1994
+;    Description..: Les soldes se retrouve dans la table MCREF_SOLDE au lieu
+;                   de la table CRCLI_CIE.
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+;
+SCREEN cr001c ACTIONBAR &
+              MODE LABEL "" AT 2,80 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              FROM 13,1 TO 23,80 &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              ACTIVITIES FIND &
+              RECEIVING CRCLIENT
+
+USE ussectmp   NOLIST
+    "CR001C"
+
+USE cr001c.hlp NOLIST
+
+USE usactecr   NOLIST
+
+;-------------------------------------------------------------------------------
+;
+
+FILE CRCLIENT         MASTER
+
+;
+; Solde par compagnie.
+;
+FILE MCREF_SOLDE PRIMARY &
+                 OCCURS 5 &
+                 NOITEM
+
+;
+; Validation de la sécurité par compagnie(DATA).
+;
+FILE VSEC_USR         DESIGNER &
+                      OPEN READ &
+                      OCCURS WITH MCREF_SOLDE
+  ACCESS VIA CIECLE &
+         USING CIECLE OF MCREF_SOLDE
+
+
+;-------------------------------------------------------------------------------
+;
+; Alias de la relation MCREF_SOLDE pour calculer le solde global du client
+;
+FILE MCREF_SOLDE DESIGNER &
+                 OPEN READ &
+                 ALIAS A_CLC_SLDCLI
+
+;-------------------------------------------------------------------------------
+;
+; Alias de la relation MCREF_SOLDE pour calculer le solde global du fournisseur
+;
+;
+FILE MCREF_SOLDE DESIGNER &
+                 OPEN READ &
+                 ALIAS A_FOC_SLDCLI
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_SLDACJCLI FLOAT SIZE 8 RESET AT STARTUP ; Solde à jour du client.
+TEMPORARY T_SLDACJFOU FLOAT SIZE 8 RESET AT STARTUP ; Solde à jour du fournisseur.
+
+;-------------------------------------------------------------------------------
+;
+
+DRAW 02,01 TO 02,79
+DRAW 02,01 TO 11,01
+DRAW 11,01 TO 11,80
+DRAW 03,80 TO 11,80
+
+USE ushilite NOLIST
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+      " Solde par compagnie " &
+@ELSE
+      " Company balance " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST
+
+SKIP
+
+ALIGN (3,3,19) (,48,65)
+
+FIELD T_SLDACJCLI HIDDEN ID 05 &
+        DISPLAY &
+@IF FRANCAIS
+        LABEL "Solde client..:" &
+@ELSE
+        LABEL "Balance client:" &
+@ENDIF
+        PICTURE "^^,^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5
+
+FIELD T_SLDACJFOU &
+      DISPLAY &
+      PICTURE "^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+@IF FRANCAIS
+      LABEL "Solde fourn....:"
+@ELSE
+      LABEL "%%%de fourn....:"
+@ENDIF
+
+
+SKIP 1
+TITLE &
+@IF FRANCAIS
+      "Cie  Nom                                           Solde C/R       Solde C/P" &
+@ELSE
+      "%%%% %%%%%%%%%%%%%%%%%%%%%%                        %%%%%%%         %%%%%" &
+@ENDIF
+      AT , 3
+
+SKIP
+
+ALIGN (2,2,3) (,,8) (,,49) (,,65)
+
+CLUSTER OCCURS WITH MCREF_SOLDE ID BASE 10
+
+FIELD CIECLE    OF MCREF_SOLDE HIDDEN LABEL " "
+
+FIELD CIENOM    OF VSEC_USR &
+        DISPLAY
+
+FIELD CLCSLDACJ OF MCREF_SOLDE &
+      DISPLAY &
+      PICTURE "^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5
+
+FIELD FOCSLDACJ OF MCREF_SOLDE &
+      DISPLAY &
+      PICTURE "^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5
+
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du solde global du fournisseur. Ce solde global est la somme de
+; tous les soldes de toutes les compagnies accessibles par le fourniseur.
+;
+PROCEDURE INTERNAL CALCULER_SOLDE_FOURNISSEUR
+BEGIN
+  WHILE RETRIEVING A_FOC_SLDCLI VIA     REFCIECLE, &
+                                        FOUCLE &
+                                USING   CLICIECLE OF CRCLIENT, &
+                                        FOUCLE    OF CRCLIENT
+  BEGIN
+    LET T_SLDACJFOU = T_SLDACJFOU + FOCSLDACJ OF A_FOC_SLDCLI
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du solde global du client. Ce solde global est la somme de
+; tous les soldes de toutes les compagnies accessibles par le client.
+;
+PROCEDURE INTERNAL CALCULER_SOLDE_CLIENT
+BEGIN
+  WHILE RETRIEVING A_CLC_SLDCLI VIA REFCIECLE, &
+                                    CLICLE &
+                                USING CLICIECLE OF CRCLIENT,&
+                                      CLICLE    OF CRCLIENT
+  BEGIN
+    LET T_SLDACJCLI = T_SLDACJCLI + CLCSLDACJ OF A_CLC_SLDCLI
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  ;
+  ; Valide la sécurité d'accès de l'écran.
+  ;
+  USE ussececr NOLIST
+  DO INTERNAL CALCULER_SOLDE_CLIENT
+  DO INTERNAL CALCULER_SOLDE_FOURNISSEUR
+
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; La procédure valide l'accès aux compagnies de l'usager.
+;
+;
+PROCEDURE FIND
+BEGIN
+  FOR MCREF_SOLDE
+  BEGIN
+    GET MCREF_SOLDE VIA   REFCIECLE, &
+                          CLICLE &
+                 USING CLICIECLE OF CRCLIENT, &
+                       CLICLE    OF CRCLIENT &
+                 ORDERBY CIECLE
+
+    GET VSEC_USR VIA CIECLE &
+                 USING CIECLE OF MCREF_SOLDE
+  END
+END
+
+BUILD
+@IF FORMAT
+
+***************************** Solde par compagnie *****************************x
+* Solde client..: xxxxxxxxxxxxxx               Solde fourn....: xxxxxxxxxxxxxx *
+*                                                                              *
+* Cie  Nom                                           Solde C/R       Solde C/P *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxx  xxxxxxxxxxxxxx *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxx  xxxxxxxxxxxxxx *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxx  xxxxxxxxxxxxxx *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxx  xxxxxxxxxxxxxx *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxx  xxxxxxxxxxxxxx *
+********************************************************************************
+@ENDIF

@@ -1,0 +1,286 @@
+;/T/ Journal des achats
+;
+;/P/ Programmeur...: Thomas BRENNEUR
+;    Date Création.: 4 Aout 1993
+;
+;    Description...: Consultation des achats d'une période comptable
+;
+;    Paramètres....: Compagnie
+;                    Periode CTB (Une, Plusieurs, Toutes)
+;
+;    Particularités:
+;
+;/M/ Stephane Jackson, 98-08-21
+;
+;    Ajustement pour le changement de siècle
+;
+;-------------------------------------------------------------------------------
+
+ USE ussetqzs NOLIST   ; permet de faire les SET report DEV....
+ SET NOBLANK           ; Empêche l'impression de ligne blanche
+
+ACCESS CPCPT_A_PAYER &
+
+  ;
+  ; Pour avoir la description du compte comptable du compte à payer.
+  ;
+
+  LINK CAPCPTCAP OF CPCPT_A_PAYER &
+    TO CPTCLE                     OF VCPT_DSC ALIAS A_CPT_CAP &
+
+  ;
+  ; Nom du fournisseur/divers.
+  ;
+
+  LINK REFCIECLE OF CPCPT_A_PAYER, &
+       REFCLETYP OF CPCPT_A_PAYER, &
+       REFCLENUM OF CPCPT_A_PAYER, &
+       RADCLE    OF CPCPT_A_PAYER  &
+    TO REFCIECLE          , &
+       REFCLETYP          , &
+       REFCLENUM          , &
+       RADCLE                     OF VRAD_01 &
+  OPTIONAL &
+
+  ;
+  ; On va chercher le numéro de pièce référé pour les N/C et les ajustements.
+  ;
+
+  LINK FOUCIECLE  OF CPCPT_A_PAYER, &
+       FOUCLE     OF CPCPT_A_PAYER, &
+       CAPCLE     OF CPCPT_A_PAYER, &
+       CAPTYPECR  OF CPCPT_A_PAYER, &
+       CAPTYPECR  OF CPCPT_A_PAYER  &
+    TO CPHCLE1                    , &
+       CPHCLE2                    , &
+       CPHCLE3                    , &
+       CPHTYPECR                  , &
+       CPHTYPTRA                  OF CPCAP_HISTO &
+  OPTIONAL &
+
+  ;
+  ; Ecriture de la transaction.
+  ;
+
+  LINK HISCLE OF CPCPT_A_PAYER &
+    TO HISCLE                   OF MCHIS_ECR &
+  OPTIONAL &
+
+  ;
+  ; Description du compte venant de l'écriture.
+  ;
+
+  LINK CPTCLE OF MCHIS_ECR &
+    TO CPTCLE                   OF VCPT_DSC &
+  OPTIONAL &
+
+  ;
+  ; Description de l'unité administrative venant de l'écriture.
+  ;
+
+  LINK CIECLE   OF MCHIS_ECR , &
+       UNACLE   OF MCHIS_ECR   &
+    TO CIECLE                , &
+       UNACLE                   OF MCUNITE_ADM &
+  OPTIONAL &
+
+  ;
+  ; Lecture de la devise du grand-livre
+  ;
+
+  LINK ("1") &
+    TO CIENMC                     OF MCHOLDING
+
+
+
+CHOOSE CAPCIECLE  PARM, & ; Compagnie du menu
+       PECCLE     PARM     RANGE; Période ctb
+
+; Ajustement pour le changement de siècle
+DEFINE D_ANNSIE CHARACTER SIZE 4 = PARM
+
+
+;
+; On ne sélectionne que les pièces journalisées. Et les rapports de dépenses
+; ainsi que leurs ajustements ne sont pas pris en comptes dans ce journal.
+;
+
+SELECT  CPCPT_A_PAYER &
+        IF    CAPDATJOU OF CPCPT_A_PAYER <> 0    &
+          AND CAPTYPECR OF CPCPT_A_PAYER <> "RD" &
+          AND CAPTYPECR OF CPCPT_A_PAYER <> "AR" AND &
+       PECCLE OF CPCPT_A_PAYER[1:2] = D_ANNSIE[3:2]
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_PAY CHARACTER SIZE 5 = "1" + PECCLE    OF CPCPT_A_PAYER &
+         IF PECCLE    OF CPCPT_A_PAYER[1:1] < "8" &
+         ELSE "0" + PECCLE    OF CPCPT_A_PAYER
+
+SORT ON CAPCIECLE OF CPCPT_A_PAYER & ; Numéro de compagnie.
+     ON D_PECCLE_PAY & ; Période ctb.
+     ON CAPCPTCAP OF CPCPT_A_PAYER & ; Compte à payer.
+     ON FOUCIECLE OF CPCPT_A_PAYER & ; Compagnie du fournisseur
+     ON FOUCLE    OF CPCPT_A_PAYER & ; Numéro du fournisseur
+     ON CAPCLE    OF CPCPT_A_PAYER & ; Numéro de facture
+     ON CPTCLE    OF MCHIS_ECR     & ; Compte ctb
+     ON UNACLE    OF MCHIS_ECR
+
+;
+; Titre du rapport.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+       "Journal des achats"
+@ELSE
+       "%%%Journal des achats"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = " "
+
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE  7 = "CP321"
+
+;
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM
+
+;
+; Libellé de la description, on imprime le libellé s'il y a une description
+; pour la transaction.
+;
+DEFINE D_LIBDSC CHARACTER SIZE 12 = "Description:" &
+                                       IF    CAPDSC1 OF CPCPT_A_PAYER <> "" &
+                                          OR CAPDSC2 OF CPCPT_A_PAYER <> ""
+;
+; On affiche la devise du compte à payer si elle est diffente de celle du grand livre
+;
+DEFINE  D_DEVCLE_CAP  CHARACTER SIZE 3 &
+        = "/" + DEVCLE OF A_CPT_CAP IF DEVCLE OF A_CPT_CAP <> DEVCLE OF MCHOLDING ELSE ""
+
+;
+; Imression de l'en-tête.
+;
+USE ustit180 NOLIST
+  SKIP 2&
+@IF FRANCAIS
+    TAB 001 "Période:"   &
+@ELSE
+    TAB 001 "Period :"   &
+@ENDIF
+    TAB 010 PECCLE OF CPCPT_A_PAYER &
+  SKIP 1 &
+@IF FRANCAIS
+    TAB 001 "C.A.P..:" &
+@ELSE
+    TAB 001 "A / P..:" &
+@ENDIF
+    TAB 010 CAPCPTCAP OF CPCPT_A_PAYER &
+    TAB 017 CPTDSC    OF A_CPT_CAP &
+  SKIP 2 &
+    TAB 001 &
+@IF FRANCAIS
+    "                                              Date                               Facture" &
+@ELSE
+    "%%%                                           Date                               Facture" &
+@ENDIF
+  SKIP &
+    TAB 001 &
+@IF FRANCAIS
+    "       Fournisseur            Facture       facture  Type Lot   Montant brut     référé               Compte                 Unité administrative         Débit          Crédit" &
+@ELSE
+    "%%%    Fournisseur            Facture       facture  Type Lot   Montant brut     référé               Compte                 Unité administrative         Débit          Crédit" &
+@ENDIF
+  SKIP &
+    TAB 001 &
+    "--------------------------- --------------- -------- ---- ---- --------------  ------------ --------------------------- ----------------------------- -------------- --------------"
+
+
+REPORT &
+    TAB 001 REFCLENUM OF VRAD_01        PRINT AT CAPCLE &
+    TAB 008 RADNOMABR OF VRAD_01        PRINT AT CAPCLE &
+    TAB 029 CAPCLE    OF CPCPT_A_PAYER  PRINT AT CAPCLE &
+    TAB 045 CAPDAT    OF CPCPT_A_PAYER  PRINT AT CAPCLE &
+    TAB 055 CAPTYPECR OF CPCPT_A_PAYER  PRINT AT CAPCLE &
+    TAB 059 LCPCLE    OF CPCPT_A_PAYER  PRINT AT CAPCLE &
+    TAB 064 CAPMNT    OF CPCPT_A_PAYER  PRINT AT CAPCLE &
+    TAB 080 CAPCLE    OF CPCAP_HISTO    PRINT AT CAPCLE &
+              PICTURE "^^^^^^^^^^^^"                    &
+    TAB 093 CPTCLE    OF MCHIS_ECR                      &
+    TAB 100 CPTDSCABR OF VCPT_DSC                       &
+    TAB 121 UNACLE    OF MCHIS_ECR                      &
+    TAB 130 UNANOMABR OF MCUNITE_ADM                    &
+    TAB 151 HECMNTDBT OF MCHIS_ECR      BWZ             &
+    TAB 166 HECMNTCRT OF MCHIS_ECR      BWZ
+
+FOOTING AT CAPCLE &
+    TAB 010 D_LIBDSC &
+    TAB 023 CAPDSC1 OF CPCPT_A_PAYER &
+    TAB 151 "--------------" &
+    TAB 166 "--------------" &
+  SKIP &
+    TAB 023 CAPDSC2 OF CPCPT_A_PAYER &
+    TAB 151 HECMNTDBT OF MCHIS_ECR SUBTOTAL &
+    TAB 166 HECMNTCRT OF MCHIS_ECR SUBTOTAL &
+  SKIP 2
+
+FOOTING AT CAPCPTCAP &
+    TAB 063 "---------------" &
+  SKIP &
+    TAB 047 "Total :" &
+    TAB 063 CAPMNT OF CPCPT_A_PAYER SUBTOTAL AT CAPCLE PICTURE "^^^,^^^,^^^.^^ " &
+    TAB 078 D_DEVCLE_CAP &
+  SKIP &
+    TAB 063 "===============" &
+SKIP PAGE
+
+BUILD cp321z
+
+@IF FORMAT
+
+                                                                                                   1         1         1         1         1         1         1         1         1
+         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8
+123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+CP321A                                                                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                             Page:9999
+99/99/99 HH:MM xxxxxxxxxxxx                                                     Journal des achats
+                                                            xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+
+Période: 99-99
+C.A.P..: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+                                              Date                               Facture
+       Fournisseur            Facture       facture  Type Lot   Montant brut     référé               Compte                 Unité administrative         Débit          Crédit
+--------------------------- --------------- -------- ---- ---- --------------  ------------ --------------------------- ----------------------------- -------------- --------------
+123456 xxxxxxxxxxxxxxxxxxxx 123456789012345 xx/xx/xx  xx  xxxx 99,999,999.99-  xxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 99,999,999.99- 99,999,999.99-
+                                                                                            123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 99,999,999.99- 99,999,999.99-
+                                                                                            123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 99,999,999.99- 99,999,999.99-
+                                                                                            123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 99,999,999.99- 99,999,999.99-
+         Description: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                                        -------------- --------------
+                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                                        99,999,999.99- 99,999,999.99-
+
+123456 xxxxxxxxxxxxxxxxxxxx 123456789012345 xx/xx/xx  xx  xxxx 99,999,999.99-  xxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 99,999,999.99- 99,999,999.99-
+                                                                                            123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 99,999,999.99- 99,999,999.99-
+                                                                                            123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 99,999,999.99- 99,999,999.99-
+                                                                                            123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 99,999,999.99- 99,999,999.99-
+         Description: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                                        -------------- --------------
+                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                                        99,999,999.99- 99,999,999.99-
+
+123456 xxxxxxxxxxxxxxxxxxxx 123456789012345 xx/xx/xx  xx  xxxx 99,999,999.99-  xxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 99,999,999.99- 99,999,999.99-
+                                                                                            123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 99,999,999.99- 99,999,999.99-
+                                                                                            123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 99,999,999.99- 99,999,999.99-
+                                                                                            123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 99,999,999.99- 99,999,999.99-
+         Description: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                                        -------------- --------------
+                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                                        99,999,999.99- 99,999,999.99-
+
+
+                                                                                                                                                      -------------- --------------
+                                                                                                                                      Total:          99,999,999.99- 99,999,999.99-
+                                                                                                                                                      ============== ==============
+
+                                                              ---------------
+                                              Total :         999,999,999.99-/XXX
+                                                              ===============
+@ENDIF

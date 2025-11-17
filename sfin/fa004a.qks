@@ -1,0 +1,2097 @@
+;/T/ Factures - Détail
+;
+;//M/GRA01/Francois Richard/1999-06-18
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur..: Steeve Duguay
+;    Date Création: 3 avril 1995
+;
+;    Description..: Saisie du détail de la facture.
+;
+;/M/ François Déry, 30 avril 1999
+;       Modifier l'accèss au fichier de séquence car il a
+;       été converti en format interbase au lieu d'indexé.
+;
+;/M/ Marie-Josée Hamel, 96.02.06, ajouter l'appel automatique du sous écran
+;/M/ Marie-Josée Hamel, 96.02.06, appeler les notes desc. par le no de séquence
+;/M/ Marie-Josée Hamel, 96.02.08, ajouter le terme et le mnt d'escompte (bloquer le type 4)
+;/M/ Marie-Josée Hamel, 96.02.09, remplacer mnt net par mnt avant taxe (bloquer le type 3)
+;/M/ Marie-Josée Hamel, 96.02.12, ajouter la notion de NC et d'AJ et de CR
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN fa004a ACTIONBAR &
+              MODE LABEL "" AT 2,132 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              FROM 1,1 TO 23,132 &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        T_PECCLEMNU, &
+                        FACPT_A_REC, &
+                        MCREF_ADRESSE
+
+TEMPORARY T_CCUPECDEBI_SIE6 CHARACTER SIZE 6 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CCUPECDEBA_SIE6 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_PECCLEMNU_SIE6 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CPTPECDEBI_SIE5 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CPTPECDEBA_SIE5 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_PECCLEMNU_SIE5 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CCUPECDEBI_SIE4 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CCUPECDEBA_SIE4 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_PECCLEMNU_SIE4 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CPTPECDEBI_SIE3 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CPTPECDEBA_SIE3 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_PECCLEMNU_SIE3 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CPTPECDEBI_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CPTPECDEBA_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_PECCLEMNU_SIE2 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CCUPECDEBI_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CCUPECDEBA_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_PECCLEMNU_SIE1 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+USE ussectmp   NOLIST
+    "FA004A"
+
+USE fa004a.hlp NOLIST
+
+USE usactecr   NOLIST
+
+;
+; Ouverture d'une transaction QUERY indépendante de l'écran maitre.
+;
+USE ustrasse   NOLIST
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE FAFAR_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_RAD_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE MCRAD_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+
+;-------------------------------------------------------------------------------
+;
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de compagnie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie du menu.
+TEMPORARY T_PECCLEMNU CHARACTER SIZE 4
+
+;-------------------------------------------------------------------------------
+;
+
+FILE FACPT_A_REC      MASTER
+
+FILE MCREF_ADRESSE    MASTER
+
+;
+;
+FILE FAFAR_DETAIL     PRIMARY &
+                      OCCURS 5 &
+                      NOITEMS
+  ACCESS VIA CIECLE, &
+             FARCLE  &
+         USING CIECLE OF FACPT_A_REC, &
+               FARCLE OF FACPT_A_REC  &
+         ORDERBY CIECLE, &
+                 FARCLE, &
+                 FFDCLELIG
+
+  ITEM CIECLE    OF FAFAR_DETAIL     INITIAL CIECLE OF FACPT_A_REC
+  ITEM FFDTIMSTP OF FAFAR_DETAIL     INITIAL SYSDATE * 1000000 + &
+                                             ROUND(SYSTIME / 100)
+
+  ITEM FFDMNTESC OF FAFAR_DETAIL     SUM INTO FARMNTESC OF FACPT_A_REC
+  ITEM FFDTYP    OF FAFAR_DETAIL     INITIAL "1" ; Le type ne peut être différent
+                                                 ; que si le détail vient de la
+                                                 ; passerelle
+
+;
+; Notion de charte de compte et pour avoir la devise du G/L.
+;
+FILE MCHOLDING        REFERENCE
+  ACCESS VIA CIENMC &
+         USING "1"
+
+;
+; Validation de la charte de compte.
+;
+FILE MCCHARTE_UNA     REFERENCE
+  ACCESS VIA CPTCLE, &
+             CIECLE, &
+             UNACLE &
+         USING CPTCLE OF FAFAR_DETAIL, &
+               CIECLE OF FAFAR_DETAIL, &
+               UNACLE OF FAFAR_DETAIL
+
+;
+; Validation de l'unité administrative.
+;
+FILE MCUNITE_ADM      REFERENCE &
+                      OCCURS WITH FAFAR_DETAIL
+  ACCESS VIA CIECLE, &
+             UNACLE &
+         USING CIECLE OF FAFAR_DETAIL, &
+               UNACLE OF FAFAR_DETAIL
+
+;
+; Validation du compte comptable.
+;
+FILE VCPT_DSC         REFERENCE &
+                      OCCURS WITH FAFAR_DETAIL
+  ACCESS VIA CPTCLE &
+         USING CPTCLE OF FAFAR_DETAIL
+
+;
+; Validation des codes de taxes fédéral.
+;
+FILE MCTAXE           REFERENCE &
+                      ALIAS A_TAX_TPS
+  ACCESS VIA TAXCLETYP, &
+             TAXCLECOD &
+         USING FFDTAXTYPTPS OF FAFAR_DETAIL, &
+               FFDTAXCODTPS OF FAFAR_DETAIL
+
+;
+; Validation des codes de taxes provincial.
+;
+FILE MCTAXE           REFERENCE &
+                      ALIAS A_TAX_TVP
+  ACCESS VIA TAXCLETYP, &
+             TAXCLECOD &
+         USING FFDTAXTYPTVQ OF FAFAR_DETAIL, &
+               FFDTAXCODTVQ OF FAFAR_DETAIL
+
+;
+; Pour avoir les codes de taxes de défaut du client, le type de client
+; et la devise du client.
+;
+FILE VCLC_CLI         REFERENCE
+  ACCESS VIA CLICIECLE, &
+             CLICLE   , &
+             CIECLE     &
+         USING REFCIECLE OF FACPT_A_REC, &
+               REFCLENUM OF FACPT_A_REC, &
+               CIECLE    OF FACPT_A_REC
+
+;
+; Validation du projet.
+;
+FILE GPPROJETS         REFERENCE &
+                      OCCURS WITH FAFAR_DETAIL
+  ACCESS VIA CIECLE, &
+             PRJCLE  &
+         USING CIECLE OF FAFAR_DETAIL, &
+               PRJCLE OF FAFAR_DETAIL
+
+;
+; Validation de l'activité.
+;
+FILE GPPRO_ACTIVITE       REFERENCE
+  ACCESS VIA CIECLE, &
+             PRJCLE, &
+             PRACLE  &
+         USING CIECLE OF FAFAR_DETAIL, &
+               PRJCLE OF FAFAR_DETAIL, &
+               PRACLE OF FAFAR_DETAIL
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide l'immobilisation et affiche la description.
+;
+TEMPORARY T_IMMCLE CHARACTER SIZE 12 ; Popup sur les immobilisations.
+
+FILE IMIMMOBILISATION REFERENCE
+
+  ACCESS  VIA   CIECLE, &
+                IMMCLE &
+          USING CIECLE OF FAFAR_DETAIL , &
+                IMMCLE OF FAFAR_DETAIL
+
+  SELECT IF IMMSTU OF IMIMMOBILISATION = "A"
+
+
+;------------------------------------------------------------------------------
+;
+; Codes bilingues du type de ligne de facture détaillé
+;
+DEFINE    D_FFDTYP CHARACTER SIZE 16 = "FFDTYP"
+TEMPORARY T_FFDTYP CHARACTER SIZE 4
+
+
+;------------------------------------------------------------------------------
+;
+; Codes bilingues du numéro du prix
+;
+DEFINE    D_FFDPRI CHARACTER SIZE 16 = "FFDPRI"
+TEMPORARY T_FFDPRI CHARACTER SIZE 4
+
+FILE VCBI_DSC REFERENCE ALIAS A_CBI_FFDPRI
+  ACCESS  VIA XELNOM, &
+              CBICLE  &
+          USING D_FFDPRI, &
+                ASCII(FFDPRI OF FAFAR_DETAIL)
+
+
+;------------------------------------------------------------------------------
+;
+; Numéro de séquence des adresses pour les clients divers.
+;
+FILE MCRAD_SEQ        DESIGNER &
+                      TRANSACTION GEN_RAD_SEQ
+
+FILE FAFAR_SEQ        DESIGNER &
+                      TRANSACTION GEN_NUM_SEQ
+
+
+;-------------------------------------------------------------------------------
+;
+; Pour afficher qu'il existe un note.
+;
+FILE FAFAR_NOTE DESIGNER OPEN READ &
+                ALIAS FAFAR_NOTE2
+
+
+
+;-------------------------------
+; Fichier des produits / trajets
+;-------------------------------
+TEMPORARY T_TRPCLE    CHARACTER SIZE 3
+TEMPORARY T_SEGMUL    CHARACTER SIZE 3
+TEMPORARY T_TRPTYPPAT CHARACTER SIZE 5
+
+FILE FATRAJET_PRODUIT       REFERENCE
+
+  ACCESS  VIA   CIECLE,    &
+                TRPCLE     &
+          USING T_CIECLEMNU           ,  &
+                TRPCLE OF FAFAR_DETAIL
+
+
+;--------------------------------------
+; Fichier des éléments de tarifications
+;--------------------------------------
+TEMPORARY T_ETACLE CHARACTER SIZE 4
+
+FILE FAELEMENT_TARIF        REFERENCE
+
+  ACCESS  VIA   CIECLE,    &
+                ETACLE     &
+          USING T_CIECLEMNU           ,  &
+                ETACLE OF FAFAR_DETAIL
+
+
+;------------------------------------
+; Fichier des grilles de tarification
+;------------------------------------
+FILE FAGRILLE_TARIF         REFERENCE
+
+  ACCESS  VIA   CIECLE,    &
+                TRPCLE,    &
+                ETACLE     &
+          USING T_CIECLEMNU           ,  &
+                TRPCLE OF FAFAR_DETAIL,  &
+                ETACLE OF FAFAR_DETAIL
+
+;
+; Validation du compte comptable d'escompte
+;
+FILE VCPT_DSC         REFERENCE &
+                      OCCURS WITH FAFAR_DETAIL &
+                      ALIAS A_VCPT_ESC
+  ACCESS VIA CPTCLE &
+         USING ETACPTESC OF FAELEMENT_TARIF
+
+;
+; Validation de la charte de compte.
+;
+FILE MCCHARTE_UNA     REFERENCE &
+                      ALIAS A_CCU_ESC
+  ACCESS VIA CPTCLE, &
+             CIECLE, &
+             UNACLE &
+         USING ETACPTESC OF FAELEMENT_TARIF, &
+               CIECLE OF FAFAR_DETAIL, &
+               UNACLE OF FAFAR_DETAIL
+
+;
+; Valiation des termes et calcul des dates due.
+;
+FILE CRTERME          DESIGNER &
+                      OPEN READ
+
+
+TEMPORARY T_CPTCLE    CHARACTER SIZE 6 ; Popup sur les comptes
+TEMPORARY T_PECCLE    CHARACTER SIZE 4 ; Popup sur les comptes et unité adm.
+TEMPORARY T_CPTTYPPAT CHARACTER SIZE 1 ; Popup sur les comptes
+TEMPORARY T_CPTCATPAT CHARACTER SIZE 8 ; Popup sur les comptes
+
+TEMPORARY T_UNACLE    CHARACTER SIZE 8 ; Popup sur les unités adm.
+
+TEMPORARY T_TMECATPAT CHARACTER SIZE  11; Popup sur les termes d'encaissement.
+TEMPORARY T_TMECLE    CHARACTER SIZE  4 ; Popup sur les termes d'encaissement.
+
+TEMPORARY T_OCC         INTEGER SIZE 4 ; Pour les notes descriptives.
+TEMPORARY T_NOT       CHARACTER SIZE 1 OCCURS WITH FAFAR_DETAIL
+
+TEMPORARY T_OLDVALUE  CHARACTER SIZE 1
+TEMPORARY T_VERCALTAX CHARACTER SIZE 3
+TEMPORARY T_MNTTPS    INTEGER   SIZE 4 ; Montant de taxe TPS.
+TEMPORARY T_MNTTVP    INTEGER   SIZE 4 ; Montant de taxe TVP.
+
+TEMPORARY T_PRJCLE    CHARACTER SIZE 8 ; Popup sur les PRJjets.
+TEMPORARY T_PRJSTUPAT CHARACTER SIZE 8 ; Popup sur les projets.
+
+TEMPORARY T_PRACLE    CHARACTER SIZE 3 ; Popup sur les activités.
+TEMPORARY T_PRASTUPAT CHARACTER SIZE 5 ; Popup sur les activités.
+
+TEMPORARY T_TAXCLETYP CHARACTER SIZE 1 ; Popup sur les codes de taxes
+TEMPORARY T_TAXCLECOD CHARACTER SIZE 2 ; Popup sur les codes de taxes
+TEMPORARY T_TAXMODPAT CHARACTER SIZE 5 ; Popup sur les codes de taxes
+
+TEMPORARY T_CLICIECLE CHARACTER SIZE 4 ; Popup sur les Clients
+TEMPORARY T_CLICLE    CHARACTER SIZE  6 ; Popup sur les clients
+
+;
+; Pour le calcul des taxes.
+;
+TEMPORARY T_FLGMOD       CHARACTER SIZE 1 OCCURS WITH FAFAR_DETAIL
+                                          ; Flag pour déceler s'il y eu modif.
+TEMPORARY T_TAXMODTPSOLD CHARACTER SIZE 1 OCCURS WITH FAFAR_DETAIL
+                                          ; Pour diminuer le bon cumul de taxe.
+TEMPORARY T_TAXMODTVQOLD CHARACTER SIZE 1 OCCURS WITH FAFAR_DETAIL
+                                          ; Pour diminuer le bon cumul de taxe.
+;
+; Temporaires necessaires au calcul des taxes
+;
+USE ustaxtmp NOLIST
+
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;
+; Solde à recevoir.
+;
+DEFINE D_SLD_A_REC FLOAT SIZE 8 = FARMNT    OF FACPT_A_REC - &
+                                  FARMNTREC OF FACPT_A_REC
+;
+;
+DEFINE D_MNTBRUT   FLOAT SIZE 8 = ROUND ( FFDQTEFAC OF FAFAR_DETAIL * &
+                                          FFDPRIUNI OF FAFAR_DETAIL / 100) &
+                                - FFDMNTESC OF FAFAR_DETAIL &
+                            IF   FFDTYP OF FAFAR_DETAIL = "1" &
+                              OR FFDTYP OF FAFAR_DETAIL = "2" &
+                            ELSE FFDMNTNET OF FAFAR_DETAIL
+
+
+;-------------------------------------------------------------------------------
+
+USE usdrw132 NOLIST
+USE ustit132 NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Détail " &
+@ELSE
+      " Detail " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST
+
+
+ALIGN (,3,19) (,50,67) (,93,114)
+
+FIELD FARCLE    OF FACPT_A_REC &
+label "Facture.......:"&
+        DISPLAY
+
+FIELD FARMNTNET OF FACPT_A_REC &
+        DISPLAY &
+        PREDISPLAY &
+@IF FRANCAIS
+        LABEL "Montant total.:"
+@ELSE
+        LABEL "Total amount..:"
+@ENDIF
+
+FIELD FARMNTTPS OF FACPT_A_REC &
+label "Montant T.P.S.:"&
+        DISPLAY &
+        PREDISPLAY
+
+ALIGN (3,3,19) (,50,67) (,93,114)
+FIELD T_OCC &
+        HIDDEN &
+        ID 03 &
+        NOENTRY &
+        BWZ &
+        INPUT SCALE 3     &
+        SIGNIFICANCE 5    &
+        PICTURE "^^^.^^^" &
+        LABEL "Note descrip..:"
+
+FIELD FARMNTREC OF FACPT_A_REC &
+        DISPLAY &
+        PREDISPLAY &
+@IF FRANCAIS
+        LABEL "Montant recu..:"
+@ELSE
+        LABEL "Total reciept.:"
+@ENDIF
+
+FIELD FARMNTTVQ OF FACPT_A_REC &
+label "Montant T.V.Q.:"&
+        DISPLAY &
+        PREDISPLAY
+
+ALIGN (,50,67)
+FIELD D_SLD_A_REC &
+      LABEL "Solde à rec...:" DISPLAY &
+      PICTURE "^^,^^^,^^^.^^ "        &
+      TRAILING SIGN "-" SIGNIFICANCE 5 BWZ
+
+
+SKIP
+
+DRAW ,1 TO ,132
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+ "Séquence Typ Prod Élém #Prix Projet  SSpro Immobilis.  Imp Unité    Compte      Qté fac     TF TP        Prix          Montant"&
+@ENDIF
+  AT ,3
+
+
+SKIP TO 8
+
+ALIGN &
+(3,2,3)(,,13)(,,16)(,,21)(,,28)(,,31)(,,41)(,,45)(,,58)(,,62)(,,71)(,,79)(,,94)(,,97)(,,100)(,,117)
+
+CLUSTER OCCURS WITH FAFAR_DETAIL ID BASE 05
+
+SKIP
+
+FIELD FFDCLELIG    OF FAFAR_DETAIL &
+      HIDDEN LABEL " "        size 7     &
+      HILITE DISPLAY INVERSE IF T_NOT = "*" &
+      LOOKUP NOTON FAFAR_DETAIL    &
+             VIA    CIECLE,        &
+                    FARCLE,        &
+                    FFDCLELIG      &
+             USING  T_CIECLEMNU,   &
+                    FARCLE OF FACPT_A_REC, &
+                    FFDCLELIG OF FAFAR_DETAIL &
+                    MESSAGE 2737
+
+FIELD FFDTYP       OF FAFAR_DETAIL &
+      DISPLAY
+
+FIELD TRPCLE       OF FAFAR_DETAIL &
+      NOCHANGE                     &
+      IF FFDTYP OF FAFAR_DETAIL <> "3"
+
+FIELD ETACLE OF FAFAR_DETAIL       &
+      NOCHANGE                 size 4    &
+      IF FFDTYP OF FAFAR_DETAIL <> "3"
+
+FIELD FFDPRI       OF FAFAR_DETAIL &
+      NOCHANGE               size 1      &
+      IF FFDTYP OF FAFAR_DETAIL <> "3" AND &
+         FFDTYP OF FAFAR_DETAIL <> "4"
+
+FIELD PRJCLE       OF FAFAR_DETAIL &
+      REQUIRED             &
+      LOOKUP ON GPPROJETS                             &
+            VIA CIECLE,                               &
+                PRJCLE                                &
+          USING T_CIECLEMNU,                          &
+                PRJCLE OF FAFAR_DETAIL                &
+        MESSAGE 2731
+
+FIELD PRACLE       OF FAFAR_DETAIL &
+      REQUIRED             &
+      LOOKUP ON GPPRO_ACTIVITE                        &
+            VIA CIECLE,                               &
+                PRJCLE,                               &
+                PRACLE                                &
+          USING T_CIECLEMNU,                          &
+                PRJCLE OF FAFAR_DETAIL,               &
+                PRACLE OF FAFAR_DETAIL                &
+        MESSAGE 2732
+
+FIELD IMMCLE       OF FAFAR_DETAIL &
+        REQUIRED                   &
+        LOOKUP ON IMIMMOBILISATION &
+            MESSAGE 491 ; Cette immobilisation n'existe pas ou est inactive.
+
+FIELD FFDIMPIMM    OF FAFAR_DETAIL &
+        SIZE 3
+
+FIELD UNACLE       OF FAFAR_DETAIL &
+        REQUIRED &
+        LOOKUP ON MCUNITE_ADM &
+          MESSAGE 1317 ; Cette unité administrative n'existe pas.
+
+FIELD CPTCLE       OF FAFAR_DETAIL &
+        REQUIRED &
+        LOOKUP ON VCPT_DSC &
+          MESSAGE 1313 ; Ce compte n'existe pas.
+
+FIELD FFDQTEFAC    OF FAFAR_DETAIL      &
+      IF FFDTYP OF FAFAR_DETAIL <> "3" AND &
+         FFDTYP OF FAFAR_DETAIL <> "4"
+
+FIELD FFDTAXCODTPS OF FAFAR_DETAIL &
+      IF FFDTYP OF FAFAR_DETAIL <> "3"
+
+FIELD FFDTAXCODTVQ OF FAFAR_DETAIL &
+      IF FFDTYP OF FAFAR_DETAIL <> "3"
+
+FIELD FFDPRIUNI    OF FAFAR_DETAIL &
+      IF FFDTYP OF FAFAR_DETAIL = "2" OR &
+         FFDTYP OF FAFAR_DETAIL = "4" OR &
+         (    FFDTYP  OF FAFAR_DETAIL = "1" &
+          AND GRTPRI1 OF FAGRILLE_TARIF = 0 &
+          AND GRTPRI2 OF FAGRILLE_TARIF = 0 &
+          AND GRTPRI3 OF FAGRILLE_TARIF = 0)
+
+FIELD D_MNTBRUT &
+      PICTURE "^^,^^^,^^^.^^ "        &
+      TRAILING SIGN "-" SIGNIFICANCE 5 BWZ &
+      DISPLAY
+
+SKIP
+ALIGN (,3,17) (,68,73) (,88,93) (,108,113) (,,118)
+FIELD FFDDSC       OF FAFAR_DETAIL &
+      FOR ,50                      &
+      LABEL "Description :"        &
+      IF TRPDSCMOD OF FATRAJET_PRODUIT = "1"
+
+FIELD FFDMNTTPS    OF FAFAR_DETAIL &
+      LABEL "TPS:"
+
+FIELD FFDMNTTVQ    OF FAFAR_DETAIL &
+        LABEL "TVQ:"
+
+FIELD FFDTERESC    OF FAFAR_DETAIL &
+label "Esc:"
+
+
+FIELD FFDMNTESC    OF FAFAR_DETAIL
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Pour générer automatiquement le numéro d'item
+;
+PROCEDURE INPUT FFDCLELIG OF FAFAR_DETAIL
+BEGIN
+  IF 0 = SIZE( TRUNCATE( FIELDTEXT ) ) &
+    AND 0 = FFDCLELIG OF FAFAR_DETAIL
+  THEN BEGIN
+    LET FIELDTEXT = ASCII( ( FARDERLIG OF FACPT_A_REC / 1000 ) + 2 ) &
+                 + "." + ASCII( MOD( FARDERLIG OF FACPT_A_REC,1000 ) ,3)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Pour conserver la dernière valeur saisie
+;
+PROCEDURE PROCESS FFDCLELIG OF FAFAR_DETAIL
+BEGIN
+  LET FARDERLIG OF FACPT_A_REC = FFDCLELIG OF FAFAR_DETAIL
+END
+
+;-------------------------------------------------------------------------------
+;
+; Calcul des taxes (provinciale et fédérale)
+;
+PROCEDURE INTERNAL CALCUL_TAXES
+BEGIN
+  IF T_VERCALTAX <> "TPS" AND &
+     T_VERCALTAX <> "TVQ"
+  THEN BEGIN
+       LET FFDMNTTPS OF FAFAR_DETAIL = 0
+       LET FFDMNTTVQ OF FAFAR_DETAIL = 0
+       ;
+       ; On prend le montant brut de la ligne de
+       ; soumission pour le calcul des taxes.
+       ;
+       LET TZ_MNTTXB = FFDMNTTOT OF FAFAR_DETAIL
+       ;
+       ; Use standard pour le calcul des taxes
+       ;
+       USE ustaxcal NOLIST
+
+       LET FFDMNTTPS OF FAFAR_DETAIL = TZ_MNTTPS
+       LET FFDMNTTVQ OF FAFAR_DETAIL = TZ_MNTTVP
+  END
+
+  ;
+  ; Si le mode de taxation est "EN SUS", il faut mettre à jour le cumulatif brut
+  ; de la soumission.
+  ;
+  IF TAXMOD OF A_TAX_TPS = "S"
+  THEN BEGIN
+       LET FFDMNTTOT OF FAFAR_DETAIL = FFDMNTTOT OF FAFAR_DETAIL + &
+                                       FFDMNTTPS OF FAFAR_DETAIL
+
+       LET FFDMNTNET OF FAFAR_DETAIL = FFDMNTNET OF FAFAR_DETAIL + &
+                                       FFDMNTTPS OF FAFAR_DETAIL
+  END
+  ;
+  IF TAXMOD OF A_TAX_TVP = "S"
+  THEN BEGIN
+     LET FFDMNTTOT OF FAFAR_DETAIL = FFDMNTTOT OF FAFAR_DETAIL + &
+                                     FFDMNTTVQ OF FAFAR_DETAIL
+
+     LET FFDMNTNET OF FAFAR_DETAIL = FFDMNTNET OF FAFAR_DETAIL + &
+                                     FFDMNTTVQ OF FAFAR_DETAIL
+  END
+; ;
+; ; Calcul des montants de taxe remboursables (CTI & RTI)
+; ;
+; DO INTERNAL CALCUL_CTI
+; DO INTERNAL CALCUL_RTI
+END
+
+;-------------------------------------------------------------------------------
+;
+; Calcul des montants.
+;
+PROCEDURE INTERNAL CALCUL_MONTANT
+BEGIN
+  IF FFDTYP OF FAFAR_DETAIL <> "3"
+  THEN BEGIN
+    IF T_VERCALTAX <> "TPS"
+    THEN LET FARMNTTPS OF FACPT_A_REC = FARMNTTPS OF FACPT_A_REC - &
+                                        FFDMNTTPS OF FAFAR_DETAIL
+
+    IF T_VERCALTAX <> "TVQ"
+    THEN LET FARMNTTVQ OF FACPT_A_REC = FARMNTTVQ OF FACPT_A_REC - &
+                                        FFDMNTTVQ OF FAFAR_DETAIL
+    ;
+    ; Retire les montants des cumulatifs avant le calcul
+    ;
+    LET FARMNT    OF FACPT_A_REC = FARMNT    OF FACPT_A_REC - &
+                                   FFDMNTTOT OF FAFAR_DETAIL
+    LET FARMNTNET OF FACPT_A_REC = FARMNTNET OF FACPT_A_REC - &
+                                   FFDMNTNET OF FAFAR_DETAIL
+    ;
+    ; Calcul du montant brut du produit
+    ;
+    IF FFDTYP OF FAFAR_DETAIL <> "4"
+    THEN BEGIN
+      LET FFDMNTTOT OF FAFAR_DETAIL = &
+                ROUND ( FFDQTEFAC OF FAFAR_DETAIL * &
+                        FFDPRIUNI OF FAFAR_DETAIL / 100 )
+
+      LET FFDMNTNET OF FAFAR_DETAIL = &
+                ROUND ( FFDQTEFAC OF FAFAR_DETAIL * &
+                        FFDPRIUNI OF FAFAR_DETAIL / 100 )
+    END
+    ELSE BEGIN
+      LET FFDMNTTOT OF FAFAR_DETAIL = FFDPRIUNI OF FAFAR_DETAIL * -1
+      LET FFDMNTNET OF FAFAR_DETAIL = FFDPRIUNI OF FAFAR_DETAIL * -1
+    END
+
+    ;
+    ; On recalcule le montant d'Escompte sur le brut
+    ; si on a un code de terme on le calcule, sinon c'est un montant saisi
+    ;
+    IF 0 <> SIZE( TRUNCATE( FFDTERESC OF FAFAR_DETAIL ) )
+    THEN BEGIN
+      GET CRTERME VIA TMECLE &
+                     USING FFDTERESC OF FAFAR_DETAIL &
+                     OPTIONAL
+      LET FFDMNTESC OF FAFAR_DETAIL = ROUND(  FFDMNTTOT OF FAFAR_DETAIL &
+                                               * TMEPCT    OF CRTERME )
+    END
+
+    LET FFDMNTNET OF FAFAR_DETAIL = FFDMNTNET OF FAFAR_DETAIL &
+                                  - FFDMNTESC OF FAFAR_DETAIL
+    LET FFDMNTTOT OF FAFAR_DETAIL = FFDMNTTOT OF FAFAR_DETAIL &
+                                  - FFDMNTESC OF FAFAR_DETAIL
+
+    ;
+    ; Cette procédure calcule les montants de taxe
+    ; ainsi que les montants de CTI et RTI.
+    ;
+    DO INTERNAL CALCUL_TAXES
+  END
+  ELSE BEGIN
+       LET FARMNTREC OF FACPT_A_REC  = FARMNTREC OF FACPT_A_REC - &
+                                       FFDMNTTOT OF FAFAR_DETAIL
+       LET FFDMNTTOT OF FAFAR_DETAIL = FFDMNTNET OF FAFAR_DETAIL
+  END
+
+
+  IF FFDTYP OF FAFAR_DETAIL <> "3"
+  THEN BEGIN
+       LET FARMNT    OF FACPT_A_REC = FARMNT    OF FACPT_A_REC + &
+                                      FFDMNTTOT OF FAFAR_DETAIL
+       LET FARMNTTPS OF FACPT_A_REC = FARMNTTPS OF FACPT_A_REC + &
+                                      FFDMNTTPS OF FAFAR_DETAIL
+       LET FARMNTTVQ OF FACPT_A_REC = FARMNTTVQ OF FACPT_A_REC + &
+                                      FFDMNTTVQ OF FAFAR_DETAIL
+       LET FARMNTNET OF FACPT_A_REC = FARMNTNET OF FACPT_A_REC + &
+                                      FFDMNTNET OF FAFAR_DETAIL
+  END
+  ELSE BEGIN
+       LET FARMNTREC OF FACPT_A_REC = FARMNTREC OF FACPT_A_REC + &
+                                      FFDMNTTOT OF FAFAR_DETAIL
+  END
+  ;
+  ; On affiche les variables modifiées par les calculs.
+  ;
+  DISPLAY FFDMNTTPS OF FAFAR_DETAIL
+  DISPLAY FFDMNTTVQ OF FAFAR_DETAIL
+  DISPLAY D_MNTBRUT
+  DISPLAY FFDMNTESC OF FAFAR_DETAIL
+
+  DISPLAY FARMNTTPS
+  DISPLAY FARMNTTVQ
+  DISPLAY FARMNTNET
+  DISPLAY FARMNTREC
+  DISPLAY D_SLD_A_REC
+END
+
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour les notes descriptives.
+;
+PROCEDURE DESIGNER 03
+BEGIN
+  IF FARCLE OF FACPT_A_REC = " "
+  THEN ERROR 2716
+
+  ACCEPT T_OCC
+  IF T_OCC <> 0
+  THEN BEGIN
+    FOR FAFAR_DETAIL
+    BEGIN
+      IF FFDCLELIG OF FAFAR_DETAIL = T_OCC
+      THEN BEGIN
+        RUN SCREEN fa004c MODE F PASSING  T_CIECLEMNU  , &
+                                          T_CIENOM     , &
+                                          T_PECCLEMNU  , &
+                                          FACPT_A_REC  , &
+                                          FAFAR_DETAIL , &
+                                          MCREF_ADRESSE
+      END
+    END
+    LET T_OCC = 0
+  END
+  DISPLAY T_OCC
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour le code bilingue type de ligne de détail
+; (je laisse le pop-up pour permettre de l'appeler en mode select)
+;
+PROCEDURE INPUT FFDTYP
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_FFDTYP = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_FFDTYP, T_FFDTYP &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_FFDTYP)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour les trajets / produits.
+;
+;
+PROCEDURE INPUT TRPCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TRPCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_SEGMUL    = "0|1"
+    LET T_TRPTYPPAT = "T|P"
+    RUN SCREEN fa102 MODE F PASSING T_CIECLEMNU,T_TRPCLE,T_SEGMUL,T_TRPTYPPAT &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_TRPCLE)
+  END
+
+  IF 0 = SIZE(FIELDTEXT)
+  THEN LET FIELDTEXT = OLDVALUE(TRPCLE OF FAFAR_DETAIL)
+
+  IF FIELDTEXT = " " AND FFDTYP OF FAFAR_DETAIL = "1"
+  THEN ERROR 2734
+
+  IF FIELDTEXT <> " "
+  THEN BEGIN
+       GET FATRAJET_PRODUIT &
+           VIA   CIECLE,    &
+                 TRPCLE     &
+           USING T_CIECLEMNU, &
+                 FIELDTEXT OPTIONAL
+       IF NOT ACCESSOK
+       THEN ERROR 2722
+  END
+END
+
+PROCEDURE EDIT TRPCLE
+BEGIN
+  IF TRPSTU OF FATRAJET_PRODUIT <> "A"
+  THEN ERROR 2755 ; Ce produit est inactif
+END
+
+PROCEDURE PROCESS TRPCLE
+BEGIN
+   IF    TRPDSCFRA OF FATRAJET_PRODUIT <> " " &
+     AND TRPIMP    OF FATRAJET_PRODUIT = "1"
+   THEN BEGIN
+     IF CLILNG OF VCLC_CLI = "F"
+     THEN LET FFDDSC OF FAFAR_DETAIL = TRPDSCFRA OF FATRAJET_PRODUIT
+     ELSE LET FFDDSC OF FAFAR_DETAIL = TRPDSCANG OF FATRAJET_PRODUIT
+   END
+   DISPLAY FFDDSC
+END
+
+PROCEDURE PROCESS ETACLE
+BEGIN
+   IF ETADSCFRA OF FAELEMENT_TARIF  <> " "
+   THEN BEGIN
+     IF CLILNG OF VCLC_CLI = "F"
+     THEN LET FFDDSC OF FAFAR_DETAIL = TRUNCATE(FFDDSC) + " " + &
+                                     ETADSCFRA OF FAELEMENT_TARIF
+     ELSE LET FFDDSC OF FAFAR_DETAIL = TRUNCATE(FFDDSC) + " " + &
+                                     ETADSCANG OF FAELEMENT_TARIF
+   END
+   DISPLAY FFDDSC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour l'élement de tarification
+;
+;
+PROCEDURE INPUT ETACLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TRPCLE = TRPCLE OF FAFAR_DETAIL
+    LET T_ETACLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN fa101 MODE F PASSING T_CIECLEMNU, T_TRPCLE , T_ETACLE &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_ETACLE)
+  END
+
+  IF 0 = SIZE(FIELDTEXT)
+  THEN LET FIELDTEXT = OLDVALUE(ETACLE OF FAFAR_DETAIL)
+
+  IF FIELDTEXT = " " AND TRPCLE OF FAFAR_DETAIL <> " "
+  THEN ERROR 2734
+
+  IF FIELDTEXT <> " " AND TRPCLE OF FAFAR_DETAIL = " "
+  THEN BEGIN
+       LET FIELDTEXT = " "
+       WARNING 2733
+  END
+
+  IF FIELDTEXT <> " "
+  THEN BEGIN
+       GET FAELEMENT_TARIF  &
+           VIA   CIECLE,    &
+                 ETACLE     &
+           USING T_CIECLEMNU, &
+                 FIELDTEXT OPTIONAL
+       IF NOT ACCESSOK
+       THEN ERROR 2719
+
+       GET FAGRILLE_TARIF   &
+           VIA   CIECLE,    &
+                 TRPCLE,    &
+                 ETACLE     &
+           USING T_CIECLEMNU,            &
+                 TRPCLE OF FAFAR_DETAIL, &
+                 FIELDTEXT OPTIONAL
+       IF NOT ACCESSOK
+       THEN ERROR 2729
+  END
+END
+
+
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour le code bilingue numéro de prix
+;
+;
+PROCEDURE INPUT FFDPRI
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_FFDPRI = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_FFDPRI, T_FFDPRI &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_FFDPRI)
+  END
+
+  IF 0 < NCON(FIELDTEXT) AND (TRPCLE OF FAFAR_DETAIL = " " OR &
+                              ETACLE OF FAFAR_DETAIL = " ")
+  THEN BEGIN
+       LET FIELDTEXT = "0"
+       WARNING 2733
+  END
+
+  IF 0=SIZE(FIELDTEXT)
+  THEN BEGIN
+       LET FIELDTEXT = ASCII(OLDVALUE(FFDPRI OF FAFAR_DETAIL))
+       LET T_OLDVALUE= "O"
+  END
+  ELSE LET T_OLDVALUE= "N"
+
+  IF 0 <> NCON(FIELDTEXT)
+  THEN BEGIN
+       GET A_CBI_FFDPRI  &
+           VIA   XELNOM, &
+                 CBICLE  &
+           USING D_FFDPRI, &
+                 FIELDTEXT OPTIONAL
+       IF NOT ACCESSOK
+       THEN ERROR 2730
+  END
+END
+
+PROCEDURE PROCESS FFDPRI
+BEGIN
+  IF FFDPRI OF FAFAR_DETAIL = 1 AND T_OLDVALUE = "N"
+  THEN LET FFDPRIUNI OF FAFAR_DETAIL = GRTPRI1 OF FAGRILLE_TARIF * 100
+
+  IF FFDPRI OF FAFAR_DETAIL = 2 AND T_OLDVALUE = "N"
+  THEN LET FFDPRIUNI OF FAFAR_DETAIL = GRTPRI2 OF FAGRILLE_TARIF * 100
+
+  IF FFDPRI OF FAFAR_DETAIL = 3 AND T_OLDVALUE = "N"
+  THEN LET FFDPRIUNI OF FAFAR_DETAIL = GRTPRI3 OF FAGRILLE_TARIF * 100
+
+  DISPLAY FFDPRIUNI OF FAFAR_DETAIL
+
+  DO CALCUL_MONTANT
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation du projet, le projet est optionnel dans la ligne de commande.
+;
+PROCEDURE INPUT PRJCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PRJSTUPAT = "A"
+    LET T_PRJCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gp104 MODE F PASSING T_CIECLEMNU, &
+                                    T_PRJCLE   , &
+                                    T_PRJSTUPAT WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_PRJCLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation du projet, le projet est optionnel dans la ligne de commande.
+;
+PROCEDURE EDIT PRJCLE
+BEGIN
+  IF FIELDTEXT <> " "
+  THEN BEGIN
+       IF PRJSTU OF GPPROJETS <> "A"
+       THEN ERROR 1386 ; Ce projet n'est pas actif.
+  END
+END
+
+PROCEDURE PROCESS PRJCLE
+BEGIN
+  IF PRJCLE OF FAFAR_DETAIL <> " "
+  THEN INFORMATION = PRJDSC1 OF GPPROJETS
+END
+
+
+;----------------------------------------------------------------
+;
+; Popup sur les activités.
+;
+PROCEDURE INPUT PRACLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PRJCLE    = PRJCLE OF FAFAR_DETAIL
+    LET T_PRASTUPAT = "A"
+    LET T_PRACLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gp108 MODE F PASSING T_CIECLEMNU, &
+                                    T_PRJCLE   , &
+                                    T_PRACLE   , &
+                                    T_PRASTUPAT WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_PRACLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation de l'activité, l'activité est optionnelle dans la ligne de réquisition.
+;
+PROCEDURE EDIT PRACLE
+BEGIN
+  IF FIELDTEXT <> " "
+  THEN BEGIN
+       IF PRASTU OF GPPRO_ACTIVITE <> "A"
+       THEN ERROR 1388 ; Cette activité est inactive.
+  END
+END
+
+PROCEDURE PROCESS PRACLE
+BEGIN
+  IF PRACLE OF FAFAR_DETAIL <> " "
+  THEN INFORMATION = PRADSC1 OF GPPRO_ACTIVITE
+END
+
+;-------------------------------------------------------------------------------
+; Pop up pour la catégorie d'équipement
+;
+PROCEDURE INPUT IMMCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_IMMCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN im102 MODE F &
+                     PASSING T_CIECLEMNU , &
+                             T_IMMCLE  WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE( T_IMMCLE )
+  END
+
+  IF     0 = SIZE(FIELDTEXT) &
+     AND 0 = SIZE(TRUNCATE(IMMCLE OF FAFAR_DETAIL))
+  THEN BEGIN
+     IF 0 <> SIZE(TRUNCATE(PRAIMMCLE OF GPPRO_ACTIVITE))
+     THEN LET FIELDTEXT = PRAIMMCLE OF GPPRO_ACTIVITE
+     ELSE LET FIELDTEXT = IMMCLE OF FAFAR_DETAIL
+  END
+
+  IF 0=SIZE(FIELDTEXT)
+  THEN LET FIELDTEXT = OLDVALUE(IMMCLE OF FAFAR_DETAIL)
+
+  IF FIELDTEXT = " "
+  THEN LET FIELDTEXT = ""
+END
+
+PROCEDURE EDIT IMMCLE
+BEGIN
+   IF IMMTYP OF IMIMMOBILISATION <> "E" AND &
+      FIELDTEXT <> " "
+   THEN ERROR 1503
+END
+
+PROCEDURE PROCESS IMMCLE
+BEGIN
+  IF IMMCLE OF FAFAR_DETAIL <> " "
+  THEN INFORMATION = IMMDSC OF IMIMMOBILISATION
+END
+
+;-------------------------------------------------------------------------------
+;
+; Pour la transformation du flag d'impression en 1 et 0
+;
+PROCEDURE INPUT FFDIMPIMM
+BEGIN
+  USE usflginp NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Pour afficher le falg sous la forme Oui ou Non
+;
+PROCEDURE OUTPUT FFDIMPIMM
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le dépisteur du numéro de compte.
+;
+PROCEDURE INPUT CPTCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_PECCLE    = T_PECCLEMNU
+    LET T_CPTTYPPAT = "@"
+    LET T_CPTCATPAT = "@"
+    RUN SCREEN mc103 MODE F PASSING T_CPTCLE   , &
+                                    T_CPTTYPPAT, &
+                                    T_CPTCATPAT, &
+                                    T_PECCLE     &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_CPTCLE)
+  END
+
+  IF 0 = SIZE(FIELDTEXT) AND OLDVALUE(CPTCLE OF FAFAR_DETAIL) = " "
+  THEN LET FIELDTEXT = ETACPTCLE OF FAELEMENT_TARIF
+END
+
+;-------------------------------------------------------------------------------
+;
+; Validation si le compte est actif.
+;
+PROCEDURE EDIT CPTCLE
+BEGIN
+  ;
+  ; Note: La période de fin, est la première période d'inactivité.
+  ;
+
+  ; Ajustement pour le changement de siècle
+  IF T_PECCLEMNU[1:1] < "8"
+  THEN LET T_PECCLEMNU_SIE2 = "1" + T_PECCLEMNU
+  ELSE LET T_PECCLEMNU_SIE2 = "0" + T_PECCLEMNU
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBA OF VCPT_DSC[1:1] < "8"
+  THEN LET T_CPTPECDEBA_SIE = "1" + CPTPECDEBA OF VCPT_DSC
+  ELSE LET T_CPTPECDEBA_SIE = "0" + CPTPECDEBA OF VCPT_DSC
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBI OF VCPT_DSC[1:1] < "8"
+  THEN LET T_CPTPECDEBI_SIE = "1" + CPTPECDEBI OF VCPT_DSC
+  ELSE LET T_CPTPECDEBI_SIE = "0" + CPTPECDEBI OF VCPT_DSC
+
+  IF T_PECCLEMNU_SIE2 >= T_CPTPECDEBA_SIE AND &
+     ( &
+       T_PECCLEMNU_SIE2 < T_CPTPECDEBI_SIE OR &
+       CPTPECDEBI OF VCPT_DSC = "" &
+     )
+  THEN NULL
+  ELSE ERROR 1380 ; Ce compte est inactif.
+
+  IF CPTTYP OF VCPT_DSC <> "R"
+  THEN ERROR 1381 ; On ne peut pas utiliser ce compte dans une commande.
+
+  ;******
+  IF HLDCHTCPT OF MCHOLDING = "1"
+  THEN BEGIN
+    GET MCCHARTE_UNA OPTIONAL
+    ;
+    ; Si la charte est incluse, le lien est obligatoire.
+    ;
+    IF NOT ACCESSOK
+    THEN BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN ERROR 1314 ; La combinaison compte/unité administrative n'existe pas.
+    END
+    ELSE BEGIN
+      ;
+      ; Si la charte est Exclusive et que la période fait partie de
+      ; l'intervalle de périodes de la charte alors c'est une erreur.
+      ;
+      ; Si la charte est inclusive et que la période ne fait pas partie de
+      ; l'intervalle de périodes de la charte alors c'est une erreur.
+      ;
+      ; Ajustement pour le changement de siècle
+      IF T_PECCLEMNU[1:1] < "8"
+      THEN LET T_PECCLEMNU_SIE1 = "1" + T_PECCLEMNU
+      ELSE LET T_PECCLEMNU_SIE1 = "0" + T_PECCLEMNU
+
+      ; Ajustement pour le changement de siècle
+      IF CCUPECDEBA OF MCCHARTE_UNA[1:1] < "8"
+      THEN LET T_CCUPECDEBA_SIE = "1" + CCUPECDEBA OF MCCHARTE_UNA
+      ELSE LET T_CCUPECDEBA_SIE = "0" + CCUPECDEBA OF MCCHARTE_UNA
+
+      ; Ajustement pour le changement de siècle
+      IF CCUPECDEBI OF MCCHARTE_UNA[1:1] < "8"
+      THEN LET T_CCUPECDEBI_SIE = "1" + CCUPECDEBI OF MCCHARTE_UNA
+      ELSE LET T_CCUPECDEBI_SIE = "0" + CCUPECDEBI OF MCCHARTE_UNA
+
+      IF ( &
+           T_PECCLEMNU_SIE1 >= T_CCUPECDEBA_SIE AND &
+           ( &
+             T_PECCLEMNU_SIE1 < T_CCUPECDEBI_SIE OR &
+             CCUPECDEBI OF MCCHARTE_UNA = " " &
+           ) &
+         )
+      THEN BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "E"
+        THEN ERROR 1384 ; La combinaison compte/unité administrative est inactive.
+      END
+      ELSE BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "I"
+        THEN ERROR 1384 ; La combinaison compte/unité administrative est inactive.
+      END
+    END
+  END
+  ;*****
+END
+
+PROCEDURE PROCESS CPTCLE
+BEGIN
+  IF CPTCLE OF FAFAR_DETAIL <> " "
+  THEN INFORMATION = CPTDSC OF VCPT_DSC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Dépisteur de l'unité administrative et obligation du lookup.
+;
+PROCEDURE INPUT UNACLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE = CPTCLE OF FAFAR_DETAIL
+    LET T_PECCLE = T_PECCLEMNU
+    LET T_UNACLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc104 MODE F PASSING T_CIECLEMNU, T_UNACLE WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_UNACLE)
+  END
+
+  IF 0=SIZE(FIELDTEXT) AND " " = OLDVALUE(UNACLE OF FAFAR_DETAIL)
+  THEN LET FIELDTEXT = PRAUNAREV OF GPPRO_ACTIVITE
+END
+
+PROCEDURE PROCESS UNACLE
+BEGIN
+  IF UNACLE OF FAFAR_DETAIL <> " "
+  THEN INFORMATION = UNANOM OF MCUNITE_ADM
+END
+
+PROCEDURE PROCESS FFDQTEFAC
+BEGIN
+  DO CALCUL_MONTANT
+END
+
+
+PROCEDURE EDIT FFDPRIUNI
+BEGIN
+  USE usvaldec NOLIST
+END
+
+PROCEDURE PROCESS FFDPRIUNI
+BEGIN
+  DO CALCUL_MONTANT
+END
+
+
+
+PROCEDURE EDIT FFDMNTTPS
+BEGIN
+   LET FARMNTTPS OF FACPT_A_REC = FARMNTTPS OF FACPT_A_REC - &
+                                  OLDVALUE(FFDMNTTPS OF FAFAR_DETAIL)
+END
+
+PROCEDURE PROCESS FFDMNTTPS
+BEGIN
+  LET T_VERCALTAX = "TPS"
+
+  DO CALCUL_MONTANT
+
+  LET T_VERCALTAX = " "
+
+END
+
+
+
+PROCEDURE EDIT FFDMNTTVQ
+BEGIN
+   LET FARMNTTVQ OF FACPT_A_REC = FARMNTTVQ OF FACPT_A_REC - &
+                                  OLDVALUE(FFDMNTTVQ OF FAFAR_DETAIL)
+END
+
+
+PROCEDURE PROCESS FFDMNTTVQ
+BEGIN
+  LET T_VERCALTAX = "TVQ"
+
+  DO CALCUL_MONTANT
+
+  LET T_VERCALTAX = " "
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Terme d'escompte , popup sur les termes d'encaissements.
+;
+;
+PROCEDURE INPUT FFDTERESC
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TMECATPAT = "ESC"
+    LET T_TMECLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cr104 MODE F PASSING T_TMECLE, &
+                                    T_TMECATPAT &
+                     WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNC(T_TMECLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du code de terme-escmpte(1), il est optionel.
+;
+;
+PROCEDURE EDIT FFDTERESC
+BEGIN
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    GET CRTERME VIA TMECLE &
+                USING FIELDTEXT &
+                OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 639 ; Ce terme n'existe pas.
+
+    IF TMECAT OF CRTERME <> "ESC"
+    THEN ERROR 640 ; Ce n'est pas un code terme pour les escmptes.
+
+    ;
+    ; Note: La période de fin, est la première période d'inactivité.
+    ;
+    ; Ajustement pour le changement de siècle
+    IF T_PECCLEMNU[1:1] < "8"
+    THEN LET T_PECCLEMNU_SIE3 = "1" + T_PECCLEMNU
+    ELSE LET T_PECCLEMNU_SIE3 = "0" + T_PECCLEMNU
+
+    ; Ajustement pour le changement de siècle
+    IF CPTPECDEBA OF A_VCPT_ESC[1:1] < "8"
+    THEN LET T_CPTPECDEBA_SIE3 = "1" + CPTPECDEBA OF A_VCPT_ESC
+    ELSE LET T_CPTPECDEBA_SIE3 = "0" + CPTPECDEBA OF A_VCPT_ESC
+
+    ; Ajustement pour le changement de siècle
+    IF CPTPECDEBI OF A_VCPT_ESC[1:1] < "8"
+    THEN LET T_CPTPECDEBI_SIE3 = "1" + CPTPECDEBI OF A_VCPT_ESC
+    ELSE LET T_CPTPECDEBI_SIE3 = "0" + CPTPECDEBI OF A_VCPT_ESC
+
+    IF T_PECCLEMNU_SIE3 >= T_CPTPECDEBA_SIE3 AND &
+       ( &
+         T_PECCLEMNU_SIE3 < T_CPTPECDEBI_SIE3 OR &
+         CPTPECDEBI OF A_VCPT_ESC = "" &
+       )
+    THEN NULL
+    ELSE ERROR 1380 ; Ce compte est inactif.
+
+    IF CPTTYP OF A_VCPT_ESC <> "R"
+    THEN ERROR 1381 ; On ne peut pas utiliser ce compte dans une commande.
+
+    ;******
+    IF HLDCHTCPT OF MCHOLDING = "1"
+    THEN BEGIN
+      GET A_CCU_ESC OPTIONAL
+      ;
+      ; Si la charte est incluse, le lien est obligatoire.
+      ;
+      IF NOT ACCESSOK
+      THEN BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "I"
+        THEN ERROR 1314 ; La combinaison compte/unité administrative n'existe pas.
+      END
+      ELSE BEGIN
+        ;
+        ; Si la charte est Exclusive et que la période fait partie de
+        ; l'intervalle de périodes de la charte alors c'est une erreur.
+        ;
+        ; Si la charte est inclusive et que la période ne fait pas partie de
+        ; l'intervalle de périodes de la charte alors c'est une erreur.
+        ;
+
+        ; Ajustement pour le changement de siècle
+        IF T_PECCLEMNU[1:1] < "8"
+        THEN LET T_PECCLEMNU_SIE4 = "1" + T_PECCLEMNU
+        ELSE LET T_PECCLEMNU_SIE4 = "0" + T_PECCLEMNU
+
+        ; Ajustement pour le changement de siècle
+        IF CCUPECDEBA OF A_CCU_ESC[1:1] < "8"
+        THEN LET T_CCUPECDEBA_SIE4 = "1" + CCUPECDEBA OF A_CCU_ESC
+        ELSE LET T_CCUPECDEBA_SIE4 = "0" + CCUPECDEBA OF A_CCU_ESC
+
+        ; Ajustement pour le changement de siècle
+        IF CCUPECDEBI OF A_CCU_ESC[1:1] < "8"
+        THEN LET T_CCUPECDEBI_SIE4 = "1" + CCUPECDEBI OF A_CCU_ESC
+        ELSE LET T_CCUPECDEBI_SIE4 = "0" + CCUPECDEBI OF A_CCU_ESC
+
+        IF ( &
+             T_PECCLEMNU_SIE4 >= T_CCUPECDEBA_SIE4 AND &
+             ( &
+               T_PECCLEMNU_SIE4 < T_CCUPECDEBI_SIE4 OR &
+               CCUPECDEBI OF A_CCU_ESC = " " &
+             ) &
+           )
+        THEN BEGIN
+          IF HLDCHTCPTRLT OF MCHOLDING = "E"
+          THEN ERROR 1384 ; La combinaison compte/unité administrative est inactive.
+        END
+        ELSE BEGIN
+          IF HLDCHTCPTRLT OF MCHOLDING = "I"
+          THEN ERROR 1384 ; La combinaison compte/unité administrative est inactive.
+        END
+      END
+    END
+    ;*****
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du montant d'escompte.
+;
+;
+PROCEDURE PROCESS FFDTERESC
+BEGIN
+  IF 0 = SIZE( TRUNCATE ( FFDTERESC OF FAFAR_DETAIL ) )
+  THEN LET FFDMNTESC OF FAFAR_DETAIL = 0
+
+  DO CALCUL_MONTANT
+END
+
+
+PROCEDURE EDIT FFDMNTESC
+BEGIN
+  ;
+  ; Note: La période de fin, est la première période d'inactivité.
+  ;
+
+  ; Ajustement pour le changement de siècle
+  IF T_PECCLEMNU[1:1] < "8"
+  THEN LET T_PECCLEMNU_SIE5 = "1" + T_PECCLEMNU
+  ELSE LET T_PECCLEMNU_SIE5 = "0" + T_PECCLEMNU
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBA OF A_VCPT_ESC[1:1] < "8"
+  THEN LET T_CPTPECDEBA_SIE5 = "1" + CPTPECDEBA OF A_VCPT_ESC
+  ELSE LET T_CPTPECDEBA_SIE5 = "0" + CPTPECDEBA OF A_VCPT_ESC
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBI OF A_VCPT_ESC[1:1] < "8"
+  THEN LET T_CPTPECDEBI_SIE5 = "1" + CPTPECDEBI OF A_VCPT_ESC
+  ELSE LET T_CPTPECDEBI_SIE5 = "0" + CPTPECDEBI OF A_VCPT_ESC
+
+  IF T_PECCLEMNU_SIE5 >= T_CPTPECDEBA_SIE5 AND &
+     ( &
+       T_PECCLEMNU_SIE5 < T_CPTPECDEBI_SIE5 OR &
+       CPTPECDEBI OF A_VCPT_ESC = "" &
+     )
+  THEN NULL
+  ELSE ERROR 1380 ; Ce compte est inactif.
+
+  IF CPTTYP OF A_VCPT_ESC <> "R"
+  THEN ERROR 1381 ; On ne peut pas utiliser ce compte dans une commande.
+
+  ;******
+  IF HLDCHTCPT OF MCHOLDING = "1"
+  THEN BEGIN
+    GET A_CCU_ESC OPTIONAL
+    ;
+    ; Si la charte est incluse, le lien est obligatoire.
+    ;
+    IF NOT ACCESSOK
+    THEN BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN ERROR 1314 ; La combinaison compte/unité administrative n'existe pas.
+    END
+    ELSE BEGIN
+      ;
+      ; Si la charte est Exclusive et que la période fait partie de
+      ; l'intervalle de périodes de la charte alors c'est une erreur.
+      ;
+      ; Si la charte est inclusive et que la période ne fait pas partie de
+      ; l'intervalle de périodes de la charte alors c'est une erreur.
+      ;
+
+      ; Ajustement pour le changement de siècle
+      IF T_PECCLEMNU[1:1] < "8"
+      THEN LET T_PECCLEMNU_SIE6 = "1" + T_PECCLEMNU
+      ELSE LET T_PECCLEMNU_SIE6 = "0" + T_PECCLEMNU
+
+      ; Ajustement pour le changement de siècle
+      IF CCUPECDEBA OF A_CCU_ESC[1:1] < "8"
+      THEN LET T_CCUPECDEBA_SIE6 = "1" + CCUPECDEBA OF A_CCU_ESC
+      ELSE LET T_CCUPECDEBA_SIE6 = "0" + CCUPECDEBA OF A_CCU_ESC
+
+      ; Ajustement pour le changement de siècle
+      IF CCUPECDEBI OF A_CCU_ESC[1:1] < "8"
+      THEN LET T_CCUPECDEBI_SIE6 = "1" + CCUPECDEBI OF A_CCU_ESC
+      ELSE LET T_CCUPECDEBI_SIE6 = "0" + CCUPECDEBI OF A_CCU_ESC
+
+      IF ( &
+           T_PECCLEMNU_SIE6 >= T_CCUPECDEBA_SIE6 AND &
+           ( &
+             T_PECCLEMNU_SIE6 < T_CCUPECDEBI_SIE6 OR &
+             CCUPECDEBI OF A_CCU_ESC = " " &
+           ) &
+         )
+      THEN BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "E"
+        THEN ERROR 1384 ; La combinaison compte/unité administrative est inactive.
+      END
+      ELSE BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "I"
+        THEN ERROR 1384 ; La combinaison compte/unité administrative est inactive.
+      END
+    END
+  END
+  ;*****
+END
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du montant d'escompte.
+;
+;
+PROCEDURE PROCESS FFDMNTESC
+BEGIN
+  DO CALCUL_MONTANT
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran de consultation des codes de taxe.
+;
+;
+PROCEDURE INPUT FFDTAXCODTPS
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TAXCLETYP = FFDTAXTYPTPS OF FAFAR_DETAIL
+    LET T_TAXCLECOD = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    LET T_TAXMODPAT = "@"
+    RUN SCREEN mc111 MODE F PASSING T_TAXCLETYP, &
+                                    T_TAXCLECOD, &
+                                    T_TAXMODPAT &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNC(T_TAXCLECOD)
+  END
+  ;
+  ; Par defaut on utilise le code de taxe de TPS du client.
+  ;
+  IF     0 = SIZE( FIELDTEXT ) &
+     AND NEWRECORD OF FAFAR_DETAIL &
+     AND FFDTAXCODTPS OF FAFAR_DETAIL = "" &
+     AND CLCTAXCODTPS OF VCLC_CLI <> ""
+  THEN LET FIELDTEXT = CLCTAXCODTPS OF VCLC_CLI
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du code de taxe fédéral.
+;
+;
+PROCEDURE EDIT FFDTAXCODTPS
+BEGIN
+  IF 0 <> SIZE(TRUNC(FIELDTEXT))
+  THEN BEGIN
+    GET A_TAX_TPS OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 672 ; Ce code de taxe n'existe pas.
+
+    IF TAXCPTCAR OF A_TAX_TPS = ""
+    THEN ERROR 673 ; On ne peut pas utiliser ce code de taxe au recevable.
+  END
+  ;
+  ; Initialise le flag à Oui dans la procédure EDIT. Car si l'usager saisie
+  ; une valeur la procédure EDIT est exécuté.
+  ;
+  LET T_FLGMOD = "1"
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran de consultation des codes de taxe.
+;
+;
+PROCEDURE INPUT FFDTAXCODTVQ
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TAXCLETYP = FFDTAXTYPTVQ OF FAFAR_DETAIL
+    LET T_TAXCLECOD = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    LET T_TAXMODPAT = "@"
+    RUN SCREEN mc111 MODE F PASSING T_TAXCLETYP, &
+                                    T_TAXCLECOD, &
+                                    T_TAXMODPAT &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNC(T_TAXCLECOD)
+  END
+  ;
+  ; Par defaut on utilise le code de taxe de TVQ du client.
+  ;
+  IF     0 = SIZE( FIELDTEXT ) &
+     AND NEWRECORD OF FAFAR_DETAIL &
+     AND FFDTAXCODTVQ OF FAFAR_DETAIL = "" &
+     AND CLCTAXCODTVP OF VCLC_CLI <> ""
+  THEN LET FIELDTEXT = CLCTAXCODTVP OF VCLC_CLI
+  ;
+  ; Force l'éxécution de la procédure edit, car il y a inter-relation entre
+  ; deux champs(taxe).
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     T_FLGMOD = "1"
+  THEN LET FIELDTEXT = FFDTAXCODTVQ OF FAFAR_DETAIL
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du code de taxe provincial
+;
+;
+PROCEDURE EDIT FFDTAXCODTVQ
+BEGIN
+  IF 0 <> SIZE(TRUNC(FIELDTEXT))
+  THEN BEGIN
+    GET A_TAX_TVP OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 672 ; Ce code de taxe n'existe pas.
+
+    IF TAXCPTCAR OF A_TAX_TVP = ""
+    THEN ERROR 673 ; On ne peut pas utiliser ce code de taxe au recevable.
+
+    IF TAXMOD    OF A_TAX_TVP = "I" AND &
+       TAXFLGNET OF A_TAX_TVP = "2" AND &
+       TAXMOD    OF A_TAX_TPS = "S"
+    THEN ERROR 674 ; TVQ incluse et TPS ensus incompatible.
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul des taxes.
+;
+PROCEDURE PROCESS FFDTAXCODTVQ
+BEGIN
+  DO CALCUL_MONTANT
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE POSTFIND
+BEGIN
+  FOR FAFAR_DETAIL
+  BEGIN
+    ;
+    ; Il faut conserver l'ancienne valeur qui a servi à incrémenter le cumul
+    ; des montants brut(incluant taxe). Il faut prendre les informations du
+    ; code de taxe précédemment saisie, c'est pour cette raison que le traitement
+    ; est fait dans cette procédure.
+    ;
+    LET T_TAXMODTPSOLD = TAXMOD OF A_TAX_TPS
+    LET T_TAXMODTVQOLD = TAXMOD OF A_TAX_TVP
+
+    GET FAFAR_NOTE2 &
+        VIA     CIECLE   , &
+                FARCLE   , &
+                FFDCLELIG  &
+         USING  CIECLE    OF FAFAR_DETAIL , &
+                FARCLE    OF FAFAR_DETAIL , &
+                FFDCLELIG OF FAFAR_DETAIL UNIQUE OPTIONAL
+    IF ACCESSOK
+    THEN LET T_NOT = "*"
+    ELSE LET T_NOT = " "
+  END
+  DISPLAY FARMNTNET
+  DISPLAY FARMNTREC
+  DISPLAY D_SLD_A_REC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR FAFAR_DETAIL
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF FAFAR_DETAIL &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF FAFAR_DETAIL &
+       AND NOT NEWRECORD     OF FAFAR_DETAIL &
+       AND NOT DELETEDRECORD OF FAFAR_DETAIL &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+
+    ;IF FARMNTREC OF FACPT_A_REC > FARMNT OF FACPT_A_REC
+    ;THEN ERROR 2736 ;Le montant recu doit être inférieur ou égal au montant tot.
+
+    ;
+    ; Le timbre de modification est mis à jour si l'usager modifie
+    ; la table FAFAR_DETAIL.
+    ;
+    IF        NEWRECORD OF FAFAR_DETAIL &
+       OR ALTEREDRECORD OF FAFAR_DETAIL &
+       OR DELETEDRECORD OF FAFAR_DETAIL
+    THEN BEGIN
+      LET FARDATMOD OF FACPT_A_REC = SYSDATE
+      LET FARHREMOD OF FACPT_A_REC = SYSTIME / 10000
+      LET FARUSRMOD OF FACPT_A_REC = LOGONID
+    END
+  END
+
+  IF FARCLE OF FACPT_A_REC = " "
+  THEN BEGIN
+    START TRANSACTION GEN_NUM_SEQ
+    GET FAFAR_SEQ VIA   CIECLE, &
+                        FSEANNCLE  &
+                  USING T_CIECLEMNU,&
+                        T_PECCLEMNU[1:2] &
+                  OPTIONAL
+    LET CIECLE    OF FAFAR_SEQ = T_CIECLEMNU
+    LET FSEANNCLE OF FAFAR_SEQ = T_PECCLEMNU[1:2]
+    ;LET FSENUMSEQ OF FAFAR_SEQ = FSENUMSEQ OF FAFAR_SEQ + 1
+    ;an 2000
+    IF NEWRECORD OF FAFAR_SEQ
+    THEN LET FSENUMSEQ OF FAFAR_SEQ = 0
+    LET FSENUMSEQ OF FAFAR_SEQ = FSENUMSEQ OF FAFAR_SEQ + 1
+    LET FARCLE OF FACPT_A_REC = FSEANNCLE + &
+           ASCII(FSENUMSEQ OF FAFAR_SEQ, FSELONNUM OF FAFAR_SEQ -2)
+    PUT FAFAR_SEQ
+    COMMIT TRANSACTION GEN_NUM_SEQ
+    DISPLAY FARCLE
+  END
+
+  ;
+  ; On incrémente le numéro d'adresse pour les clients divers.
+  ;
+  IF     CLITYP OF VCLC_CLI = "D" &
+     AND RADCLE OF FACPT_A_REC = 0
+  THEN BEGIN
+    START TRANSACTION GEN_RAD_SEQ
+    GET MCRAD_SEQ VIA REFCIECLE, &
+                      REFCLETYP, &
+                      REFCLENUM  &
+                  USING REFCIECLE OF FACPT_A_REC, &
+                        REFCLETYP OF FACPT_A_REC, &
+                        REFCLENUM OF FACPT_A_REC  &
+                  OPTIONAL
+    LET REFCIECLE OF MCRAD_SEQ = REFCIECLE OF FACPT_A_REC
+    LET REFCLETYP OF MCRAD_SEQ = REFCLETYP OF FACPT_A_REC
+    LET REFCLENUM OF MCRAD_SEQ = REFCLENUM OF FACPT_A_REC
+    LET RASNUMSEQ OF MCRAD_SEQ = RASNUMSEQ OF MCRAD_SEQ + 1
+    LET RADCLE    OF FACPT_A_REC = RASNUMSEQ OF MCRAD_SEQ
+    PUT MCRAD_SEQ
+    COMMIT TRANSACTION GEN_RAD_SEQ
+  END
+
+  FOR FAFAR_DETAIL
+  BEGIN
+     IF FARCLE OF FAFAR_DETAIL = " "
+     THEN LET FARCLE OF FAFAR_DETAIL = FARCLE OF FACPT_A_REC
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Met à jour les cumulatifs dans la facture.
+;
+;
+PROCEDURE DELETE
+BEGIN
+  IF FARSTU OF FACPT_A_REC = "P"
+  THEN BEGIN
+       ;
+       ; Enlève les anciennes valeurs des totaux
+       ;
+       IF FFDTYP OF FAFAR_DETAIL <> "3"
+       THEN BEGIN
+            LET FARMNTTPS OF FACPT_A_REC = FARMNTTPS OF FACPT_A_REC - &
+                                           FFDMNTTPS OF FAFAR_DETAIL
+            LET FARMNTTVQ OF FACPT_A_REC = FARMNTTVQ OF FACPT_A_REC - &
+                                           FFDMNTTVQ OF FAFAR_DETAIL
+            LET FARMNT    OF FACPT_A_REC = FARMNT    OF FACPT_A_REC - &
+                                           FFDMNTTOT OF FAFAR_DETAIL
+            LET FARMNTNET OF FACPT_A_REC = FARMNTNET OF FACPT_A_REC - &
+                                           FFDMNTNET OF FAFAR_DETAIL
+       END
+       ELSE BEGIN
+            LET FARMNTREC OF FACPT_A_REC = FARMNTREC OF FACPT_A_REC - &
+                                           FFDMNTTOT OF FAFAR_DETAIL
+       END
+
+       DELETE FAFAR_DETAIL
+       DISPLAY FARMNTTPS OF FACPT_A_REC
+       DISPLAY FARMNTTVQ OF FACPT_A_REC
+       DISPLAY FARMNTNET OF FACPT_A_REC
+       DISPLAY FARMNTREC
+       DISPLAY D_SLD_A_REC
+  END
+  ELSE WARNING 2735
+END
+
+PROCEDURE DESIGNER 5
+BEGIN
+   IF FARSTU OF FACPT_A_REC = "P"
+   THEN BEGIN
+        ACCEPT FFDCLELIG OF FAFAR_DETAIL
+
+        IF TRPCLE OF FAFAR_DETAIL <> " " AND &
+           ETACLE OF FAFAR_DETAIL <> " " AND &
+           FFDTYP OF FAFAR_DETAIL <> "4"
+        THEN ACCEPT FFDPRI OF FAFAR_DETAIL
+
+        ACCEPT PRJCLE    OF FAFAR_DETAIL
+        ACCEPT PRACLE    OF FAFAR_DETAIL
+        ACCEPT IMMCLE    OF FAFAR_DETAIL
+        ACCEPT FFDIMPIMM OF FAFAR_DETAIL
+        ACCEPT UNACLE    OF FAFAR_DETAIL
+        ACCEPT CPTCLE    OF FAFAR_DETAIL
+
+        IF FFDTYP OF FAFAR_DETAIL <> "3" AND &
+           FFDTYP OF FAFAR_DETAIL <> "4"
+        THEN BEGIN
+             ACCEPT FFDQTEFAC OF FAFAR_DETAIL
+        END
+
+        IF FFDTYP OF FAFAR_DETAIL <> "3"
+        THEN BEGIN
+             ACCEPT FFDTAXCODTPS OF FAFAR_DETAIL
+             ACCEPT FFDTAXCODTVQ OF FAFAR_DETAIL
+        END
+
+        IF FFDTYP OF FAFAR_DETAIL = "2" OR &
+           FFDTYP OF FAFAR_DETAIL = "4" OR &
+           (    FFDTYP OF FAFAR_DETAIL = "1" &
+            AND GRTPRI1 OF FAGRILLE_TARIF = 0 &
+            AND GRTPRI2 OF FAGRILLE_TARIF = 0 &
+            AND GRTPRI3 OF FAGRILLE_TARIF = 0)
+        THEN ACCEPT FFDPRIUNI OF FAFAR_DETAIL
+
+        DISPLAY D_MNTBRUT
+
+        IF TRPDSCMOD OF FATRAJET_PRODUIT = "1"
+        THEN  ACCEPT FFDDSC OF FAFAR_DETAIL
+
+        IF FFDTYP OF FAFAR_DETAIL <> "3"
+        THEN BEGIN
+             ACCEPT FFDMNTTPS OF FAFAR_DETAIL
+             ACCEPT FFDMNTTVQ OF FAFAR_DETAIL
+        END
+
+        IF FFDTYP OF FAFAR_DETAIL <> "3" AND &
+           FFDTYP OF FAFAR_DETAIL <> "4" AND &
+           ETACLE OF FAFAR_DETAIL <> " "
+        THEN BEGIN
+             ACCEPT FFDTERESC OF FAFAR_DETAIL
+             IF 0 = SIZE( TRUNCATE ( FFDTERESC OF FAFAR_DETAIL ) )
+             THEN BEGIN
+               ACCEPT FFDMNTESC OF FAFAR_DETAIL
+             END
+        END
+   END
+   ELSE WARNING 2735
+END
+
+
+PROCEDURE APPEND
+BEGIN
+
+   USE ussecent NOLIST
+
+   IF FARSTU OF FACPT_A_REC = "P"
+   THEN BEGIN
+        ACCEPT FFDCLELIG OF FAFAR_DETAIL
+        DISPLAY FFDTYP OF FAFAR_DETAIL
+
+        IF FFDTYP OF FAFAR_DETAIL <> "3"
+        THEN BEGIN
+             ACCEPT TRPCLE OF FAFAR_DETAIL
+             DISPLAY FFDDSC OF FAFAR_DETAIL
+        END
+
+        IF TRPCLE OF FAFAR_DETAIL <> " "
+        THEN ACCEPT ETACLE OF FAFAR_DETAIL
+        ELSE DISPLAY ETACLE OF FAFAR_DETAIL
+
+        IF TRPCLE OF FAFAR_DETAIL <> " " AND &
+           ETACLE OF FAFAR_DETAIL <> " " AND &
+           FFDTYP OF FAFAR_DETAIL <> "4"
+        THEN ACCEPT FFDPRI OF FAFAR_DETAIL
+        ELSE DISPLAY FFDPRI OF FAFAR_DETAIL
+
+        ACCEPT PRJCLE    OF FAFAR_DETAIL
+        ACCEPT PRACLE    OF FAFAR_DETAIL
+        ACCEPT IMMCLE    OF FAFAR_DETAIL
+        ACCEPT FFDIMPIMM OF FAFAR_DETAIL
+        ACCEPT UNACLE    OF FAFAR_DETAIL
+        ACCEPT CPTCLE    OF FAFAR_DETAIL
+
+        IF FFDTYP OF FAFAR_DETAIL <> "3" AND &
+           FFDTYP OF FAFAR_DETAIL <> "4"
+        THEN BEGIN
+             ACCEPT FFDQTEFAC OF FAFAR_DETAIL
+        END
+
+        IF FFDTYP OF FAFAR_DETAIL <> "3"
+        THEN BEGIN
+             ACCEPT FFDTAXCODTPS OF FAFAR_DETAIL
+             ACCEPT FFDTAXCODTVQ OF FAFAR_DETAIL
+        END
+
+        IF FFDTYP OF FAFAR_DETAIL = "2" OR &
+           FFDTYP OF FAFAR_DETAIL = "4" OR &
+           (    FFDTYP OF FAFAR_DETAIL = "1" &
+            AND GRTPRI1 OF FAGRILLE_TARIF = 0 &
+            AND GRTPRI2 OF FAGRILLE_TARIF = 0 &
+            AND GRTPRI3 OF FAGRILLE_TARIF = 0)
+        THEN ACCEPT FFDPRIUNI OF FAFAR_DETAIL
+
+        DISPLAY D_MNTBRUT
+
+        IF TRPDSCMOD OF FATRAJET_PRODUIT = "1"
+        THEN ACCEPT FFDDSC OF FAFAR_DETAIL
+
+        IF FFDTYP OF FAFAR_DETAIL <> "3"
+        THEN BEGIN
+             ACCEPT FFDMNTTPS OF FAFAR_DETAIL
+             ACCEPT FFDMNTTVQ OF FAFAR_DETAIL
+        END
+
+        IF FFDTYP OF FAFAR_DETAIL <> "3" AND &
+           FFDTYP OF FAFAR_DETAIL <> "4" AND &
+           ETACLE OF FAFAR_DETAIL <> " "
+        THEN BEGIN
+             ACCEPT FFDTERESC OF FAFAR_DETAIL
+             IF 0 = SIZE( TRUNCATE ( FFDTERESC OF FAFAR_DETAIL ) )
+             THEN BEGIN
+               ACCEPT FFDMNTESC OF FAFAR_DETAIL
+             END
+        END
+
+        RUN SCREEN fa004c MODE SAME PASSING  T_CIECLEMNU  , &
+                                             T_CIENOM     , &
+                                             T_PECCLEMNU  , &
+                                             FACPT_A_REC  , &
+                                             FAFAR_DETAIL , &
+                                             MCREF_ADRESSE
+   END
+   ELSE WARNING 2735
+END
+
+
+PROCEDURE ENTRY
+BEGIN
+   DISPLAY FARMNTTPS OF FACPT_A_REC
+   DISPLAY FARMNTTVQ OF FACPT_A_REC
+   DISPLAY FARMNTNET OF FACPT_A_REC
+   DISPLAY FARMNTREC
+   DISPLAY D_SLD_A_REC
+   FOR FAFAR_DETAIL
+   BEGIN
+      PERFORM APPEND
+   END
+END
+
+
+BUILD
+@IF FORMAT
+xxxx                                          xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                             x
+************************************************************** Détail **************************************************************
+* Facture.......: xxxxxxxxxxxx                   Montant total.:  xxxxxxxxxxxxxx            Montant T.P.S.:      xxxxxxxxxxxxxx    *
+* Note descrip..: xxxxxxx                        Montant recu..:  xxxxxxxxxxxxxx            Montant T.V.Q.:      xxxxxxxxxxxxxx    *
+*                                                Solde à rec...:  xxxxxxxxxxxxxx                                                   *
+************************************************************************************************************************************
+* Séquence Typ Prod Élém #Prix Projet  SSpro Immobilis.  Imp Unité    Compte      Qté fac    TF TP       Prix           Montant    *
+* xxxxxxx   x  xxx  xxxx   x  xxxxxxxx  xxx xxxxxxxxxxxx xxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxxxxxxx xxxxxxxxxxxxxx *
+* Description : xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx TPS: xxxxxxxxxxxxxx TVQ: xxxxxxxxxxxxxx Esc: xxxx xxxxxxxxxxxxxx*
+*                                                                                                                                  *
+* xxxxxxx   x  xxx  xxxx   x  xxxxxxxx  xxx xxxxxxxxxxxx xxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx  xx xx  xxxxxxxxxxxxxx xxxxxxxxxxxxxx *
+* Description : xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx TPS: xxxxxxxxxxxxxx TVQ: xxxxxxxxxxxxxx Esc: xxxx xxxxxxxxxxxxxx*
+*                                                                                                                                  *
+* xxxxxxx   x  xxx  xxxx   x  xxxxxxxx  xxx xxxxxxxxxxxx xxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx  xx xx  xxxxxxxxxxxxxx xxxxxxxxxxxxxx *
+* Description : xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx TPS: xxxxxxxxxxxxxx TVQ: xxxxxxxxxxxxxx Esc: xxxx xxxxxxxxxxxxxx*
+*                                                                                                                                  *
+* xxxxxxx   x  xxx  xxxx   x  xxxxxxxx  xxx xxxxxxxxxxxx xxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx  xx xx  xxxxxxxxxxxxxx xxxxxxxxxxxxxx *
+* Description : xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx TPS: xxxxxxxxxxxxxx TVQ: xxxxxxxxxxxxxx Esc: xxxx xxxxxxxxxxxxxx*
+*                                                                                                                                  *
+* xxxxxxx   x  xxx  xxxx   x  xxxxxxxx  xxx xxxxxxxxxxxx xxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx  xx xx  xxxxxxxxxxxxxx xxxxxxxxxxxxxx *
+* Description : xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx TPS: xxxxxxxxxxxxxx TVQ: xxxxxxxxxxxxxx Esc: xxxx xxxxxxxxxxxxxx*
+************************************************************************************************************************************
+@ENDIF

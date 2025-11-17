@@ -1,0 +1,1008 @@
+;/T/ Journalisation des  critures de journal
+;
+;/M/ Martin Perron / Modifier la MAJ de T_HISCLE_ANN avec T_HISCLE_TMP
+;
+;    Date de modif..: 1 d\351cembre 1999
+;
+;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur...: Micheline B langer
+;    Date Cr ation.: 29-Juillet-1992
+;
+;    Description...:
+;
+;    Param tres....: Compagnie     1 fois  Compagnie du menu
+;                    Periode CTB   1 fois
+;                    No Lot        n fois
+;
+;    Trigger.......: T_ECJ
+;
+;    G n ral.......: Nous avons choisi de mettre a jour les fichiers au fur et
+;                    a mesure du traitement (exemple lot, transaction, etc...)
+;                    plutot que d'attendre d'avoir tout valider et d'ensuite
+;                    tout mettre a jour.
+;                    Ceci est possible d  a STARBASE et nous permet de
+;                    diminuer consid rablement les lectures/ecritures.
+;                    Si un 'TERMINATE REQUEST' est execut , alors un 'ROLLBACK'
+;                    de toutes les transactions sera effectu .
+;
+;    Note..........: Type d' critures trait s:
+;                       "RG"  ---> R guliere
+;                       "DP"  ---> D pense pay es d'avance
+;                       "RC"  ---> R currente
+;                       "RV"  ---> Renvers es - origine
+;                       "RS"  ---> Renvers es - semi-automatique
+;                       "RF"  ---> Renvers es - destination
+;                       "SA"  ---> Semi-automatique
+;
+;    Particularit .: Une bonne partie du programme se retrouve dans un
+;                    use g r ral a toutes les journalisations soit :
+;                      US900.QTS.
+;
+;-------------------------------------------------------------------------------
+;/V/ 3.00.02    Guy Chabot 12-mai-1994 (219).
+;-------------------------------------------------------------------------------
+;
+;/M/ Francois Richard, 1999-08-12
+;
+;    Ajustement pour le changement de siècle
+;
+
+USE ussetqts NOLIST   ; permet de faire les SET PROCESS NOLIMIT....
+
+RUN gl700t
+;
+; Pour arr ter la proc dure en cas d'erreur
+;
+GLOBAL TEMPORARY G_ERREUR       CHARACTER SIZE 5
+;
+; Pour toujours avoir la p riode   journaliser.
+;
+GLOBAL TEMPORARY G_PECCLE       CHARACTER SIZE 4
+;
+; Pour garder la date et l'heure du jour tout le long du traitement.
+;
+GLOBAL TEMPORARY G_DATJOU       DATE
+GLOBAL TEMPORARY G_HREJOU       INTEGER SIZE 4
+;
+; Pour avoir l'annee selon date du jour
+;
+GLOBAL TEMPORARY G_ANN          CHARACTER SIZE 2
+;
+; Identifie le module.
+GLOBAL TEMPORARY G_CODMOD       CHARACTER SIZE 2
+;
+; Parametres de holding pour nombre de p riode ctb.
+;
+GLOBAL TEMPORARY G_HLDNBRPERCTB INTEGER SIZE 2
+;
+; Parametres de holding pour relation de compte.
+;
+GLOBAL TEMPORARY G_HLDCHTCPTRLT CHARACTER SIZE 1
+;
+; Param tres du holding, si notion de projet Oui/Non.
+;
+GLOBAL TEMPORARY G_HLDNTNPRO    CHARACTER SIZE 1
+;
+; Parametre de holding - devise du grand-livre.
+;
+GLOBAL TEMPORARY G_DEVCLE       CHARACTER SIZE 3
+;
+; Parametre pour le mode de numerotation des  critures
+;
+GLOBAL TEMPORARY G_HLDECRAUT    CHARACTER SIZE 1
+GLOBAL TEMPORARY G_HLDECRCOD    CHARACTER SIZE 1
+;
+; Pour savoir s'il y a eu une convertion de montant.
+;
+GLOBAL TEMPORARY G_FLGDEV       CHARACTER SIZE 1
+
+
+;-------------------------------------------------------------------------------
+;
+; Affectation des variables globales selon les param tres du holding.
+;
+;
+REQUEST TRAITE_GENERAL
+
+ACCESS MCHOLDING
+
+SELECT IF CIENMC OF MCHOLDING = "1"
+
+ITEM G_CODMOD       = "GL"
+ITEM G_HLDNBRPERCTB = HLDNBRPERCTB OF MCHOLDING
+ITEM G_HLDCHTCPTRLT = HLDCHTCPTRLT OF MCHOLDING
+ITEM G_HLDNTNPRO    = HLDNTNPRO    OF MCHOLDING
+ITEM G_DEVCLE       = DEVCLE       OF MCHOLDING
+ITEM G_HLDECRAUT    = HLDECRAUT    OF MCHOLDING
+ITEM G_HLDECRCOD    = HLDECRCOD    OF MCHOLDING
+ITEM G_FLGDEV       = "0"
+
+ITEM G_DATJOU RESET AT INITIAL TO SYSDATE
+ITEM G_HREJOU RESET AT INITIAL TO SYSTIME / 10000
+ITEM G_ANN    RESET AT INITIAL TO ASCII(MOD(FLOOR(G_DATJOU / 10000), 100),2)
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; S lection des lots selon les parametres saisies par l'usager.
+;
+; On s lectionne que les lots autoris s   la journalisation
+; et pas encore journalis s.
+;
+; On met a jour la date et l'heure de journalisation dans le lot.
+;
+;
+REQUEST SELECTION_ET_MAJ_DU_LOT
+
+ACCESS GLLOT
+
+CHOOSE LGLCIECLE PARM , &
+       PECCLE    PARM , &
+       LGLCLE    PARM
+
+SELECT GLLOT IF LGLDATJOU OF GLLOT = 0 AND &  ; ne doit pas etre journalis
+                LGLATRJOU OF GLLOT = "1"      ; doit  tre autoris  a journalis
+
+
+;
+; Affectation de la p riode trait e.
+;
+ITEM G_PECCLE = PECCLE OF GLLOT
+
+;
+; On conserve les lots   traiter. Ce sous-fichier est commun   tous
+; les programmes de journalisation de tous les modules.
+;
+SUBFILE WGL700LO &
+  INCLUDE LGLCIECLE OF GLLOT , &
+          PECCLE    OF GLLOT , &
+          LGLCLE    OF GLLOT , &
+          LGLTYPECR OF GLLOT , &
+          LGLDSC    OF GLLOT
+
+;
+; Mise   jour du lot.
+;
+OUTPUT GLLOT UPDATE
+  ITEM LGLDATJOU OF GLLOT FINAL G_DATJOU
+  ITEM LGLHREJOU OF GLLOT FINAL G_HREJOU
+  ITEM LGLUSRJOU OF GLLOT FINAL LOGONID
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; S lection et mise   jour des  critures.
+;
+; On valide que les transactions balancent.
+;
+; On g n re un num ro d'historique pour chaque  criture de journal.
+;
+; On met   jour la date de journalisation, l'heure de journalisation et le
+; num ro d'historique dans l' criture de journal.
+;
+;
+REQUEST SELECTION_ET_MAJ_ECRITURE_JG
+
+ACCESS *WGL700LO &
+  LINK LGLCIECLE OF WGL700LO, &
+       LGLCLE    OF WGL700LO, &
+       PECCLE    OF WGL700LO  &
+    TO ECJCIECLE, &
+       LGLCLE, &
+       PECCLE OF GLECRITURE_JG &
+
+  LINK ECJCIECLE OF GLECRITURE_JG, &
+       ECJCLENUM OF GLECRITURE_JG, &
+       ECJCLESEQ OF GLECRITURE_JG  &
+    TO ECJCIECLE, &
+       ECJCLENUM, &
+       ECJCLESEQ OF GLIMPUTATION &
+
+  LINK "1", G_ANN &
+    TO CIENMC, HSSCLEANN OF MCHIS_SEQ OPTIONAL
+
+;
+; Variables utilis es pour la gestion des transferts d'unit  administrative.
+;
+TEMPORARY T_MNTDBT1 FLOAT SIZE 8
+TEMPORARY T_MNTCRT1 FLOAT SIZE 8
+TEMPORARY T_MNTDBT2 FLOAT SIZE 8
+TEMPORARY T_MNTCRT2 FLOAT SIZE 8
+
+TEMPORARY T_MESERR   CHARACTER SIZE 80 ; Pour les erreurs.
+TEMPORARY T_PECCLE   CHARACTER SIZE 4  ; pour la p riode ctb des transactions
+TEMPORARY T_PECCLERS CHARACTER SIZE 4  ; P riode pour nouvelle transaction 'RS'
+TEMPORARY T_ANNRS    CHARACTER SIZE 2  ; Pour l'ann e de la nouvelles transaction
+;
+; Pour le g n ration des num ro d'historique.
+;
+TEMPORARY T_HISCLE INTEGER UNSIGNED SIZE 4
+TEMPORARY T_HISCLE_SIE INTEGER UNSIGNED SIZE 4
+TEMPORARY T_NUMSEQ INTEGER UNSIGNED SIZE 4
+TEMPORARY T_HISCLE_TMP CHARACTER SIZE 9
+
+TEMPORARY T_NUL1      CHARACTER SIZE  1 ; pour affecter des valeurs a blanc
+TEMPORARY T_NUL4      CHARACTER SIZE  4 ; pour affecter des valeurs a blanc
+TEMPORARY T_NUL6      CHARACTER SIZE  6 ; pour affecter des valeurs a blanc
+TEMPORARY T_HISNUMDOC CHARACTER SIZE 15 ; Num ro de document.
+TEMPORARY T_HECUNAINT CHARACTER SIZE  8 ; Unit  adm. d'inter-unit .
+TEMPORARY T_HECFLGINT CHARACTER SIZE  1 ; Pour les inter-cie.
+TEMPORARY T_HISCLE1    CHARACTER SIZE 4  ; Cl  d'acc s 1, de l'histo.
+TEMPORARY T_HISCLE2    CHARACTER SIZE 15 ; Cl  d'acc s 2, de l'histo.
+TEMPORARY T_HISCLE3    CHARACTER SIZE 15 ; Cl  d'acc s 3, de l'histo.
+TEMPORARY T_MNTGL      FLOAT     SIZE 8  ; Montant de l'imputation.
+
+; Ajustement pour le changement de siècle
+DEFINE D_ECJCLENUM_TRI CHARACTER SIZE 10 = "1" + ECJCLENUM OF GLECRITURE_JG &
+    IF ECJCLENUM OF GLECRITURE_JG[1:1] < "8" &
+    ELSE "0" + ECJCLENUM OF GLECRITURE_JG
+
+SORT ON ECJCIECLE OF GLECRITURE_JG &
+     ON D_ECJCLENUM_TRI            &
+     ON ECJCLESEQ OF GLECRITURE_JG
+
+;
+; Sommation des d bit/cr dit pour les deux unit s adm., sert au transfert
+; des unit s adm.
+;
+ITEM T_MNTDBT1 SUB ECIMNT OF GLIMPUTATION &
+                     IF ECICODDC OF GLIMPUTATION = "D" AND &
+                        UNACLE   OF GLIMPUTATION = ECJUNAINT1 OF GLECRITURE_JG &
+               RESET AT ECJCLESEQ
+
+ITEM T_MNTCRT1 SUB ECIMNT OF GLIMPUTATION &
+                     IF ECICODDC OF GLIMPUTATION = "C" AND &
+                        UNACLE   OF GLIMPUTATION = ECJUNAINT1 OF GLECRITURE_JG &
+               RESET AT ECJCLESEQ
+
+ITEM T_MNTDBT2 SUB ECIMNT OF GLIMPUTATION &
+                     IF ECICODDC OF GLIMPUTATION = "D" AND &
+                        UNACLE   OF GLIMPUTATION = ECJUNAINT2 OF GLECRITURE_JG &
+               RESET AT ECJCLESEQ
+
+ITEM T_MNTCRT2 SUB ECIMNT OF GLIMPUTATION &
+                     IF ECICODDC OF GLIMPUTATION = "C" AND &
+                        UNACLE   OF GLIMPUTATION = ECJUNAINT2 OF GLECRITURE_JG &
+               RESET AT ECJCLESEQ
+
+;
+; Affectation de la p riode ctb de la nouvelle  criture
+;
+ITEM T_PECCLE = ECJPECDES OF GLECRITURE_JG &
+                  IF   ECJTYPECR OF GLECRITURE_JG = "RV" &
+                    OR ECJTYPECR OF GLECRITURE_JG = "RS" &
+           ELSE ASCII( NCONVERT(PECCLE OF GLECRITURE_JG) + 1 , 4 ) &
+                  IF G_HLDNBRPERCTB > NCONVERT(PECCLE OF GLECRITURE_JG[3:2]) &
+                ; Ajustement pour le changement de siècle
+           ELSE ASCII(NCONVERT(PECCLE OF GLECRITURE_JG[1:2]) + 1, 3)[2:2] + "01"
+;
+; Affectation de la p riode ctb de la nouvelle  criture 'RS' pour les types 'RS'
+;
+ITEM T_PECCLERS = "    " &
+               IF ECJTYPECR OF GLECRITURE_JG <> "RS" &
+             ELSE ASCII( NCONVERT(PECCLE OF GLECRITURE_JG) + 1 , 4 ) &
+               IF G_HLDNBRPERCTB > NCONVERT(PECCLE OF GLECRITURE_JG[3:2]) &
+             ELSE ASCII(NCONVERT(PECCLE OF GLECRITURE_JG[1:2]) + 1, 3)[2:2] + "01"
+
+ITEM T_ANNRS = T_PECCLERS[1:2]
+
+ITEM T_MESERR = &
+@IF FRANCAIS
+  "Ventilation hors balance           ; lot: " + LGLCLE OF GLECRITURE_JG + &
+                                " , criture: " + ECJCLENUM OF GLECRITURE_JG + &
+                                         " - " + ECJCLESEQ OF GLECRITURE_JG &
+@ELSE
+  "Breakdown out of balance           ; batch: " + LGLCLE OF GLECRITURE_JG + &
+                                     " ,entry: " + ECJCLENUM OF GLECRITURE_JG + &
+                                           " - " + ECJCLESEQ OF GLECRITURE_JG &
+@ENDIF
+    IF ECJMNTDBT OF GLECRITURE_JG <> ECJMNTCRT OF GLECRITURE_JG &
+  ELSE &
+@IF FRANCAIS
+  "Transfert d'unit  adm. hors balance; lot: " + LGLCLE OF GLECRITURE_JG + &
+                                " , criture: " + ECJCLENUM OF GLECRITURE_JG + &
+                                         " - " + ECJCLESEQ OF GLECRITURE_JG &
+@ELSE
+  "Transfer adm. unit out of balance  ; batch: " + LGLCLE OF GLECRITURE_JG + &
+                                     " ,entry: " + ECJCLENUM OF GLECRITURE_JG + &
+                                           " - " + ECJCLESEQ OF GLECRITURE_JG &
+@ENDIF
+    IF ECJTRFUNA OF GLECRITURE_JG = "1" AND &
+       ( T_MNTDBT1 <> T_MNTCRT2 OR &
+         T_MNTDBT2 <> T_MNTCRT1 ) &
+  ELSE &
+@IF FRANCAIS
+  "Transfert d'unit  adm invalide     ; lot: " + LGLCLE OF GLECRITURE_JG + &
+                                " , criture: " + ECJCLENUM OF GLECRITURE_JG + &
+                                         " - " + ECJCLESEQ OF GLECRITURE_JG &
+@ELSE
+  "Invalid transfer of adm. unit      ; batch: " + LGLCLE OF GLECRITURE_JG + &
+                                     " ,entry: " + ECJCLENUM OF GLECRITURE_JG + &
+                                           " - " + ECJCLESEQ OF GLECRITURE_JG &
+@ENDIF
+    IF ECJTRFUNA OF GLECRITURE_JG = "1" AND &
+       UNACLE    OF GLIMPUTATION <> ECJUNAINT1 OF GLECRITURE_JG AND &
+       UNACLE    OF GLIMPUTATION <> ECJUNAINT2 OF GLECRITURE_JG &
+    AT ECJCLESEQ &
+
+  RESET AT ECJCLESEQ
+
+
+;
+; Affectation d'erreurs
+;
+ITEM G_ERREUR = "ARRET" IF T_MESERR <> "" AT ECJCLESEQ
+
+;
+; Affectation du num ro d'historique
+;
+; Ajustement pour le changement de siècle
+ITEM T_NUMSEQ INITIAL 0 & ; NCONVERT(G_ANN) * 10000000 &
+                        IF NOT RECORD MCHIS_SEQ EXIST &
+                 ELSE HSSNUMSEQ OF MCHIS_SEQ
+
+ITEM T_HISCLE RESET AT INITIAL TO (T_NUMSEQ + 1)
+
+ITEM T_HISCLE COUNT AT ECJCLESEQ OF GLECRITURE_JG
+
+ITEM T_HISCLE_TMP = ASCII(T_HISCLE,9)
+ITEM T_HISCLE_SIE = NCONVERT((G_ANN + T_HISCLE_TMP[3:7]))
+
+; Ajustement pour le changement de siècle
+;ITEM T_HISCLE_SIE = NCONVERT(G_ANN + ASCII(T_HISCLE,7))
+
+
+ITEM T_HISNUMDOC = ECJCLENUM OF GLECRITURE_JG &
+                     IF ECJCLESEQ OF GLECRITURE_JG = "" &
+              ELSE ECJCLENUM OF GLECRITURE_JG + "-" + &
+                   ECJCLESEQ OF GLECRITURE_JG
+
+
+;
+; Assignation de l'unit  adm. d'inter-unit .
+; Si ce n'est pas une  criture de transfert d'unit , alors l'unit  d'inter
+; est la m me que celle de l'imputation.
+; Dans la cas d'une  criture d'inter, on assigne cette unit  adm selon
+; l'unit  adm. de l'imputation.
+;
+ITEM T_HECUNAINT = UNACLE OF GLIMPUTATION &
+                     IF ECJTRFUNA OF GLECRITURE_JG = "0" &
+              ELSE ECJUNAINT1 OF GLECRITURE_JG &
+                     IF UNACLE OF GLIMPUTATION = ECJUNAINT2 OF GLECRITURE_JG &
+              ELSE ECJUNAINT2 OF GLECRITURE_JG
+
+;
+; Identifie si l' criture est de type, inter-unit  administrative, inter-
+; compagnie ou une  criture standard.
+;
+ITEM T_HECFLGINT = "1" IF    ECJTRFUNA    OF GLECRITURE_JG = "1" &
+                          OR ECJFLGINTCIE OF GLECRITURE_JG = "1" &
+              ELSE "0"
+
+;
+; On assigne la cl  de l' criture de journal   l'historique, l' criture de
+; journal a trois segments dans sa cl .
+;
+ITEM T_HISCLE1 = ECJCIECLE OF GLECRITURE_JG
+ITEM T_HISCLE2 = ECJCLENUM OF GLECRITURE_JG
+ITEM T_HISCLE3 = ECJCLESEQ OF GLECRITURE_JG
+
+;
+; Sous-fichier des erreurs
+;
+SUBFILE WUS900ER KEEP &
+                 AT ECJCLESEQ &
+                 IF T_MESERR <> "" &
+  INCLUDE ECJCIECLE OF GLECRITURE_JG ALIAS CIECLE, &
+          G_PECCLE                   ALIAS PECCLE, &
+          T_MESERR
+
+;
+; Le sous fichier suivant sert   la g n ration des  critures r p titives.
+;
+SUBFILE WGL700TR IF ECJFLGANN OF GLECRITURE_JG = "0" &
+  INCLUDE &
+    ECJCIECLE    OF GLECRITURE_JG, &
+    ECJCLENUM    OF GLECRITURE_JG, &
+    ECJCLESEQ    OF GLECRITURE_JG, &
+    PECCLE       OF GLECRITURE_JG, &
+    LGLCLE       OF GLECRITURE_JG, &
+    ECJFLGINTCIE OF GLECRITURE_JG, &
+    ECJTYPECR    OF GLECRITURE_JG, &
+    ECJDAT       OF GLECRITURE_JG, &
+    ECJDSC1      OF GLECRITURE_JG, &
+    ECJDSC2      OF GLECRITURE_JG, &
+    ECJDSC3      OF GLECRITURE_JG, &
+    ECJCIEINT    OF GLECRITURE_JG, &
+    ECJTRFUNA    OF GLECRITURE_JG, &
+    ECJNBRPERINI OF GLECRITURE_JG, &
+    ECJNBRPERRES OF GLECRITURE_JG, &
+    ECJPECDES    OF GLECRITURE_JG, &
+    ECJMNTDBT    OF GLECRITURE_JG, &
+    ECJMNTCRT    OF GLECRITURE_JG, &
+    ECJNUMLIG    OF GLECRITURE_JG, &
+    ECJUSRCRE    OF GLECRITURE_JG, &
+    ECJUNAINT1   OF GLECRITURE_JG, &
+    ECJUNAINT2   OF GLECRITURE_JG, &
+    ECJUNANBR1   OF GLECRITURE_JG, &
+    ECJUNANBR2   OF GLECRITURE_JG, &
+    ECINUMLIG    OF GLIMPUTATION, &
+    PRJCLE       OF GLIMPUTATION, &
+    PRACLE       OF GLIMPUTATION, &
+    IMMCLE       OF GLIMPUTATION, &
+    CPTCLE       OF GLIMPUTATION, &
+    CIECLE       OF GLIMPUTATION, &
+    UNACLE       OF GLIMPUTATION, &
+    ECICODDC     OF GLIMPUTATION, &
+    ECIMNT       OF GLIMPUTATION, &
+    LGLTYPECR OF WGL700LO, &
+    LGLDSC    OF WGL700LO, &
+    T_PECCLE, &
+    T_PECCLERS, &
+    T_ANNRS
+
+;
+; Montant de l'imputation, on utilise une variable temporaire pour avoir
+; une variable de type FLOAT dans la d finition du sous-fichier, si on
+; met directement la variable ECIMNT dans le sous-fichier, alors la
+; d finition sera G_FLOAT et cela cause un BUG entre les programmes de
+; journalisation.
+;
+ITEM T_MNTGL = ECIMNT OF GLIMPUTATION
+
+;
+; Sous fichier commun   toutes les journalisations, sert   mettre   jour la
+; table MCHIS_ECR.
+;
+SUBFILE WUS900HE KEEP &
+                 IF ECIMNT OF GLIMPUTATION <> 0 &
+  INCLUDE T_HISCLE_SIE                 ALIAS HISCLE      , &
+          ECJCIECLE   OF GLECRITURE_JG ALIAS HISCIECLE   , &
+          CPTCLE      OF GLIMPUTATION                    , &
+          ECJCIEINT   OF GLECRITURE_JG ALIAS HECCIEINT   , &
+          T_HECUNAINT                  ALIAS HECUNAINT   , &
+          CIECLE      OF GLIMPUTATION                    , &
+          UNACLE      OF GLIMPUTATION                    , &
+          PRJCLE      OF GLIMPUTATION                    , &
+          PRACLE      OF GLIMPUTATION                    , &
+          IMMCLE      OF GLIMPUTATION                    , &
+          PECCLE      OF GLECRITURE_JG                   , &
+          T_NUL6                       ALIAS HECNUMDOC2  , &
+          ECICODDC    OF GLIMPUTATION  ALIAS T_CODDC     , &
+          T_MNTGL                                        , &
+          T_MNTGL                      ALIAS T_MNTORI    , &
+          T_HECFLGINT                  ALIAS HECFLGINT   , &
+          G_DEVCLE                     ALIAS DEVCLE      , &
+          G_CODMOD                     ALIAS HISCODMOD   , &
+          ECJTYPECR   OF GLECRITURE_JG ALIAS HISTYPECR   , &
+          LGLCLE      OF GLECRITURE_JG ALIAS HISNUMLOT
+
+
+;
+;
+; Sous fichier commun   toutes les journalisations, sert   mettre   jour la
+; table MCHISTO.
+;
+;
+SUBFILE WUS900H AT ECJCLESEQ &
+  INCLUDE T_HISCLE_SIE               ALIAS HISCLE    , &
+          ECJCIECLE OF GLECRITURE_JG ALIAS HISCIECLE , &
+          T_NUL4                     ALIAS REFCIECLE , &
+          T_NUL1                     ALIAS REFCLETYP , &
+          T_NUL6                     ALIAS REFCLENUM , &
+          T_HISNUMDOC                ALIAS HISNUMDOC , &
+          PECCLE OF GLECRITURE_JG                    , &
+          LGLCLE OF GLECRITURE_JG    ALIAS HISNUMLOT , &
+          ECJDAT OF GLECRITURE_JG    ALIAS HISDAT    , &
+          G_DATJOU                   ALIAS HISDATJOU , &
+          ECJTYPECR OF GLECRITURE_JG ALIAS HISTYPECR , &
+          ECJDSC1   OF GLECRITURE_JG ALIAS HISDSCGEN , &
+          ECJDSC2   OF GLECRITURE_JG ALIAS HISDSCSAI , &
+          ECJDSC3   OF GLECRITURE_JG ALIAS HISDSCSAI2, &
+          ECJUSRCRE OF GLECRITURE_JG ALIAS HISUSRCRE , &
+          G_DEVCLE                   ALIAS DEVCLE    , &
+          T_HISCLE1                  ALIAS HISCLE1   , &
+          T_HISCLE2                  ALIAS HISCLE2   , &
+          T_HISCLE3                  ALIAS HISCLE3
+
+
+
+;
+; Mise   jour des  critures trait es.
+;
+OUTPUT GLECRITURE_JG UPDATE &
+                     AT ECJCLESEQ OF GLECRITURE_JG
+  ITEM ECJDATJOU OF GLECRITURE_JG FINAL G_DATJOU
+  ITEM ECJHREJOU OF GLECRITURE_JG FINAL G_HREJOU
+  ITEM HISCLE    OF GLECRITURE_JG FINAL T_HISCLE_SIE
+
+;
+; Mise   jour du fichier des num ros d'historique.
+;
+OUTPUT MCHIS_SEQ ADD UPDATE &
+                 AT FINAL   &
+                 NOITEM
+  ITEM CIENMC    OF MCHIS_SEQ INITIAL "1"
+  ITEM HSSCLEANN OF MCHIS_SEQ INITIAL G_ANN
+  ITEM HSSNUMSEQ OF MCHIS_SEQ FINAL   (T_HISCLE - 1)
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Il faut compl ter les  critures inter-compagnies, c-a-d qu'il faut balancer
+; chaque compagnie avec la compagnie d'inter de l' criture. Pour chaque
+; compagnie on ajoute une ligne d'imputation 'avance' et 'd e'.
+;
+;
+REQUEST GENERE_INTER_CIE
+
+ACCESS *WUS900HE &
+  LINK HECCIEINT OF WUS900HE &
+    TO CIECLE OF MCCOMPAGNIE ALIAS A_MCCIE_INTER &
+
+  LINK CIECLE OF WUS900HE &
+    TO CIECLE OF MCCOMPAGNIE ALIAS A_MCCIE_VENT
+
+
+SELECT WUS900HE IF     HECCIEINT OF WUS900HE <> CIECLE OF WUS900HE
+
+
+TEMPORARY T_CPTINT1 CHARACTER  SIZE 6  ; pour le compte d'avance
+TEMPORARY T_CPTINT2 CHARACTER  SIZE 6  ; pour le compte de du
+TEMPORARY T_CODDC1  CHARACTER  SIZE 1  ; code d/c pour l'avance
+TEMPORARY T_CODDC2  CHARACTER  SIZE 1  ; code d/c pour le du
+
+
+ITEM T_CPTINT1 = CIECPTDUE OF A_MCCIE_INTER    IF T_CODDC = "D" &
+            ELSE CIECPTAVA OF A_MCCIE_INTER
+
+ITEM T_CPTINT2 = CIECPTAVA OF A_MCCIE_VENT     IF T_CODDC = "D" &
+            ELSE CIECPTDUE OF A_MCCIE_VENT
+
+ITEM T_CODDC1  = "C" IF T_CODDC OF WUS900HE = "D" &
+            ELSE "D"
+
+ITEM T_CODDC2  = "D" IF T_CODDC OF WUS900HE = "D" &
+            ELSE "C"
+
+
+;
+; ajout de la ventilation d'avance
+;
+OUTPUT *WUS900HE ALIAS A_WUS900HE_INTER1 ADD
+  ITEM HISCLE     OF A_WUS900HE_INTER1 FINAL HISCLE     OF WUS900HE
+  ITEM HISCIECLE  OF A_WUS900HE_INTER1 FINAL HISCIECLE  OF WUS900HE
+  ITEM CPTCLE     OF A_WUS900HE_INTER1 FINAL T_CPTINT1
+  ITEM HECCIEINT  OF A_WUS900HE_INTER1 FINAL HECCIEINT  OF WUS900HE
+  ITEM HECUNAINT  OF A_WUS900HE_INTER1 FINAL CIEUNABIL  OF A_MCCIE_INTER
+  ITEM CIECLE     OF A_WUS900HE_INTER1 FINAL CIECLE     OF WUS900HE
+  ITEM UNACLE     OF A_WUS900HE_INTER1 FINAL CIEUNABIL  OF A_MCCIE_VENT
+  ITEM PRJCLE     OF A_WUS900HE_INTER1 FINAL " "
+  ITEM PRACLE     OF A_WUS900HE_INTER1 FINAL " "
+  ITEM IMMCLE     OF A_WUS900HE_INTER1 FINAL " "
+  ITEM PECCLE     OF A_WUS900HE_INTER1 FINAL PECCLE     OF WUS900HE
+  ITEM HECNUMDOC2 OF A_WUS900HE_INTER1 FINAL HECNUMDOC2 OF WUS900HE
+  ITEM T_CODDC    OF A_WUS900HE_INTER1 FINAL T_CODDC1
+  ITEM T_MNTGL    OF A_WUS900HE_INTER1 FINAL T_MNTGL    OF WUS900HE
+  ITEM T_MNTORI   OF A_WUS900HE_INTER1 FINAL T_MNTORI   OF WUS900HE
+  ITEM HECFLGINT  OF A_WUS900HE_INTER1 FINAL "1"
+  ITEM DEVCLE     OF A_WUS900HE_INTER1 FINAL DEVCLE     OF WUS900HE
+  ITEM HISCODMOD  OF A_WUS900HE_INTER1 FINAL HISCODMOD OF WUS900HE
+  ITEM HISTYPECR  OF A_WUS900HE_INTER1 FINAL HISTYPECR OF WUS900HE
+  ITEM HISNUMLOT  OF A_WUS900HE_INTER1 FINAL HISNUMLOT OF WUS900HE
+
+;
+; ajout de la ventilation de d .
+;
+OUTPUT *WUS900HE ALIAS A_WUS900HE_INTER2 ADD
+  ITEM HISCLE     OF A_WUS900HE_INTER2 FINAL HISCLE     OF WUS900HE
+  ITEM HISCIECLE  OF A_WUS900HE_INTER2 FINAL HISCIECLE  OF WUS900HE
+  ITEM CPTCLE     OF A_WUS900HE_INTER2 FINAL T_CPTINT2
+  ITEM HECCIEINT  OF A_WUS900HE_INTER2 FINAL CIECLE     OF WUS900HE
+  ITEM HECUNAINT  OF A_WUS900HE_INTER2 FINAL CIEUNABIL  OF A_MCCIE_VENT
+  ITEM CIECLE     OF A_WUS900HE_INTER2 FINAL HECCIEINT  OF WUS900HE
+  ITEM UNACLE     OF A_WUS900HE_INTER2 FINAL CIEUNABIL  OF A_MCCIE_INTER
+  ITEM PRJCLE     OF A_WUS900HE_INTER2 FINAL " "
+  ITEM PRACLE     OF A_WUS900HE_INTER2 FINAL " "
+  ITEM IMMCLE     OF A_WUS900HE_INTER2 FINAL " "
+  ITEM PECCLE     OF A_WUS900HE_INTER2 FINAL PECCLE     OF WUS900HE
+  ITEM HECNUMDOC2 OF A_WUS900HE_INTER2 FINAL HECNUMDOC2 OF WUS900HE
+  ITEM T_CODDC    OF A_WUS900HE_INTER2 FINAL T_CODDC2
+  ITEM T_MNTGL    OF A_WUS900HE_INTER2 FINAL T_MNTGL    OF WUS900HE
+  ITEM T_MNTORI   OF A_WUS900HE_INTER2 FINAL T_MNTORI   OF WUS900HE
+  ITEM HECFLGINT  OF A_WUS900HE_INTER2 FINAL "1"
+  ITEM DEVCLE     OF A_WUS900HE_INTER2 FINAL DEVCLE     OF WUS900HE
+  ITEM HISCODMOD  OF A_WUS900HE_INTER2 FINAL HISCODMOD OF WUS900HE
+  ITEM HISTYPECR  OF A_WUS900HE_INTER2 FINAL HISTYPECR OF WUS900HE
+  ITEM HISNUMLOT  OF A_WUS900HE_INTER2 FINAL HISNUMLOT OF WUS900HE
+
+
+;-------------------------------------------------------------------------------
+;
+; TRAITEMENTS GENERAUX A TOUTES LES JOURNALISATION
+;
+
+USE us-900t ; NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; G n ration des nouvelles transactions d'ecriture de journal.
+;
+;===============================================================================
+;  transaction origine                   |      transaction g n ree
+;===============================================================================
+; no.    no. type per. per. code montant | no.    no. type per. code montant
+;trans. seq. ecr. ctb dest. D/C          |trans. seq. ecr. ctb   D/C
+;                                        |
+;000024  01   RG  9208   0   D    100.00 | ON NE GENERE RIEN POUR LES TYPE 'RG'
+;000025  01   RF  9208   0   D    100.00 | ON NE GENERE RIEN POUR LES TYPE 'RF'
+;------------------------------------------------------------------------------
+;000026  01   RV  9208 9211  D    100.00 |000026  02   RF  9211   C    100.00
+;000027  01   DP  9208   0   D    100.00 |000027  02   DP  9209   D    100.00
+;000028  01   RC  9208   0   D    100.00 |000028  02   RC  9209   D    100.00
+;000029  01   SA  9208   0   D    100.00 |000029  02   SA  9209   D      0.00
+;------------------------------------------------------------------------------
+;000030  01   RS  9208 9211  D    100.00 |000031  --   RS  9209   D      0.00
+; |                                      |000030  02   RF  9211   C    100.00
+; |-> Note pour les types 'RS' :
+;     . Lorsqu'il s'agit d'une  criture de type 'RS', il faut g n rer
+;       deux  critures; soient une autre 'RS' et une 'RF'.
+;     . La nouvelle 'RS' portera un nouveau num ro d'ecriture.
+;     . La nouvelle 'RS' n'est pas g n r e dans le 'request' GENERE_TRANSACTION
+;       mais plutot dans le 'request' GENERE_TRANSACTION_RS.
+;       Cela a cause de la nouvelle p riode ctb qui n'est pas la m me, et
+;       de la g n ration d'un nouveau num ro d' criture.
+;
+;
+REQUEST GENERE_ECRITURE
+
+ACCESS *WGL700TR &
+  LINK ECJCIECLE OF WGL700TR, &
+       T_PECCLE  OF WGL700TR &
+    TO LGSCIECLE, &
+       PECCLE OF GLLGL_SEQ OPTIONAL
+
+SELECT WGL700TR IF ECJTYPECR OF WGL700TR <> "RG" AND &
+                   ECJTYPECR OF WGL700TR <> "RF"
+
+SELECT IF (ECJTYPECR OF WGL700TR = "RV" OR &
+           ECJTYPECR OF WGL700TR = "RS") OR &
+
+          ((ECJTYPECR OF WGL700TR = "DP" OR &
+            ECJTYPECR OF WGL700TR = "RC") AND &
+           ECJNBRPERRES OF WGL700TR > 1 ) OR &
+
+          ECJTYPECR OF WGL700TR = "SA"
+
+
+TEMPORARY T_LGLCLE       INTEGER   SIZE 4
+
+; Ajustement pour le changement de siècle
+DEFINE D_T_PECCLE_SIE CHARACTER SIZE 5 = "1" + T_PECCLE OF WGL700TR &
+         IF T_PECCLE OF WGL700TR[1:1] < "8" &
+         ELSE "0" + T_PECCLE OF WGL700TR
+
+; Ajustement pour le changement de siècle
+DEFINE D_ECJCLENUM_TRI CHARACTER SIZE 10 = "1" + ECJCLENUM OF WGL700TR &
+   IF ECJCLENUM OF WGL700TR[1:1] < "8" &
+   ELSE "0" + ECJCLENUM OF WGL700TR
+
+SORT ON ECJCIECLE OF WGL700TR &
+     ON D_T_PECCLE_SIE  &
+     ON LGLCLE    OF WGL700TR &
+     ON D_ECJCLENUM_TRI &
+     ON ECJCLESEQ OF WGL700TR
+
+
+ITEM T_LGLCLE   COUNT AT LGLCLE &
+                  RESET AT D_T_PECCLE_SIE TO (LGSSEQ OF GLLGL_SEQ + 1)
+
+OUTPUT GLECRITURE_JG ADD &
+                     AT ECJCLESEQ &
+                     NOITEM
+  ITEM ECJCIECLE        OF GLECRITURE_JG INITIAL ECJCIECLE OF WGL700TR
+  ITEM ECJCLENUM        OF GLECRITURE_JG INITIAL ECJCLENUM OF WGL700TR
+  ITEM ECJCLESEQ        OF GLECRITURE_JG    =    &
+                                 ASCII(NCONVERT(ECJCLESEQ OF WGL700TR) + 1,2)
+  ITEM PECCLE           OF GLECRITURE_JG    =    T_PECCLE OF WGL700TR
+  ITEM LGLCLE           OF GLECRITURE_JG    =    ASCII(T_LGLCLE,4)
+  ITEM ECJFLGINTCIE     OF GLECRITURE_JG    =    ECJFLGINTCIE OF WGL700TR
+  ITEM ECJTYPECR        OF GLECRITURE_JG    =    "RF" &
+                                 IF   ECJTYPECR OF WGL700TR = "RV" &
+                                   OR ECJTYPECR OF WGL700TR = "RS" &
+                                            ELSE ECJTYPECR OF WGL700TR
+  ITEM ECJFLGANN        OF GLECRITURE_JG    =    "0"
+  ITEM ECJDAT           OF GLECRITURE_JG    =    G_DATJOU
+  ITEM ECJDATSTP        OF GLECRITURE_JG    =    G_DATJOU
+  ITEM ECJDATJOU        OF GLECRITURE_JG    =    0
+  ITEM ECJHREJOU        OF GLECRITURE_JG    =    0
+  ITEM ECJDSC1          OF GLECRITURE_JG INITIAL ECJDSC1      OF WGL700TR
+  ITEM ECJDSC2          OF GLECRITURE_JG INITIAL ECJDSC2      OF WGL700TR
+  ITEM ECJDSC3          OF GLECRITURE_JG INITIAL ECJDSC3      OF WGL700TR
+  ITEM ECJCIEINT        OF GLECRITURE_JG INITIAL ECJCIEINT    OF WGL700TR
+  ITEM ECJTRFUNA        OF GLECRITURE_JG INITIAL ECJTRFUNA    OF WGL700TR
+  ITEM ECJNBRPERINI     OF GLECRITURE_JG INITIAL ECJNBRPERINI OF WGL700TR
+  ITEM ECJNBRPERRES     OF GLECRITURE_JG    =    ECJNBRPERRES OF WGL700TR - 1 &
+                                 IF   ECJTYPECR OF WGL700TR = "DP" OR &
+                                      ECJTYPECR OF WGL700TR = "RC" &
+                                            ELSE ECJNBRPERRES OF WGL700TR
+  ITEM ECJPECDES        OF GLECRITURE_JG INITIAL ""
+  ITEM ECJMNTDBT        OF GLECRITURE_JG    =    0 &
+                                 IF   ECJTYPECR OF WGL700TR = "SA" &
+                                            ELSE ECJMNTCRT OF WGL700TR &
+                                 IF   ECJTYPECR OF WGL700TR = "RV" OR &
+                                      ECJTYPECR OF WGL700TR = "RS" &
+                                            ELSE ECJMNTDBT OF WGL700TR
+  ITEM ECJMNTCRT        OF GLECRITURE_JG    =    0 &
+                                 IF   ECJTYPECR OF WGL700TR = "SA" &
+                                            ELSE ECJMNTDBT OF WGL700TR &
+                                 IF   ECJTYPECR OF WGL700TR = "RV" OR &
+                                      ECJTYPECR OF WGL700TR = "RS" &
+                                            ELSE ECJMNTCRT OF WGL700TR
+  ITEM ECJNUMLIG        OF GLECRITURE_JG INITIAL ECJNUMLIG OF WGL700TR
+  ITEM HISCLE           OF GLECRITURE_JG    =    0
+  ITEM ECJUSRCRE        OF GLECRITURE_JG INITIAL ECJUSRCRE OF WGL700TR
+  ITEM ECJUNAINT1       OF GLECRITURE_JG INITIAL ECJUNAINT1 OF WGL700TR
+  ITEM ECJUNAINT2       OF GLECRITURE_JG INITIAL ECJUNAINT2 OF WGL700TR
+  ITEM ECJUNANBR1       OF GLECRITURE_JG INITIAL ECJUNANBR1 OF WGL700TR
+  ITEM ECJUNANBR2       OF GLECRITURE_JG INITIAL ECJUNANBR2 OF WGL700TR
+
+
+OUTPUT GLIMPUTATION ADD &
+                    NOITEM
+  ITEM ECJCIECLE        OF GLIMPUTATION INITIAL ECJCIECLE  OF WGL700TR
+  ITEM ECJCLENUM        OF GLIMPUTATION INITIAL ECJCLENUM  OF WGL700TR
+  ITEM ECJCLESEQ        OF GLIMPUTATION    =    &
+                                 ASCII(NCONVERT(ECJCLESEQ OF WGL700TR) + 1,2)
+  ITEM ECINUMLIG        OF GLIMPUTATION INITIAL ECINUMLIG  OF WGL700TR
+  ITEM PRJCLE           OF GLIMPUTATION INITIAL PRJCLE     OF WGL700TR
+  ITEM PRACLE           OF GLIMPUTATION INITIAL PRACLE     OF WGL700TR
+  ITEM IMMCLE           OF GLIMPUTATION INITIAL IMMCLE     OF WGL700TR
+  ITEM CPTCLE           OF GLIMPUTATION INITIAL CPTCLE     OF WGL700TR
+  ITEM CIECLE           OF GLIMPUTATION INITIAL CIECLE     OF WGL700TR
+  ITEM UNACLE           OF GLIMPUTATION INITIAL UNACLE     OF WGL700TR
+  ITEM ECICODDC         OF GLIMPUTATION = ECICODDC OF WGL700TR &
+                                 IF ECJTYPECR OF WGL700TR <> "RV" AND &
+                                    ECJTYPECR OF WGL700TR <> "RS" &
+                                     ELSE "D" &
+                                 IF ECICODDC OF WGL700TR = "C" &
+                                     ELSE "C"
+  ITEM ECIMNT           OF GLIMPUTATION = 0 &
+                                 IF ECJTYPECR OF WGL700TR = "SA" &
+                                     ELSE ECIMNT OF WGL700TR
+
+
+;
+; NOTE : Nous devons gerer les cumulatifs du lot ici, car le trigger T_ECJ
+;        ne fonctionnera pas dans ce cas-ci.
+;        Raison : Le lot sera cr er une fois que toutes les  critures de
+;                 journal se r f rant a ce lot seront cr  es.
+;                 Donc, dans le 'store' du trigger, on ne trouvera pas le lot.
+;
+OUTPUT GLLOT ADD &
+             AT LGLCLE &
+             NOITEM
+  ITEM LGLCIECLE    OF GLLOT    =    ECJCIECLE OF WGL700TR
+  ITEM LGLCLE       OF GLLOT    =    ASCII(T_LGLCLE,4)
+  ITEM PECCLE       OF GLLOT    =    T_PECCLE  OF WGL700TR
+  ITEM LGLTYPECR    OF GLLOT    =    LGLTYPECR OF WGL700TR
+  ITEM LGLUSR       OF GLLOT INITIAL LOGONID
+  ITEM LGLDSC       OF GLLOT INITIAL LGLDSC    OF WGL700TR
+  ITEM LGLDATVAL    OF GLLOT INITIAL 0
+  ITEM LGLDATJOU    OF GLLOT INITIAL 0
+  ITEM LGLHREJOU    OF GLLOT INITIAL 0
+  ITEM LGLUSRJOU    OF GLLOT INITIAL ""
+  ITEM LGLUSRATR    OF GLLOT INITIAL ""
+  ITEM LGLATRJOU    OF GLLOT INITIAL "0"
+  ITEM LGLNBRTRS    OF GLLOT COUNT AT ECJCLESEQ OF WGL700TR &
+                                   RESET AT LGLCLE
+  ITEM LGLCUMMNT    OF GLLOT SUBTOTAL ECJMNTDBT OF GLECRITURE_JG &
+                                   AT ECJCLESEQ OF WGL700TR &
+                                   RESET AT LGLCLE
+  ITEM LGLCUMMNTVER OF GLLOT FINAL LGLCUMMNT OF GLLOT
+  ITEM LGLNBRTRSVER OF GLLOT FINAL LGLNBRTRS OF GLLOT
+  ITEM LGLNBRTRSERR OF GLLOT INITIAL 0
+
+
+OUTPUT GLLGL_SEQ ADD UPDATE &
+                 AT D_T_PECCLE_SIE &
+                 NOITEM
+  ITEM LGSCIECLE OF GLLGL_SEQ INITIAL ECJCIECLE OF WGL700TR
+  ITEM PECCLE    OF GLLGL_SEQ INITIAL T_PECCLE  OF WGL700TR
+  ITEM LGSSEQ    OF GLLGL_SEQ    =    T_LGLCLE
+
+;-------------------------------------------------------------------------------
+;
+;
+; Ajour de l' criture de type RS.
+;
+;
+REQUEST GENERE_ECRITURE_RS
+
+ACCESS *WGL700TR &
+  LINK ECJCIECLE  OF WGL700TR, &
+       T_PECCLERS OF WGL700TR &
+    TO LGSCIECLE, &
+       PECCLE OF GLLGL_SEQ OPTIONAL &
+
+  LINK ECJCIECLE OF WGL700TR, &
+       T_ANNRS OF WGL700TR &
+    TO ECSCIECLE, &
+       ECSANN OF GLECJ_SEQ OPTIONAL
+
+SELECT WGL700TR IF ECJTYPECR OF WGL700TR = "RS"
+
+TEMPORARY T_ECSNUMSEQ    INTEGER          SIZE 4
+TEMPORARY T_NUMSEQ       INTEGER UNSIGNED SIZE 4
+TEMPORARY T_LGLCLE       INTEGER          SIZE 4
+
+; Ajustement pour le changement de siècle
+DEFINE D_T_PECCLEERS_SIE CHARACTER SIZE 5 = "1" + T_PECCLERS OF WGL700TR &
+         IF T_PECCLERS OF WGL700TR[1:1] < "8" &
+         ELSE "0" + T_PECCLERS OF WGL700TR
+
+; Ajustement pour le changement de siècle
+DEFINE D_ECJCLENUM_TRI CHARACTER SIZE 10 = "1" + ECJCLENUM OF WGL700TR &
+   IF ECJCLENUM OF WGL700TR[1:1] < "8" &
+   ELSE "0" + ECJCLENUM OF WGL700TR
+
+SORT ON ECJCIECLE  OF WGL700TR &
+     ON T_ANNRS    OF WGL700TR &
+     ON D_T_PECCLEERS_SIE      &
+     ON LGLCLE     OF WGL700TR &
+     ON D_ECJCLENUM_TRI
+
+
+; G n ration des num ros d' criture :
+; - Si les num ros d' critures sont normalement saisie par l'usager
+;   ('S' selon le holding, alors le num ro d' criture g n r  sera
+;   compos  de la facon suivante :
+;   . 1ere position  : Identifiant d' criture selon le parametre du holding
+;   . 2eme et 3eme   : Deux dernier caractere de l'annee (ex: 1992 -> 92)
+;   . Postions 4 a 8 : S quence de 1 a 9999 generer a partir du fichier
+;                      de sequence.
+; - Si les num ros d' critures sont toujours g n r s par le systeme
+;   ('A' selon le holding, alors le num ro d' criture g n r  sera
+;   compos  de la facon suivante :
+;   . Position 1 a 2 ; Deux dernier caractere de l'ann e (ex: 1992 -> 92)
+;   . Postions 3 a 8 : S quence de 1 a 9999 generer a partir du fichier
+;                      de sequence.
+;
+;ITEM T_NUMSEQ INITIAL NCONVERT(T_ANNRS) * &
+;                      (10 ^ (ECSLONNUM OF GLECJ_SEQ - 2) ) &
+;                         IF NOT RECORD GLECJ_SEQ EXIST AND &
+;                            G_HLDECRAUT = "A" &
+;                 ELSE NCONVERT(T_ANNRS) * &
+;                      (10 ^ (ECSLONNUM OF GLECJ_SEQ - 3) ) &
+;                         IF NOT RECORD GLECJ_SEQ EXIST &
+;                 ELSE ECSNUMSEQ OF GLECJ_SEQ
+
+; Ajustement pour le changement de siècle
+ITEM T_NUMSEQ INITIAL 0 &
+                 IF NOT RECORD GLECJ_SEQ EXIST &
+                 ELSE ECSNUMSEQ OF GLECJ_SEQ
+
+ITEM T_ECSNUMSEQ COUNT AT D_ECJCLENUM_TRI &
+                   RESET AT T_ANNRS TO T_NUMSEQ + 1
+
+ITEM T_LGLCLE   COUNT AT LGLCLE &
+                  RESET AT D_T_PECCLEERS_SIE TO (LGSSEQ OF GLLGL_SEQ + 1)
+
+OUTPUT GLECRITURE_JG ADD &
+                     AT D_ECJCLENUM_TRI &
+                     NOITEM
+  ITEM ECJCIECLE        OF GLECRITURE_JG INITIAL ECJCIECLE OF WGL700TR
+  ; Ajustement pour le chanchement de siècle
+  ITEM ECJCLENUM        OF GLECRITURE_JG    = T_ANNRS + &
+                             ASCII(T_ECSNUMSEQ ,ECSLONNUM OF GLECJ_SEQ - 2) &
+                               IF G_HLDECRAUT = "A" &
+                        ELSE G_HLDECRCOD + T_ANNRS + &
+                             ASCII(T_ECSNUMSEQ ,ECSLONNUM OF GLECJ_SEQ - 3)
+  ITEM ECJCLESEQ        OF GLECRITURE_JG    =    ""
+  ITEM PECCLE           OF GLECRITURE_JG    =    T_PECCLERS OF WGL700TR
+  ITEM LGLCLE           OF GLECRITURE_JG    =    ASCII(T_LGLCLE,4)
+  ITEM ECJFLGINTCIE     OF GLECRITURE_JG    =    ECJFLGINTCIE OF WGL700TR
+  ITEM ECJTYPECR        OF GLECRITURE_JG    =    "RS"
+  ITEM ECJFLGANN        OF GLECRITURE_JG    =    "0"
+  ITEM ECJDAT           OF GLECRITURE_JG    =    G_DATJOU
+  ITEM ECJDATSTP        OF GLECRITURE_JG    =    G_DATJOU
+  ITEM ECJDATJOU        OF GLECRITURE_JG    =    0
+  ITEM ECJHREJOU        OF GLECRITURE_JG    =    0
+  ITEM ECJDSC1          OF GLECRITURE_JG INITIAL ECJDSC1      OF WGL700TR
+  ITEM ECJDSC2          OF GLECRITURE_JG INITIAL ECJDSC2      OF WGL700TR
+  ITEM ECJDSC3          OF GLECRITURE_JG INITIAL ECJDSC3      OF WGL700TR
+  ITEM ECJCIEINT        OF GLECRITURE_JG INITIAL ECJCIEINT    OF WGL700TR
+  ITEM ECJTRFUNA        OF GLECRITURE_JG INITIAL ECJTRFUNA    OF WGL700TR
+  ITEM ECJNBRPERINI     OF GLECRITURE_JG INITIAL ECJNBRPERINI OF WGL700TR
+  ITEM ECJNBRPERRES     OF GLECRITURE_JG INITIAL ECJNBRPERRES OF WGL700TR
+  ITEM ECJPECDES        OF GLECRITURE_JG    =    &
+                ASCII( NCONVERT(ECJPECDES OF WGL700TR) + 1 , 4 ) &
+                  IF G_HLDNBRPERCTB > NCONVERT(ECJPECDES OF WGL700TR[3:2]) &
+           ELSE ASCII(NCONVERT(ECJPECDES OF WGL700TR[1:2]) + 1, 3)[2:2] + "01"
+  ITEM ECJMNTDBT        OF GLECRITURE_JG    =    0
+  ITEM ECJMNTCRT        OF GLECRITURE_JG    =    0
+  ITEM ECJNUMLIG        OF GLECRITURE_JG INITIAL ECJNUMLIG OF WGL700TR
+  ITEM HISCLE           OF GLECRITURE_JG    =    0
+  ITEM ECJUSRCRE        OF GLECRITURE_JG INITIAL ECJUSRCRE OF WGL700TR
+  ITEM ECJUNAINT1       OF GLECRITURE_JG INITIAL ECJUNAINT1 OF WGL700TR
+  ITEM ECJUNAINT2       OF GLECRITURE_JG INITIAL ECJUNAINT2 OF WGL700TR
+  ITEM ECJUNANBR1       OF GLECRITURE_JG INITIAL ECJUNANBR1 OF WGL700TR
+  ITEM ECJUNANBR2       OF GLECRITURE_JG INITIAL ECJUNANBR2 OF WGL700TR
+
+
+OUTPUT GLIMPUTATION ADD &
+                    NOITEM
+  ITEM ECJCIECLE        OF GLIMPUTATION INITIAL ECJCIECLE  OF WGL700TR
+  ITEM ECJCLENUM        OF GLIMPUTATION    =    &
+                             ASCII(T_ECSNUMSEQ ,ECSLONNUM OF GLECJ_SEQ) &
+                               IF G_HLDECRAUT = "A" &
+                        ELSE G_HLDECRCOD + &
+                             ASCII(T_ECSNUMSEQ ,ECSLONNUM OF GLECJ_SEQ - 1)
+  ITEM ECJCLESEQ        OF GLIMPUTATION    =    " "
+  ITEM ECINUMLIG        OF GLIMPUTATION INITIAL ECINUMLIG  OF WGL700TR
+  ITEM PRJCLE           OF GLIMPUTATION INITIAL PRJCLE     OF WGL700TR
+  ITEM PRACLE           OF GLIMPUTATION INITIAL PRACLE     OF WGL700TR
+  ITEM IMMCLE           OF GLIMPUTATION INITIAL IMMCLE     OF WGL700TR
+  ITEM CPTCLE           OF GLIMPUTATION INITIAL CPTCLE     OF WGL700TR
+  ITEM CIECLE           OF GLIMPUTATION INITIAL CIECLE     OF WGL700TR
+  ITEM UNACLE           OF GLIMPUTATION INITIAL UNACLE     OF WGL700TR
+  ITEM ECICODDC         OF GLIMPUTATION    =    ECICODDC  OF WGL700TR
+  ITEM ECIMNT           OF GLIMPUTATION    =    0
+
+
+; NOTE : Nous devons gerer les cumulatifs du lot ici, car le trigger T_ECJ
+;        ne fonctionnera pas dans ce cas-ci.
+;        Raison : Le lot sera cr er une fois que toutes les  critures de
+;                 journal se r f rant a ce lot seront cr  es.
+;                 Donc, dans le 'store' du trigger, on ne trouvera pas le lot.
+;
+OUTPUT GLLOT ADD &
+             AT LGLCLE &
+             NOITEM
+  ITEM LGLCIECLE    OF GLLOT    =    ECJCIECLE OF WGL700TR
+  ITEM LGLCLE       OF GLLOT    =    ASCII(T_LGLCLE,4)
+  ITEM PECCLE       OF GLLOT    =    T_PECCLERS OF WGL700TR
+  ITEM LGLTYPECR    OF GLLOT    =    "RS"
+  ITEM LGLUSR       OF GLLOT INITIAL LOGONID
+  ITEM LGLDSC       OF GLLOT INITIAL LGLDSC     OF WGL700TR
+  ITEM LGLDATVAL    OF GLLOT INITIAL 0
+  ITEM LGLDATJOU    OF GLLOT INITIAL 0
+  ITEM LGLHREJOU    OF GLLOT INITIAL 0
+  ITEM LGLUSRJOU    OF GLLOT INITIAL ""
+  ITEM LGLUSRATR    OF GLLOT INITIAL ""
+  ITEM LGLATRJOU    OF GLLOT INITIAL "0"
+  ITEM LGLNBRTRS    OF GLLOT COUNT AT D_ECJCLENUM_TRI &
+                                   RESET AT LGLCLE
+  ITEM LGLCUMMNT    OF GLLOT    =    0
+  ITEM LGLCUMMNTVER OF GLLOT INITIAL 0
+  ITEM LGLNBRTRSVER OF GLLOT FINAL LGLNBRTRS OF GLLOT
+  ITEM LGLNBRTRSERR OF GLLOT INITIAL 0
+
+
+OUTPUT GLLGL_SEQ ADD UPDATE &
+                 AT D_T_PECCLEERS_SIE &
+                 NOITEM
+  ITEM LGSCIECLE OF GLLGL_SEQ INITIAL ECJCIECLE OF WGL700TR
+  ITEM PECCLE    OF GLLGL_SEQ INITIAL T_PECCLERS OF WGL700TR
+  ITEM LGSSEQ    OF GLLGL_SEQ    =    T_LGLCLE
+
+
+OUTPUT GLECJ_SEQ ADD UPDATE &
+                 AT T_ANNRS OF WGL700TR &
+                 NOITEM
+  ITEM ECSCIECLE OF GLECJ_SEQ INITIAL ECJCIECLE OF WGL700TR
+  ITEM ECSANN    OF GLECJ_SEQ INITIAL T_ANNRS   OF WGL700TR
+  ITEM ECSNUMSEQ OF GLECJ_SEQ    =    T_ECSNUMSEQ
+
+BUILD

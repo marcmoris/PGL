@@ -1,0 +1,247 @@
+;/T/ Grand livre sommaire par Compagnie et /ou par consolidé
+;
+;/P/ Programmeur..: Chantal Martineau
+;    Date Création: 5 mai 1993
+;
+;    Description..: Le but du grand livre sommaire est de nous données une image
+;                   rapide du solde des comptes selon les périodes sélectionnées.
+;
+;                   Le rapport imprime trois solde: le solde de début, la variation
+;                   et le solde de fin.
+;                     - Le solde de début est le solde d'ourverture de la première
+;                       période de la sélection.
+;                     - La variation représente la sommation des transactions qui ont
+;                       affectées le compte pour les périodes sélectionnées. C-a-d.
+;                       la sommation du solde courant de chaque période.
+;                     - Le solde de fin est le solde de début plus la variation.
+;
+;                   Ce rapport peut être demandé par compagnie/centre ou consolidé
+;                   par compagnie. Le terme consolidé veut dire qu'on ne tient pas
+;                   du centre.
+;
+;    Paramètres...: Voir le QTP.
+;
+;---------------------------------------------------------------------------
+;***M    Date : 1993-05-05
+;***M    Note :
+;***M           Modification du prodcode pour inclure le traitement
+;***M           ou on calcul le solde d'ouverture. (cette procédure
+;***M           n'est pas fait encore.
+;***M          -Dans le menu des rapports cosonlidé le nom qui apparait
+;***M           sur l'écran n'est pas le même que celui qui est imprimer
+;-------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST   ; permet de faire les SET REPORT DEV....
+
+ACCESS *WGL332A &
+  LINK CPTCLE OF WGL332A                     &
+    TO CPTCLE OF VCPT_DSC     OPTIONAL       &
+  LINK CIECLE OF WGL332A                   , &
+       UNACLE OF WGL332A                     &
+    TO CIECLE                              , &
+       UNACLE OF MCUNITE_ADM  OPTIONAL       &
+  LINK NACCLE OF VCPT_DSC                    &
+    TO   NACCLE OF VNAC_DSC   OPTIONAL       &
+  LINK CIECLE OF WGL332A                     &
+    TO   CIECLE OF MCCOMPAGNIE OPTIONAL
+
+
+
+;
+; On sélectionne que les comptes qui ne sont pas à zéro.
+;
+SELECT WGL332A IF T_TOTSLDDEB <> 0 OR &
+                  T_TOTSLDVAR <> 0
+
+
+
+ DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+           "Grand Livre sommaire"
+@ELSE
+           "General Ledger summary"
+@ENDIF
+ DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = " "            ; titre2  du rapport
+ DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "GL332"                      ; numéro du rapport
+ DEFINE DZ_CIENOM  CHARACTER SIZE 40 = CENTER(CIENOM OF MCCOMPAGNIE)[1:40] ; Nom de la compagnie
+
+;
+; Solde de début, il faut inverser les soldes des comptes créditeur pour
+; que le signie débit/Crédit soit respecter.
+;
+ DEFINE D_SLDDEB FLOAT SIZE 8 = 0 - T_TOTSLDDEB OF WGL332A IF CPTCODDC OF VCPT_DSC = "C" &
+                           ELSE T_TOTSLDDEB OF WGL332A
+
+;
+; Variation, il faut inverser les soldes des comptes créditeur pour
+; que le signie débit/Crédit soit respecter.
+;
+ DEFINE D_SLDVAR FLOAT SIZE 8 = 0 - T_TOTSLDVAR OF WGL332A IF CPTCODDC OF VCPT_DSC = "C" &
+                           ELSE T_TOTSLDVAR OF WGL332A
+
+;
+; Solde de fin.
+;
+ DEFINE D_SLDFIN FLOAT SIZE 8 = D_SLDDEB + D_SLDVAR
+
+;
+; Libellé de la nature de compte pour le sous-total.
+;
+ DEFINE D_NACDSC CHARACTER SIZE 21 = "Total " + &
+                      TRUNCATE(NACDSC OF VNAC_DSC) + ".:"
+
+;
+;
+SORT ON CIECLE OF WGL332A  &       ; Compagnie
+     ON NACCLE OF VCPT_DSC &       ; Nature comptable
+     ON CPTCLE OF WGL332A  &       ; Compte comptable
+     ON UNACLE OF WGL332A          ; Unité adm.
+
+
+USE ustitstd NOLIST  ; Titre standard pour l'application
+  SKIP 2 &
+@IF FRANCAIS
+  TAB 001 "Période début.:" &
+@ELSE
+  TAB 001 "Start period..:" &
+@ENDIF
+  TAB 017 D_ANNFIN &
+  TAB 019 "-" &
+  TAB 020 D_PECDEB &
+ SKIP &
+@IF FRANCAIS
+  TAB 001 "Période fin...:" &
+@ELSE
+  TAB 001 "End period....:" &
+@ENDIF
+  TAB 017 D_ANNFIN &
+  TAB 019 "-" &
+  TAB 020 D_PECFIN &
+ SKIP 2  &
+@IF FRANCAIS
+  TAB 001 "                  Compte                        Unité administrative     "&
+  TAB 077 "Solde de début       Variation         Solde de fin " &
+@ELSE
+  TAB 001 "                  Account                              Unit adm.     "&
+  TAB 077 "Starting bal.       Variation         Closing bal. " &
+@ENDIF
+ SKIP &
+  TAB 001 "------------------------------------------  -----------------------------"&
+  TAB 077 "--------------     --------------     --------------" &
+ SKIP 2
+
+
+REPORT &
+  TAB 001 CPTCLE    OF WGL332A  &
+  TAB 008 CPTDSCABR OF VCPT_DSC &
+  TAB 045 UNACLE    OF WGL332A  &
+  TAB 054 UNANOMABR OF MCUNITE_ADM &
+  TAB 077 D_SLDDEB &
+            PICTURE "^^^,^^^,^^^.^^ " &
+            TRAILING SIGN "-" &
+            SIGNIFICANCE 5 &
+  TAB 096 D_SLDVAR &
+            PICTURE "^^^,^^^,^^^.^^ " &
+            TRAILING SIGN "-" &
+            SIGNIFICANCE 5 &
+  TAB 115 D_SLDFIN &
+            PICTURE "^^^,^^^,^^^.^^ " &
+            TRAILING SIGN "-" &
+            SIGNIFICANCE 5
+
+
+FOOTING AT NACCLE  &
+ SKIP 1 &
+  TAB 077 "--------------" &
+  TAB 096 "--------------" &
+  TAB 115 "--------------" &
+ SKIP 1 &
+  TAB 045 D_NACDSC &
+  TAB 077 D_SLDDEB SUBTOTAL &
+            PICTURE "^^^,^^^,^^^.^^ " &
+            TRAILING SIGN "-" &
+            SIGNIFICANCE 5 &
+  TAB 096 D_SLDVAR SUBTOTAL &
+            PICTURE "^^^,^^^,^^^.^^ " &
+            TRAILING SIGN "-" &
+            SIGNIFICANCE 5 &
+  TAB 115 D_SLDFIN SUBTOTAL &
+            PICTURE "^^^,^^^,^^^.^^ " &
+            TRAILING SIGN "-" &
+            SIGNIFICANCE 5 &
+ SKIP 2
+
+;
+;
+FOOTING AT CIECLE &
+ SKIP 1 &
+  TAB 077 "--------------" &
+  TAB 096 "--------------" &
+  TAB 115 "--------------" &
+ SKIP 1 &
+  TAB 045 "Grand total.:" &
+  TAB 077 D_SLDDEB SUBTOTAL &
+            PICTURE "^^^,^^^,^^^.^^ " &
+            TRAILING SIGN "-" &
+            SIGNIFICANCE 5 &
+  TAB 096 D_SLDVAR SUBTOTAL &
+            PICTURE "^^^,^^^,^^^.^^ " &
+            TRAILING SIGN "-" &
+            SIGNIFICANCE 5 &
+  TAB 115 D_SLDFIN SUBTOTAL &
+            PICTURE "^^^,^^^,^^^.^^ " &
+            TRAILING SIGN "-" &
+            SIGNIFICANCE 5 &
+ SKIP &
+  TAB 077 "==============" &
+  TAB 096 "==============" &
+  TAB 115 "==============" &
+ SKIP PAGE
+
+BUILD gl332z
+
+;         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8
+;123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+;GL332                                         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                    Page: 9999
+;99/99/99 hh:mm xxxxxxxxxxxx                             Grand Livre sommaire
+;                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+;
+;Période début.: 99-99
+;Période fin...: 99-99
+;
+;                  Compte                        Unité administrative        Solde de début       Variation         Solde de fin
+;------------------------------------------  -----------------------------   --------------     --------------     --------------
+;123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx   999,999,999.99-    999,999,999.99-    999,999,999.99-
+;123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx   999,999,999.99-    999,999,999.99-    999,999,999.99-
+;123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx   999,999,999.99-    999,999,999.99-    999,999,999.99-
+;                                                                            --------------     --------------     --------------
+;                                            Total actif.:                   999,999,999.99-    999,999,999.99-    999,999,999.99-
+;                                                                            --------------     --------------     --------------
+;
+;123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx   999,999,999.99-    999,999,999.99-    999,999,999.99-
+;123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx   999,999,999.99-    999,999,999.99-    999,999,999.99-
+;                                                                            --------------     --------------     --------------
+;                                            Total passif.:                  999,999,999.99-    999,999,999.99-    999,999,999.99-
+;                                                                            --------------     --------------     --------------
+;
+;123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx   999,999,999.99-    999,999,999.99-    999,999,999.99-
+;123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx   999,999,999.99-    999,999,999.99-    999,999,999.99-
+;                                                                            --------------     --------------     --------------
+;                                            Total avoir.:                   999,999,999.99-    999,999,999.99-    999,999,999.99-
+;                                                                            --------------     --------------     --------------
+;
+;123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx   999,999,999.99-    999,999,999.99-    999,999,999.99-
+;123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx   999,999,999.99-    999,999,999.99-    999,999,999.99-
+;123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx   999,999,999.99-    999,999,999.99-    999,999,999.99-
+;                                                                            --------------     --------------     --------------
+;                                            Total revenus.:                 999,999,999.99-    999,999,999.99-    999,999,999.99-
+;                                                                            --------------     --------------     --------------
+;
+;123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx   999,999,999.99-    999,999,999.99-    999,999,999.99-
+;123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx   999,999,999.99-    999,999,999.99-    999,999,999.99-
+;                                                                            --------------     --------------     --------------
+;                                            Total dépenses.:                999,999,999.99-    999,999,999.99-    999,999,999.99-
+;                                                                            --------------     --------------     --------------
+;
+;                                            Grand total.:                   999,999,999.99-    999,999,999.99-    999,999,999.99-
+;                                                                            ==============     ==============     ==============

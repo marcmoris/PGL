@@ -1,0 +1,128 @@
+;/T/ Liste des produit en B/O
+;
+;/P/ Programmeur...: Patrick Langlois
+;    Date Création.: 5 Aôut 1999
+;
+;    Description...: Impression des commandes avec produit en B/O
+;
+;    Paramètres....: Compagnie
+;                    Date de début
+;                    Date de fin
+;                    Flag pour date ultérieure (Voir intervention 1999-10-14)
+;
+;/M/675/Marc Trudel/1999-10-14
+;  Etat..........: Termin\351
+;  Description...: GRA01
+;                  On demande un paramètre de plus pour savoir s'il veulent
+;                  avoir les produits en B/O dont la date de livraison est
+;                  ultérieure à la date du jour.
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST
+
+
+ACCESS ARCOMMANDE            &
+  LINK ("----"             , &
+       FOUCLE OF ARCOMMANDE) &
+    TO FOUCIECLE           , &
+       FOUCLE                    OF CPFOURNISSEUR OPT &
+  LINK CIECLE OF ARCOMMANDE, &
+       CMDCLE OF ARCOMMANDE, &
+       CMDAJT OF ARCOMMANDE  &
+    TO CIECLE              , &
+       CMDCLE              , &
+       CMDAJT                    OF ARCMD_DETAIL
+
+
+CHOOSE CIECLE PARM, &
+       FOUCLE PARM, &
+       CMDDAT PARM RANGE
+
+DEFINE D_FLGDATE CHARACTER SIZE 1 = PARM  ; Si "1" on veut les produits en B/O
+                                          ; dont la date de livraison prevue est
+                                          ; ultérieure à la date du jour.
+
+DEFINE D_QTEBO FLOAT SIZE 8 = CDEQTECOM OF ARCMD_DETAIL - CDEQTEREC OF ARCMD_DETAIL
+
+;
+; Commande non complèté et ligne de détail sélectionné non complète
+; Ne pas tenir compte de la date du jour si l'usager veut aussi les B/O en date
+; ultérieure à la date du jour.
+;
+SELECT IF ( CMDSTU OF ARCOMMANDE   = "S"  AND  &
+            CDESTU OF ARCMD_DETAIL = "S"  AND  &
+            D_QTEBO <> 0                  AND  &
+            D_FLGDATE = "0"               AND  &
+            CDEDATLIVPRE OF ARCMD_DETAIL < SYSDATE )  OR  &
+          ( CMDSTU OF ARCOMMANDE   = "S"  AND  &
+            CDESTU OF ARCMD_DETAIL = "S"  AND  &
+            D_QTEBO <> 0                  AND  &
+            D_FLGDATE = "1" )
+
+;-------------------------------------------------------------------------------
+;
+; Variables obligatoires pour les en-têtes standards.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = "Listes des produits en B/O"
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = ""
+
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE  7 = "AR348Z"
+;
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM
+
+
+SORT ON CIECLE OF ARCOMMANDE, &
+        FOUCLE OF ARCOMMANDE, &
+        CMDCLE OF ARCOMMANDE, &
+        PRDCLE OF ARCMD_DETAIL
+
+USE ustitstd NOLIST
+  SKIP 2 &
+TAB 001 "Numéro       Date      Date                                                       Quantité   Quantité                   " &
+  SKIP 1 &
+TAB 001 "Commande   Commande  Liv. Prévu No produit   Description                          Commandée À recevoir Fourn. Nom" &
+  SKIP 1 &
+TAB 001 "--------- ---------- ---------- ------------ ----------------------------------- ---------- ---------- ------ --------------------" &
+SKIP
+
+
+REPORT                                 &
+  TAB 001 CMDCLE       OF ARCOMMANDE   &
+          PRINT AT CMDCLE              &
+  TAB 011 CMDDAT       OF ARCOMMANDE   &
+          PRINT AT CMDCLE              &
+  tab 022 CDEDATLIVPRE OF ARCMD_DETAIL &
+  TAB 033 PRDCLE       OF ARCMD_DETAIL &
+  TAB 046 CDEDSCPRD    OF ARCMD_DETAIL &
+          PICTURE "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^" &
+  TAB 082 CDEQTECOM    OF ARCMD_DETAIL &
+          PICTURE "^^,^^^.^^^ "        &
+          TRAILING SIGN "-"            &
+          SIGNIFICANCE 6               &
+          BWZ                          &
+  TAB 093 D_QTEBO                      &
+          PICTURE "^^,^^^.^^^ "        &
+          TRAILING SIGN "-"            &
+          SIGNIFICANCE 6               &
+          BWZ                          &
+  TAB 104 FOUCLE       OF ARCOMMANDE   &
+  TAB 111 FOUNOM       OF CPFOURNISSEUR &
+          PICTURE "^^^^^^^^^^^^^^^^^^^^"
+
+FOOTING AT CMDCLE  SKIP 2
+
+
+BUILD ar348z
+
+
+@IF FORMAT
+Numéro       Date      Date                                                       Quantité   Quantité
+Commande   Commande  Liv. Prévu No produit   Description                          Commandée À recevoir  Fourn. Nom
+xxxxxxxxx 9999/99/99 9999/99/99 xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 99,999.999 99,999.999  xxxxxx xxxxxxxxxxxxxxxxxxxx
+@ENDIF

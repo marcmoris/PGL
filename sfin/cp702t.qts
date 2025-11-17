@@ -1,0 +1,619 @@
+;/T/ Préparation des PAIEMENTS
+;
+;;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur...: Thomas BRENNEUR
+;    Date Création.: 22 Juin 1993
+;
+;    Description...: Génération des paiements à partir de la sélection
+;                    des paiements
+;
+;    Paramètres....: Compagnie
+;                    Periode CTB
+;                    No Lot (Un ou plusieurs)
+;
+;-------------------------------------------------------------------------------
+;/M/ François Déry, 4 mai 1999
+;       Lors de lc onversion vers unix, changement de t_lcpdatpam pour integer
+;       size 8 dans le dernier request.
+;
+; /M/ Nancy Marceau, 94/02/24
+;      - Enlever l'initialisation des descriptions de facture sur les paiements.
+;        Ces desriptions doivent servir uniquement pour les chèques manuels.
+;
+;/V3.02.04/, Nancy Marceau, 94/06/09, (265)
+;
+USE ussetqts NOLIST  ; permet de faire les SET PROCESS NOLIMIT....
+
+;===============================================================================
+
+RUN cp702t
+
+GLOBAL TEMPORARY G_ERREUR     CHARACTER SIZE 5          ; Arrêt en cas d'erreur
+GLOBAL TEMPORARY G_SYSDATE    DATE                & ; Date d'execution
+                              INITIAL SYSDATE
+GLOBAL TEMPORARY G_SYSTIME    INTEGER UNSIGNED SIZE 2 & ; Heure d'execution
+                              INITIAL SYSTIME / 10000
+GLOBAL TEMPORARY G_LBQCPTENC  CHARACTER SIZE 6          ; Compte d'encaisse pour
+                                                        ; les rapports de dépenses
+
+GLOBAL TEMPORARY G_COMPILE    CHARACTER SIZE 1 PARM     ; Flag permettant
+                                                        ; d'exécuter tous les
+                                                        ; request lors de la
+                                                        ; compilation
+
+;-------------------------------------------------------------------------------
+;
+; Recherche du compte d'encaisse pour les rapports de dépenses
+; On doit toujours rechercher ce compte d'encaisse car on ne peut pas
+; savoir si les lots à traiter contiennent des relevés de dépenses.
+;
+REQUEST RECHERCHE_CPT_ENCAISSE_RD
+
+ACCESS CPCIE_PARAM
+
+  CHOOSE  CIECLE PARM
+
+ITEM G_LBQCPTENC FINAL LBQCPTENC OF CPCIE_PARAM
+
+;-------------------------------------------------------------------------------
+;
+; Génération du subfile d'erreur si le compte d'encaisse n'à pas
+; été trouvé.
+;
+REQUEST CPT_ENCAISSE_PAS_TROUVE SKIP IF G_LBQCPTENC <> ""
+
+ACCESS MCHOLDING
+
+  CHOOSE CIENMC "1"
+
+TEMPORARY T_CIECLE  CHARACTER SIZE 4
+TEMPORARY T_LCPCLE  CHARACTER SIZE 4
+TEMPORARY T_PECCLE  CHARACTER SIZE 4
+TEMPORARY T_MESERR  CHARACTER SIZE 80
+
+ITEM T_MESERR &
+@IF FRANCAIS
+  = "* Vous devez déclarer un compte d'encaisse dans les paramètres par compagnie *"
+@ELSE
+  = "* %%%s devez déclarer un compte d'encaisse dans les paramètres par compagnie *"
+@ENDIF
+
+ITEM G_ERREUR  = "ARRET"
+
+SUBFILE WCP702ER KEEP &
+  INCLUDE T_CIECLE ALIAS CIECLE, &
+          T_LCPCLE ALIAS LCPCLE, &
+          T_PECCLE ALIAS PECCLE, &
+          T_MESERR
+
+;-------------------------------------------------------------------------------
+;
+; Recherche de tous les lots à traiter et récupération des pièces contenues
+; dans ces lots de préparation de paiements (PP). Ce request permet de
+; cumuler toutes les pièces à traiter et de leur assigner à chacune leur
+; compte d'encaisse. Si c'est une une facture ou un crédit, alors le compte
+; d'encaisse provient du fournisseur, mais si c'est un rapport de dépense
+; alors le compte d'encaisse provient des paramètres de la compagnie
+;
+REQUEST SELECTION_PIECES TERMINATE IF G_ERREUR = "ARRET" AND G_COMPILE <> "O"
+
+ACCESS CPLOT &
+
+  LINK  CIECLE OF CPLOT, &
+        PECCLE OF CPLOT, &
+        LCPCLE OF CPLOT  &
+    TO  CIECLE, &
+        PECCLE, &
+        LCPCLE                OF CPSEL_CAP &
+
+  LINK  FOUCIECLE OF CPSEL_CAP, &
+        FOUCLE    OF CPSEL_CAP, &
+        CAPCLE    OF CPSEL_CAP  &
+    TO  FOUCIECLE , &
+        FOUCLE    , &
+        CAPCLE                OF CPCPT_A_PAYER &
+
+  LINK  FOUCIECLE OF CPCPT_A_PAYER, &
+        FOUCLE    OF CPCPT_A_PAYER, &
+        CAPCIECLE OF CPCPT_A_PAYER  &
+    TO  FOUCIECLE , &
+        FOUCLE    , &
+        FOCCIECLE             OF CPFOU_CIE &
+  OPTIONAL &
+
+  LINK  FOUCIECLE OF CPCPT_A_PAYER, &
+        FOUCLE    OF CPCPT_A_PAYER, &
+        CAPCLE    OF CPCPT_A_PAYER  &
+    TO  FOUCIECLE , &
+        FOUCLE    , &
+        CAPCLE                OF CPCAP_TALON &
+  OPTIONAL
+
+
+CHOOSE CIECLE    PARM , &
+       PECCLE    PARM , &
+       LCPCLE    PARM , &
+       LCPTYPECR "PP"
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE CHARACTER SIZE 5 = "1" + PECCLE &
+         IF PECCLE[1:1] < "8" &
+         ELSE "0" + PECCLE
+
+SORT ON CIECLE OF CPLOT, &
+        D_PECCLE_SIE,    &
+        LCPCLE OF CPLOT
+;
+; Si le document est un rapport de dépense alors on utilise le compte
+; d'encaisse des paramètres de la compagnie. Sinon, on utilise le compte
+; d'encaisse du fournisseur.
+;
+TEMPORARY T_LBQCPTENC CHARACTER SIZE 6
+
+  ITEM T_LBQCPTENC  = G_LBQCPTENC IF CAPTYPECR OF CPCPT_A_PAYER = "RD" ELSE &
+                      LBQCPTENC OF CPFOU_CIE
+
+
+;
+; On marque differement les paiements automatiques. Car contrairement aux
+; paiements normaux qui sont cumulés par adresse de paiement, on doit
+; générer un chèque par cédule de paiement automatique (à cause du talon).
+;
+TEMPORARY T_TYPCAP  CHARACTER SIZE 14
+
+  ITEM T_TYPCAP = CAPCLE OF CPCPT_A_PAYER + ASCII(CPCCLELIG OF CPSEL_CAP,2) &
+                  IF CAPTYPECR OF CPCPT_A_PAYER = "PA" &
+                  ELSE ""
+
+;
+; Subfile permettant de transmettre les données au request suivant
+; pour la génération des paiements.
+;
+
+SUBFILE WCP702A &
+  INCLUDE CIECLE    OF CPLOT                        , &
+          PECCLE    OF CPLOT                        , &
+          LCPCLE    OF CPLOT                        , &
+          LCPDATPAM OF CPLOT                        , &
+          FOUCIECLE OF CPSEL_CAP                    , &
+          FOUCLE    OF CPSEL_CAP                    , &
+          CAPCLE    OF CPSEL_CAP                    , &
+          T_TYPCAP                                  , &
+          CPCCLELIG OF CPSEL_CAP                    , &
+          SLCMNT    OF CPSEL_CAP                    , &
+          SLCMNTESC OF CPSEL_CAP                    , &
+          SLCMNTPYE OF CPSEL_CAP                    , &
+          REFCIECLE OF CPCPT_A_PAYER                , &
+          REFCLETYP OF CPCPT_A_PAYER                , &
+          REFCLENUM OF CPCPT_A_PAYER                , &
+          RADCLE    OF CPCPT_A_PAYER                , &
+          CAPDSC1   OF CPCPT_A_PAYER                , &
+          CAPDSC2   OF CPCPT_A_PAYER                , &
+          T_LBQCPTENC               ALIAS LBQCPTENC , &
+          CTACLELIG OF CPCAP_TALON                  , &
+          CTADSC    OF CPCAP_TALON
+
+;
+; Suppression de la sélection
+;
+OUTPUT CPSEL_CAP DELETE
+
+;
+; On remet les compteurs du lot à 0 pour permettre au trigger de store des
+; paiements d'ajouter le nombre de chèques et le montant total payé du lot.
+; Et on change le type de lot de PP à CH pour que la journalisation des
+; paiements reconnaisse ce lot.
+;
+
+OUTPUT CPLOT UPDATE AT LCPCLE
+
+  ITEM LCPTYPECR  OF CPLOT  FINAL "CH"
+  ITEM LCPCUMMNT  OF CPLOT  FINAL 0
+  ITEM LCPNBRTRS  OF CPLOT  FINAL 0
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Génération des paiements.
+;
+;   On génère un chèque par adresse de paiement. Sauf pour les paiements
+;   automatiques où on génère un chèque par paiement automatique.
+;
+;
+REQUEST GENERATION_CHEQUES
+
+ACCESS *WCP702A &
+
+  LINK  CIECLE    OF WCP702A, &
+        LBQCPTENC OF WCP702A  &
+    TO  CIECLE              , &
+        LBQCPTENC             OF CPPAM_SEQ &
+  OPTIONAL
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_WCP702 CHARACTER SIZE 5 = "1" + PECCLE OF WCP702A &
+         IF PECCLE OF WCP702A[1:1] < "8" &
+         ELSE "0" + PECCLE OF WCP702A
+
+SORT ON CIECLE    OF WCP702A, &
+        LBQCPTENC OF WCP702A, & ; Numéro de chèque par compte de banque
+        D_PECCLE_WCP702     , &
+        LCPCLE    OF WCP702A, &
+        T_TYPCAP  OF WCP702A, & ; On doit générer un chèque seulement par
+                                ; paiement automatique
+        REFCIECLE OF WCP702A, &
+        REFCLETYP OF WCP702A, &
+        REFCLENUM OF WCP702A, &
+        RADCLE    OF WCP702A, & ; Pour les autres types de paiement on génère
+                                ; un chèque par adresse de paiement
+        FOUCIECLE OF WCP702A, &
+        FOUCLE    OF WCP702A, &
+        CAPCLE    OF WCP702A, &
+        CPCCLELIG OF WCP702A
+
+;
+; Calcul du total du paiement et du total d'escompte pris sur ce paiement
+;
+TEMPORARY T_PAMMNT  FLOAT SIZE  8
+TEMPORARY T_PAMESC  FLOAT SIZE  8
+
+ITEM T_PAMMNT SUBTOTAL SLCMNTPYE OF WCP702A AT CPCCLELIG RESET AT RADCLE
+ITEM T_PAMESC SUBTOTAL SLCMNTESC OF WCP702A AT CPCCLELIG RESET AT RADCLE
+
+;
+; On ne doit pas générer de chèques négatifs. Les chèque à 0 sont acceptés
+; mais ils ne seront jamais imprimés.
+;
+TEMPORARY T_MESERR  CHARACTER SIZE 80
+
+ITEM T_MESERR &
+@IF FRANCAIS
+    = "Total du paiement négatif. Lot : " &
+@ELSE
+    = "%%%al du paiement négatif. Lot : " &
+@ENDIF
+    + PECCLE OF WCP702A &
+    + " " &
+    + LCPCLE OF WCP702A &
+@IF FRANCAIS
+    + ", Référence : " &
+@ELSE
+    + ", Référence : " &
+@ENDIF
+    + REFCLENUM OF WCP702A &
+    IF T_PAMMNT < 0 AT RADCLE
+
+ITEM G_ERREUR = "ARRET" IF T_MESERR <> "" AT RADCLE
+
+SUBFILE WCP702ER KEEP AT RADCLE IF T_MESERR <> "" &
+  INCLUDE CIECLE OF WCP702A, &
+          LCPCLE OF WCP702A, &
+          PECCLE OF WCP702A, &
+          T_MESERR
+
+ITEM T_MESERR = ""
+
+;
+; Le numéro séquentiel du paiement est par compagnie et par compte de banque.
+;
+TEMPORARY T_PSENUMSEQ INTEGER UNSIGNED SIZE 4
+TEMPORARY T_PAMCLE    CHARACTER        SIZE 7
+
+ITEM T_PSENUMSEQ =  T_PSENUMSEQ + 1 &
+                    AT RADCLE OF WCP702A &
+                    RESET AT LBQCPTENC OF WCP702A &
+                    TO PSENUMSEQ OF CPPAM_SEQ + 1
+
+ITEM T_PAMCLE    =  ASCII(T_PSENUMSEQ,PSELONNUM OF CPPAM_SEQ)
+
+;
+; Si le paiement est un paiement automatique alors on transfert le talon
+; du paiement dans le talon du chèque
+;
+OUTPUT CPPAM_TALON  ADD IF T_TYPCAP OF WCP702A <> ""
+
+  ITEM CIECLE     OF CPPAM_TALON  INITIAL CIECLE    OF WCP702A
+  ITEM LBQCPTENC  OF CPPAM_TALON  INITIAL LBQCPTENC OF WCP702A
+  ITEM PAMCLE     OF CPPAM_TALON  =       T_PAMCLE
+  ITEM PTACLELIG  OF CPPAM_TALON  INITIAL CTACLELIG OF WCP702A
+  ITEM PTADSC     OF CPPAM_TALON  INITIAL CTADSC    OF WCP702A
+
+;
+; On crée la ventilation par facture du chèque dans l'historique
+;
+OUTPUT CPCAP_HISTO ADD AT CPCCLELIG OF WCP702A
+
+  ITEM FOUCIECLE  OF CPCAP_HISTO INITIAL FOUCIECLE OF WCP702A
+  ITEM FOUCLE     OF CPCAP_HISTO INITIAL FOUCLE    OF WCP702A
+  ITEM CAPCLE     OF CPCAP_HISTO INITIAL CAPCLE    OF WCP702A
+  ITEM CPHTIMSTP  OF CPCAP_HISTO INITIAL SYSDATE * 1000000 + ROUND(SYSTIME / 100)
+  ITEM CPHCLE1    OF CPCAP_HISTO INITIAL CIECLE    OF WCP702A
+  ITEM CPHCLE2    OF CPCAP_HISTO INITIAL LBQCPTENC OF WCP702A
+  ITEM CPHCLE3    OF CPCAP_HISTO =       T_PAMCLE
+  ITEM CPHTYPECR  OF CPCAP_HISTO INITIAL "CH" ; Chèque
+  ITEM CPHTYPTRA  OF CPCAP_HISTO INITIAL "CH" ; Chèque
+  ITEM CPCCLELIG  OF CPCAP_HISTO INITIAL CPCCLELIG OF WCP702A
+  ITEM CPHMNTCAP  OF CPCAP_HISTO INITIAL SLCMNT    OF WCP702A
+  ITEM CPHMNTESC  OF CPCAP_HISTO INITIAL SLCMNTESC OF WCP702A
+  ITEM CPHMNTPYE  OF CPCAP_HISTO INITIAL SLCMNTPYE OF WCP702A
+  ITEM CPHDAT     OF CPCAP_HISTO INITIAL LCPDATPAM OF WCP702A
+  ITEM CPHDATJOU  OF CPCAP_HISTO INITIAL 0
+  ITEM PECCLE     OF CPCAP_HISTO INITIAL PECCLE    OF WCP702A
+  ITEM LCPCLE     OF CPCAP_HISTO INITIAL LCPCLE    OF WCP702A
+
+;
+; Et on créé le chèque lui-même
+;
+OUTPUT CPPAIEMENT ADD AT RADCLE OF WCP702A
+
+  ITEM CIECLE    OF CPPAIEMENT INITIAL CIECLE OF WCP702A
+  ITEM LBQCPTENC OF CPPAIEMENT INITIAL LBQCPTENC OF WCP702A
+  ITEM PAMCLE    OF CPPAIEMENT =       T_PAMCLE
+  ITEM PECCLE    OF CPPAIEMENT INITIAL PECCLE OF WCP702A
+  ITEM LCPCLE    OF CPPAIEMENT INITIAL LCPCLE OF WCP702A
+  ITEM PAMTYPPAM OF CPPAIEMENT INITIAL "R"  ; Paiement régulier
+  ITEM PAMTYPECR OF CPPAIEMENT INITIAL "CH" ; Chèque
+  ITEM PAMDAT    OF CPPAIEMENT INITIAL LCPDATPAM OF WCP702A
+  ITEM PAMDATJOU OF CPPAIEMENT INITIAL 0
+  ITEM PAMHREJOU OF CPPAIEMENT INITIAL 0
+  ITEM PAMNUMPIM OF CPPAIEMENT INITIAL "        "
+  ITEM RADCLE    OF CPPAIEMENT INITIAL RADCLE OF WCP702A
+  ITEM REFCIECLE OF CPPAIEMENT INITIAL REFCIECLE OF WCP702A
+  ITEM REFCLETYP OF CPPAIEMENT INITIAL REFCLETYP OF WCP702A
+  ITEM REFCLENUM OF CPPAIEMENT INITIAL REFCLENUM OF WCP702A
+  ITEM PAMDSC1   OF CPPAIEMENT INITIAL ""
+  ITEM PAMDSC2   OF CPPAIEMENT INITIAL ""
+  ITEM PAMMNT    OF CPPAIEMENT FINAL   T_PAMMNT
+  ITEM PAMMNTTPS OF CPPAIEMENT INITIAL 0
+  ITEM PAMMNTTVQ OF CPPAIEMENT INITIAL 0
+  ITEM PAMMNTCTI OF CPPAIEMENT INITIAL 0
+  ITEM PAMMNTRTI OF CPPAIEMENT INITIAL 0
+  ITEM PAMMNTESC OF CPPAIEMENT FINAL   T_PAMESC
+  ITEM PAMFLGIMP OF CPPAIEMENT INITIAL "0"
+  ITEM PAMCUMMNT OF CPPAIEMENT FINAL   T_PAMMNT
+  ITEM PAMFLGPA  OF CPPAIEMENT =       "1" IF T_TYPCAP OF WCP702A <> ""
+  ITEM PAMUSRCRE OF CPPAIEMENT INITIAL LOGONID
+  ITEM PAMDATCRE OF CPPAIEMENT INITIAL G_SYSDATE
+  ITEM PAMHRECRE OF CPPAIEMENT INITIAL G_SYSTIME
+
+;
+; Création d'un subfile contenant la liste des paiements avec
+; "paiement automatique". Cette liste permet ensuite de recopier l'imputation
+; du paiement automatique dans l'imputation du paiement.
+;
+
+SUBFILE WCP702AU AT RADCLE IF T_TYPCAP OF WCP702A <> "" &
+  INCLUDE CIECLE    OF WCP702A              , &
+          LBQCPTENC OF WCP702A              , &
+          T_PAMCLE              ALIAS PAMCLE, &
+          FOUCIECLE OF WCP702A              , &
+          FOUCLE    OF WCP702A              , &
+          CAPCLE    OF WCP702A              , &
+          T_PAMMNT              ALIAS PAMMNT
+
+;
+; Création d'un subfile pour imprimer la liste des paiements générés
+;
+SUBFILE WCP702PA KEEP AT RADCLE &
+  INCLUDE CIECLE    OF WCP702A                  , &
+          PECCLE    OF WCP702A                  , &
+          LCPCLE    OF WCP702A                  , &
+          LCPDATPAM OF WCP702A                  , &
+          LBQCPTENC OF WCP702A                  , &
+          T_PAMCLE              ALIAS PAMCLE    , &
+          REFCIECLE OF WCP702A                  , &
+          REFCLETYP OF WCP702A                  , &
+          REFCLENUM OF WCP702A                  , &
+          RADCLE    OF WCP702A                  , &
+          T_PAMMNT              ALIAS PAMMNT    , &
+          T_PAMESC              ALIAS PAMMNTESC
+
+;
+; On met à jour les compteurs de chaques compte d'encaisse.
+; Note : la longueur du numéro est initialisée par le dictionnaire
+;
+OUTPUT CPPAM_SEQ ADD UPDATE AT LBQCPTENC OF WCP702A
+
+  ITEM CIECLE     OF CPPAM_SEQ  INITIAL CIECLE    OF WCP702A
+  ITEM LBQCPTENC  OF CPPAM_SEQ  INITIAL LBQCPTENC OF WCP702A
+  ITEM PSENUMSEQ  OF CPPAM_SEQ  =       T_PSENUMSEQ
+
+;-------------------------------------------------------------------------------
+;
+; Transfert de l'imputation d'un paiement automatique et calcul du montant
+; de chaque ligne en fonction du montant du paiement.
+;
+;
+REQUEST TRANSFER_IMPUTATION_PAIM_AUTO SKIP IF G_ERREUR <> ""
+
+;
+; Liste des paiements automatiques
+;
+ACCESS *WCP702AU &
+
+  ;
+  ; Imputation du paiement automatique
+  ;
+  LINK  FOUCIECLE OF WCP702AU, &
+        FOUCLE    OF WCP702AU, &
+        CAPCLE    OF WCP702AU  &
+    TO  FOUCIECLE, &
+        FOUCLE   , &
+        CAPCLE    OF CPCAP_IMPUTATION &
+
+  ;
+  ; Taxe Fédérale
+  ;
+  LINK  CCITAXTYPTPS OF CPCAP_IMPUTATION, &
+        CCITAXCODTPS OF CPCAP_IMPUTATION  &
+    TO  TAXCLETYP, &
+        TAXCLECOD OF MCTAXE ALIAS A_TAX_TPS OPTIONAL &
+
+  ;
+  ; Taxe Provinciale
+  ;
+  LINK  CCITAXTYPTVQ OF CPCAP_IMPUTATION, &
+        CCITAXCODTVQ OF CPCAP_IMPUTATION  &
+    TO  TAXCLETYP, &
+        TAXCLECOD OF MCTAXE ALIAS A_TAX_TVQ OPTIONAL
+
+
+SORTED  ON  CIECLE    OF WCP702AU, &
+            LBQCPTENC OF WCP702AU, &
+            PAMCLE    OF WCP702AU
+
+;
+; Calcul du montant à imputer et des montants de taxes pour chaque ligne
+; en fonction du pourcentage de répartition.
+;
+; Note : Les codes de taxes (s'il y en à) sont toujours de type "Taxe Incluse"
+;
+TEMPORARY T_CPIMNT    FLOAT   SIZE 8 ; Montant imputé
+TEMPORARY T_CPIMNTTPS FLOAT   SIZE 8 ; Taxe Fédérale
+TEMPORARY T_CPIMNTCTI FLOAT   SIZE 8 ; Taxe Fédérale remboursable
+TEMPORARY T_MNTNETTPS FLOAT   SIZE 8 ; Montant sans TPS ni TVQ ( = NET )
+TEMPORARY T_CPIMNTTVQ FLOAT   SIZE 8 ; Taxe Provinciale
+TEMPORARY T_CPIMNTRTI FLOAT   SIZE 8 ; Taxe Provinciale remboursable
+TEMPORARY T_MNTNETTVQ FLOAT   SIZE 8 ; Montant sans TVQ (mais avec TPS)
+TEMPORARY T_PCTREPTOT INTEGER SIZE 2 ; Total du pourcentage de répartition
+TEMPORARY T_MNTIMPTOT FLOAT   SIZE 8 ; Montant total imputé
+TEMPORARY T_DIFMNT    FLOAT   SIZE 8 ; Différence entre total et imputé
+TEMPORARY T_TOTMNTTPS FLOAT   SIZE 8 ; Total de la taxe Fédérale
+TEMPORARY T_TOTMNTCTI FLOAT   SIZE 8 ; Total de la taxe Fédérale remboursable
+TEMPORARY T_TOTMNTTVQ FLOAT   SIZE 8 ; Total de la taxe Provinciale
+TEMPORARY T_TOTMNTRTI FLOAT   SIZE 8 ; Total de la taxe Provinciale remboursable
+
+
+;
+; Calcul des montants de taxes de chaque ligne d'imputation
+;
+  ITEM T_CPIMNT     = ROUND(PAMMNT OF WCP702AU * CCIPCTREP OF CPCAP_IMPUTATION)
+  ITEM T_MNTNETTVQ  = ROUND(T_CPIMNT    / ( 1 + TAXPCT OF A_TAX_TVQ ))
+  ITEM T_CPIMNTTVQ  = T_CPIMNT    - T_MNTNETTVQ
+  ITEM T_MNTNETTPS  = ROUND(T_MNTNETTVQ / ( 1 + TAXPCT OF A_TAX_TPS ))
+  ITEM T_CPIMNTTPS  = T_MNTNETTVQ - T_MNTNETTPS
+  ITEM T_CPIMNTCTI  = T_CPIMNTTPS * TAXPCTCTI OF A_TAX_TPS
+  ITEM T_CPIMNTRTI  = T_CPIMNTTVQ * TAXPCTCTI OF A_TAX_TVQ
+
+  ITEM T_TOTMNTTPS  SUBTOTAL T_CPIMNTTPS RESET AT PAMCLE
+  ITEM T_TOTMNTCTI  SUBTOTAL T_CPIMNTCTI RESET AT PAMCLE
+  ITEM T_TOTMNTTVQ  SUBTOTAL T_CPIMNTTVQ RESET AT PAMCLE
+  ITEM T_TOTMNTRTI  SUBTOTAL T_CPIMNTRTI RESET AT PAMCLE
+;
+; Lorsqu'on répartit le montant total du paiement sur chaque ligne
+; d'imputation en fonction du pourcentage, il y a très souvent une
+; différence entre le montant total et la somme des montants répartits.
+; Cette différence provient des arrondis dans les calculs. Et comme il ne
+; faut pas générer de paiements "Hors balance" (montant total différent de
+; la somme imputée), on doit équilibrer le paiement avec l'imputation.
+;
+
+  ITEM T_PCTREPTOT  = T_PCTREPTOT + ROUND (CCIPCTREP OF CPCAP_IMPUTATION*10000 )
+  ITEM T_MNTIMPTOT  = T_MNTIMPTOT + T_CPIMNT
+  ITEM T_DIFMNT     = PAMMNT OF WCP702AU - T_MNTIMPTOT IF T_PCTREPTOT = 10000
+  ITEM T_CPIMNT     = T_CPIMNT + T_DIFMNT              IF T_PCTREPTOT = 10000
+
+;
+; Transfert de l'imputation du compte à recevoir vers le paiement
+;
+OUTPUT CPPAM_IMPUTATION ADD
+
+  ITEM CIECLE         OF CPPAM_IMPUTATION INITIAL CIECLE        OF WCP702AU
+  ITEM LBQCPTENC      OF CPPAM_IMPUTATION INITIAL LBQCPTENC     OF WCP702AU
+  ITEM PAMCLE         OF CPPAM_IMPUTATION INITIAL PAMCLE        OF WCP702AU
+  ITEM CPITIMSTP      OF CPPAM_IMPUTATION INITIAL SYSDATE * 1000000 + ROUND(SYSTIME / 100)
+  ITEM PRJCLE         OF CPPAM_IMPUTATION INITIAL PRJCLE        OF CPCAP_IMPUTATION
+  ITEM PRACLE         OF CPPAM_IMPUTATION INITIAL PRACLE        OF CPCAP_IMPUTATION
+  ITEM CPTCLE         OF CPPAM_IMPUTATION INITIAL CPTCLE        OF CPCAP_IMPUTATION
+  ITEM UNACLE         OF CPPAM_IMPUTATION INITIAL UNACLE        OF CPCAP_IMPUTATION
+  ITEM CPICODDC       OF CPPAM_IMPUTATION INITIAL CCICODDC      OF CPCAP_IMPUTATION
+  ITEM CPIMNT         OF CPPAM_IMPUTATION =       T_CPIMNT
+  ITEM CPITAXTYPTPS   OF CPPAM_IMPUTATION INITIAL CCITAXTYPTPS  OF CPCAP_IMPUTATION
+  ITEM CPITAXCODTPS   OF CPPAM_IMPUTATION INITIAL CCITAXCODTPS  OF CPCAP_IMPUTATION
+  ITEM CPITAXTYPTVQ   OF CPPAM_IMPUTATION INITIAL CCITAXTYPTVQ  OF CPCAP_IMPUTATION
+  ITEM CPITAXCODTVQ   OF CPPAM_IMPUTATION INITIAL CCITAXCODTVQ  OF CPCAP_IMPUTATION
+  ITEM CPIMNTTPS      OF CPPAM_IMPUTATION =       T_CPIMNTTPS
+  ITEM CPIMNTTVQ      OF CPPAM_IMPUTATION =       T_CPIMNTTVQ
+  ITEM CPIMNTCTI      OF CPPAM_IMPUTATION =       T_CPIMNTCTI
+  ITEM CPIMNTRTI      OF CPPAM_IMPUTATION =       T_CPIMNTRTI
+
+;
+; Mise à jour du paiement pour enregistrer les montant de taxes
+;
+OUTPUT CPPAIEMENT UPDATE &
+                  AT PAMCLE &
+                  IF    T_TOTMNTTPS <> 0 &
+                    OR  T_TOTMNTCTI <> 0 &
+                    OR  T_TOTMNTTVQ <> 0 &
+                    OR  T_TOTMNTRTI <> 0 &
+                  VIA   CIECLE   , &
+                        LBQCPTENC, &
+                        PAMCLE     &
+                  USING CIECLE    OF WCP702AU, &
+                        LBQCPTENC OF WCP702AU, &
+                        PAMCLE    OF WCP702AU
+
+  ITEM  PAMMNTTPS OF CPPAIEMENT = T_TOTMNTTPS
+  ITEM  PAMMNTCTI OF CPPAIEMENT = T_TOTMNTCTI
+  ITEM  PAMMNTTVQ OF CPPAIEMENT = T_TOTMNTTVQ
+  ITEM  PAMMNTRTI OF CPPAIEMENT = T_TOTMNTRTI
+
+;
+; Réinitialisation des variables de calcul à chaque paiement
+;
+  ITEM T_PCTREPTOT  = 0 AT PAMCLE OF WCP702AU
+  ITEM T_MNTIMPTOT  = 0 AT PAMCLE OF WCP702AU
+
+;-------------------------------------------------------------------------------
+;
+; Supression des informations contenues dans le subfile d'impression
+; en cas d'erreur.
+;
+REQUEST VIDE_SUBFILE SKIP IF G_ERREUR = ""
+
+ACCESS *WCP702ER
+
+TEMPORARY T_CIECLE    CHARACTER SIZE 4
+TEMPORARY T_PECCLE    CHARACTER SIZE 4
+TEMPORARY T_LCPCLE    CHARACTER SIZE 4
+TEMPORARY T_LCPDATPAM INTEGER   SIZE 8
+TEMPORARY T_LBQCPTENC CHARACTER SIZE 6
+TEMPORARY T_PAMCLE    CHARACTER SIZE 7
+TEMPORARY T_REFCIECLE CHARACTER SIZE 4
+TEMPORARY T_REFCLETYP CHARACTER SIZE 1
+TEMPORARY T_REFCLENUM CHARACTER SIZE 6
+TEMPORARY T_RADCLE    INTEGER   SIZE 2
+TEMPORARY T_PAMMNT    FLOAT     SIZE 8
+TEMPORARY T_PAMESC    FLOAT     SIZE 8
+
+SUBFILE WCP702PA KEEP AT FINAL &
+  INCLUDE T_CIECLE     ALIAS CIECLE   , &
+          T_PECCLE     ALIAS PECCLE   , &
+          T_LCPCLE     ALIAS LCPCLE   , &
+          T_LCPDATPAM  ALIAS LCPDATPAM, &
+          T_LBQCPTENC  ALIAS LBQCPTENC, &
+          T_PAMCLE     ALIAS PAMCLE   , &
+          T_REFCIECLE  ALIAS REFCIECLE, &
+          T_REFCLETYP  ALIAS REFCLETYP, &
+          T_REFCLENUM  ALIAS REFCLENUM, &
+          T_RADCLE     ALIAS RADCLE   , &
+          T_PAMMNT     ALIAS PAMMNT   , &
+          T_PAMESC     ALIAS PAMMNTESC
+
+;-------------------------------------------------------------------------------
+;
+; Cette requete permet de faire un ROLLBACK s'il y a eu une erreur dans
+; le dernier REQUEST.
+;
+REQUEST VERIFIE_ERREUR TERMINATE IF G_ERREUR = "ARRET" AND G_COMPILE <> "O"
+
+ACCESS *WCP702ER
+
+BUILD

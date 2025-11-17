@@ -1,0 +1,165 @@
+;/T/ Ages des comptes à payer /Sommaire par date
+;
+;/P/ Programmeur...: Alain Côté / Adapté pour les C.R. par Thomas BRENNEUR
+;    Date Création.: 5 Aout 1993
+;
+;    Description...: Age des comptes à payer de type comptable, sert à avoir
+;                    une vision globale des soldes à payer et de balancer
+;                    le compte ctb à payer avec le Grand Livre.
+;
+;                    Les transactions sont sélectionnées selon les dates
+;                    demandées par l'usager, les soldes sont répartis dans la
+;                    bonne colonne selon la date due et la date de fin de
+;                    période.
+;
+;                    Les transactions doivent être journalisées.
+;
+;    Paramètres....: Compte ctb à payer     un, plusieurs
+;                    Fournisseur            Un, plusieurs ou tous
+;                    Dates                  Jusqu'à
+;
+;
+;    Particularités: Le QTP sert à préparer un sous-fichier contenant les
+;                    factures dont il reste un solde à payer.
+;
+;
+;/M/ Modifié par...: Guy Chabot le 18 octobre 1994
+;
+;    Description...: Introduction du P.N.A. aux payables sur le même principe
+;                    ou presque des recevables.
+;
+;/M/ Programmeur...: Sébastien Chabot
+;    Date modif....: 10 Septembre 1996
+;    Description...: Modifier selon la demande du client (gra01 9311 315)
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST
+
+RUN cp333t
+
+
+GLOBAL TEMPORARY G_DATFIN    DATE PARM        ; Date de fin
+GLOBAL TEMPORARY G_CIVCOD    CHARACTER SIZE 1 PARM
+                                              ; Code identifiant l'intervalle
+                                              ; choisi pour les colonnes.
+
+
+;-------------------------------------------------------------------------------
+
+REQUEST AGES_COMPTE_CAP
+
+;
+; Comptes à payer
+;
+
+ACCESS CPCPT_A_PAYER &
+
+  ;
+  ; Fournisseur de la facture, pour avoir la catégorie...
+  ;
+  LINK REFCIECLE OF CPCPT_A_PAYER, &
+       REFCLENUM OF CPCPT_A_PAYER  &
+    TO FOUCIECLE, &
+       FOUCLE                     OF CPFOURNISSEUR &
+
+  ;
+  ; Nom du Fournisseur/divers.
+  ;
+  LINK REFCIECLE OF CPCPT_A_PAYER, &
+       REFCLETYP OF CPCPT_A_PAYER, &
+       REFCLENUM OF CPCPT_A_PAYER, &
+       RADCLE    OF CPCPT_A_PAYER  &
+    TO REFCIECLE , &
+       REFCLETYP , &
+       REFCLENUM , &
+       RADCLE                       OF MCREF_ADRESSE OPTIONAL &
+
+  ;
+  ; Cédule de paiement, date due, montant à payer.
+  ;
+
+  LINK FOUCIECLE  OF CPCPT_A_PAYER, &
+       FOUCLE     OF CPCPT_A_PAYER, &
+       CAPCLE     OF CPCPT_A_PAYER  &
+    TO FOUCIECLE, &
+       FOUCLE, &
+       CAPCLE                       OF CPCAP_CEDULE &
+
+  ;
+  ; Transactions associées à la cédule(ajust., paiements...)
+  ;
+  LINK FOUCIECLE  OF CPCAP_CEDULE, &
+       FOUCLE     OF CPCAP_CEDULE, &
+       CAPCLE     OF CPCAP_CEDULE, &
+       CPCCLELIG  OF CPCAP_CEDULE  &
+    TO FOUCIECLE , &
+       FOUCLE , &
+       CAPCLE , &
+       CPCCLELIG                    OF CPCAP_HISTO &
+  OPTIONAL
+
+
+CHOOSE CAPCIECLE PARM, &  ; Compagnie du menu.
+       CAPCPTCAP PARM, &  ; Compte ctb à payer.
+       REFCLENUM PARM     ; Numéro de fournisseur.
+
+
+SELECT CPCPT_A_PAYER IF     (     CAPTYPECR OF CPCPT_A_PAYER = "FA"   &
+                              OR  CAPTYPECR OF CPCPT_A_PAYER = "CR"   &
+                              OR  CAPTYPECR OF CPCPT_A_PAYER = "NA"   &
+                              OR  CAPTYPECR OF CPCPT_A_PAYER = "PA" ) &
+                        AND CAPDAT    OF CPCPT_A_PAYER <= G_DATFIN   &
+                        AND CAPDATJOU OF CPCPT_A_PAYER <> 0
+
+
+SELECT CPCAP_HISTO IF     CPHDATJOU OF CPCAP_HISTO <> 0 &
+                      AND CPHDAT    OF CPCAP_HISTO <= G_DATFIN
+
+
+
+TEMPORARY T_CPHMNT  FLOAT SIZE 8 ; Sommation des trs. associées.
+TEMPORARY T_SLD_TOT FLOAT SIZE 8 ; Solde de la ligne de cédule.
+
+
+SORT ON CAPCIECLE OF CPCPT_A_PAYER , & ; No compagnie
+        CAPCPTCAP OF CPCPT_A_PAYER , & ; Compte ctb à payer
+        REFCLENUM OF CPCPT_A_PAYER , & ; Numéro de fournisseur
+        CAPCLE    OF CPCPT_A_PAYER , & ; No facture
+        CPCCLELIG OF CPCAP_CEDULE      ; No Cédule
+
+;
+; Si c'est un chèque ou un chèque annulé il faut soustraire
+; le montant du montant brut.
+;
+ITEM T_CPHMNT = 0 - CPHMNTCAP OF CPCAP_HISTO &
+                         IF    CPHTYPTRA OF CPCAP_HISTO = "CH" &
+                            OR CPHTYPTRA OF CPCAP_HISTO = "CA" ELSE &
+                CPHMNTCAP OF CPCAP_HISTO
+
+;
+; Solde de la cédule.
+;
+ITEM T_SLD_TOT SUBTOTAL T_CPHMNT &
+               RESET AT CPCCLELIG TO CPCMNT OF CPCAP_CEDULE
+
+
+SUBFILE WCP333 KEEP &
+               AT CPCCLELIG &
+               IF T_SLD_TOT <> 0 &
+INCLUDE CAPCIECLE OF CPCPT_A_PAYER  , &
+        CAPCLE    OF CPCPT_A_PAYER  , &
+        CAPCPTCAP OF CPCPT_A_PAYER  , &
+        CAPDAT    OF CPCPT_A_PAYER  , &
+        CAPMNT    OF CPCPT_A_PAYER  , &                    <-- SEBCHA960910
+        REFCLENUM OF CPCPT_A_PAYER  , &
+        RADNOM    OF MCREF_ADRESSE  , &
+        RADNOMABR OF MCREF_ADRESSE  , &
+        FOUCAT    OF CPFOURNISSEUR  , &
+        CPCCLELIG OF CPCAP_CEDULE   , &
+        CPCDATDUE OF CPCAP_CEDULE   , &
+        G_DATFIN                    , &
+        T_SLD_TOT                   , &
+        G_CIVCOD
+
+BUILD cp333t

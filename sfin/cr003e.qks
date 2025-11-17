@@ -1,0 +1,212 @@
+;/T/ Factures / Notes de crédit - Histo. des transactions
+;
+;/P/ Programmeur..: Alain Côté
+;    Date Création: 7 juin 1993
+;
+;    Description..: Affiche les transactions qui affecte le compte à recevoir.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cr003e MODE LABEL "" AT 1,80 &
+              NOACTION FIELDMARK RETAIN &
+              FROM 2,1 TO 15,80 &
+              MESSAGE ON 24 &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              ACTIVITIES FIND &
+              RECEIVING CRCPT_A_REC
+
+USE ussectmp  NOLIST
+    "CR003E"
+
+USE cr003e.hlp NOLIST
+
+;
+; Ouverture d'une transaction QUERY indépendante de l'écran maitre.
+;
+USE ustrasse   NOLIST
+
+;-------------------------------------------------------------------------------
+;
+
+FILE CRCPT_A_REC      MASTER
+
+FILE CRCAR_HISTO      PRIMARY &
+                      NOITEM  &
+                      OCCURS 9
+  ACCESS VIA   CIECLE, &
+               CARCLE  &
+         USING CIECLE OF CRCPT_A_REC, &
+               CARCLE OF CRCPT_A_REC  &
+         ORDERBY CIECLE, &
+                 CARCLE, &
+                 CRHTIMSTP
+
+;
+; Pour afficher le type de transaction(BILINGUE).
+;
+DEFINE    D_CRHTYPECR CHAR SIZE 16 = "CRHTYPECR"
+;
+FILE VCBI_DSC         REFERENCE &
+                      OCCURS WITH CRCAR_HISTO
+  ACCESS VIA XELNOM, &
+             CBICLE  &
+         USING D_CRHTYPECR, &
+               CRHTYPECR OF CRCAR_HISTO
+
+
+;-------------------------------------------------------------------------------
+;
+; Définition du signe qui affecte le compte à recevoir.
+; Il y a deux posibilité, soit une transaction qui augemente(+) le compte à
+; recevoir, ou soit une transaction qui diminu(-) le compte à recevoir.
+;
+; Ceux qui auguement le compte à recevoir:
+;   - un ajustement positif.
+;   - un encaissement négatif
+;   - une mauvaise créance négative.
+;
+; Ceux qui diminu le compte à recevoir:
+;   - un ajustement négatif.
+;   - un encaissement positif.
+;   - une mauvaise créance.
+;
+DEFINE D_SGN CHARACTER SIZE 1 = "+" IF (     CRHTYPECR OF CRCAR_HISTO = "AJ" &
+                                         AND CRHMNTCAR OF CRCAR_HISTO > 0 &
+                                       ) &
+                                       OR &
+                                       (     CRHTYPECR OF CRCAR_HISTO = "EN" &
+                                         AND CRHMNTCAR OF CRCAR_HISTO < 0 &
+                                       ) &
+                                       OR &
+                                       (     CRHTYPECR OF CRCAR_HISTO = "MC" &
+                                         AND CRHMNTCAR OF CRCAR_HISTO < 0 &
+                                       ) &
+                           ELSE "-"
+
+;
+; Le montant doit être positif, car le signe est affiché séparément.
+;
+DEFINE D_CRHMNT    FLOAT SIZE 8 = ABSOLUTE(CRHMNTCAR OF CRCAR_HISTO) &
+                                 IF CRHTYPECR OF CRCAR_HISTO <> "EN" &
+                          ELSE ABSOLUTE(CRHMNTREC OF CRCAR_HISTO)
+;
+DEFINE D_CRHMNTESC FLOAT SIZE 8 = 0 &
+                                 IF CRHTYPECR OF CRCAR_HISTO <> "EN" &
+                          ELSE ABSOLUTE(CRHMNTESC OF CRCAR_HISTO)
+
+;-------------------------------------------------------------------------------
+DRAW 01,01 TO 01,79
+DRAW 01,01 TO 14,01
+DRAW 14,01 TO 14,80
+DRAW 02,80 TO 14,80
+
+USE ushilite NOLIST
+
+TITLE &
+@IF FRANCAIS
+      " Historique des transactions " &
+@ELSE
+      " Transaction History " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST
+
+SKIP
+
+ALIGN (,3,19)
+
+FIELD CARCLE OF CRCPT_A_REC &
+label "Facture.......:" &
+        FIXED
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      "Date" &
+@ELSE
+      "Post" &
+@ENDIF
+      AT ,21
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+ "Type             Journ.    Référence      Céd  +/-       Montant    Escompte" &
+@ELSE
+ "Type            posting  Reference       Sch  +/-        Amount    Discount" &
+@ENDIF
+    AT ,3
+
+ALIGN (3,2,3) (,,19) (,,30) (,,46) (,,51) (,,54) (,,68)
+
+CLUSTER OCCURS WITH CRCAR_HISTO ID BASE 05
+
+FIELD CBIDSC OF VCBI_DSC HIDDEN LABEL " " &
+        DISPLAY &
+        SIZE 15
+
+FIELD CRHDATJOU OF CRCAR_HISTO  FORMAT YYYYMMDD PATTERN "####/##/##"&
+        DISPLAY
+
+FIELD CRHCLE2   OF CRCAR_HISTO &
+        DISPLAY
+
+FIELD CCDCLELIG OF CRCAR_HISTO &
+        DISPLAY
+
+@IF VAXVMS
+HILITE DISPLAY HALFTONE
+@ENDIF
+FIELD D_SGN &
+        DISPLAY
+
+USE ushilite NOLIST
+
+FIELD D_CRHMNT &
+        PICTURE "^^,^^^,^^^.^^" &
+        SIGNIFICANCE 4 &
+        BWZ
+
+FIELD D_CRHMNTESC &
+        PICTURE "^^^,^^^.^^" &
+        SIGNIFICANCE 4 &
+        BWZ
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran par son code.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+BUILD
+
+;
+;************************* Historique des transactions *************************x
+;* Facture.......: xxxxxxxxxxxxxxx                                              *
+;*                   Date                                                       *
+;* Type             Journ.  Référence       Céd  +/-       Montant    Escompte  *
+;* xxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxx  xx   x  xxxxxxxxxxxxx  xxxxxxxxxx  *
+;* xxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxx  xx   x  xxxxxxxxxxxxx  xxxxxxxxxx  *
+;* xxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxx  xx   x  xxxxxxxxxxxxx  xxxxxxxxxx  *
+;* xxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxx  xx   x  xxxxxxxxxxxxx  xxxxxxxxxx  *
+;* xxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxx  xx   x  xxxxxxxxxxxxx  xxxxxxxxxx  *
+;* xxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxx  xx   x  xxxxxxxxxxxxx  xxxxxxxxxx  *
+;* xxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxx  xx   x  xxxxxxxxxxxxx  xxxxxxxxxx  *
+;* xxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxx  xx   x  xxxxxxxxxxxxx  xxxxxxxxxx  *
+;* xxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxx  xx   x  xxxxxxxxxxxxx  xxxxxxxxxx  *
+;********************************************************************************

@@ -1,0 +1,1420 @@
+;/T/ Rapports de dépenses
+;
+;//M/GRA01/Francois Richard/1999-06-18
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur..: Thomas BRENNEUR
+;    Date Création: 15 Juin 1993
+;
+;    Description..: Saisie des rapports de dépenses (RD) et des ajustement
+;                   de rapports de dépenses (AR)
+;
+;
+;/M/ Adatation....: Marc Morissette
+;                   3 Décembre 1993
+;    Description..: Demande du montant d'avance
+;
+;-------------------------------------------------------------------------------
+;
+;/M/ Date modif...: 09-Mars-1994
+;
+;    Programmeur..: Guy Chabot
+;
+;    Description..: Ajout de CAPCIECLE dans l'appel du popup CP105 pour ne
+;                   référer que les pièces de la même compagnie.
+;
+;                   Modification du ACCESS de la table A_CAP_REFERE pour
+;                   n'avoir que les pièce de la compagnie.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cp005  ACTIONBAR &
+              MODE LABEL "" AT 2,80 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              AUTOUPDATE &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        T_PECCLEMNU, &
+                        T_PECCLECOU, &
+                        T_FOUCIECLE, &
+                        T_EMPCIECLE, &
+                        T_CAPCLEFND
+
+TEMPORARY T_PECCLECOU_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_FIELDTEXT_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+USE ustraecr  NOLIST
+
+USE usactecr  NOLIST
+
+USE cp005.hlp NOLIST
+
+USE ussectmp  NOLIST
+    "CP005"
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-Ecrans"
+  MENUITEM LABEL "Imputation                      " ACTION DESIGNER D001
+  MENUITEM LABEL "Ecriture comptable              " ACTION DESIGNER D002
+  MENUITEM LABEL "Historique des transactions     " ACTION DESIGNER D003
+  MENUITEM LABEL "Gestion des lots                " ACTION DESIGNER D004
+  MENUITEM LABEL "Vérification                    " ACTION DESIGNER D005
+@ELSE
+ACTIONMENU LABEL "Subscreens"
+  MENUITEM LABEL "Imputation                   %%%" ACTION DESIGNER D001
+  MENUITEM LABEL "Ecriture comptable           %%%" ACTION DESIGNER D002
+  MENUITEM LABEL "Historique des transactions  %%%" ACTION DESIGNER D003
+  MENUITEM LABEL "Gestion des lots             %%%" ACTION DESIGNER D004
+  MENUITEM LABEL "Vérification                 %%%" ACTION DESIGNER D005
+@ENDIF
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE  4 ; Cie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la Cie du menu.
+TEMPORARY T_FOUCIECLE CHARACTER SIZE  4 ; Cie de la clef du fournisseur.
+TEMPORARY T_PECCLEMNU CHARACTER SIZE  4 ; Période du menu
+TEMPORARY T_PECCLECOU CHARACTER SIZE  4 ; Période courante
+TEMPORARY T_EMPCIECLE CHARACTER SIZE  4 ; Cie de l'employé
+TEMPORARY T_CAPCLEFND CHARACTER SIZE 15 ; No rapport à chercher
+
+;-------------------------------------------------------------------------------
+;
+; RAPPORT DE DÉPENSE / COMPTE À PAYER.
+;
+; Dans cet écran on prend en compte les transactions suivantes :
+;
+;   RD = Rapports de dépenses
+;   AR = Ajustements de rapports de dépenses
+;
+; Note : Dans le cas des rapports de dépenses, la clée du fournisseur est
+;        particulière. Chaque champs contient :
+;
+;                   FOUCIECLE     = T_CIECLEMNU (Compagnie du menu)
+;                   FOUCLE        = "      " (VIDE)
+;                   CAPCLE        = Numéro du rapport de dépense
+;
+;        Et les champs de la référence contiennent :
+;
+;                   REFCIECLE     = T_EMPCIECLE (Compagnie de l'employé)
+;                   REFCLETYP     = "E" (EMPLOYÉ)
+;                   REFCLENUM     = Numéro de l'employé
+;
+; Note : Un numéro de rapport de dépense est unique par compagnie.
+;
+
+FILE CPCPT_A_PAYER  PRIMARY
+  ;
+  ; La procédure PATH et FIND on été écrite pour que l'écran soit appelé
+  ; directement par l'analyse de compte.
+  ;
+  SELECT IF (CAPTYPECR OF CPCPT_A_PAYER = "RD"   OR &
+             CAPTYPECR OF CPCPT_A_PAYER = "AR")
+
+  ITEM FOUCIECLE    OF CPCPT_A_PAYER INITIAL T_CIECLEMNU
+  ITEM FOUCLE       OF CPCPT_A_PAYER INITIAL "      "
+  ITEM CAPCIECLE    OF CPCPT_A_PAYER INITIAL T_CIECLEMNU
+  ITEM REFCIECLE    OF CPCPT_A_PAYER INITIAL T_EMPCIECLE
+  ITEM REFCLETYP    OF CPCPT_A_PAYER INITIAL "E"
+  ITEM RADCLE       OF CPCPT_A_PAYER INITIAL 1
+  ITEM CAPDATNET    OF CPCPT_A_PAYER FINAL   CAPDAT OF CPCPT_A_PAYER
+  ITEM CAPDATCRE    OF CPCPT_A_PAYER INITIAL SYSDATE
+  ITEM CAPHRECRE    OF CPCPT_A_PAYER INITIAL SYSTIME / 10000
+  ITEM CAPUSRCRE    OF CPCPT_A_PAYER INITIAL LOGONID
+
+;-------------------------------------------------------------------------------
+;
+; HISTORIQUE & LIEN SUR LE RAPPORT RÉFÉRÉE
+;
+;
+FILE CPCAP_HISTO  SECONDARY &
+                  NOITEM
+
+  ACCESS  VIA   CPHCLE1  , &
+                CPHCLE2  , &
+                CPHCLE3  , &
+                CPHTYPECR, &
+                CPHTYPTRA  &
+          USING T_FOUCIECLE, &
+                REFCLENUM OF CPCPT_A_PAYER, &
+                CAPCLE    OF CPCPT_A_PAYER, &
+                CAPTYPECR OF CPCPT_A_PAYER, &
+                "AR"
+
+  ITEM  FOUCIECLE OF CPCAP_HISTO  FINAL   FOUCIECLE   OF CPCPT_A_PAYER
+  ITEM  FOUCLE    OF CPCAP_HISTO  FINAL   FOUCLE      OF CPCPT_A_PAYER
+  ITEM  CPHTIMSTP OF CPCAP_HISTO  INITIAL SYSDATE * 1000000 + ROUND(SYSTIME / 100)
+  ITEM  CPHCLE1   OF CPCAP_HISTO  INITIAL T_FOUCIECLE
+  ITEM  CPHCLE2   OF CPCAP_HISTO  FINAL   REFCLENUM   OF CPCPT_A_PAYER
+  ITEM  CPHCLE3   OF CPCAP_HISTO  FINAL   CAPCLE      OF CPCPT_A_PAYER
+  ITEM  CPHTYPECR OF CPCAP_HISTO  FINAL   CAPTYPECR   OF CPCPT_A_PAYER
+  ITEM  CPHTYPTRA OF CPCAP_HISTO  FINAL   "AR"
+  ITEM  CPCCLELIG OF CPCAP_HISTO  FINAL   1
+  ITEM  CPHMNTCAP OF CPCAP_HISTO  FINAL   CAPMNT      OF CPCPT_A_PAYER
+  ITEM  CPHDAT    OF CPCAP_HISTO  FINAL   CAPDAT      OF CPCPT_A_PAYER
+  ITEM  PECCLE    OF CPCAP_HISTO  FINAL   PECCLE      OF CPCPT_A_PAYER
+  ITEM  LCPCLE    OF CPCAP_HISTO  FINAL   LCPCLE      OF CPCPT_A_PAYER
+
+;-------------------------------------------------------------------------------
+;
+; Cette table est utilisée pour valider les relevés de dépenses référées par
+; les ajustements.
+;
+FILE CPCPT_A_PAYER    REFERENCE &
+                      ALIAS A_CAP_REFERE
+
+  ACCESS  VIA   FOUCIECLE, &
+                FOUCLE   , &
+                CAPCLE   , &
+                CAPCIECLE  &
+          USING FOUCIECLE OF CPCPT_A_PAYER, &
+                FOUCLE    OF CPCPT_A_PAYER, &
+                CAPCLE    OF CPCAP_HISTO  , &
+                CAPCIECLE OF CPCPT_A_PAYER
+
+;-------------------------------------------------------------------------------
+;
+; COMPTAGE DU NOMBRE D'AJUSTEMENTS
+;
+;
+FILE CPCAP_HISTO  DESIGNER &
+                  ALIAS A_CPH_AJ &
+                  OPEN READ
+
+;-------------------------------------------------------------------------------
+;
+; VUE SUR LES SOLDES DU COMPTE À PAYER
+;
+FILE VCAP_SLD REFERENCE &
+              NOITEM
+
+  ACCESS  VIA   FOUCIECLE, &
+                FOUCLE   , &
+                CAPCLE     &
+          USING FOUCIECLE OF CPCPT_A_PAYER, &
+                FOUCLE    OF CPCPT_A_PAYER, &
+                CAPCLE    OF CPCPT_A_PAYER
+
+;-------------------------------------------------------------------------------
+;
+; EMPLOYE (MCREFERENCE)
+;
+;
+FILE MCREFERENCE  REFERENCE &
+                  NOITEM
+
+  ACCESS  VIA   REFCIECLE, &
+                REFCLETYP, &
+                REFCLENUM  &
+          USING REFCIECLE OF CPCPT_A_PAYER, &
+                REFCLETYP OF CPCPT_A_PAYER, &
+                REFCLENUM OF CPCPT_A_PAYER
+
+;-------------------------------------------------------------------------------
+;
+; ADRESSE DE L'EMPLOYE
+;
+;
+FILE MCREF_ADRESSE    REFERENCE &
+                      NOITEM
+
+  ACCESS  VIA   REFCIECLE, &
+                REFCLETYP, &
+                REFCLENUM, &
+                RADCLE &
+          USING REFCIECLE OF CPCPT_A_PAYER, &
+                REFCLETYP OF CPCPT_A_PAYER, &
+                REFCLENUM OF CPCPT_A_PAYER, &
+                RADCLE    OF CPCPT_A_PAYER
+
+;-------------------------------------------------------------------------------
+;
+; VALIDATION DU LOT
+;
+;   Note : Le cumul du nombre de transactions et le cumul des montants se
+;          fait par les triggers TCAPSTO,TCAPMOD,TCAPDEL
+;
+FILE CPLOT REFERENCE
+
+  ACCESS  VIA   CIECLE, &
+                PECCLE, &
+                LCPCLE &
+          USING CAPCIECLE OF CPCPT_A_PAYER, &
+                PECCLE    OF CPCPT_A_PAYER, &
+                LCPCLE    OF CPCPT_A_PAYER
+
+;-------------------------------------------------------------------------------
+;
+; VALIDATION DE LA PÉRIODE COMPTABLE
+;
+FILE MCPERIODE_CIE REFERENCE
+
+  ACCESS  VIA   CIECLE, &
+                PECCLE  &
+          USING T_CIECLEMNU, &
+                PECCLE OF CPCPT_A_PAYER
+
+FILE MCPERIODE_CTB REFERENCE
+
+  ACCESS  VIA   PECCLE  &
+          USING PECCLE OF CPCPT_A_PAYER
+
+;-------------------------------------------------------------------------------
+;
+; Paramètres pour la compagnie consolidé(holding)
+;
+FILE MCHOLDING REFERENCE
+  ACCESS VIA CIENMC USING "1"
+
+;-------------------------------------------------------------------------------
+;
+; Validation du type de pièce.
+;
+DEFINE    D_CAPTYPECR CHARACTER SIZE 16 = "CAPTYPECR"
+TEMPORARY T_CAPTYPECR CHARACTER SIZE  4
+
+FILE VCBI_DSC   REFERENCE &
+                ALIAS A_CBI_CAPTYPECR
+
+  ACCESS  VIA   XELNOM, &
+                CBICLE  &
+          USING D_CAPTYPECR, &
+                CAPTYPECR OF CPCPT_A_PAYER
+
+;-------------------------------------------------------------------------------
+;
+; Recherche du code des paiements automatiques pour interdire de
+; commencer un numéro de rapport de dépense par ce code
+;
+FILE CPPARAMETRE REFERENCE
+
+  ACCESS  VIA   CIENMC &
+          USING "1"
+
+
+;-------------------------------------------------------------------------------
+;
+; Destruction des ligne d'imputation lors de la destruction de la piece
+;
+
+FILE CPCAP_IMPUTATION DELETE &
+                      ALIAS A_CPI_DELETE &
+                      NOITEM
+
+  ACCESS  VIA   FOUCIECLE, &
+                FOUCLE   , &
+                CAPCLE     &
+          USING FOUCIECLE OF CPCPT_A_PAYER, &
+                FOUCLE    OF CPCPT_A_PAYER, &
+                CAPCLE    OF CPCPT_A_PAYER
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLE    CHARACTER SIZE  4
+TEMPORARY T_FOCCIECLE CHARACTER SIZE  4
+TEMPORARY T_CAPCIECLE CHARACTER SIZE  4
+TEMPORARY T_CAPCLE    CHARACTER SIZE 15
+TEMPORARY T_CODMOD    CHARACTER SIZE  2 INITIAL "CP" RESET AT STARTUP
+TEMPORARY T_FLGSLD    CHARACTER SIZE  1
+TEMPORARY T_FOUCLE    CHARACTER SIZE  6
+TEMPORARY T_CPCCLELIG INTEGER SIZE  2
+TEMPORARY T_LCPCLE    CHARACTER SIZE  4
+TEMPORARY T_PECCLE    CHARACTER SIZE  4
+TEMPORARY T_LCPCLEFND CHARACTER SIZE  4
+TEMPORARY T_PECCLEFND CHARACTER SIZE  4
+TEMPORARY T_REFCIECLE CHARACTER SIZE  4
+TEMPORARY T_REFCLETYP CHARACTER SIZE  1
+TEMPORARY T_REFCLENUM CHARACTER SIZE  6
+TEMPORARY T_REFSTUPAT CHARACTER SIZE  5
+TEMPORARY T_RADCLE    INTEGER UNSIGNED SIZE  2
+TEMPORARY T_TERCAT    CHARACTER SIZE  4
+TEMPORARY T_TERCLE    CHARACTER SIZE  4
+TEMPORARY T_TYPADR    CHARACTER SIZE  3
+TEMPORARY T_TYPECR    CHARACTER SIZE  2
+TEMPORARY T_TYPECRPAT CHARACTER SIZE 30
+TEMPORARY T_TYPTRAPAT CHARACTER SIZE 30
+TEMPORARY T_CAPMNTOLD FLOAT     SIZE   8 ; Ancien montant du rapport
+
+TEMPORARY T_NUMAJT    CHARACTER SIZE  2 ; Pour le traitement des ajustements.
+
+;-------------------------------------------------------------------------------
+;
+; Clef d'accès pour la consultation des écritures.
+;
+DEFINE D_HISCLE    INTEGER UNSIGNED SIZE 4 = HISCLE OF CPCPT_A_PAYER
+
+;-------------------------------------------------------------------------------
+;
+; Pour duplicater la période et le lot en mode ENTRY.
+;
+TEMPORARY T_PECCLE_DUP CHARACTER SIZE  4 RESET AT MODE
+TEMPORARY T_LCPCLE_DUP CHARACTER SIZE  4 RESET AT MODE
+
+DEFINE    D_DEVCLE CHARACTER SIZE 4 &
+          = " " IF DEVCLE OF MCREFERENCE = DEVCLE OF MCHOLDING ELSE &
+            "/" + DEVCLE OF MCREFERENCE
+
+DEFINE    D_SLD_A_PYE FLOAT SIZE 8 &
+          = CAPMNT      OF CPCPT_A_PAYER &
+          + V_CAPMNTAJT OF VCAP_SLD      &
+          - V_CAPMNTPYE OF VCAP_SLD      &
+          - CAPMNTAVA   OF CPCPT_A_PAYER
+
+;
+; Si le lot est autorisé, sert au sous-écran CP005A
+;
+DEFINE D_LCPATRJOU    CHARACTER SIZE 1 = LCPATRJOU OF CPLOT
+;
+; Devise de l'employé, sert au sous-écran CP005A
+;
+DEFINE D_REFDEVCLE    CHARACTER SIZE 3 = DEVCLE OF MCREFERENCE
+
+
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Rapports de dépenses " &
+@ELSE
+      " Expenses reports " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+ALIGN (3,3,19) (,27,43) (,49,63) (,,74)
+
+FIELD PECCLE OF CPCPT_A_PAYER &
+label "Période ......:"&
+      ID 05 HIDDEN &
+      DEFAULT T_PECCLEMNU &
+      NOCHANGE &
+      LOOKUP ON MCPERIODE_CIE &
+        MESSAGE 404 ; Cette période n'est pas définie pour cette compagnie.
+
+FIELD LCPCLE OF CPCPT_A_PAYER &
+label "Numéro de lot.:"&
+      ID SAME &
+      REQUIRED &
+      NOCHANGE &
+      NUMERIC SIGNIF 4 &
+      LOOKUP ON CPLOT &
+        MESSAGE 436 ; Ce numéro de lot n'existe pas
+
+FIELD CAPDATJOU OF CPCPT_A_PAYER  FORMAT YYYYMMDD PATTERN "####/##/##"&
+label "Journalisé le:"&
+      DISPLAY
+
+FIELD CAPHREJOU OF CPCPT_A_PAYER &
+      DISPLAY size 5
+
+SKIP
+
+ALIGN (3,3,19) (,,22)
+
+FIELD CAPTYPECR OF CPCPT_A_PAYER &
+label "Type écriture.:"&
+      ID 10 HIDDEN &
+      REQUIRED &
+      NOCHANGE &
+      NOCORRECT &
+      LOOKUP ON A_CBI_CAPTYPECR &
+        MESSAGE 412 ; Ce type d'écriture est invalide
+
+FIELD CBIDSC OF A_CBI_CAPTYPECR &
+      DISPLAY
+
+SKIP 1
+ALIGN (3,3,19) (,,26)
+
+FIELD REFCLENUM OF CPCPT_A_PAYER &
+      ID 15 HIDDEN &
+@IF FRANCAIS
+      LABEL "Employé.......:" &
+@ELSE
+      LABEL "Employe.......:" &
+@ENDIF
+      REQUIRED NOCHANGE &
+      LOOKUP ON MCREFERENCE &
+          MESSAGE 525 ; Ce numéro d'employé n'existe pas.
+
+FIELD RADNOM OF MCREF_ADRESSE &
+      DISPLAY
+
+
+SKIP
+
+FIELD RADCLE OF CPCPT_A_PAYER &
+      DISPLAY &
+      ID SAME &
+@IF FRANCAIS
+      LABEL "Adr. paiement.:" &
+@ELSE
+      LABEL "Payment Adr...:" &
+@ENDIF
+      LOOKUP ON MCREF_ADRESSE &
+        MESSAGE 415 ; Ce code d'adresse est inexistant.
+
+FIELD RADADR1 OF MCREF_ADRESSE &
+      DISPLAY
+
+SKIP 1
+
+ALIGN(3,3,19) (,36,52)
+
+FIELD CAPCLE OF CPCPT_A_PAYER &
+      ID 20 HIDDEN &
+@IF FRANCAIS
+      LABEL "Rapport dép...:" &
+@ELSE
+      LABEL "Exp. report...:" &
+@ENDIF
+      REQUIRED NOCHANGE &
+      LOOKUP NOTON CPCPT_A_PAYER &
+        VIA   FOUCIECLE, &
+              FOUCLE   , &
+              CAPCLE     &
+        USING FOUCIECLE OF CPCPT_A_PAYER, &
+              FOUCLE    OF CPCPT_A_PAYER, &
+              CAPCLE    OF CPCPT_A_PAYER  &
+        MESSAGE 536 ; Ce rapport de dépense existe déja.
+
+FIELD CAPCLE OF CPCAP_HISTO &
+      REQUIRED &
+      NOCHANGE &
+@IF FRANCAIS
+      LABEL "Rapport réf...:" &
+@ELSE
+      LABEL "Report ref....:" &
+@ENDIF
+      LOOKUP ON A_CAP_REFERE &
+        MESSAGE 546 ; Ce rapport de dépense n'existe pas.
+
+SKIP
+
+FIELD CAPDAT OF CPCPT_A_PAYER  FORMAT YYYYMMDD PATTERN "####/##/##"&
+label "Date..........:"&
+      ID 25 HIDDEN &
+      REQUIRED
+
+SKIP 1
+
+FIELD CAPNBRKM OF CPCPT_A_PAYER &
+label "Kilométrage...:"&
+      ID 30 HIDDEN &
+      BWZ
+
+SKIP 1
+
+ALIGN(3,3,19)
+
+FIELD CAPDSC1 OF CPCPT_A_PAYER &
+label "Description...:"&
+      ID 35 HIDDEN
+
+FIELD CAPDSC2 OF CPCPT_A_PAYER &
+      ID SAME &
+      NOLABEL
+
+SKIP 1
+
+ALIGN (3,3,19) (,,33) (,40,56)
+
+FIELD CAPMNT OF CPCPT_A_PAYER &
+label "Montant brut..:" &
+      ID 45 HIDDEN &
+      REQUIRED
+
+FIELD D_DEVCLE DISPLAY
+
+FIELD CAPMNTTPS OF CPCPT_A_PAYER &
+label "Montant de TPS:" &
+      DISPLAY &
+      DATA AT ,59 &
+      REFRESH
+
+SKIP
+ALIGN (3,3,19) (,40,56)
+
+FIELD V_CAPMNTAJT OF VCAP_SLD &
+      ID 50 HIDDEN &
+      DISPLAY &
+@IF FRANCAIS
+      LABEL "Ajustement....:" &
+@ELSE
+      LABEL "%%%stement....:" &
+@ENDIF
+      PICTURE "^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5
+
+FIELD CAPMNTCTI OF CPCPT_A_PAYER &
+label "C.T.I.........:" &
+      DISPLAY &
+      DATA AT ,59 &
+      REFRESH
+
+FIELD CAPMNTAVA OF CPCPT_A_PAYER &
+label "Mnt avance....:" &
+      ID 55 HIDDEN
+
+
+FIELD CAPMNTTVQ OF CPCPT_A_PAYER &
+label "Montant de TVQ:" &
+      DISPLAY &
+      DATA AT ,59 &
+      REFRESH
+
+FIELD V_CAPMNTPYE OF VCAP_SLD &
+      ID 60 HIDDEN &
+      DISPLAY &
+@IF FRANCAIS
+      LABEL "Montant payé..:" &
+@ELSE
+      LABEL "%%%tant payé..:" &
+@ENDIF
+      PICTURE "^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5
+
+FIELD CAPMNTRTI OF CPCPT_A_PAYER &
+label "R.T.I.........:" &
+      DISPLAY &
+      DATA AT ,59 &
+      REFRESH
+
+FIELD D_SLD_A_PYE &
+      ID 65 HIDDEN &
+      REFRESH &
+      DISPLAY &
+@IF FRANCAIS
+      LABEL "Reste à payer.:" &
+@ELSE
+      LABEL "%%%te à payer.:" &
+@ENDIF
+      PICTURE "^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès pour l'écran par son code.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+  ;
+  ; Si l'écran n'est pas appellé par le menu, alors on interdit la saisie,
+  ; la destruction et la modification à l'usager
+  ;
+  IF T_CAPCLEFND <> ""
+  THEN BEGIN
+    LET TZ_SECENT = "0"
+    LET TZ_SECDEL = "0"
+    LET TZ_SECMOD = "0"
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION ET VALIDATION DE LA PÉRIODE COMPTABLE
+;
+;
+PROCEDURE INPUT PECCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = T_CIECLEMNU
+    LET T_PECCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc109 MODE F PASSING T_CIECLE, T_PECCLE, T_CODMOD
+    LET FIELDTEXT = TRUNCATE(T_PECCLE)
+  END
+END
+
+;
+; La période ne doit pas être fermée mais elle peut être différente de la
+; période courante.
+;
+
+PROCEDURE EDIT PECCLE
+BEGIN
+  ; Ajustement pour le changement de siècle
+  IF FIELDTEXT[1:1] < "8"
+  THEN LET T_FIELDTEXT_SIE = "1" + FIELDTEXT
+  ELSE LET T_FIELDTEXT_SIE = "0" + FIELDTEXT
+
+  ; Ajustement pour le changement de siècle
+  IF T_PECCLECOU[1:1] < "8"
+  THEN LET T_PECCLECOU_SIE = "1" + T_PECCLECOU
+  ELSE LET T_PECCLECOU_SIE = "0" + T_PECCLECOU
+
+  IF T_FIELDTEXT_SIE < T_PECCLECOU_SIE
+  THEN ERROR 406 ; Cette période est fermée.
+
+  IF FIELDTEXT <> T_PECCLECOU
+  THEN WARNING 407 ; Cette période diffère de la période courante.
+END
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION & VALIDATION DU LOT
+;
+;
+PROCEDURE INPUT LCPCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PECCLE = PECCLE OF CPCPT_A_PAYER
+    LET T_TYPECR = "RD"
+    LET T_LCPCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cp103 MODE F PASSING T_TYPECR, T_CIECLEMNU, T_PECCLE, T_LCPCLE
+    LET FIELDTEXT = TRUNCATE(T_LCPCLE)
+  END
+  ;
+  ; Force l'éxécution du LOOKUP sur le lot et de la procédure EDIT.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(LCPCLE OF CPCPT_A_PAYER))
+  THEN LET FIELDTEXT = LCPCLE OF CPCPT_A_PAYER
+END
+
+;
+; Le lot doit être un rapports de dépenses ou d'ajustements de rapports
+; de dépenses. Il ne doit pas être autorisé ni journalisé. Et pour l'utiliser,
+; il faut être l'usager déclaré dans le lot.
+;
+
+PROCEDURE EDIT LCPCLE
+BEGIN
+  IF LCPTYPECR OF CPLOT <> "RD"
+  THEN ERROR 441 ; Ce lot n'est pas du bon type.
+
+  IF LCPDATJOU OF CPLOT <> 0
+  THEN ERROR 442 ; Le lot est déjà journalisé.
+
+  IF LCPATRJOU OF CPLOT = "1"
+  THEN ERROR 443 ; On ne peut pas utiliser un lot autorisé à la journalisation.
+
+  IF LCPUSR OF CPLOT <> LOGONID
+  THEN ERROR 444 ; Ce lot ne vous est pas destiné.
+
+  IF LCPNBRTRSVER of cplot = 0
+  THEN ERROR 549 ; Vous devez d'abord saisir les montants vérifiés dans le lot.
+
+  IF LCPDATVAL OF CPLOT <> 0
+  THEN WARNING 445 ; Une liste de vérification a déjà été demandé pour ce lot.
+END
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION & VALIDATION DU TYPE DE PIECE
+;
+;
+PROCEDURE INPUT CAPTYPECR
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CAPTYPECR = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_CAPTYPECR, T_CAPTYPECR
+    LET FIELDTEXT = TRUNCATE(T_CAPTYPECR)
+  END
+END
+
+PROCEDURE EDIT CAPTYPECR
+BEGIN
+  IF    CAPTYPECR OF CPCPT_A_PAYER <> "RD" &
+    AND CAPTYPECR OF CPCPT_A_PAYER <> "AR"
+  THEN ERROR 545 ; Ce type de pièce ne peut pas être utilisé ici.
+END
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION & VALIDATION DU FOURNISSEUR
+;
+;
+PROCEDURE INPUT REFCLENUM
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_REFCIECLE = T_EMPCIECLE
+    LET T_REFCLETYP = "E"
+    LET T_REFCLENUM = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_REFSTUPAT = "A"
+    RUN SCREEN mc112 MODE F &
+              PASSING T_REFCIECLE, T_REFCLETYP, T_REFCLENUM, T_REFSTUPAT
+    LET FIELDTEXT = TRUNCATE(T_REFCLENUM)
+  END
+END
+
+;
+; L'employé doit être actif
+;
+PROCEDURE EDIT REFCLENUM
+BEGIN
+  IF REFSTU OF MCREFERENCE = "I"
+  THEN ERROR 504 ; Cet employé est inactif.
+END
+
+;-------------------------------------------------------------------------------
+;
+; Validation du numéro de rapport. Celui-ci ne doit pas dépasser 12 caractères
+; pour pouvoir laisser de la place au numéro d'ajustement. et il ne doit pas
+; commencer par les mêmes lettres que le code des paiements automatiques.
+;
+PROCEDURE EDIT CAPCLE OF CPCPT_A_PAYER
+BEGIN
+  IF 12 < SIZE(TRUNCATE(FIELDTEXT))
+  THEN ERROR 403 ; Le numéro est trop long.
+
+  IF FIELDTEXT[1:2] = CPPCODPAU OF CPPARAMETRE
+  THEN ERROR 448 ; Le numéro ne peut pas débuter par le code des paiements automatiques.
+END
+
+;-------------------------------------------------------------------------------
+;
+; SAISIE & VALIDATION DU NUMÉRO DE LA PIÈCE RÉFÉRÉE
+;
+; Numéro de rapport en référence pour les ajustements de rapports de dépenses
+;
+PROCEDURE INPUT CAPCLE OF CPCAP_HISTO
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE    = FOUCIECLE OF CPCPT_A_PAYER
+    LET T_FOUCLE    = FOUCLE    OF CPCPT_A_PAYER
+    LET T_CAPCIECLE = CAPCIECLE OF CPCPT_A_PAYER
+    LET T_TYPECRPAT = "RD"
+    LET T_FLGSLD    = "0"
+    LET T_CAPCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_REFCLENUM = REFCLENUM OF CPCPT_A_PAYER
+
+    RUN SCREEN cp105 MODE F PASSING T_CIECLE, T_FOUCLE, T_TYPECRPAT, &
+                                    T_FLGSLD, T_CAPCLE, T_REFCLENUM, &
+                                    T_CAPCIECLE
+
+    LET FIELDTEXT = TRUNCATE(T_CAPCLE)
+  END
+END
+
+;
+; Validation du numéro de référence pour les notes de crédit et ajustements.
+;
+PROCEDURE EDIT CAPCLE OF CPCAP_HISTO
+BEGIN
+  IF CAPTYPECR OF CPCPT_A_PAYER = "RD"
+  THEN ERROR 542 ; Vous ne pouvez pas référer autre chose qu'un rapport de dépense.
+
+  IF CAPDATJOU OF A_CAP_REFERE = 0
+  THEN ERROR 451 ; La pièce doit être journalisée pour la référer.
+END
+
+;-------------------------------------------------------------------------------
+;
+; VALIDATION DE LA DATE DU RAPPORT
+;
+;
+PROCEDURE EDIT CAPDAT
+BEGIN
+  IF FIELDVALUE < PECDATDEB OF MCPERIODE_CTB
+  THEN WARNING 452 ; La date est inférieure à la date de début de la période
+
+  IF FIELDVALUE > PECDATFIN OF MCPERIODE_CTB
+  THEN WARNING 453 ; La date est supérieure à la date de fin de la période.
+END
+
+;-------------------------------------------------------------------------------
+;
+; VALIDATION DU MONTANT DU RAPPORT
+;
+;
+PROCEDURE EDIT CAPMNT
+BEGIN
+  ;
+  ; Valide la partie décimale.
+  ;
+  USE usvaldec NOLIST
+
+  IF     FIELDVALUE < 0 &
+     AND "RD" = CAPTYPECR OF CPCPT_A_PAYER
+  THEN ERROR 481 ; Le montant doit être positif
+
+  IF     FIELDVALUE  < CAPMNTAVA OF CPCPT_A_PAYER &
+     AND "RD" = CAPTYPECR OF CPCPT_A_PAYER
+  THEN ERROR 579 ; Le montant brut doit être supérieur ou égale au montant
+                 ; d'avance
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION DES AJUSTEMENTS DE LA PIÈCE
+;
+;
+PROCEDURE INPUT V_CAPMNTAJT
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE    = FOUCIECLE OF CPCPT_A_PAYER
+    LET T_FOUCLE    = FOUCLE    OF CPCPT_A_PAYER
+    LET T_CAPCLE    = CAPCLE    OF CPCPT_A_PAYER
+    LET T_TYPTRAPAT = "AR"
+    RUN SCREEN cp106 MODE F PASSING T_CIECLE, T_FOUCLE, T_CAPCLE, T_TYPTRAPAT
+  END
+  LET FIELDTEXT = ""
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du montant d'avance.
+;
+;
+PROCEDURE EDIT CAPMNTAVA
+BEGIN
+
+  IF FIELDVALUE < 0
+  THEN ERROR 481 ; Le montant doit être positif
+
+  IF FIELDVALUE  > CAPMNT OF CPCPT_A_PAYER
+  THEN ERROR 579 ; Le montant brut doit être supérieur ou égale au montant
+                 ; d'avance
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION DES PAIEMENTS APPLIQUÉS SUR CETTE PIECE
+;
+;
+PROCEDURE INPUT V_CAPMNTPYE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE    = FOUCIECLE OF CPCPT_A_PAYER
+    LET T_FOUCLE    = FOUCLE    OF CPCPT_A_PAYER
+    LET T_CAPCLE    = CAPCLE    OF CPCPT_A_PAYER
+    LET T_TYPTRAPAT = "CH|CA"
+    RUN SCREEN cp106 MODE F PASSING T_CIECLE, T_FOUCLE, T_CAPCLE, T_TYPTRAPAT
+  END
+  LET FIELDTEXT = ""
+END
+
+;-------------------------------------------------------------------------------
+;
+; VALIDATION DE LA SÉCURITÉE EN SAISIE DE DONNÉES
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; PROCÉDURE DE SAISIE DES PIÈCES
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  ;
+  ; La période et le lot reste les mêmes pour la durée d'une saisie.
+  ;
+  IF T_PECCLE_DUP = ""
+  THEN BEGIN
+    ACCEPT PECCLE OF CPCPT_A_PAYER
+    ACCEPT LCPCLE OF CPCPT_A_PAYER
+    LET T_PECCLE_DUP = PECCLE OF CPCPT_A_PAYER
+    LET T_LCPCLE_DUP = LCPCLE OF CPCPT_A_PAYER
+  END
+  ELSE BEGIN
+    LET PECCLE OF CPCPT_A_PAYER = T_PECCLE_DUP
+    LET LCPCLE OF CPCPT_A_PAYER = T_LCPCLE_DUP
+    DISPLAY PECCLE OF CPCPT_A_PAYER
+    DISPLAY LCPCLE OF CPCPT_A_PAYER
+    EDIT    LCPCLE OF CPCPT_A_PAYER
+  END
+
+  ;
+  ; Type de pièce.
+  ;
+  ACCEPT CAPTYPECR OF CPCPT_A_PAYER
+  DISPLAY CBIDSC OF A_CBI_CAPTYPECR
+  ;
+  ; Numéro de fournisseur
+  ;
+  ACCEPT REFCLENUM OF CPCPT_A_PAYER
+  DISPLAY RADNOM    OF MCREF_ADRESSE
+  DISPLAY RADCLE    OF CPCPT_A_PAYER
+  DISPLAY RADADR1   OF MCREF_ADRESSE
+
+  ;
+  ; Numéro du rapport
+  ;
+  IF CAPTYPECR OF CPCPT_A_PAYER <> "AR"
+  THEN ACCEPT CAPCLE OF CPCPT_A_PAYER
+
+  IF CAPTYPECR OF CPCPT_A_PAYER = "AR"
+  THEN BEGIN
+    ACCEPT CAPCLE OF CPCAP_HISTO
+    ;
+    IF CAPTYPECR OF CPCPT_A_PAYER = "AR"
+    THEN BEGIN
+      ;
+      ; Le numéro d'ajustement est composé du numéro de document plus
+      ; un numéro de séquence. Le numéro de séquence est séparé du numéro
+      ; du document par un #.
+      ;
+      ; Exemple: Rapport    ==> R1234
+      ;          Ajustement ==> R1234#01
+      ;
+      LET T_NUMAJT = "00"
+      WHILE RETRIEVING A_CPH_AJ VIA   FOUCIECLE , &
+                                      FOUCLE    , &
+                                      CAPCLE    , &
+                                      CPHTYPECR   &
+                                USING FOUCIECLE OF CPCPT_A_PAYER, &
+                                      FOUCLE    OF CPCPT_A_PAYER, &
+                                      CAPCLE    OF CPCAP_HISTO, &
+                                      CAPTYPECR OF CPCPT_A_PAYER
+      BEGIN
+        IF T_NUMAJT < &
+               CPHCLE3 OF A_CPH_AJ[SIZE(TRUNCATE(CPHCLE3 OF A_CPH_AJ)) - 1 : 2]
+        THEN LET T_NUMAJT = &
+               CPHCLE3 OF A_CPH_AJ[SIZE(TRUNCATE(CPHCLE3 OF A_CPH_AJ)) - 1 : 2]
+      END
+      LET CAPCLE OF CPCPT_A_PAYER = TRUNCATE( CAPCLE OF CPCAP_HISTO ) + "#" + &
+                                  ASCII( NCONVERT(T_NUMAJT) + 1 ,2 )
+      DISPLAY CAPCLE OF CPCPT_A_PAYER
+    END
+  END
+  ;
+  ; Date du rapport de dépense.
+  ;
+  ACCEPT CAPDAT OF CPCPT_A_PAYER
+
+  ;
+  ; Nombre de kilomètres
+  ;
+  ACCEPT CAPNBRKM OF CPCPT_A_PAYER
+
+  ;
+  ; Description du rapport de dépense
+  ;
+  ACCEPT CAPDSC1 OF CPCPT_A_PAYER
+  ACCEPT CAPDSC2 OF CPCPT_A_PAYER
+
+  DISPLAY D_DEVCLE
+
+  ACCEPT CAPMNT    OF CPCPT_A_PAYER
+
+  IF "RD" = CAPTYPECR OF CPCPT_A_PAYER
+  THEN ACCEPT CAPMNTAVA OF CPCPT_A_PAYER
+
+  RUN SCREEN cp005a MODE E &
+              PASSING   T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        D_LCPATRJOU, &
+                        D_REFDEVCLE  , &
+                        CPCPT_A_PAYER, &
+                        CPCAP_HISTO
+
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; La procédure PATH suivante est nécessaire dans le cas où l'écran est
+; appelé autre que par le menu.
+;
+;
+PROCEDURE PATH
+BEGIN
+  IF T_CAPCLEFND <> ""
+  THEN LET PATH = 99
+  ELSE BEGIN
+    REQUEST REFCLENUM OF CPCPT_A_PAYER
+    IF PROMPTOK
+    THEN REQUEST CAPCLE OF CPCPT_A_PAYER
+    IF PROMPTOK
+    THEN LET PATH = 1
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST REFCLENUM OF CPCPT_A_PAYER
+      IF PROMPTOK
+      THEN LET PATH = 2
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST PECCLE OF CPCPT_A_PAYER
+      IF PROMPTOK
+      THEN REQUEST LCPCLE OF CPCPT_A_PAYER
+      IF PROMPTOK
+      THEN LET PATH = 3
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST PECCLE OF CPCPT_A_PAYER
+      IF PROMPTOK
+      THEN LET PATH = 4
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      LET PATH = 5
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; La procédure FIND est pour gérer l'appel en sous-écran (PATH=99)
+;
+;
+PROCEDURE FIND
+BEGIN
+  IF PATH = 1
+  THEN GET CPCPT_A_PAYER VIA FOUCIECLE , &
+                             FOUCLE    , &
+                             CAPCLE    , &
+                             REFCIECLE , &
+                             REFCLETYP , &
+                             REFCLENUM   &
+                         USING T_CIECLEMNU             , &
+                               "      "                , &
+                               CAPCLE OF CPCPT_A_PAYER , &
+                               T_EMPCIECLE             , &
+                               "E"                     , &
+                               REFCLENUM OF CPCPT_A_PAYER
+
+  IF PATH = 2
+  THEN GET CPCPT_A_PAYER VIA FOUCIECLE , &
+                             FOUCLE    , &
+                             REFCIECLE , &
+                             REFCLETYP , &
+                             REFCLENUM   &
+                         USING T_CIECLEMNU , &
+                               "      "    , &
+                               T_EMPCIECLE , &
+                               "E"         , &
+                               REFCLENUM OF CPCPT_A_PAYER &
+                         ORDERBY FOUCIECLE , &
+                                 FOUCLE    , &
+                                 CAPCLE
+
+  IF PATH = 3
+  THEN GET CPCPT_A_PAYER VIA CAPCIECLE , &
+                             PECCLE    , &
+                             LCPCLE      &
+                         USING T_CIECLEMNU             , &
+                               PECCLE OF CPCPT_A_PAYER , &
+                               LCPCLE OF CPCPT_A_PAYER   &
+                         ORDERBY CAPCIECLE , &
+                                 PECCLE    , &
+                                 LCPCLE    , &
+                                 REFCIECLE , &
+                                 REFCLETYP , &
+                                 REFCLENUM , &
+                                 FOUCIECLE , &
+                                 FOUCLE    , &
+                                 CAPCLE
+
+  IF PATH = 4
+  THEN GET CPCPT_A_PAYER VIA CAPCIECLE , &
+                             PECCLE      &
+                         USING T_CIECLEMNU , &
+                               PECCLE OF CPCPT_A_PAYER &
+                         ORDERBY CAPCIECLE , &
+                                 PECCLE    , &
+                                 LCPCLE    , &
+                                 REFCIECLE , &
+                                 REFCLETYP , &
+                                 REFCLENUM , &
+                                 FOUCIECLE , &
+                                 FOUCLE    , &
+                                 CAPCLE
+
+  IF PATH = 5
+  THEN GET CPCPT_A_PAYER VIA FOUCIECLE , &
+                             FOUCLE    , &
+                             REFCIECLE , &
+                             REFCLETYP   &
+                         USING T_CIECLEMNU , &
+                               "      "    , &
+                               T_EMPCIECLE , &
+                               "E"           &
+                         ORDERBY REFCIECLE , &
+                                 REFCLETYP , &
+                                 REFCLENUM , &
+                                 FOUCIECLE , &
+                                 FOUCLE    , &
+                                 CAPCLE
+
+  IF PATH = 99
+  THEN GET CPCPT_A_PAYER VIA FOUCIECLE , &
+                             FOUCLE    , &
+                             CAPCLE      &
+                         USING T_CIECLEMNU , &
+                               "      "    , &
+                               T_CAPCLEFND
+
+  GET CPCAP_HISTO OPTIONAL
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procedure qui conserve l'ancien montant du rapport si la pièce actuelle
+; est une note de crédit ou un ajustement.
+;
+PROCEDURE POSTFIND
+BEGIN
+  IF CAPTYPECR OF CPCPT_A_PAYER = "AR"
+  THEN LET T_CAPMNTOLD = CAPMNT OF CPCPT_A_PAYER
+END
+
+;-------------------------------------------------------------------------------
+;
+; PREPARATION DE LA MISE-A-JOUR.
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Valide les traitements permis par écran et par usager.
+  ;
+  ;
+  ; Validation de la destruction
+  ;
+  IF    DELETEDRECORD OF CPCPT_A_PAYER &
+    AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la mise à jour(Entrée, Modification)
+  ;
+  IF (   ALTEREDRECORD     OF CPCPT_A_PAYER &
+      OR ALTEREDRECORD     OF CPCAP_HISTO   &
+     ) &
+     AND NOT NEWRECORD     OF CPCPT_A_PAYER &
+     AND NOT DELETEDRECORD OF CPCPT_A_PAYER &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  ;
+  ; Validation de la destruction si transaction est journalisé
+  ;
+  IF    DELETEDRECORD OF CPCPT_A_PAYER &
+    AND CAPDATJOU OF CPCPT_A_PAYER <> 0
+  THEN ERROR 550 ;Impossible de détruire une transaction journalisé
+
+  IF    ALTEREDRECORD OF CPCPT_A_PAYER &
+    AND CAPDATJOU OF CPCPT_A_PAYER <> 0
+  THEN ERROR 458 ; Impossible de mettre à jour une transaction journalisée.
+
+  ;
+  ; Le document est non modifiable si le lot est autorisé.
+  ;
+  IF    LCPATRJOU OF CPLOT = "1" &
+    AND CAPDATJOU OF CPCPT_A_PAYER = 0
+  THEN ERROR 544 ;Impossible de mettre à jour la transaction est déjà autorisé
+
+  IF CAPCUMMNT OF CPCPT_A_PAYER <> ( CAPMNT    OF CPCPT_A_PAYER - &
+                                     CAPMNTAVA OF CPCPT_A_PAYER )
+  THEN WARNING 459 ; L'imputation ne balance pas.
+
+END
+
+;-------------------------------------------------------------------------------
+;
+; Procedure qui conserve l'ancien numéro du rapport référée par une note
+; de crédit et son montant.
+;
+PROCEDURE POSTUPDATE
+BEGIN
+  IF CAPTYPECR OF CPCPT_A_PAYER = "AR"
+  THEN LET T_CAPMNTOLD = CAPMNT OF CPCPT_A_PAYER
+END
+
+;-------------------------------------------------------------------------------
+;
+; MODIFICATION DE LA DATE
+;
+;
+PROCEDURE DESIGNER 25
+BEGIN
+  IF CAPDATJOU OF CPCPT_A_PAYER = 0
+  THEN ACCEPT CAPDAT OF CPCPT_A_PAYER
+END
+
+;-------------------------------------------------------------------------------
+;
+; MODIFICATION DE LA DESCRIPTION DE LA PIÈCE
+;
+; la modification est autorisée seulement si le raport n'est pas journalisée
+;
+PROCEDURE DESIGNER 35
+BEGIN
+  IF CAPDATJOU OF CPCPT_A_PAYER = 0
+  THEN BEGIN
+    ACCEPT CAPDSC1 OF CPCPT_A_PAYER
+    ACCEPT CAPDSC2 OF CPCPT_A_PAYER
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Si le rapport est journalisée le montant brut est non modifiable.
+;
+PROCEDURE DESIGNER 45
+BEGIN
+  IF CAPDATJOU OF CPCPT_A_PAYER = 0
+  THEN ACCEPT CAPMNT OF CPCPT_A_PAYER
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; CONSULTATION DES PIECES POUR LES MONTANTS D'AJUSTEMENT
+;
+PROCEDURE DESIGNER 50
+BEGIN
+  ACCEPT V_CAPMNTAJT
+END
+
+;-------------------------------------------------------------------------------
+;
+; Le montant d'avance n'est pas modifiable si la pièce est journalisée
+;
+PROCEDURE DESIGNER 55
+BEGIN
+  IF     CAPDATJOU OF CPCPT_A_PAYER = 0 &
+     AND "RD" = CAPTYPECR OF CPCPT_A_PAYER
+  THEN ACCEPT CAPMNTAVA OF CPCPT_A_PAYER
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; CONSULTATION DES PIECES POUR LES MONTANTS PAYE
+;
+PROCEDURE DESIGNER 60
+BEGIN
+  ACCEPT V_CAPMNTPYE
+END
+
+;-------------------------------------------------------------------------------
+;
+; SOUS-ÉCRAN D'IMPUTATION
+;
+;
+PROCEDURE DESIGNER D001
+BEGIN
+  IF    CAPMNT OF CPCPT_A_PAYER <> T_CAPMNTOLD &
+    AND CAPTYPECR OF CPCPT_A_PAYER = "AR"
+  THEN ERROR 483 ; Faire une mise à jour avant d'accèder ce sous-écran.
+  RUN SCREEN cp005a MODE SAME &
+              PASSING   T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        D_LCPATRJOU, &
+                        D_REFDEVCLE  , &
+                        CPCPT_A_PAYER, &
+                        CPCAP_HISTO
+END
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION DE L'ÉCRITURE COMPTABLE
+;
+;
+PROCEDURE DESIGNER D002
+BEGIN
+  IF CAPDATJOU OF CPCPT_A_PAYER = 0
+  THEN ERROR 460 ; L'écriture doit être journalisée pour accèder le sous-écran.
+
+  RUN SCREEN mc090  MODE F PASSING D_HISCLE
+END
+
+;-------------------------------------------------------------------------------
+;
+; SOUS-ECRAN DE L'HISTORIQUE DES TRANSACTIONS
+;
+PROCEDURE DESIGNER D003
+BEGIN
+    RUN SCREEN cp005b PASSING CPCPT_A_PAYER MODE F
+END
+
+;-------------------------------------------------------------------------------
+;
+; GESTION DES LOTS
+;
+PROCEDURE DESIGNER D004
+BEGIN
+
+    LET T_PECCLEFND = PECCLE OF CPCPT_A_PAYER
+    LET T_LCPCLEFND = LCPCLE OF CPCPT_A_PAYER
+
+    RUN SCREEN cp020 &
+                PASSING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        T_PECCLEMNU, &
+                        T_PECCLECOU, &
+                        T_PECCLEFND, &
+                        T_LCPCLEFND  &
+                MODE F
+END
+
+;-------------------------------------------------------------------------------
+;
+; SOUS-ECRAN DE VÉRIFICATION
+;
+PROCEDURE DESIGNER D005
+BEGIN
+    RUN SCREEN cp005c PASSING CPCPT_A_PAYER MODE F
+END
+
+BUILD
+@IF FORMAT
+
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+***************************** Rapports de dépenses *****************************
+* Période ......: xxxxx   Numéro de lot.: xxxx  Journalisé le.: xxxxxxxx xxxxx *
+*                                                                              *
+* Employé.......: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              *
+* Adr. paiement.: xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              *
+*                                                                              *
+* Rapport dép...: xxxxxxxxxxxxxxx  Rapport réf...: xxxxxxxxxxxxxxx             *
+* Date..........: xxxxxxxx                                                     *
+*                                                                              *
+* Kilométrage...: xxxxx                                                        *
+*                                                                              *
+* Description...: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                                                                              *
+* Montant brut..: xxxxxxxxxxxxxxxxxx   Montant de TPS:    xxxxxxxxxxx          *
+* Ajustement....: xxxxxxxxxxxxxx       C.T.I.........:    xxxxxxxxxxx          *
+* Mnt avance....: xxxxxxxxxxxxxx       Montant de TVQ:    xxxxxxxxxxx          *
+* Montant payé..: xxxxxxxxxxxxxx       R.T.I.........:    xxxxxxxxxxx          *
+* Reste à payer.: xxxxxxxxxxxxxx                                               *
+********************************************************************************
+@ENDIF

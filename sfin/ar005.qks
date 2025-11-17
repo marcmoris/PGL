@@ -1,0 +1,560 @@
+;/T/ Réservation des numéros de commande
+;
+;/P/ Programmeur..: Nancy Marceau
+;    Date Création: 7 mars 1994
+;
+;    Description..: Cet écran permet de faire la réservation des numéros
+;                   de commande. Ces numéros de commande serviront lorsque
+;                   les commandes seront placées.
+;
+;
+;/M/ Programmeur.......: Patrick Langlois
+;    Date modification.: 09 Juin 1999
+;    Description.......: Migration Achat/Réception/Inventaire de l'environnement (BOC)
+;
+;-------------------------------------------------------------------------------
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN ar005 ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU, &
+                       T_CIENOM,    &
+                       T_PECCLEMNU, &
+                       T_FOUCIECLE
+
+
+USE ussectmp NOLIST     ; Variable pour la sécurité
+    "AR005"             ; Nom de l'écran
+
+USE ar005.hlp NOLIST  ; Use servant à la documentation de l'écran
+
+USE ustraecr NOLIST
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-écrans
+
+
+;-------------------------------------------------------------------------------
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de la compagnie
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie
+TEMPORARY T_PECCLEMNU CHARACTER SIZE 4  ; Période du menu
+TEMPORARY T_FOUCIECLE CHARACTER SIZE 4  ; Compagnie fournisseur
+
+TEMPORARY T_SELUTL    CHARACTER SIZE 1 &; Pour ne voir que les non-utilisés
+                        INITIAL "0" RESET AT MODE
+
+;-------------------------------------------------------------------------------
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;
+; Sert à la génération du numéro de séquence des bons de commandes
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE ARCMD_SEQ IN DICT
+
+
+FILE ARRESERVATION  PRIMARY OCCURS 14 NOITEM NODELETE
+   ; Il n'y a pas d'accès séquentiel car, l'entrepôt est sorti du CLUSTER et
+   ; affiche le premier entrepôt de la première ligne.
+
+  ITEM CIECLE       OF ARRESERVATION  INITIAL T_CIECLEMNU
+  ITEM USRCLE       OF ARRESERVATION  INITIAL TZ_LOGONID
+  ITEM ENTCLE       OF ARRESERVATION  INITIAL FIRST (ENTCLE OF ARRESERVATION)
+  ITEM FOUCIECLE    OF ARRESERVATION  INITIAL T_FOUCIECLE
+
+  SELECT IF (RESDATUTI OF ARRESERVATION = 0 AND T_SELUTL = "0") OR &
+             RESDATUTI OF ARRESERVATION <> 0 AND T_SELUTL = "1"
+
+; Fichier pour les numéros séquentiels des commandes
+;
+FILE ARCMD_SEQ  DESIGNER   TRANSACTION GEN_NUM_SEQ
+
+
+; Fichier pour valider que le numéro de commande réservé n'est pas déjà
+; utilisé par une commande.
+;
+FILE ARREQUISITION  REFERENCE
+
+  ACCESS VIA   CIECLE, &
+               CMDCLE  &
+         USING CIECLE OF ARRESERVATION, &
+               CMDCLE OF ARRESERVATION
+
+FILE ARCOMMANDE  REFERENCE
+  ACCESS VIA   CIECLE, &
+               CMDCLE  &
+         USING CIECLE OF ARRESERVATION, &
+               CMDCLE OF ARRESERVATION
+
+FILE ARENTREPOT  REFERENCE
+  ACCESS VIA   CIECLE, &
+               ENTCLE  &
+         USING T_CIECLEMNU, &
+               ENTCLE OF ARRESERVATION
+
+
+
+; Fichier permettant de valider que le fournisseur existe et d'afficher le
+; nom du fournisseur
+;
+FILE VFOC_FOU  REFERENCE &
+              OCCURS WITH ARRESERVATION
+  ACCESS VIA   FOUCIECLE, &
+               FOUCLE,    &
+               FOCCIECLE  &
+         USING T_FOUCIECLE,             &
+               FOUCLE OF ARRESERVATION, &
+               CIECLE OF ARRESERVATION
+
+
+
+;
+; Paramètres pour la compagnie consolidé(holding)
+;
+FILE MCHOLDING  REFERENCE
+  ACCESS VIA CIENMC USING "1"
+
+;-------------------------------------------------------------------------------
+TEMPORARY T_CIECLE    CHARACTER SIZE 4 ; Compagnie pour écran dépisteur
+TEMPORARY T_ENTCLE    CHARACTER SIZE 4 ; Entrepôt pour écran dépisteur
+TEMPORARY T_FOUCLE    CHARACTER SIZE 6 ; Fournisseur écran dépisteur
+TEMPORARY T_FOCCIECLE CHARACTER SIZE 4 ; Compagnie du fournisseur
+
+DEFINE    D_RESDATUTI DATE = RESDATUTI OF ARRESERVATION
+
+USE usvarprd NOLIST
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST     ; Draw pour les écrans pleine page
+USE ustitstd NOLIST     ; En-tête pour les écrans pleine page
+USE ushilite NOLIST     ; Hilite pour tous les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Réservation des numéros de commande " &
+@ELSE
+      " %%%Réservation des numéros de commande " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+;-------------------------------------------------------------------------------
+
+SKIP 1
+ALIGN (,3,19) (,,24) (,65,75)
+
+
+FIELD ENTCLE OF ARRESERVATION &
+        REQUIRED NOCHANGE &
+        LOOKUP ON ARENTREPOT &
+          VIA   CIECLE, &
+                ENTCLE  &
+          USING T_CIECLEMNU, &
+                ENTCLE OF ARENTREPOT &
+          MESSAGE 1337 ; Ce code d'entrepôt n'existe pas.
+
+
+FIELD ENTNOM OF ARENTREPOT DISPLAY
+
+FIELD T_SELUTL &
+        UPSHIFT           &
+@IF FRANCAIS
+        LABEL "Utilisé.:" &
+        HELP  "Pour ne voir que les non-utilisés" &
+@ELSE
+        LABEL "Uused...:" &
+        HELP  "%%%% ne voir que les non-utilisés" &
+@ENDIF
+        SIZE 3
+
+SKIP 1
+TITLE &
+@IF FRANCAIS
+      "Usager      # Commande Fourn. Description            Réservé    Utilisé" &
+@ELSE
+      "%%%Usager      # Commande Fourn. Description                 " &
+@ENDIF
+       AT ,3
+
+
+SKIP
+
+CLUSTER OCCURS WITH ARRESERVATION ID BASE 15
+
+ALIGN (3,3,3) (,,16) (,,26) (,,33) (,,56) (,,67)
+
+FIELD USRCLE OF ARRESERVATION DISPLAY &
+        HIDDEN                 &
+        LABEL " "
+
+
+FIELD CMDCLE OF ARRESERVATION &
+        REQUIRED IF HLDCMDACH OF MCHOLDING <> "1" & ; Requis si la numérotation
+        NOCHANGE                    &
+        LOOKUP NOTON ARRESERVATION  &
+          VIA   CIECLE, &
+                CMDCLE  &
+          USING CIECLE OF ARRESERVATION, &
+                CMDCLE OF ARRESERVATION  &
+          MESSAGE 1356,    & ; Ce numéro de commande a déjà été réservé.
+
+        NOTON ARCOMMANDE     &
+          MESSAGE 1357       ; Ce numéro de commande existe déjà.
+
+
+FIELD FOUCLE OF ARRESERVATION  &
+        REQUIRED
+
+
+FIELD RESDSC  OF ARRESERVATION &
+        FOR 1,22
+
+FIELD RESDAT    OF ARRESERVATION   FORMAT YYYYMMDD DISPLAY
+
+FIELD D_RESDATUTI  FORMAT YYYYMMDD DISPLAY
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Pour saisir et afficher les valeurs Oui/Non
+;
+PROCEDURE INPUT T_SELUTL
+BEGIN
+  USE usflginp NOLIST  ; Pour l'entrée d'un flag oui/non
+END
+;-------------------------------------------------------------------------------
+;
+; Pour saisir et afficher les valeurs Oui/Non
+;
+PROCEDURE OUTPUT T_SELUTL
+BEGIN
+  USE usflgout3 NOLIST ; Pour afficher la valeur O/N
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de faire un écran dépisteur pour l'entrepôt
+;
+PROCEDURE INPUT ENTCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = T_CIECLEMNU
+    LET T_ENTCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN ar100 MODE F PASSING T_CIECLE, T_ENTCLE
+    LET FIELDTEXT = TRUNCATE(T_ENTCLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+; Ecran de consultation (dépisteur) des fournisseurs du produit
+;
+;
+PROCEDURE INPUT FOUCLE
+BEGIN
+  ;
+  ; Valide si l'usager peut faire de la saisie.
+  ;
+  ;
+  USE ussecent NOLIST
+
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_FOUCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_FOCCIECLE = T_CIECLEMNU
+    RUN SCREEN cp104 MODE F PASSING T_FOUCIECLE, T_FOUCLE, T_FOCCIECLE
+    LET FIELDTEXT = TRUNCATE(T_FOUCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de valider que le fournisseur existe s'il est saisi.
+; Permet aussi de l'effacer après coup car ce champ est optionnel.
+;
+PROCEDURE EDIT FOUCLE
+BEGIN
+  GET VFOC_FOU OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 1355     ; Ce fournisseur n'existe pas.
+
+END
+
+;------------------------------------------------------------------------------
+;
+; 
+PROCEDURE INPUT CMDCLE
+BEGIN
+  USE usinpcmd NOLIST
+END
+
+;-------------------------------------------------------------------------------
+; Procédure pour la modification. Les informations ne sont pas modifiables
+; si le numéro de commande est utilisé.
+;
+PROCEDURE DESIGNER 15
+BEGIN
+  GET ARREQUISITION &
+      VIA    CIECLE, &
+             CMDCLE, &
+             ENTCLE  &
+      USING  CIECLE OF ARRESERVATION, &
+             CMDCLE OF ARRESERVATION, &
+             ENTCLE OF ARRESERVATION OPTIONAL
+  IF ACCESSOK
+  THEN ERROR 1358
+
+  IF RESDATUTI = 0
+  THEN BEGIN
+    ACCEPT FOUCLE OF ARRESERVATION
+    INFORMATION = FOUNOMABR OF VFOC_FOU
+    ACCEPT RESDSC OF ARRESERVATION
+  END
+  ELSE ERROR 1358  ; Impossible de faire la modification, la réservation est
+                   ; utilisée.
+
+END
+
+
+;-------------------------------------------------------------------------------
+; Procédure pour la modification dans Powerhouse Client. Les informations
+; ne sont pas modifiables si le numéro de commande est utilisé.
+;
+PROCEDURE DESIGNER PH01
+BEGIN
+  GET ARREQUISITION &
+      VIA    CIECLE, &
+             CMDCLE, &
+             ENTCLE  &
+      USING  CIECLE OF ARRESERVATION, &
+             CMDCLE OF ARRESERVATION, &
+             ENTCLE OF ARRESERVATION OPTIONAL
+  IF ACCESSOK
+  THEN ERROR 1358
+
+  IF RESDATUTI = 0
+  THEN BEGIN
+    ACCEPT FOUCLE OF ARRESERVATION
+    INFORMATION = FOUNOMABR OF VFOC_FOU
+    ACCEPT RESDSC OF ARRESERVATION
+  END
+  ELSE ERROR 1358  ; Impossible de faire la modification, la réservation est
+                   ; utilisée.
+
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+; Pour afficher le nom du fournisseur lorsque le numéro est saisi.
+;
+PROCEDURE APPEND
+BEGIN
+  DISPLAY USRCLE OF ARRESERVATION
+
+  IF HLDCMDACH OF MCHOLDING <> "1" 
+  THEN ACCEPT CMDCLE OF ARRESERVATION
+  ELSE DISPLAY CMDCLE OF ARRESERVATION
+
+  ACCEPT FOUCLE OF ARRESERVATION
+  INFORMATION = FOUNOMABR OF VFOC_FOU
+
+  ACCEPT RESDSC OF ARRESERVATION
+
+  ; On initialise la date afin de forcer l'altération de l'enregistrement
+  ; dans le cas où l'usager n'a rien saisi pour le fournisseur et
+  ; la description.
+
+  LET RESDAT OF ARRESERVATION = SYSDATE
+  DISPLAY RESDAT OF ARRESERVATION
+
+  DISPLAY D_RESDATUTI
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure est codée car la procédure APPEND est aussi codée.
+;
+PROCEDURE ENTRY
+BEGIN
+  ACCEPT ENTCLE OF ARRESERVATION
+  DISPLAY ENTNOM OF ARENTREPOT
+  FOR ARRESERVATION
+  BEGIN
+    PERFORM APPEND
+  END
+END
+
+;------------------------------------------------------------------------------
+;
+; Procédure pour gérer le flag de sélection.
+;
+PROCEDURE PATH
+BEGIN
+  REQUEST ENTCLE OF ARRESERVATION
+  IF PROMPTOK
+  THEN BEGIN
+    REQUEST T_SELUTL
+    REQUEST FOUCLE OF ARRESERVATION
+    IF PROMPTOK
+    THEN LET PATH = 1
+  END
+  IF PATH = 0
+  THEN BEGIN
+    REQUEST ENTCLE OF ARRESERVATION
+    IF PROMPTOK
+    THEN BEGIN
+      REQUEST T_SELUTL
+      LET PATH = 2
+    END
+  END
+  IF PATH = 0
+  THEN ERROR = "Key required."
+END
+;------------------------------------------------------------------------------
+;
+; Procédure pour gérer le flag de sélection.
+;
+PROCEDURE FIND
+BEGIN
+  FOR ARRESERVATION
+  BEGIN
+   IF PATH = 1
+   THEN GET ARRESERVATION VIA CIECLE , ENTCLE , FOUCIECLE , &
+            FOUCLE USING T_CIECLEMNU , ENTCLE OF ARRESERVATION , &
+            T_FOUCIECLE , FOUCLE OF ARRESERVATION
+   IF PATH = 2
+   THEN GET ARRESERVATION VIA CIECLE , ENTCLE USING &
+            T_CIECLEMNU , ENTCLE OF ARRESERVATION
+  END
+END
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR ARRESERVATION
+  BEGIN
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF ARRESERVATION &
+       AND NOT NEWRECORD     OF ARRESERVATION &
+       AND NOT DELETEDRECORD OF ARRESERVATION &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+
+     ; On vérifie si on utilise la numérotation automatique pour
+     ; assigner un numéro de commande.
+     ;
+    IF HLDCMDACH OF MCHOLDING = "1"
+    THEN BEGIN
+      IF 0 = SIZE( TRUNCATE( CMDCLE OF ARRESERVATION ) )
+      THEN BEGIN
+        ;
+        ; Attribution du numéro de commande selon la compagnie et l'année
+        ; dans la table ARCMD_SEQ où se trouve le dernier numéro de commande
+        ; utilisé.
+        ;
+        START TRANSACTION GEN_NUM_SEQ
+        GET ARCMD_SEQ VIA   CIECLE, &
+                            CMSANNCLE  &
+                      USING T_CIECLEMNU,&
+                            T_PECCLEMNU[1:2] &
+                      OPTIONAL
+        LET CIECLE    OF ARCMD_SEQ = T_CIECLEMNU
+        LET CMSANNCLE OF ARCMD_SEQ = T_PECCLEMNU[1:2]
+        LET CMSNUMSEQ OF ARCMD_SEQ = CMSNUMSEQ OF ARCMD_SEQ + 1
+
+      ; Le numéro de commande est composé de l'année de la période ainsi que
+      ; d'un numéro séquentiel de 7 chiffres.
+
+        LET CMDCLE OF ARRESERVATION = CMSANNCLE OF ARCMD_SEQ + &
+          ASCII(CMSNUMSEQ OF ARCMD_SEQ,CMSLONNUM OF ARCMD_SEQ)
+        PUT ARCMD_SEQ
+        COMMIT TRANSACTION GEN_NUM_SEQ
+      END
+    END
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Pour afficher le numéro de commande nouvellement créé et que l'écran ne s'efface
+; pas.
+;
+;
+PROCEDURE POSTUPDATE
+BEGIN
+  FOR ARRESERVATION
+  BEGIN
+    IF CORRECTMODE
+    THEN BEGIN
+      DISPLAY CMDCLE OF ARRESERVATION
+      WARNING = " "
+    END
+  END
+END
+
+
+BUILD
+
+@IF FORMAT
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+********************* Réservation des numéros de commande **********************
+*                                                                              *
+* Entrepôt......: xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx Utilisé.: xxx  *
+*                                                                              *
+* Usager      # Commande Fourn. Description            Réservé  Utilisé        *
+* xxxxxxxxxxxx xxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxx       *
+* xxxxxxxxxxxx xxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxx       *
+* xxxxxxxxxxxx xxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxx       *
+* xxxxxxxxxxxx xxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxx       *
+* xxxxxxxxxxxx xxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxx       *
+* xxxxxxxxxxxx xxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxx       *
+* xxxxxxxxxxxx xxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxx       *
+* xxxxxxxxxxxx xxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxx       *
+* xxxxxxxxxxxx xxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxx       *
+* xxxxxxxxxxxx xxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxx       *
+* xxxxxxxxxxxx xxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxx       *
+* xxxxxxxxxxxx xxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxx       *
+* xxxxxxxxxxxx xxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxx       *
+*                                                                              *
+********************************************************************************
+@ENDIF

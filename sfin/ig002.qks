@@ -1,0 +1,273 @@
+;/T/ Enregistrer les tranches en inventaire
+;
+;/P/ Programmeur..: René Bonneau
+;    Date Création: 1996-03-28
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   l'inventaire physique de tranches de granit de Granicor.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN ig002 ACTIONBAR                    &
+             MODE LABEL "" AT 2,80        &
+             NOACTION                     &
+             FIELDMARK RETAIN STARTUP     &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU ,      &
+                       T_CIENOM
+
+;-------------------------------------------------------------------------------
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "IG002"
+
+;-------------------------------------------------------------------------------
+; Documentation de l'écran.
+;
+USE ig002.hlp NOLIST
+
+;-------------------------------------------------------------------------------
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+;-------------------------------------------------------------------------------
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+;-------------------------------------------------------------------------------
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+; Fichier utiliser dans le dans l'écran
+;
+FILE INTRANCHE PRIMARY OCCURS 22
+
+    ITEM CIECLE     OF INTRANCHE INITIAL T_CIECLEMNU
+    ITEM ITRNUMPGE  OF INTRANCHE INIT FIRST(ITRNUMPGE OF INTRANCHE)
+    ITEM ITRDATINV  OF INTRANCHE INIT SYSDATE
+    ITEM ITRHREINV  OF INTRANCHE INIT SYSTIME
+
+FILE INTRANCHE DESIGNER ALIAS INTRANCHE_EXISTE
+;    SELECT IF CIECLE OF INTRANCHE_EXISTE = T_CIECLEMNU
+
+FILE PDTRANCHE    DESIGNER
+
+FILE INTRANCHE DESIGNER ALIAS INTRANCHE_BOUCLE
+
+;-------------------------------------------------------------------------------
+;Variables temporaires
+;
+TEMPORARY T_COD              INTEGER UNSIGNED SIZE 02
+TEMPORARY T_TRANUMTRA002     CHARACTER SIZE 7
+TEMPORARY TMP_NO             CHARACTER SIZE 288 ;36(OCCURS) X (7+1)(NO-TRANCHE)
+TEMPORARY TMP_NO_PROCHAIN    CHARACTER SIZE 288 ;36(OCCURS) X (7+1)(NO-TRANCHE)
+
+TEMPORARY T_COMPTEUR        INT SIZE 2
+TEMPORARY T_COMPTEUR_BOUCLE INT SIZE 2
+
+TEMPORARY T_HEURE           CHAR SIZE 4
+TEMPORARY T_HEURE_BOUCLE    CHAR SIZE 4
+TEMPORARY T_TEMPS           CHAR SIZE 8
+TEMPORARY T_VARIABLE        CHAR SIZE 6
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " INVENTAIRE DE TRANCHES " &
+@ELSE
+      " %%%INVENTAIRE DE TRANCHES " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP TO LINE 5
+ALIGN(,5,11)
+FIELD ITRNUMPGE LABEL "Page:" REQUIRED
+
+SKIP TO LINE 7
+TITLE "LOCAL  TRANCHE  COMMENTAIRE " AT ,5
+TITLE "LOCAL  TRANCHE  COMMENTAIRE " AT ,44
+
+SKIP TO LINE 9
+ALIGN(2,,5)(,,12)(,,21)
+CLUSTER OCCURS WITH INTRANCHE FOR 1,39 VERTICAL
+
+FIELD ITRNUMLOC OF INTRANCHE           &
+;        PATTERN "##^<"                     &
+        REQUIRED DUPLICATE
+
+FIELD TRANUMTRA002 OF INTRANCHE        &
+        NUM SIGNIF 7 REQUIRED
+
+FIELD ITRDESC OF INTRANCHE             &
+        FOR 1,16
+
+CLUSTER
+
+;PROCEDURE DESIGNER TRAN HELP "ÉCRAN DES TRANCHES" NODATA
+;BEGIN
+;  RUN SCREEN tranche PASSING T-SITE, D-SITE-NOM MODE F CLEAR ALL
+;END
+;
+;
+; Cette procedure ajoute un "0" a la localisation pour etre sur que les
+; localisations soit sous la forme suivantes; 2 chiffres et une lettre
+;
+;
+;PROCEDURE INPUT ITRNUMLOC
+;BEGIN
+;  IF 0 <> SIZE(TRUNC(FIELDTEXT))
+;  THEN BEGIN
+;    IF MATCHPATTERN(FIELDTEXT,"#^<")
+;    THEN LET FIELDTEXT = "0" + FIELDTEXT
+;  END
+;END
+
+;-------------------------------------------------------------------------------
+PROCEDURE EDIT TRANUMTRA002
+BEGIN
+  IF 0 <> (IND(TMP_NO,TRANUMTRA002 OF INTRANCHE)) AND &
+     OCCURRENCE <> &
+     (IND(TMP_NO,TRANUMTRA002 OF INTRANCHE) - 1) / 8 + 1
+  THEN WARN 1804 ;  "CE NUMERO DE TRANCHE EXISTE DEJA A L'ECRAN..."
+
+  IF OCCURRENCE > 1
+  THEN BEGIN
+    LET TMP_NO_PROCHAIN = TMP_NO[1:(OCCURRENCE - 1) * 8] + &
+                          TRANUMTRA002 OF INTRANCHE + "," + &
+                          TMP_NO[(OCCURRENCE * 8) + 1:288]
+  END
+  ELSE BEGIN
+    LET TMP_NO_PROCHAIN = TRANUMTRA002 OF INTRANCHE + "," + &
+                          TMP_NO[(OCCURRENCE * 8) + 1:288]
+  END
+  LET TMP_NO = TMP_NO_PROCHAIN
+
+END
+
+PROCEDURE PROCESS TRANUMTRA002
+BEGIN
+  GET INTRANCHE_EXISTE  VIA     CIECLE,         &
+                                TRANUMTRA002    &
+                        USING   T_CIECLEMNU,    &
+                                TRANUMTRA002 OPTIONAL
+  IF ACCESSOK
+  THEN WARN 1805 ; "CE NUMERO DE TRANCHE EXISTE DEJA..."
+
+  GET PDTRANCHE         VIA     CIECLE,         &
+                                TRANUMTRA002    &
+                        USING   T_CIECLEMNU,    &
+                                TRANUMTRA002 OPTIONAL
+  IF NOT ACCESSOK
+  THEN WARN 1806 ; "LE NUMERO DE TRANCHE EST INVALIDE..."
+END
+;-------------------------------------------------------------------------------
+; Appel du dépisteur (pop-up) pour le champ.
+;
+PROCEDURE INPUT TRANUMTRA002
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_COD          = 0 ; Toutes les tranches
+    LET T_TRANUMTRA002 = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd122 MODE F &
+                     PASSING T_TRANUMTRA002, &
+                             T_COD,          &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_TRANUMTRA002 )
+  END
+END
+
+;------------------------------------------------------------------------------
+;PROCEDURE DESIGNER 01
+;BEGIN
+;  ACCEPT TRANUMTRA002
+;E;ND
+
+;------------------------------------------------------------------------------
+PROCEDURE PATH
+BEGIN
+  REQUEST ITRNUMPGE OF INTRANCHE
+  IF PROMPTOK
+  THEN LET PATH = 1
+  IF PATH = 0
+  THEN BEGIN
+    REQUEST TRANUMTRA002 OF INTRANCHE
+    IF PROMPTOK
+    THEN LET PATH = 2
+    ELSE ERROR "UNE CLE EST REQUISE"
+  END
+END
+
+;-------------------------------------------------------------------------------
+PROCEDURE FIND
+BEGIN
+  LET TMP_NO = ""
+  LET TMP_NO_PROCHAIN = ""
+  FOR INTRANCHE
+  BEGIN
+    IF PATH = 1
+    THEN GET INTRANCHE VIA  CIECLE,           &
+                                ITRNUMPGE         &
+                        USING   T_CIECLEMNU,      &
+                                ITRNUMPGE OF INTRANCHE OPTIONAL
+
+    ELSE GET INTRANCHE VIA  CIECLE,           &
+                                TRANUMTRA002      &
+                        USING   T_CIECLEMNU,      &
+                                TRANUMTRA002 OF INTRANCHE OPTIONAL
+
+    IF 0 <> SIZE(TRUNCATE(TRANUMTRA002))
+    THEN LET TMP_NO = TRUNC(TMP_NO) + TRANUMTRA002 OF INTRANCHE + ","
+  END
+END
+
+PROCEDURE PREUPDATE
+BEGIN
+    LET T_COMPTEUR = 0
+    LET T_TEMPS    = ASCII(SYSTIME)
+    if 7=size(trunc(t_temps))
+    then let t_temps="0"+t_temps
+    LET T_HEURE    = T_TEMPS[1:4]
+    LET T_COMPTEUR_BOUCLE = 0
+    WHILE RETRIEVING INTRANCHE_BOUCLE VIA CIECLE, ITRNUMPGE &
+                     USING CIECLE    OF INTRANCHE, &
+                           ITRNUMPGE OF INTRANCHE
+    BEGIN
+      LET T_HEURE_BOUCLE = ASCII(ITRHREINV OF INTRANCHE_BOUCLE)[1:4]
+      IF T_HEURE_BOUCLE = T_HEURE
+      THEN LET T_COMPTEUR_BOUCLE = &
+               NCONVERT(ASCII(ITRHREINV OF INTRANCHE_BOUCLE)[5:2]) + 25
+    END
+    LET T_COMPTEUR = T_COMPTEUR_BOUCLE
+    FOR INTRANCHE
+      BEGIN
+        IF NEWRECORD OF INTRANCHE
+        THEN BEGIN
+           LET T_COMPTEUR = T_COMPTEUR + 1
+           LET T_VARIABLE = T_HEURE + ASCII(T_COMPTEUR,2)
+           LET ITRHREINV  OF INTRANCHE = NCONVERT(T_VARIABLE) * 10000
+        END
+     END
+END
+
+BUILD

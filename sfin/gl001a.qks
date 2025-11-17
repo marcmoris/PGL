@@ -1,0 +1,1145 @@
+set list transaction
+;/T/ Imputation
+;
+;//M/GRA01/Francois Richard/1999-06-18
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur..: Alain Côté
+;    Date Création: 9 mars 1992
+;
+;    Description..: Saisie de l'imputation comptable sous l'écriture de
+;                   journal.
+;
+;
+;/M/ François Déry, 30 avril 1999
+;       Modifier l'accèss au fichier de séquence car il a
+;       été converti en format interbase au lieu d'indexé.
+;
+;-------------------------------------------------------------------------------
+;/V/ 3.00.02    Guy Chabot 12-mai-1994 (197).
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN gl001a ACTIONBAR &
+              MODE LABEL "" AT 2,80 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        T_FLGMNU   , &
+                        D_LGLATRJOU, &
+                        GLECRITURE_JG
+
+TEMPORARY T_CPTPECDEBI_SIE2 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CPTPECDEBA_SIE2 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_PECCLE_SIE2 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CCUPECDEBI_SIE1 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CCUPECDEBA_SIE1 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_PECCLE_SIE1 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+USE ussectmp NOLIST     ; Variable pour la securite
+    "GL001A"
+
+USE gl001a.hlp NOLIST
+
+USE usactecr NOLIST
+
+USE ustrasse NOLIST ; Transaction QUERY pour les sous-écrans
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE GLECJ_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4 ; Compagnie de transaction
+TEMPORARY T_CIENOM    CHARACTER SIZE 40; Compagnie de transaction
+TEMPORARY T_FLGMNU    CHARACTER SIZE 1 ; Identifie le menu d'origine.
+TEMPORARY T_CLICIECLE CHARACTER SIZE 4 RESET AT STARTUP ; Compagnie du client.
+DEFINE    D_LGLATRJOU CHARACTER SIZE 1 ; Si le lot est autorisé.
+
+;-------------------------------------------------------------------------------
+;
+FILE GLECRITURE_JG    MASTER
+
+;
+; Ligne d'imputation.
+;
+FILE GLIMPUTATION     PRIMARY   &
+                      OCCURS 15 &
+                      NOITEM    
+  ACCESS VIA ECJCIECLE, &
+             ECJCLENUM, &
+             ECJCLESEQ &
+         USING ECJCIECLE OF GLECRITURE_JG, &
+               ECJCLENUM OF GLECRITURE_JG, &
+               ECJCLESEQ OF GLECRITURE_JG
+
+  ITEM ECJCIECLE OF GLIMPUTATION INITIAL ECJCIECLE OF GLECRITURE_JG
+  ITEM ECJCLENUM OF GLIMPUTATION FINAL   ECJCLENUM OF GLECRITURE_JG
+  ITEM ECJCLESEQ OF GLIMPUTATION FINAL   ECJCLESEQ OF GLECRITURE_JG
+  ITEM CIECLE    OF GLIMPUTATION INITIAL T_CIECLEMNU
+  ITEM CLICIECLE OF GLIMPUTATION FINAL   T_CLICIECLE
+;
+; Paramètres pour la compagnie consolidé(holding)
+;
+FILE MCHOLDING        REFERENCE
+  ACCESS VIA CIENMC USING "1"
+
+
+;
+; Validation du numéro de client et on a besoin de certaines informations sur
+; le client , comme les termes d'encaissements, le statut, le type...
+;
+FILE VCLC_CLI         REFERENCE
+  ACCESS VIA CLICIECLE, &
+             CLICLE   , &
+             CIECLE     &
+         USING T_CLICIECLE,&
+               CLICLE OF GLIMPUTATION,&
+               T_CIECLEMNU
+
+TEMPORARY T_CLICLE    CHARACTER SIZE  6 ; Popup sur les clients
+
+
+;
+; Validation du numéro de compagnie.
+;
+FILE MCCOMPAGNIE      REFERENCE
+  ACCESS VIA CIECLE &
+         USING CIECLE OF GLIMPUTATION
+
+
+;
+; Validation de la charte de compte.
+;
+FILE MCCHARTE_UNA     REFERENCE
+  ACCESS VIA CPTCLE,CIECLE,UNACLE &
+         USING CPTCLE OF GLIMPUTATION, &
+               CIECLE OF GLIMPUTATION, &
+               UNACLE OF GLIMPUTATION
+
+
+;
+; Validation du compte.
+;
+FILE VCPT_DSC         REFERENCE
+  ACCESS VIA CPTCLE &
+         USING CPTCLE OF GLIMPUTATION
+
+
+;
+; Validation de l'unité adm.
+;
+FILE MCUNITE_ADM      REFERENCE
+  ACCESS VIA CIECLE, &
+             UNACLE &
+         USING CIECLE OF GLIMPUTATION, &
+               UNACLE OF GLIMPUTATION
+
+
+;
+; Validation du projet.
+;
+FILE GPPROJETS         REFERENCE
+  ACCESS VIA CIECLE, &
+             PRJCLE  &
+         USING CIECLE OF GLIMPUTATION, &
+               PRJCLE OF GLIMPUTATION
+
+;
+; Validation de l'activité.
+;
+FILE GPPRO_ACTIVITE       REFERENCE
+  ACCESS VIA CIECLE, &
+             PRJCLE, &
+             PRACLE  &
+         USING CIECLE OF GLIMPUTATION, &
+               PRJCLE OF GLIMPUTATION, &
+               PRACLE OF GLIMPUTATION
+
+
+;
+; Valide l'immobilisation et affiche la description.
+;
+TEMPORARY T_IMMCLE CHARACTER SIZE 12 ; Popup sur les immobilisations.
+
+FILE IMIMMOBILISATION REFERENCE
+
+  ACCESS  VIA   CIECLE, &
+                IMMCLE &
+          USING CIECLE OF GLIMPUTATION , &
+                IMMCLE OF GLIMPUTATION
+
+  SELECT IF IMMSTU OF IMIMMOBILISATION = "A"
+
+
+
+
+;
+; Numérotation du numéro d'écriture, le numéro est attribué par année.
+;
+FILE GLECJ_SEQ        DESIGNER &
+                      TRANSACTION GEN_NUM_SEQ
+  ACCESS VIA ECSCIECLE, &
+             ECSANN &
+         USING ECJCIECLE OF GLECRITURE_JG, &
+               PECCLE    OF GLECRITURE_JG[1:2]
+
+
+;-------------------------------------------------------------------------------
+;
+; Sert aux sous-écrans de consultation.
+;
+TEMPORARY T_CPTCLE    CHARACTER SIZE 6 ; Popup sur les comptes
+TEMPORARY T_PECCLE    CHARACTER SIZE 4 ; Popup sur les comptes et unité adm.
+TEMPORARY T_CPTTYPPAT CHARACTER SIZE 1 ; Popup sur les comptes
+TEMPORARY T_CPTCATPAT CHARACTER SIZE 8 ; Popup sur les comptes
+TEMPORARY T_CIECLE    CHARACTER SIZE 4 ; Compagnie pour les popups
+TEMPORARY T_UNACLE    CHARACTER SIZE 8 ; Popup sur les unités adm.
+TEMPORARY T_PRJCLE    CHARACTER SIZE 8 ; Popup sur les projets.
+TEMPORARY T_PRJSTUPAT CHARACTER SIZE 8 ; Popup sur les projets.
+TEMPORARY T_PRACLE    CHARACTER SIZE 3 ; Popup sur les activités.
+TEMPORARY T_PRASTUPAT CHARACTER SIZE 5 ; Popup sur les activités.
+
+
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU      IF T_FLGMNU = "C"
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER(T_CIENOM)
+;
+; Solde de l'écriture, Balance.
+;
+DEFINE D_BALECR FLOAT SIZE 8 = ECJMNTDBT OF GLECRITURE_JG - &
+                               ECJMNTCRT OF GLECRITURE_JG
+
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+
+SKIP
+TITLE &
+@IF FRANCAIS
+      " Imputation " &
+@ELSE
+      " Charge " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP TO 4
+
+ALIGN(,3,19)(,,28)(,36,52)
+FIELD ECJCLENUM OF GLECRITURE_JG FIXED
+FIELD ECJCLESEQ OF GLECRITURE_JG FIXED
+
+FIELD ECJMNTDBT OF GLECRITURE_JG FIXED
+
+SKIP TO GROUP 3
+FIELD ECJMNTCRT OF GLECRITURE_JG FIXED
+
+SKIP TO GROUP 3
+FIELD D_BALECR FIXED &
+        PIC "^^,^^^,^^^.^^ " TRAIL SIGN "-" SIGNIF 5 &
+        LABEL "Balance.......:"
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+"Cie  Projet SSpro Immobilis.   Unité    Compte  D/C     $ Montant Fac. Client" &
+@ENDIF
+      AT ,3
+
+SKIP
+ALIGN (3,2,3)(,,8) (,,17) (,,21) (,,34) (,,43) (,,52) (,,55)(,,70) (,,74)
+
+CLUSTER OCCURS WITH GLIMPUTATION ID BASE 01
+
+FIELD CIECLE    OF GLIMPUTATION HIDDEN LABEL " "&
+        REQUIRED &
+        LOOKUP ON MCCOMPAGNIE &
+          MESSAGE 207 ; Ce numéro de compagnie n'existe pas.
+
+FIELD PRJCLE    OF GLIMPUTATION REQUIRED
+
+FIELD PRACLE    OF GLIMPUTATION REQUIRED
+
+FIELD IMMCLE    OF GLIMPUTATION REQUIRED &
+        LOOKUP ON IMIMMOBILISATION &
+            MESSAGE 491 ; Cette immobilisation n'existe pas ou est inactive.
+
+FIELD UNACLE    OF GLIMPUTATION &
+        REQUIRED &
+        DUPLICATE &
+        LOOKUP ON MCUNITE_ADM &
+          MESSAGE 220 ; Ce numéro d'unité adm. n'existe pas.
+
+FIELD CPTCLE    OF GLIMPUTATION &
+        REQUIRED &
+        LOOKUP ON VCPT_DSC &
+          MESSAGE 249 ; Ce numéro de compte n'existe pas.
+
+
+
+FIELD ECICODDC  OF GLIMPUTATION &
+        REQUIRED
+
+FIELD ECIMNT    OF GLIMPUTATION &
+        PICTURE "^^,^^^,^^^.^^ " &
+        REQUIRED
+
+FIELD ECIFLGFAC    OF GLIMPUTATION SIZE 3
+
+FIELD CLICLE       OF GLIMPUTATION REQUIRED &
+        LOOKUP ON VCLC_CLI &
+          MESSAGE 624  ; Ce client n'existe pas.
+
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+
+  IF HLDCHTCLI OF MCHOLDING = "1"
+  THEN LET T_CLICIECLE = T_CIECLEMNU
+  ELSE LET T_CLICIECLE = HLDCHRSUB OF MCHOLDING
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Averti l'usager si l'écriture ne balance pas.
+;
+;
+PROCEDURE EXIT
+BEGIN
+  IF ECJMNTDBT OF GLECRITURE_JG <> ECJMNTCRT OF GLECRITURE_JG
+  THEN WARN 254 ; L'écriture ne balance pas.
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les compagnies.
+;
+;
+PROCEDURE INPUT CIECLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc106 MODE F PASSING T_CIECLE
+    LET FIELDTEXT = TRUNCATE(T_CIECLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les comptes.
+;
+;
+PROCEDURE INPUT CPTCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = CIECLE OF GLIMPUTATION
+    LET T_CPTCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_CPTTYPPAT = "R"
+    LET T_CPTCATPAT = "@"
+    LET T_PECCLE = PECCLE OF GLECRITURE_JG
+    RUN SCREEN mc103 MODE F PASSING T_CPTCLE, &
+                                    T_CPTTYPPAT, &
+                                    T_CPTCATPAT, &
+                                    T_PECCLE
+    LET FIELDTEXT = TRUNCATE(T_CPTCLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation si le compte est actif.
+;
+;
+PROCEDURE EDIT CPTCLE
+BEGIN
+  ;
+  ; Note: La période de fin, est la première période d'inactivité.
+  ;
+
+  ; Ajustement pour le changement de siècle
+  IF PECCLE OF GLECRITURE_JG[1:1] < "8"
+  THEN LET T_PECCLE_SIE2 = "1" + PECCLE OF GLECRITURE_JG
+  ELSE LET T_PECCLE_SIE2 = "0" + PECCLE OF GLECRITURE_JG
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBA OF VCPT_DSC[1:1] < "8"
+  THEN LET T_CPTPECDEBA_SIE2 = "1" + CPTPECDEBA OF VCPT_DSC
+  ELSE LET T_CPTPECDEBA_SIE2 = "0" + CPTPECDEBA OF VCPT_DSC
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBI OF VCPT_DSC[1:1] < "8"
+  THEN LET T_CPTPECDEBI_SIE2 = "1" + CPTPECDEBI OF VCPT_DSC
+  ELSE LET T_CPTPECDEBI_SIE2 = "0" + CPTPECDEBI OF VCPT_DSC
+
+  IF T_PECCLE_SIE2 >= T_CPTPECDEBA_SIE2 AND &
+     ( &
+       T_PECCLE_SIE2 < T_CPTPECDEBI_SIE2 OR &
+       CPTPECDEBI OF VCPT_DSC = "" &
+     )
+  THEN NULL
+  ELSE ERROR 251; Ce compte est inactif.
+
+  IF CPTTYP OF VCPT_DSC <> "R"
+  THEN ERROR 255; On ne peut pas utliser ce compte dans une imputation.
+
+;
+;  Ne pas empêcher la régularisation d'un comte en "devise"
+;
+;  IF DEVCLE OF VCPT_DSC <> DEVCLE OF MCHOLDING
+;  THEN ERROR 304 ; Compte interdit due à la devise du comtpe.
+
+  IF HLDCHTCPT OF MCHOLDING = "1"
+  THEN BEGIN
+    GET MCCHARTE_UNA OPTIONAL
+    ;
+    ; Si la charte est incluse, le lien est obligatoire.
+    ;
+    IF NOT ACCESSOK
+    THEN BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN ERROR 256 ; La combinaison compte/unité adm n'existe pas.
+    END
+    ELSE BEGIN
+      ;
+      ; Si la charte est Exclusive et que la période fait partie de
+      ; l'intervalle de période de la charte alors c'est une erreur.
+      ;
+      ; Si la charte est inclusive et que la période ne fait pas partie de
+      ; l'intervalle de période de la charte alors c'est une erreur.
+      ;
+
+      ; Ajustement pour le changement de siècle
+      IF PECCLE OF GLECRITURE_JG[1:1] < "8"
+      THEN LET T_PECCLE_SIE1 = "1" + PECCLE OF GLECRITURE_JG
+      ELSE LET T_PECCLE_SIE1 = "0" + PECCLE OF GLECRITURE_JG
+
+      ; Ajustement pour le changement de siècle
+      IF CCUPECDEBA OF MCCHARTE_UNA[1:1] < "8"
+      THEN LET T_CCUPECDEBA_SIE1 = "1" + CCUPECDEBA OF MCCHARTE_UNA
+      ELSE LET T_CCUPECDEBA_SIE1 = "0" + CCUPECDEBA OF MCCHARTE_UNA
+
+      ; Ajustement pour le changement de siècle
+      IF CCUPECDEBI OF MCCHARTE_UNA[1:1] < "8"
+      THEN LET T_CCUPECDEBI_SIE1 = "1" + CCUPECDEBI OF MCCHARTE_UNA
+      ELSE LET T_CCUPECDEBI_SIE1 = "0" + CCUPECDEBI OF MCCHARTE_UNA
+
+      IF ( &
+           T_PECCLE_SIE1 >= T_CCUPECDEBA_SIE1 AND &
+           ( &
+             T_PECCLE_SIE1 < T_CCUPECDEBI_SIE1 OR &
+             CCUPECDEBI OF MCCHARTE_UNA = " " &
+           ) &
+         )
+      THEN BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "E"
+        THEN ERROR 250 ; La combinaison compte/unité adm. est inactif.
+      END
+      ELSE BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "I"
+        THEN ERROR 250; La combinaison compte/unité adm. est inactif.
+      END
+    END
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT UNACLE
+BEGIN
+  ;
+  ; Popup sur les unités administrative.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = CIECLE OF GLIMPUTATION
+    LET T_UNACLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+
+    RUN SCREEN mc104 MODE F PASSING T_CIECLE, T_UNACLE
+
+    LET FIELDTEXT = TRUNCATE(T_UNACLE)
+  END
+  ;
+  ; Force l'éxécution du LOOKUP.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(UNACLE OF GLIMPUTATION))
+  THEN LET FIELDTEXT = UNACLE OF GLIMPUTATION
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation de la charte de compte.
+; La charte de compte peut être soit incluse, ou soit excluse.
+;
+;
+PROCEDURE EDIT UNACLE
+BEGIN
+  ;
+  ;
+  ; Transfert d'unité administrative, vente interne.
+  ;
+  ;
+  IF ECJTRFUNA OF GLECRITURE_JG = "1" AND &
+     FIELDTEXT <> OLDVALUE( UNACLE OF GLIMPUTATION )
+  THEN BEGIN
+    ;
+    ; On peut spécifier que deux unités administratives différente dans les
+    ; ligne d'imputation.
+    ;
+    IF    FIELDTEXT <> ECJUNAINT1 OF GLECRITURE_JG &
+      AND FIELDTEXT <> ECJUNAINT2 OF GLECRITURE_JG &
+      AND ""        <> ECJUNAINT1 OF GLECRITURE_JG &
+      AND ""        <> ECJUNAINT2 OF GLECRITURE_JG &
+      AND ( 0 = SIZE( TRUNCATE( OLDVALUE( UNACLE OF GLIMPUTATION ) ) ) &
+            OR &
+            ( OLDVALUE(UNACLE OF GLIMPUTATION) = ECJUNAINT1 OF GLECRITURE_JG &
+              AND ECJUNANBR1 OF GLECRITURE_JG > 1 ) &
+            OR &
+            ( OLDVALUE(UNACLE OF GLIMPUTATION) = ECJUNAINT2 OF GLECRITURE_JG &
+              AND ECJUNANBR2 OF GLECRITURE_JG > 1 ) &
+          )
+    THEN ERROR 339 ; On peut spécifier que deux unité adm. pour un transfert.
+    ;
+    ; S'il y avait déjà un numéro d'unité adm., il faut diminuer le compteur
+    ; de l'unité 1 ou 2, si le compteur devient à zéro il faut enlever
+    ; le numéro d'unité adm., car cela signifie que cette unité adm. ne fait
+    ; plus partie d'aucune ligne d'imputation.
+    ;
+    IF 0 <> SIZE( TRUNCATE( OLDVALUE( UNACLE OF GLIMPUTATION ) ) )
+    THEN BEGIN
+      IF OLDVALUE( UNACLE OF GLIMPUTATION ) = ECJUNAINT1 OF GLECRITURE_JG
+      THEN BEGIN
+        LET ECJUNANBR1 OF GLECRITURE_JG = ECJUNANBR1 OF GLECRITURE_JG - 1
+        IF ECJUNANBR1 OF GLECRITURE_JG = 0
+        THEN LET ECJUNAINT1 OF GLECRITURE_JG = ""
+      END
+      ELSE BEGIN
+        LET ECJUNANBR2 OF GLECRITURE_JG = ECJUNANBR2 OF GLECRITURE_JG - 1
+        IF ECJUNANBR2 OF GLECRITURE_JG = 0
+        THEN LET ECJUNAINT2 OF GLECRITURE_JG = ""
+      END
+    END
+    ;
+    ; On conserve les deux unités adm. d'inter dans l'écriture.
+    ;
+    IF FIELDTEXT <> ECJUNAINT1 OF GLECRITURE_JG AND &
+       FIELDTEXT <> ECJUNAINT2 OF GLECRITURE_JG
+    THEN BEGIN
+      IF ECJUNAINT1 OF GLECRITURE_JG = ""
+      THEN LET ECJUNAINT1 OF GLECRITURE_JG = FIELDTEXT
+      ELSE BEGIN
+        IF ECJUNAINT2 OF GLECRITURE_JG = ""
+        THEN LET ECJUNAINT2 OF GLECRITURE_JG = FIELDTEXT
+      END
+    END
+    ;
+    ; On augmente le compteur de l'unité adm. respective.
+    ;
+    IF ECJUNAINT1 OF GLECRITURE_JG = FIELDTEXT
+    THEN LET ECJUNANBR1 OF GLECRITURE_JG = ECJUNANBR1 OF GLECRITURE_JG + 1
+    ELSE LET ECJUNANBR2 OF GLECRITURE_JG = ECJUNANBR2 OF GLECRITURE_JG + 1
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Saisie rapide des codes débit/crédit par le clavier numérique.
+;
+;
+PROCEDURE INPUT ECICODDC
+BEGIN
+  IF FIELDTEXT = ","
+  THEN LET FIELDTEXT = "D"
+
+  IF FIELDTEXT = "-"
+  THEN LET FIELDTEXT = "C"
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Transfert le montant de débit à crédit, vise-versa si l'usager change
+; le code DEBIT/CREDIT
+;
+;
+PROCEDURE EDIT ECICODDC
+BEGIN
+  IF OLDVALUE(ECICODDC OF GLIMPUTATION) <> FIELDTEXT
+  THEN BEGIN
+    IF OLDVALUE(ECICODDC OF GLIMPUTATION) = "D"
+    THEN BEGIN
+      LET ECJMNTDBT OF GLECRITURE_JG = ECJMNTDBT OF GLECRITURE_JG - &
+                                       ECIMNT OF GLIMPUTATION
+      LET ECJMNTCRT OF GLECRITURE_JG = ECJMNTCRT OF GLECRITURE_JG + &
+                                       ECIMNT OF GLIMPUTATION
+    END
+    ELSE BEGIN
+      LET ECJMNTDBT OF GLECRITURE_JG = ECJMNTDBT OF GLECRITURE_JG + &
+                                       ECIMNT OF GLIMPUTATION
+      LET ECJMNTCRT OF GLECRITURE_JG = ECJMNTCRT OF GLECRITURE_JG - &
+                                       ECIMNT OF GLIMPUTATION
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Affiche les sommations débit/crédit les plus à jour.
+;
+;
+PROCEDURE PROCESS ECICODDC
+BEGIN
+  DISPLAY ECJMNTDBT OF GLECRITURE_JG
+  DISPLAY ECJMNTCRT OF GLECRITURE_JG
+  DISPLAY D_BALECR
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Mise à jour des variables DEBIT et CREDIT à chaque fois que l'usager entre
+; ou modifie le montant.
+;
+;
+PROCEDURE EDIT ECIMNT
+BEGIN
+  ;
+  ; Valide la partie décimale.
+  ;
+  USE usvaldec NOLIST
+
+  IF ECICODDC OF GLIMPUTATION = "D"
+  THEN LET ECJMNTDBT OF GLECRITURE_JG = ECJMNTDBT OF GLECRITURE_JG - &
+                                        OLDVALUE(ECIMNT OF GLIMPUTATION) + &
+                                        FIELDVALUE
+  ELSE LET ECJMNTCRT OF GLECRITURE_JG = ECJMNTCRT OF GLECRITURE_JG - &
+                                        OLDVALUE(ECIMNT OF GLIMPUTATION) + &
+                                        FIELDVALUE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Affiche les sommations débit/crédit les plus à jour.
+;
+;
+PROCEDURE PROCESS ECIMNT
+BEGIN
+  DISPLAY ECJMNTDBT OF GLECRITURE_JG
+  DISPLAY ECJMNTCRT OF GLECRITURE_JG
+  DISPLAY D_BALECR
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT PRJCLE
+BEGIN
+  ;
+  ; Popup sur les projets.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = CIECLE OF GLIMPUTATION
+    LET T_PRJSTUPAT = "A"
+    LET T_PRJCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gp104 MODE F PASSING T_CIECLE, T_PRJCLE, T_PRJSTUPAT
+    LET FIELDTEXT = TRUNCATE(T_PRJCLE)
+  END
+  ;
+  ; Force la validation du projet, car l'usager peut modifier le numéro de
+  ; compagnie sur le ligne.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(PRJCLE OF GLIMPUTATION))
+  THEN LET FIELDTEXT = PRJCLE OF GLIMPUTATION
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du projet, le projet est optionel dans l'imputation.
+;
+;
+PROCEDURE EDIT PRJCLE
+BEGIN
+  GET GPPROJETS OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 334 ; Ce projet n'existe pas.
+
+  IF PRJSTU OF GPPROJETS <> "A"
+  THEN ERROR 335 ; Ce projet n'est pas actif.
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT PRACLE
+BEGIN
+  ;
+  ; Popup sur les activités.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = CIECLE OF GLIMPUTATION
+    LET T_PRJCLE    = PRJCLE OF GLIMPUTATION
+    LET T_PRASTUPAT = "A"
+    LET T_PRACLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gp108 MODE F PASSING T_CIECLE, T_PRJCLE, T_PRACLE, T_PRASTUPAT
+    LET FIELDTEXT = TRUNCATE(T_PRACLE)
+  END
+  ;
+  ; Force la validation de l'activité, car l'usager peut modifier le numéro de
+  ; compagnie ou le numéro de projet sur le ligne.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(PRACLE OF GLIMPUTATION))
+  THEN LET FIELDTEXT = PRACLE OF GLIMPUTATION
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation de l'activité, l'activité est optionel dans l'imputation.
+;
+;
+PROCEDURE EDIT PRACLE
+BEGIN
+  GET GPPRO_ACTIVITE OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 336 ; Cette activité n'existe pas.
+
+  IF PRASTU OF GPPRO_ACTIVITE <> "A"
+  THEN ERROR 337 ; Cette activité n'est pas active.
+END
+
+PROCEDURE INPUT IMMCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_IMMCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN im102 MODE F &
+                     PASSING T_CIECLEMNU, &
+                             T_IMMCLE  WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE( T_IMMCLE )
+  END
+END
+
+
+PROCEDURE EDIT IMMCLE
+BEGIN
+   IF IMMTYP OF IMIMMOBILISATION <> "E"
+   THEN ERROR 1503
+END
+
+PROCEDURE INPUT ECIFLGFAC
+BEGIN
+  USE usflginp NOLIST
+END
+
+PROCEDURE PROCESS ECIFLGFAC
+BEGIN
+  IF ECIFLGFAC = "0"
+  THEN BEGIN
+    LET CLICLE OF GLIMPUTATION = ""
+    DISPLAY CLICLE
+  END
+END
+
+PROCEDURE OUTPUT ECIFLGFAC
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les client.
+;
+;
+PROCEDURE INPUT CLICLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CLICLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cr102 MODE F PASSING T_CLICIECLE, T_CIECLEMNU, T_CLICLE &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNC(T_CLICLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du client.
+;
+;
+PROCEDURE EDIT CLICLE
+BEGIN
+  IF CLISTU OF VCLC_CLI = "I"
+  THEN ERROR 632 ; Le client est inactif.
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; la procédure append est généré pour traiter les différence d'écriture
+; consolidé ou non.
+;
+;
+PROCEDURE APPEND
+BEGIN
+
+  USE ussecent NOLIST
+
+  ;
+  ; Si ce n'est pas une ecriture de consolide on ne saisie pas la
+  ; compagnie sinon on la saisie.
+  ;
+  IF ECJFLGINTCIE OF GLECRITURE_JG = "0" OR &
+     ECJTRFUNA    OF GLECRITURE_JG = "1"
+  THEN BEGIN
+;;    LET CIECLE OF GLIMPUTATION = ECJCIEINT OF GLECRITURE_JG
+    DISPLAY CIECLE OF GLIMPUTATION
+  END
+  ELSE BEGIN
+    ACCEPT CIECLE    OF GLIMPUTATION
+    INFO = CIENOM OF MCCOMPAGNIE
+  END
+  ;
+
+
+  ;
+  ; Si notion de projet.
+  ;
+  IF HLDNTNPRO OF MCHOLDING = "1"
+  THEN BEGIN
+    ACCEPT PRJCLE    OF GLIMPUTATION
+    IF 0 <> SIZE(TRUNCATE(PRJCLE OF GLIMPUTATION))
+    THEN BEGIN
+      INFO = PRJDSC1 OF GPPROJETS
+      ACCEPT PRACLE  OF GLIMPUTATION
+      INFO = PRADSC1 OF GPPRO_ACTIVITE
+      ACCEPT IMMCLE  OF GLIMPUTATION
+      INFO = IMMDSC  OF IMIMMOBILISATION
+    END
+  END
+  ELSE BEGIN
+    LET PRJCLE OF GLIMPUTATION = " "
+    LET PRACLE OF GLIMPUTATION = " "
+    LET IMMCLE OF GLIMPUTATION = " "
+  END
+  ;
+
+
+  ACCEPT UNACLE    OF GLIMPUTATION
+  INFO = UNANOM OF MCUNITE_ADM
+  ACCEPT CPTCLE    OF GLIMPUTATION
+  INFO = CPTDSC    OF VCPT_DSC
+  ACCEPT ECICODDC  OF GLIMPUTATION
+  ACCEPT ECIMNT    OF GLIMPUTATION
+
+
+  ; Numérotation des lignes d'imputation.
+  ;
+  IF ECINUMLIG OF GLIMPUTATION = 0
+  THEN BEGIN
+    LET ECJNUMLIG OF GLECRITURE_JG = ECJNUMLIG OF GLECRITURE_JG + 1
+    LET ECINUMLIG OF GLIMPUTATION  = ECJNUMLIG OF GLECRITURE_JG
+  END
+
+  ACCEPT ECIFLGFAC    OF GLIMPUTATION
+  IF ECIFLGFAC    OF GLIMPUTATION = "1"
+  THEN BEGIN
+    ACCEPT CLICLE OF GLIMPUTATION
+    INFORMATION = CLINOM OF VCLC_CLI
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; La procédure entry est généré car la procédure append est généré.
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  FOR GLIMPUTATION
+  BEGIN
+    PERFORM APPEND
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Cette procédure est idem à la procédure APPEND.
+;
+;
+PROCEDURE DESIGNER 01
+BEGIN
+  ;
+  ; Si ce n'est pas une ecriture de consolide on ne saisie pas la
+  ; compagnie sinon on la saisie.
+  ;
+  IF ECJFLGINTCIE OF GLECRITURE_JG = "0" OR &
+     ECJTRFUNA    OF GLECRITURE_JG = "1"
+  THEN BEGIN
+;;    LET CIECLE OF GLIMPUTATION = ECJCIEINT OF GLECRITURE_JG
+    DISPLAY CIECLE OF GLIMPUTATION
+  END
+  ELSE BEGIN
+    ACCEPT CIECLE    OF GLIMPUTATION
+    INFO = CIENOM OF MCCOMPAGNIE
+  END
+  ;
+
+  ;
+  ; Si notion de projet.
+  ;
+  IF HLDNTNPRO OF MCHOLDING = "1"
+  THEN BEGIN
+    ACCEPT PRJCLE    OF GLIMPUTATION
+    IF 0 <> SIZE(TRUNCATE(PRJCLE OF GLIMPUTATION))
+    THEN BEGIN
+      INFO = PRJDSC1 OF GPPROJETS
+      ACCEPT PRACLE  OF GLIMPUTATION
+      INFO = PRADSC1 OF GPPRO_ACTIVITE
+      ACCEPT IMMCLE  OF GLIMPUTATION
+      INFO = IMMDSC  OF IMIMMOBILISATION
+    END
+  END
+  ELSE BEGIN
+    LET PRJCLE OF GLIMPUTATION = " "
+    LET PRACLE OF GLIMPUTATION = " "
+    LET IMMCLE OF GLIMPUTATION = " "
+  END
+
+
+  ACCEPT UNACLE    OF GLIMPUTATION
+  INFO = UNANOM OF MCUNITE_ADM
+  ACCEPT CPTCLE    OF GLIMPUTATION
+  INFO = CPTDSC    OF VCPT_DSC
+
+  ACCEPT ECICODDC  OF GLIMPUTATION
+  ACCEPT ECIMNT    OF GLIMPUTATION
+
+  ACCEPT ECIFLGFAC    OF GLIMPUTATION
+  IF ECIFLGFAC    OF GLIMPUTATION = "1"
+  THEN BEGIN
+    ACCEPT CLICLE OF GLIMPUTATION
+    INFORMATION = CLINOM OF VCLC_CLI
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+
+  IF ECJDATJOU OF GLECRITURE_JG <> 0
+  THEN ERROR 236 ; Impossible de mettre à jour, l'écriture est journalisée
+
+  IF D_LGLATRJOU = "1" AND &
+     ECJDATJOU OF GLECRITURE_JG = 0
+  THEN ERROR 314 ; Impossible de mettre à jour, ce lot est déjà autorisé
+
+  FOR GLIMPUTATION
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF GLIMPUTATION &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF GLIMPUTATION &
+       AND NOT NEWRECORD     OF GLIMPUTATION &
+       AND NOT DELETEDRECORD OF GLIMPUTATION &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; L'assignation du numéro d'écriture est fait lors du UPDATE pour eviter
+; de perdre des numéros d'écriture du journal général, l'écran GL001
+; fait la meme chose dans sa PROCEDURE UPDATE.
+;
+;
+PROCEDURE UPDATE
+BEGIN
+  ;
+  ; si l'écriture est générée automatiquement ('A' selon holding)
+  ; alors on génére le numéro d'écriture;
+  ; sinon, il est obligatoire lors de la saisie.
+  ;
+  IF 0 = SIZE(TRUNCATE(ECJCLENUM OF GLECRITURE_JG)) AND &
+     HLDECRAUT OF MCHOLDING = "A"
+  THEN BEGIN
+    START TRANSACTION GEN_NUM_SEQ
+    GET GLECJ_SEQ OPTIONAL
+    LET ECSCIECLE OF GLECJ_SEQ = ECJCIECLE OF GLECRITURE_JG
+    LET ECSANN    OF GLECJ_SEQ = PECCLE    OF GLECRITURE_JG
+    ;
+    ; Il faut ajouter l'année au début du numéro pour un nouveau record.
+    ; ex: ECSNUMSEQ = 920000
+    ;
+    IF NEWRECORD OF GLECJ_SEQ
+    THEN LET ECSNUMSEQ OF GLECJ_SEQ = 0
+    LET ECSNUMSEQ OF GLECJ_SEQ     = ECSNUMSEQ OF GLECJ_SEQ + 1
+    LET ECJCLENUM OF GLECRITURE_JG = ECSANN OF GLECJ_SEQ + &
+                 ASCII(ECSNUMSEQ OF GLECJ_SEQ, ECSLONNUM OF GLECJ_SEQ -2)
+    PUT GLECJ_SEQ
+    COMMIT TRANSACTION GEN_NUM_SEQ
+  END
+
+  PUT GLECRITURE_JG
+  FOR GLIMPUTATION
+  BEGIN
+    PUT GLIMPUTATION
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Met à jour les variales de DEBIT et CREDIT
+;
+;
+PROCEDURE DELETE
+BEGIN
+  IF NOT DELETEDRECORD OF GLIMPUTATION
+  THEN BEGIN
+    IF ECICODDC OF GLIMPUTATION = "D"
+    THEN LET ECJMNTDBT OF GLECRITURE_JG = ECJMNTDBT OF GLECRITURE_JG - &
+                                          ECIMNT OF GLIMPUTATION
+    ELSE LET ECJMNTCRT OF GLECRITURE_JG = ECJMNTCRT OF GLECRITURE_JG - &
+                                          ECIMNT OF GLIMPUTATION
+    ;
+    ; Maintenance des compteurs de ligne pour le transfert d'unité adm.
+    ;
+    IF ECJTRFUNA OF GLECRITURE_JG = "1"
+    THEN BEGIN
+      IF UNACLE OF GLIMPUTATION = ECJUNAINT1 OF GLECRITURE_JG
+      THEN BEGIN
+        LET ECJUNANBR1 OF GLECRITURE_JG = ECJUNANBR1 OF GLECRITURE_JG - 1
+        IF ECJUNANBR1 OF GLECRITURE_JG = 0
+        THEN LET ECJUNAINT1 OF GLECRITURE_JG = ""
+      END
+      ELSE BEGIN
+        LET ECJUNANBR2 OF GLECRITURE_JG = ECJUNANBR2 OF GLECRITURE_JG - 1
+        IF ECJUNANBR2 OF GLECRITURE_JG = 0
+        THEN LET ECJUNAINT2 OF GLECRITURE_JG = ""
+      END
+    END
+  END
+  DELETE GLIMPUTATION
+
+  DISPLAY ECJMNTDBT OF GLECRITURE_JG
+  DISPLAY ECJMNTCRT OF GLECRITURE_JG
+  DISPLAY D_BALECR
+END
+
+BUILD
+@IF FORMAT
+        GL001A    ;/T/ Imputation    93-10-22
+
+        xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+        ********************************** Imputation **********************************
+        * No écriture...: xxxxxxxx xx      Somm. débit...: xxxxxxxxxxxxxx              *
+        *                                  Somm. crédit..: xxxxxxxxxxxxxx              *
+        *                                  Balance.......: xxxxxxxxxxxxxx              *
+        * Cie  Projet SSpro Équipement Unité    Compte  D/C     $ Montant Fac. Client  *
+        * xxxx xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx   x  xxxxxxxxxxxxx xxx  xxxxxx  *
+        * xxxx xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx   x  xxxxxxxxxxxxx              *
+        * xxxx xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx   x  xxxxxxxxxxxxx              *
+        * xxxx xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx   x  xxxxxxxxxxxxx              *
+        * xxxx xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx   x  xxxxxxxxxxxxx              *
+        * xxxx xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx   x  xxxxxxxxxxxxx              *
+        * xxxx xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx   x  xxxxxxxxxxxxx              *
+        * xxxx xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx   x  xxxxxxxxxxxxx              *
+        * xxxx xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx   x  xxxxxxxxxxxxx              *
+        * xxxx xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx   x  xxxxxxxxxxxxx              *
+        * xxxx xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx   x  xxxxxxxxxxxxx              *
+        * xxxx xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx   x  xxxxxxxxxxxxx              *
+        * xxxx xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx   x  xxxxxxxxxxxxx              *
+        * xxxx xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx   x  xxxxxxxxxxxxx              *
+        * xxxx xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx   x  xxxxxxxxxxxxx              *
+        ********************************************************************************
+@ENDIF

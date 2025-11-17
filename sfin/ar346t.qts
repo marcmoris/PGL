@@ -1,0 +1,122 @@
+;/T/ Liste des produits à commander / Génération des quantités sorties
+;
+;/M/ Réalisé par.......: Marc Poulin.
+;    Date..............: 20 avril 2000.
+;    Description.......: Ajout de l'information relative aux sorties de produits enregistrées au cours des 12 derniers mois.
+;
+;    Référence.........: Demande de changement 000042.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par......: Marc Poulin
+;    Date modification: 03 mai 2000
+;    Description......: Ajustement le traitement afin d'y ajouter les paramètres associés au code entrepôt et au statut du produit.
+;
+;    Référence........: Demande Directe
+;
+;    Signet...........: MP-00-05-03_DD999999.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+USE ussetqts NOLIST   ; set process nolimit
+SET LOCK RECORD UPDATE
+
+RUN ar346t
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+; Déterminer les quantités sorties (utilisées) dans les 12 derniers mois.
+
+REQUEST SORTIES_PRODUIT
+
+ACCESS VPRE_PRD LINK CIECLE OF VPRE_PRD   , &       ; Vue regroupant les tables des produits et des produits par entrepôts ; MP-00-05-03_DD999999.
+                     PRDCLE OF VPRE_PRD   , &
+                     ENTCLE OF VPRE_PRD   , &
+                     "06"                   &       ; Code associé à la sortie de produit
+                 TO  CIECLE               , &
+                     PRDCLE               , &
+                     ENTCLE               , &
+                     PRHTYP OF ARPRD_HISTO OPTIONAL ; Table de l'historique de transactions par produit
+;
+; Sélection selon les critères de l'usager
+;
+CHOOSE CIECLE PARM      , & ; Compagnie du menu
+       PRDCLE PARM RANGE, & ; Code de produit
+       PRDCAT PARM      , & ; Catégorie de produit
+       ENTCLE PARM          ; Code d'entrepôt       ; MP-00-05-03_DD999999.
+;
+; Variable de travail associée au statut du produit
+;
+DEFINE D_PRDSTU CHARACTER SIZE 01 = PARM ; MP-00-05-03_DD999999.
+
+SELECT VPRE_PRD     IF (PRDSTU    OF VPRE_PRD    = "A" AND D_PRDSTU = "0") OR D_PRDSTU = "1" ; Inclusion ou non des produits inactifs ; MP-00-05-03_DD999999.
+
+SELECT ARPRD_HISTO IF  PRHDATREF OF ARPRD_HISTO >= SYSDATE - 10000 AND &  ; Sélection des sorties de la dernière année.
+                       PRHDATREF OF ARPRD_HISTO <= SYSDATE
+;
+; Variable de travail associée au type de produit
+;
+DEFINE D_PRDTYP CHARACTER SIZE 6 = PARM UPSHIFT ; Type de produit
+;
+; Variables de travail associées à la quantité commandée
+;
+DEFINE D_QTEACOM FLOAT SIZE 8 = (PREQTEMAX OF VPRE_PRD * 1000) - &
+                                 PREQTEPHY OF VPRE_PRD         - &
+                                 PREQTECOM OF VPRE_PRD         - &
+                                 PREQTEDEM OF VPRE_PRD
+;
+; Sélection selon les critères de l'usager
+;
+SELECT IF (PRDTYP    OF VPRE_PRD  = D_PRDTYP  OR D_PRDTYP = "") AND &
+           PREQTEPHY OF VPRE_PRD <= PREPOICOM OF VPRE_PRD       AND &
+           D_QTEACOM             > 0
+;
+; Tri
+;
+SORT ON CIECLE OF VPRE_PRD &
+     ON PRDCLE OF VPRE_PRD &
+     ON ENTCLE OF VPRE_PRD
+
+TEMPORARY T_PRHQTETRS  FLOAT SIZE 08
+ITEM T_PRHQTETRS SUBTOTAL PRHQTETRS OF ARPRD_HISTO RESET AT ENTCLE
+
+SUBFILE WAR346A KEEP AT ENTCLE INCLUDE VPRE_PRD   , &
+                                       D_QTEACOM  , &
+                                       T_PRHQTETRS  &
+                                 INDEX WAR346A_IDX  &
+                               SEGMENT CIECLE     , &
+                                       PRDCLE     , &
+                                       ENTCLE
+
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+; Tenir compte des quantités incluses dans les bons de commande ayant un statut égal à "P" (préliminaire).
+;
+;
+; L'index suivant a dû être créé au niveau de la table arcmd_detail :
+;
+;         create ascending index cde_r01 on arcmd_detail (ciecle, prdcle);
+
+
+REQUEST QTES_CMD
+
+access *WAR346A link ciecle of WAR346A          , &
+                     prdcle of WAR346A            &
+                  to ciecle                     , &
+                     prdcle of arcmd_detail  opt  &
+
+                link cmdcle of arcmd_detail     , &
+                     cmdajt of arcmd_detail     , &
+                     ciecle of arcmd_detail     , &
+                     "P"                          &
+                  to cmdcle                     , &
+                     cmdajt                     , &
+                     ciecle                     , &
+                     cmdstu of arcommande    opt
+                     
+select if entcle of WAR346A = entcle of arcommande                     
+
+output WAR346A update
+  item D_QTEACOM of WAR346A final D_QTEACOM of WAR346A - cdeqtecom of arcmd_detail
+
+
+BUILD ar346t

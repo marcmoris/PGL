@@ -1,0 +1,2144 @@
+;/T/ Factures / Notes de crédit
+;
+;//M/GRA01/Francois Richard/1999-06-18
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur..: Alain Côté
+;    Date Création: 31 mai 1993
+;
+;    Description..: Cet écran permet la saisie de 4 types de factures c-a-d
+;                   les factures, les notes de crédits(2) et les ajustements.
+;
+;                   Il y a deux types de note de crédit, le premier est une
+;                   note de crédit qui ne s'applique pas à une facture, les
+;                   traitements de cette note de crédit sont les mêmes que celle
+;                   des factrues. Le seconde type, c'est les notes de crédit sur
+;                   facture, c-a-d que la note de crédit réfère une facture.
+;                   Le montant de la note de crédit doit étre négaitf.
+;
+;                   Un ajustement peut se faire sur une facture(FA), une note
+;                   de crédit(NC) ou un note de crédit/facture(NF). Dans le
+;                   cas d'un ajustement sur le type NF, une ligne d'historique
+;                   supplémentaire est nécessaire sur le facture référé par la
+;                   note de crédit.
+;
+;                   Le montant du compte à recevoir inclus les montants de
+;                   taxes.
+;
+;/M/ François Déry, 30 avril 1999
+;       Modifier l'accèss au fichier de séquence car il a
+;       été converti en format interbase au lieu d'indexé.
+;
+;/M/ Adatation....: Marc Morissette 10 Nov 1993
+;
+;    Description..: Modification du titre de l'écran
+;
+;
+;-------------------------------------------------------------------------------
+;**M Alain Côté, le 23 juin 1993
+;**M
+;**M Maintenance des champs modifiables après journalisation dans l'historique
+;**m du grand livre.
+;**m
+
+;/M/ Programmeur...: Nancy Breton
+;    Date modif....: 15 décembre 1998
+;    Description...: Modifier le libellé Num. réf. client pour Nom projet mettre
+;                    le champs display (sos #GRA01 9311 573)
+;
+;/M/ Remy demers 17 mars 1999
+;    validation de la periode de la facture
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cr003 ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             AUTOUPDATE &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CLICIECLE, &
+                       T_CIECLEMNU, &
+                       T_CIENOM   , &
+                       T_PECCLEMNU, &
+                       T_PECCLECOU, &
+                       T_CARCLEFND
+
+TEMPORARY T_PECCLECOU_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_FIELDTEXT_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+USE ussectmp  NOLIST
+    "CR003"
+
+USE cr003.hlp NOLIST
+
+USE ustraecr NOLIST
+
+USE usactecr NOLIST
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Imputation                      " ACTION DESIGNER D001
+  MENUITEM LABEL "Ecriture comptable              " ACTION DESIGNER D002
+  MENUITEM LABEL "Historique des transactions     " ACTION DESIGNER D003
+  MENUITEM LABEL "Cédule d'encaissement           " ACTION DESIGNER D004
+  MENUITEM LABEL "Adresse - client divers         " ACTION DESIGNER D005
+  MENUITEM LABEL "Gestion des lots                " ACTION DESIGNER D006
+  MENUITEM LABEL "Vérification                    " ACTION DESIGNER D007
+@ELSE
+ACTIONMENU LABEL "Subscreens"
+  MENUITEM LABEL "Charge                          " ACTION DESIGNER D001
+  MENUITEM LABEL "Accounting entry                " ACTION DESIGNER D002
+  MENUITEM LABEL "History                         " ACTION DESIGNER D003
+  MENUITEM LABEL "Payment Receipt Schedule        " ACTION DESIGNER D004
+  MENUITEM LABEL "Addresse                        " ACTION DESIGNER D005
+  MENUITEM LABEL "Batch managment                 " ACTION DESIGNER D006
+  MENUITEM LABEL "Verification                    " ACTION DESIGNER D007
+@ENDIF
+
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_RAD_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE MCRAD_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CLICIECLE CHARACTER SIZE 4  ; Compagnie du client.
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de compagnie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie du menu.
+TEMPORARY T_PECCLEMNU CHARACTER SIZE 4  ; Période saisie au menu
+TEMPORARY T_PECCLECOU CHARACTER SIZE 4  ; Période courante
+TEMPORARY T_CARCLEFND CHARACTER SIZE 15 ; # de facture de recherche
+
+;
+; Variables temporaires pour répèter la valeur de la période et du lot en
+; mode saisie.
+;
+TEMPORARY T_PECCLESAI CHARACTER SIZE 4 RESET AT STARTUP
+TEMPORARY T_LCRCLESAI CHARACTER SIZE 4 RESET AT STARTUP
+
+;-------------------------------------------------------------------------------
+
+;
+;
+FILE CRCPT_A_REC      PRIMARY
+
+  ITEM CIECLE    OF CRCPT_A_REC INITIAL T_CIECLEMNU
+  ITEM REFCIECLE OF CRCPT_A_REC INITIAL T_CLICIECLE
+  ITEM REFCLETYP OF CRCPT_A_REC INITIAL "C"
+  ITEM CARDATCRE OF CRCPT_A_REC INITIAL SYSDATE
+  ITEM CARHRECRE OF CRCPT_A_REC INITIAL SYSTIME / 10000
+  ITEM CARUSRCRE OF CRCPT_A_REC INITIAL LOGONID
+  ITEM CARMNTNET OF CRCPT_A_REC FINAL   CARMNT      OF CRCPT_A_REC &
+                                        - CARMNTTPS OF CRCPT_A_REC &
+                                        - CARMNTTVP OF CRCPT_A_REC
+  ITEM PECCLE    OF CRCPT_A_REC INITIAL T_PECCLESAI
+  ITEM LCRCLE    OF CRCPT_A_REC INITIAL T_LCRCLESAI
+
+;
+; Cette table est utilisée pour valider l'adresse d'état de compte ou pour créer
+; l'adresse pour un client divers.
+;
+FILE MCREF_ADRESSE    SECONDARY &
+                      NOITEM    &
+                      NODELETE
+  ACCESS VIA REFCIECLE, &
+             REFCLETYP, &
+             REFCLENUM, &
+             RADCLE     &
+        USING REFCIECLE OF CRCPT_A_REC, &
+              REFCLETYP OF CRCPT_A_REC, &
+              REFCLENUM OF CRCPT_A_REC, &
+              RADCLE    OF CRCPT_A_REC
+
+  ITEM REFCIECLE   OF MCREF_ADRESSE FINAL REFCIECLE OF CRCPT_A_REC
+  ITEM REFCLETYP   OF MCREF_ADRESSE FINAL REFCLETYP OF CRCPT_A_REC
+  ITEM REFCLENUM   OF MCREF_ADRESSE FINAL REFCLENUM OF CRCPT_A_REC
+  ITEM RADCLE      OF MCREF_ADRESSE FINAL RADCLE    OF CRCPT_A_REC
+  ITEM RADETACPTCR OF MCREF_ADRESSE INITIAL  "1"
+
+;
+; Item du CRCPT_A_REC, le timbre de modification est mis à jour si l'usager
+; modifie la fichier ou l'adresse.
+;
+  ITEM CARDATMOD OF CRCPT_A_REC FINAL   SYSDATE        &
+                                        IF NOT NEWRECORD OF CRCPT_A_REC AND &
+                                           ( ALTEREDRECORD OF CRCPT_A_REC OR &
+                                             ALTEREDRECORD OF MCREF_ADRESSE )
+  ITEM CARHREMOD OF CRCPT_A_REC FINAL   SYSTIME / 10000 &
+                                        IF NOT NEWRECORD OF CRCPT_A_REC AND &
+                                           ( ALTEREDRECORD OF CRCPT_A_REC OR &
+                                             ALTEREDRECORD OF MCREF_ADRESSE )
+  ITEM CARUSRMOD OF CRCPT_A_REC FINAL   LOGONID         &
+                                        IF NOT NEWRECORD OF CRCPT_A_REC AND &
+                                           ( ALTEREDRECORD OF CRCPT_A_REC OR &
+                                             ALTEREDRECORD OF MCREF_ADRESSE )
+
+;
+; Ajout d'un enregistrement dans l'historique du document référé.
+; Sert seulement pour les ajustements et les notes de crédit.
+;
+FILE CRCAR_HISTO      SECONDARY &
+                      NOITEM
+  ACCESS VIA CRHCLE1  , &
+             CRHCLE2  , &
+             CRHTYPECR, &
+             CRHTYPTRA  &
+         USING CIECLE    OF CRCPT_A_REC, &
+               CARCLE    OF CRCPT_A_REC, &
+               CARTYPECR OF CRCPT_A_REC, &
+               CARTYPECR OF CRCPT_A_REC
+  ITEM CIECLE    OF CRCAR_HISTO FINAL   CIECLE    OF CRCPT_A_REC
+  ITEM CRHTIMSTP OF CRCAR_HISTO INITIAL SYSDATE * 1000000 + ROUND(SYSTIME / 100)
+  ITEM CRHCLE1   OF CRCAR_HISTO INITIAL CIECLE    OF CRCPT_A_REC
+  ITEM CRHCLE2   OF CRCAR_HISTO FINAL   CARCLE    OF CRCPT_A_REC
+  ITEM CRHTYPECR OF CRCAR_HISTO FINAL   CARTYPECR OF CRCPT_A_REC
+  ITEM CRHTYPTRA OF CRCAR_HISTO FINAL   CARTYPECR OF CRCPT_A_REC
+  ITEM CRHMNTCAR OF CRCAR_HISTO FINAL   CARMNT    OF CRCPT_A_REC
+  ITEM CRHDAT    OF CRCAR_HISTO FINAL   CARDAT    OF CRCPT_A_REC
+  ITEM PECCLE    OF CRCAR_HISTO FINAL   PECCLE    OF CRCPT_A_REC
+  ITEM LCRCLE    OF CRCAR_HISTO FINAL   LCRCLE    OF CRCPT_A_REC
+
+;
+; Ajout d'un enregistrement dans l'historique de la facture référé par
+; la note de crédit qui fait l'objet d'un ajustement.
+; Sert seulement pour les ajustements sur notes de crédit.
+;
+FILE CRCAR_HISTO      SECONDARY &
+                      ALIAS A_CRH_FACTURE &
+                      NOITEM
+  ACCESS VIA CRHCLE1  , &
+             CRHCLE2  , &
+             CRHTYPECR, &
+             CRHTYPTRA  &
+         USING CIECLE    OF CRCPT_A_REC, &
+               CARCLE    OF CRCPT_A_REC, &
+               "AJ", &
+               "NC"
+  ITEM CIECLE    OF A_CRH_FACTURE FINAL   CIECLE    OF CRCAR_HISTO
+  ITEM CRHTIMSTP OF A_CRH_FACTURE INITIAL SYSDATE * 1000000 + ROUND(SYSTIME / 100)
+  ITEM CRHCLE1   OF A_CRH_FACTURE INITIAL CRHCLE1   OF CRCAR_HISTO
+  ITEM CRHCLE2   OF A_CRH_FACTURE FINAL   CRHCLE2   OF CRCAR_HISTO
+  ITEM CRHTYPECR OF A_CRH_FACTURE FINAL   CRHTYPECR OF CRCAR_HISTO
+  ITEM CRHTYPTRA OF A_CRH_FACTURE FINAL   "NC"
+  ITEM CCDCLELIG OF A_CRH_FACTURE FINAL   CCDCLELIG OF CRCAR_HISTO
+  ITEM CRHMNTCAR OF A_CRH_FACTURE FINAL   CRHMNTCAR OF CRCAR_HISTO
+  ITEM CRHDAT    OF A_CRH_FACTURE FINAL   CRHDAT    OF CRCAR_HISTO
+  ITEM PECCLE    OF A_CRH_FACTURE FINAL   PECCLE    OF CRCAR_HISTO
+  ITEM LCRCLE    OF A_CRH_FACTURE FINAL   LCRCLE    OF CRCAR_HISTO
+
+
+;
+; Destruction des fils lors de la destruction du père.
+;
+FILE CRCAR_IMPUTATION DELETE &
+                      NOITEM
+  ACCES VIA CIECLE, &
+            CARCLE  &
+        USING CIECLE OF CRCPT_A_REC, &
+              CARCLE OF CRCPT_A_REC
+;
+FILE CRCAR_CEDULE     DELETE &
+                      NOITEM &
+                      ALIAS A_CCD_DELETE
+  ACCESS VIA CIECLE, &
+             CARCLE     &
+         USING CIECLE OF CRCPT_A_REC, &
+               CARCLE OF CRCPT_A_REC
+
+;
+; 1- Ajustements sur notes de crédit, sert à retrouver sur quelle facture la
+;    note de crédit réfère.
+; 2- Pour avoir le numéro de séquence d'un ajustement.
+;
+FILE CRCAR_HISTO      DESIGNER &
+                      ALIAS A_CRH_NC &
+                      OPEN 1 READ
+;
+; Numéro de séquence des adresses pour les clients divers.
+;
+FILE MCRAD_SEQ        DESIGNER &
+                      TRANSACTION GEN_RAD_SEQ
+
+;
+; Validation du lot.
+;
+FILE CRLOT            REFERENCE
+  ACCESS VIA CIECLE, &
+             PECCLE, &
+             LCRCLE &
+         USING CIECLE OF CRCPT_A_REC, &
+               PECCLE OF CRCPT_A_REC, &
+               LCRCLE OF CRCPT_A_REC
+
+;
+; Validation du numéro de client et on a besoin de certaines informations sur
+; le client , comme les termes d'encaissements, le statut, le type...
+;
+FILE VCLC_CLI         REFERENCE
+  ACCESS VIA CLICIECLE, &
+             CLICLE   , &
+             CIECLE     &
+         USING REFCIECLE OF CRCPT_A_REC, &
+               REFCLENUM OF CRCPT_A_REC, &
+               CIECLE    OF CRCPT_A_REC
+
+;
+; Cette table est utilisée pour valider les documents(factures) référés par
+; les ajustements et les notes de crédit.
+;
+FILE CRCPT_A_REC      REFERENCE &
+                      ALIAS A_CAR_REFERE
+  ACCESS VIA CIECLE, &
+             CARCLE  &
+         USING CIECLE OF CRCPT_A_REC, &
+               CARCLE OF CRCAR_HISTO
+
+;
+; Assignation du compte comptable 'compte à recevoir'.
+; - Pour les factures et les crédits on prend le compte qui est défini
+;   dans le client.
+; - Pour les notes de crédit et les ajustements on prend le compte dans le
+;   le document référé.
+;
+  ITEM CARCPTCAR OF CRCPT_A_REC FINAL CLCCPTCAR OF VCLC_CLI &
+                                        IF    CARTYPECR OF CRCPT_A_REC = "FA" &
+                                           OR CARTYPECR OF CRCPT_A_REC = "CR" &
+                                 ELSE CARCPTCAR OF A_CAR_REFERE
+
+
+;
+; Validation de la cédule(existance, montant).
+;
+FILE CRCAR_CEDULE     REFERENCE
+  ACCESS VIA CIECLE, &
+             CARCLE, &
+             CCDCLELIG &
+         USING CIECLE    OF CRCPT_A_REC, &
+               CARCLE    OF CRCAR_HISTO, &
+               CCDCLELIG OF CRCAR_HISTO
+
+;
+; Valiation des termes et calcul des dates due.
+;
+FILE CRTERME          DESIGNER &
+                      OPEN READ
+
+;
+; Validation du type de facture(bilingue).
+;
+DEFINE    D_CARTYPECR CHARACTER SIZE 16 = "CARTYPECR"
+TEMPORARY T_CARTYPECR CHARACTER SIZE  4
+;
+FILE VCBI_DSC         REFERENCE
+  ACCESS VIA XELNOM, &
+             CBICLE  &
+         USING D_CARTYPECR, &
+               CARTYPECR OF CRCPT_A_REC
+
+;
+; Validation de la période comptable.
+;
+FILE MCPERIODE_CTB    REFERENCE
+  ACCESS VIA PECCLE &
+         USING PECCLE OF CRCPT_A_REC
+
+;
+; Pour avoir les soldes du documents.
+;
+FILE VCAR_SLD         REFERENCE
+  ACCESS VIA CIECLE, &
+             CARCLE  &
+         USING CIECLE OF CRCPT_A_REC, &
+               CARCLE OF CRCPT_A_REC
+
+;
+; Pour avoir la devise de base du Grand livre.
+;
+FILE MCHOLDING       REFERENCE
+  ACCESS VIA CIENMC &
+         USING "1"
+
+;
+; Pour avoir le code identifiant les paiements non-appliqués.
+;
+FILE CRPARAMETRE     REFERENCE
+  ACCESS VIA CIENMC &
+         USING "1"
+
+
+FILE CRCPT_A_REC ALIAS A_CRCPT_A_REC DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+; Variables temporaire pour le calcul des dates due.
+;
+USE ustertmp NOLIST
+
+TEMPORARY  T_PECCLE_SIE     CHARACTER SIZE 5
+TEMPORARY  T_PECCLE_SIE_FAC CHARACTER SIZE 5
+
+;
+TEMPORARY T_LCRCLE    CHARACTER SIZE  4 ; Popup sur les lots
+TEMPORARY T_CODMOD    CHARACTER SIZE  2 ; Popup sur les périodes
+TEMPORARY T_PECCLE    CHARACTER SIZE  4 ; Popup sur les périodes et lots
+TEMPORARY T_TYPECR    CHARACTER SIZE  2 ; Popup sur les lots
+
+TEMPORARY T_CLICLE    CHARACTER SIZE  6 ; Popup sur les clients
+TEMPORARY T_REFCLETYP CHARACTER SIZE  1 ; Popup sur les adresses du client
+TEMPORARY T_RADCLE    INTEGER UNSIGNED &
+                                SIZE  2 ; Popup sur les adresses du client
+TEMPORARY T_TYPADR    CHARACTER SIZE  3 ; Popup sur les adresses du client
+
+TEMPORARY T_CARCLE    CHARACTER SIZE 15 ; Popup sur les documents référés
+TEMPORARY T_FLGSLD    CHARACTER SIZE  1 ; Popup sur les documents référés.??
+TEMPORARY T_TYPECRPAT CHARACTER SIZE 11 ; Popup sur les documents référés.
+TEMPORARY T_CCDCLELIG INTEGER   SIZE  2 ; Popup sur les lignes de cédule
+
+TEMPORARY T_TMECATPAT CHARACTER SIZE  11; Popup sur les termes d'encaissement.
+TEMPORARY T_TMECLE    CHARACTER SIZE  4 ; Popup sur les termes d'encaissement.
+
+TEMPORARY T_NUMAJT    CHARACTER SIZE  2 ; Pour le traitement des ajustements.
+
+;
+; Variable pour le sous-écran de consultation des écritures comptable
+;
+DEFINE D_HISCLE INTEGER UNSIGNED SIZE 4 = HISCLE OF CRCPT_A_REC
+
+;
+; Variable d'affichage des devises et du montant à recevoir.
+;
+DEFINE D_DEVCAR CHARACTER SIZE 4 = " " IF DEVCLE OF VCLC_CLI = &
+                                          DEVCLE OF MCHOLDING &
+                              ELSE "/" + DEVCLE OF VCLC_CLI
+
+;
+; Montant encaissé + mauvaise créance.
+;
+DEFINE D_MNTRECMAC FLOAT SIZE 8 = V_CARMNTREC OF VCAR_SLD + &
+                                  V_CARMNTMAC OF VCAR_SLD
+
+;
+; Solde à recevoir.
+;
+DEFINE D_SLD_A_REC FLOAT SIZE 8 = CARMNT    OF CRCPT_A_REC &
+                                  + V_CARMNTAJT OF VCAR_SLD &
+                                  + V_CARMNTCRT OF VCAR_SLD &
+                                  - V_CARMNTREC OF VCAR_SLD &
+                                  - V_CARMNTESC OF VCAR_SLD &
+                                  - V_CARMNTMAC OF VCAR_SLD
+
+;
+; Si le lot est autorisé, sert au sous-écran cr003a
+;
+DEFINE D_LCRATRJOU    CHARACTER SIZE 1 = LCRATRJOU OF CRLOT
+
+
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Factures / Notes de crédit " &
+@ELSE
+      " Invoices / Credit Notes " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST
+
+
+ALIGN(3,3,19) (,27,43) (,49,65) (,,74)
+
+FIELD PECCLE OF CRCPT_A_REC HIDDEN ID 05 &
+        DEFAULT T_PECCLEMNU &
+        DUPLICATE &
+        NOCHANGE &
+        LOOKUP ON MCPERIODE_CTB &
+          MESSAGE 606 ; Cette periode est inexistante
+
+FIELD LCRCLE    OF CRCPT_A_REC &
+        REQUIRED  &
+        DUPLICATE &
+        NOCHANGE  &
+        NUMERIC   &
+        SIGNIFICANCE 4 &
+        LOOKUP ON CRLOT &
+          MESSAGE 622 ; Ce lot est inexistant
+
+FIELD CARDATJOU OF CRCPT_A_REC  FORMAT YYYYMMDD PATTERN "####/##/##"&
+        DISPLAY
+
+FIELD CARHREJOU OF CRCPT_A_REC &
+        DISPLAY size 5
+
+SKIP
+
+ALIGN(3,3,19) (,,22)
+
+FIELD CARTYPECR OF CRCPT_A_REC HIDDEN ID 10 &
+        DEFAULT "FA" &
+        NOCHANGE     &
+        NOCORRECT    &
+        LOOKUP ON VCBI_DSC &
+          MESSAGE 609 ; Ce type d'écriture est invalide
+
+FIELD CBIDSC OF VCBI_DSC &
+        DISPLAY
+
+SKIP 1
+
+ALIGN (3,3,19) (,,26)
+
+FIELD REFCLENUM OF CRCPT_A_REC HIDDEN ID 15 &
+@IF FRANCAIS
+        LABEL "No client.....:" &
+@ELSE
+        LABEL "Client no.....:" &
+@ENDIF
+        REQUIRED &
+        NOCHANGE &
+        LOOKUP ON VCLC_CLI &
+          MESSAGE 624  ; Ce client n'existe pas.
+
+FIELD RADNOM OF MCREF_ADRESSE &
+        REQUIRED
+
+FIELD RADCLE OF CRCPT_A_REC HIDDEN ID 20 &
+        REQUIRED &
+        LOOKUP ON MCREF_ADRESSE &
+          MESSAGE 625 ; Ce numero d'adresse est inexistante
+FIELD RADADR1 OF MCREF_ADRESSE DISPLAY
+
+SKIP 
+
+ALIGN (3,3,19) (,49,65) (,,78)
+
+FIELD CARCLE    OF CRCPT_A_REC HIDDEN ID 25 &
+        REQUIRED &
+        NOCHANGE &
+;        PATTERN "((^|#|-|_|.)>)|!0" &
+                                ; Il ne faut pas que l'usager puisse saisir
+                                ; le caractère #, car c'est le caractères de
+                                ; séparation des ajustements.
+        LOOKUP NOTON CRCPT_A_REC &
+          VIA CIECLE, &
+              CARCLE &
+          USING CIECLE OF CRCPT_A_REC, &
+                CARCLE OF CRCPT_A_REC  &
+          MESSAGE 626 ; cette facture existe deja
+
+FIELD CARDAT    OF CRCPT_A_REC  FORMAT YYYYMMDD PATTERN "####/##/##"&
+        REQUIRED
+
+FIELD CARCMDCLI OF CRCPT_A_REC &
+      LABEL   "Nom du Projet.:"
+
+FIELD CARCLE OF CRCAR_HISTO &
+        SIZE 12 &
+@IF FRANCAIS
+        LABEL "Fact. référée.:" &
+@ELSE
+        LABEL "Refer. invoice:" &
+@ENDIF
+        REQUIRED &
+        NOCHANGE &
+        LOOKUP ON A_CAR_REFERE &
+          MESSAGE 634 ; Cette facture n'existe pas.
+
+FIELD CCDCLELIG OF CRCAR_HISTO &
+        REQUIRED &
+        NOCHANGE &
+        LOOKUP ON CRCAR_CEDULE &
+          MESSAGE 694 ; Cette ligne de cédule est inexistante
+
+
+ALIGN(3,3,19) (,,24) (,35,44) (,,49) (,60,65) (,,70)
+
+FIELD CARTERNET  OF CRCPT_A_REC HIDDEN ID 35
+FIELD CARDATNET  OF CRCPT_A_REC FORMAT YYYYMMDD PATTERN "####/##/##" DISPLAY
+
+FIELD CARTERESC1 OF CRCPT_A_REC &
+@IF FRANCAIS
+        LABEL "Esc.(1):"
+@ELSE
+        LABEL "Dis.(1):"
+@ENDIF
+
+FIELD CARDATESC1 OF CRCPT_A_REC FORMAT YYYYMMDD PATTERN "####/##/##"
+
+FIELD CARTERFRS  OF CRCPT_A_REC &
+@IF FRANCAIS
+        LABEL "Fr.:"
+@ELSE
+        LABEL "Ex.:"
+@ENDIF
+
+FIELD CARDATFRS  OF CRCPT_A_REC FORMAT YYYYMMDD PATTERN "####/##/##"
+
+SKIP TO GROUP 3
+
+FIELD CARTERESC2 OF CRCPT_A_REC &
+@IF FRANCAIS
+        LABEL "Esc.(2):"
+@ELSE
+        LABEL "Dis.(2):"
+@ENDIF
+
+FIELD CARDATESC2 OF CRCPT_A_REC FORMAT YYYYMMDD PATTERN "####/##/##"
+
+
+ALIGN(3,3,19)
+
+FIELD CARDSC1 OF CRCPT_A_REC HIDDEN ID 40
+FIELD CARDSC2 OF CRCPT_A_REC NOLABEL ID SAME
+
+SKIP 1
+
+ALIGN(3,3,19) (,,34)
+
+FIELD CARMNT     OF CRCPT_A_REC HIDDEN ID 45 &
+        REQUIRED
+
+FIELD D_DEVCAR   &
+        DISPLAY
+
+ALIGN(3,3,19)
+
+FIELD V_CARMNTAJT  OF VCAR_SLD HIDDEN ID 50 &
+        DISPLAY &
+@IF FRANCAIS
+        LABEL "Ajustement....:" &
+@ELSE
+        LABEL "%%%AJUST......:" &
+@ENDIF
+        PICTURE "^^,^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5
+
+
+FIELD V_CARMNTCRT  OF VCAR_SLD HIDDEN ID 55 &
+        DISPLAY &
+@IF FRANCAIS
+        LABEL "Crédit........:" &
+@ELSE
+        LABEL "%%% CREDIT....:" &
+@ENDIF
+        PICTURE "^^,^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5
+
+FIELD D_MNTRECMAC HIDDEN ID 60 &
+        DISPLAY &
+@IF FRANCAIS
+        LABEL "Encaissé/radié:" &
+@ELSE
+        LABEL "%%%Encaissé...:" &
+@ENDIF
+        PICTURE "^^,^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5
+
+FIELD V_CARMNTESC  OF VCAR_SLD HIDDEN ID 65 &
+        DISPLAY &
+@IF FRANCAIS
+        LABEL "Escompte......:" &
+@ELSE
+        LABEL "Discount......:" &
+@ENDIF
+        PICTURE "^^,^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5
+
+FIELD D_SLD_A_REC  HIDDEN ID 70 &
+        DISPLAY &
+@IF FRANCAIS
+        LABEL "Solde à rec...:" &
+@ELSE
+        LABEL "To receive....:" &
+@ENDIF
+        PICTURE "^^,^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5
+
+SKIP TO LINE 17
+
+
+ALIGN (,49,65)
+
+FIELD CARMNTNET  OF CRCPT_A_REC &
+        DISPLAY &
+        REFRESH
+
+FIELD CARMNTTPS  OF CRCPT_A_REC &
+        DISPLAY &
+        REFRESH
+
+FIELD CARMNTTVP  OF CRCPT_A_REC &
+        DISPLAY &
+        REFRESH
+
+SKIP 2
+
+FIELD CLCSLDACJ  OF VCLC_CLI &
+        DISPLAY
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+  ;
+  ; Si l'écran n'est pas appellé par le menu, alors on interdit la saisie,
+  ; la destruction et la modification à l'usager
+  ;
+  IF T_CARCLEFND <> ""
+  THEN BEGIN
+    LET TZ_SECENT = "0"
+    LET TZ_SECDEL = "0"
+    LET TZ_SECMOD = "0"
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les périodes.
+;
+;
+PROCEDURE INPUT PECCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CODMOD = "CR"
+    LET T_PECCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc109 MODE F PASSING T_CIECLEMNU, &
+                                    T_PECCLE   , &
+                                    T_CODMOD
+    LET FIELDTEXT = TRUNC(T_PECCLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation de la période.
+;
+;
+PROCEDURE EDIT PECCLE
+BEGIN
+
+   ; Ajustement pour le changement de siècle
+   IF FIELDTEXT[1:1] < "8"
+   THEN LET T_FIELDTEXT_SIE = "1" + FIELDTEXT
+   ELSE LET T_FIELDTEXT_SIE = "0" + FIELDTEXT
+
+  ; Ajustement pour le changement de siècle
+  IF T_PECCLECOU[1:1] < "8"
+  THEN LET T_PECCLECOU_SIE = "1" + T_PECCLECOU
+  ELSE LET T_PECCLECOU_SIE = "0" + T_PECCLECOU
+
+  IF T_FIELDTEXT_SIE < T_PECCLECOU_SIE
+  THEN ERROR 607 ; Cette période est fermée.
+  ;
+  IF FIELDTEXT <> T_PECCLECOU
+  THEN WARNING 608 ; La période indiquée est différente de la période courante.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les lots.
+;
+;
+PROCEDURE INPUT LCRCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TYPECR = "FA"
+    LET T_PECCLE = PECCLE OF CRCPT_A_REC
+    LET T_LCRCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cr101 MODE F PASSING T_CIECLEMNU, &
+                                    T_TYPECR, &
+                                    T_PECCLE, &
+                                    T_LCRCLE
+    LET FIELDTEXT = TRUNC(T_LCRCLE)
+  END
+  ;
+  ; Force l'éxécution du LOOKUP sur le lot et de la procédure EDIT.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNC(LCRCLE OF CRCPT_A_REC))
+  THEN LET FIELDTEXT = LCRCLE OF CRCPT_A_REC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du lot.
+;
+;
+PROCEDURE EDIT LCRCLE
+BEGIN
+  IF LCRTYPECR OF CRLOT <> "FA"
+  THEN ERROR 627 ; Ce lot n'est pas du bon type.
+  ;
+  IF LCRDATJOU OF CRLOT <> 0
+  THEN ERROR 628 ; Le lot est déjà journalisé.
+  ;
+  IF LCRATRJOU OF CRLOT = "1"
+  THEN ERROR 629 ; On ne peut pas utiliser un lot autorisé à la journalisation.
+  ;
+  IF LCRUSR OF CRLOT <> LOGONID
+  THEN ERROR 630 ; Ce lot ne vous est pas destiné.
+  ;
+  IF LCRNBRTRSVER OF CRLOT = 0
+  THEN ERROR 719 ; Saisie interdite, entrez d'abord vos montants vérifiés dans le lot.
+  ;
+  IF LCRDATVAL OF CRLOT <> 0
+  THEN WARNING 631 ; Une liste de vérification a déjà été demandé pour ce lot.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les types de factures(bilingue).
+;
+;
+PROCEDURE INPUT CARTYPECR
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CARTYPECR = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_CARTYPECR, T_CARTYPECR
+    LET FIELDTEXT = TRUNC(T_CARTYPECR)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; On ne peut pas saisir un paiement non-appliqué par cet écran.
+;
+;
+PROCEDURE EDIT CARTYPECR
+BEGIN
+  IF FIELDTEXT = "NA"
+  THEN ERROR 623 ; Ce type de facture n'est pas permis.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les client.
+;
+;
+PROCEDURE INPUT REFCLENUM
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CLICLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cr102 MODE F PASSING T_CLICIECLE, T_CIECLEMNU, T_CLICLE
+    LET FIELDTEXT = TRUNC(T_CLICLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du client.
+;
+;
+PROCEDURE EDIT REFCLENUM
+BEGIN
+  IF CLISTU OF VCLC_CLI = "I"
+  THEN ERROR 632 ; Le client est inactif.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Assignation...
+;  - de l'adresse d'état de compte du client à la facture.
+;  - des codes termes du client à la facture.
+;
+;
+PROCEDURE PROCESS REFCLENUM
+BEGIN
+  LET CARTERNET  OF CRCPT_A_REC = CLCTERNET  OF VCLC_CLI
+  LET CARTERESC1 OF CRCPT_A_REC = CLCTERESC1 OF VCLC_CLI
+  LET CARTERESC2 OF CRCPT_A_REC = CLCTERESC2 OF VCLC_CLI
+  LET CARTERFRS  OF CRCPT_A_REC = CLCTERFRS  OF VCLC_CLI
+
+  IF CLITYP OF VCLC_CLI <> "D"
+  THEN BEGIN
+    LET     RADCLE  OF CRCPT_A_REC = CLCADRETACPT OF VCLC_CLI
+    EDIT    RADCLE  OF CRCPT_A_REC
+    DISPLAY RADCLE  OF CRCPT_A_REC
+    DISPLAY RADADR1 OF MCREF_ADRESSE
+  END
+  ELSE LET RADCLE OF CRCPT_A_REC = 0
+  DISPLAY CARTERNET  OF CRCPT_A_REC
+  DISPLAY CARTERESC1 OF CRCPT_A_REC
+  DISPLAY CARTERESC2 OF CRCPT_A_REC
+  DISPLAY CARTERFRS  OF CRCPT_A_REC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Affiche le nom du client régulier, sinon affiche le nom saisie dans
+; la facture pour les clients divers.
+;
+;
+PROCEDURE OUTPUT RADNOM
+BEGIN
+  IF CLITYP OF VCLC_CLI <> "D"
+  THEN LET FIELDTEXT = CLINOM OF VCLC_CLI
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Si l'usager modifie le nom du client divers, il faut mettre à jour
+; le nom abrégé si celui-ci correspond à l'ancienne valeur.
+;
+;
+PROCEDURE EDIT RADNOM
+BEGIN
+  IF RADNOMABR OF MCREF_ADRESSE = OLDVALUE( RADNOM OF MCREF_ADRESSE )[1:20]
+  THEN LET RADNOMABR OF MCREF_ADRESSE = RADNOM OF MCREF_ADRESSE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les adresses du client.
+;
+;
+PROCEDURE INPUT RADCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_REFCLETYP = REFCLETYP OF CRCPT_A_REC
+    LET T_CLICLE    = REFCLENUM OF CRCPT_A_REC
+    LET T_TYPADR    = "ETA"
+    LET T_RADCLE    = 0
+    RUN SCREEN mc108 MODE F PASSING T_CLICIECLE, &
+                                    T_REFCLETYP, &
+                                    T_CLICLE   , &
+                                    T_TYPADR   , &
+                                    T_RADCLE
+    IF T_RADCLE <> 0
+    THEN LET FIELDTEXT = ASCII(T_RADCLE)
+    ELSE LET FIELDTEXT = ""
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation de l'adresse.
+;
+;
+PROCEDURE EDIT RADCLE
+BEGIN
+  IF RADETACPTCR OF MCREF_ADRESSE <> "1"
+  THEN ERROR 633 ; Ce n'est pas une adresse d'état de compte
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE EDIT CARCLE
+BEGIN
+  ;
+  ; Validation du numéro de facture, il faut respecter le maximum de 12
+  ; caractères pour la gestion des ajustements.
+  ;
+  IF 12 < SIZE( TRUNCATE( FIELDTEXT ))
+  THEN ERROR 644 ; Le numéro est trop long.
+  ;
+  ;
+  IF CRPCODPNA OF CRPARAMETRE = &
+       CARCLE OF CRCPT_A_REC[1:SIZE(TRUNCATE( CRPCODPNA OF CRPARAMETRE ) )]
+  THEN ERROR 650 ; Vous ne pouvez pas utiliser ce préfix dans le numéro.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la date de facture selon l'interval de date de la période.
+;
+;
+PROCEDURE EDIT CARDAT
+BEGIN
+  IF FIELDVALUE < PECDATDEB OF MCPERIODE_CTB
+  THEN WARNING 637 ; La date est inférieure à la date de début de la période
+
+  IF FIELDVALUE > PECDATFIN OF MCPERIODE_CTB
+  THEN WARNING 638 ; La date est supérieure à la date de fin de la période.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Calcul des dates due et les affiches.
+;
+;
+PROCEDURE PROCESS CARDAT
+BEGIN
+  EDIT CARTERNET  OF CRCPT_A_REC
+  EDIT CARTERESC1 OF CRCPT_A_REC
+  EDIT CARTERESC2 OF CRCPT_A_REC
+  EDIT CARTERFRS  OF CRCPT_A_REC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Numéro de facture en référence pour les notes de crédit.
+;
+;
+PROCEDURE INPUT CARCLE OF CRCAR_HISTO
+BEGIN
+  ;
+  ; Sous-écran de consultation des factures pour les notes de crédit.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CLICLE    = REFCLENUM OF CRCPT_A_REC
+    IF CARTYPECR OF CRCPT_A_REC = "NC"
+    THEN LET T_TYPECRPAT = "FA"
+    ELSE LET T_TYPECRPAT = "FA|CR|NC"
+    LET T_FLGSLD    = "0"
+    LET T_CARCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cr103 MODE F PASSING T_CLICIECLE, &
+                                    T_CLICLE   , &
+                                    T_TYPECRPAT, &
+                                    T_FLGSLD   , &
+                                    T_CIECLEMNU, &
+                                    T_CARCLE
+    LET FIELDTEXT = TRUNC(T_CARCLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du numéro de document référé.
+;
+;
+PROCEDURE EDIT CARCLE OF CRCAR_HISTO
+BEGIN
+  IF CARTYPECR OF CRCPT_A_REC = "NC" AND &
+     CARTYPECR OF A_CAR_REFERE <> "FA"
+  THEN ERROR 635 ; Une note de crédit doit s'appliquer qu'à une facture.
+
+  IF CARTYPECR OF CRCPT_A_REC = "AJ" AND &
+     CARTYPECR OF A_CAR_REFERE = "AJ"
+  THEN ERROR 659 ; On ne peut pas appliquer un ajustement sur un ajustement.
+
+  IF CARDATJOU OF A_CAR_REFERE = 0
+  THEN ERROR 636 ; La facture doit être journalisée pour la référer.
+
+  IF REFCLENUM OF A_CAR_REFERE <> REFCLENUM OF CRCPT_A_REC
+  THEN ERROR 678 ; Cette facture n'appartient pas à ce client.
+
+ ;
+ ;validation de la periode de la note ou ajustement
+ ;
+    ;
+    ;validation de la periode de la facture
+    ;
+
+    GET A_CRCPT_A_REC VIA CIECLE,CARCLE USING CIECLE OF CRCPT_A_REC,CARCLE OF CRCAR_HISTO OPT
+    IF ACCESSOK
+    THEN BEGIN
+     IF CARTYPECR OF CRCPT_A_REC = "AJ" OR CARTYPECR OF CRCPT_A_REC = "NC"
+     THEN BEGIN
+
+      ; Ajustement pour le changement de siècle
+      IF PECCLE OF CRCPT_A_REC[1:1] < "8"
+      THEN LET T_PECCLE_SIE = "1" + PECCLE OF CRCPT_A_REC
+      ELSE LET T_PECCLE_SIE = "0" + PECCLE OF CRCPT_A_REC
+
+      ; Ajustement pour le changement de siècle
+      IF PECCLE OF A_CRCPT_A_REC[1:1] < "8"
+      THEN LET T_PECCLE_SIE_FAC = "1" + PECCLE OF A_CRCPT_A_REC
+      ELSE LET T_PECCLE_SIE_FAC = "0" + PECCLE OF A_CRCPT_A_REC
+
+      IF T_PECCLE_SIE < T_PECCLE_SIE_FAC
+      THEN ERROR ="la periode de la facture est plus petit que celle de l'encaissement"
+     END
+   END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT CCDCLELIG OF CRCAR_HISTO
+BEGIN
+  ;
+  ; Popup sur les lignes de cédule.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CARCLE    = CARCLE OF CRCAR_HISTO
+    LET T_CCDCLELIG = 0
+    RUN SCREEN cr107 MODE F PASSING T_CIECLEMNU, &
+                                    T_CARCLE   , &
+                                    T_CCDCLELIG
+    LET FIELDTEXT = ASCII(T_CCDCLELIG)
+  END
+  ;
+  ; Force le lookup au cas ou l'usager modifie le numéro de facture référé sans
+  ; modifier le numéro de ligne de cédule, Mode entry seulement.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT)
+  THEN LET FIELDTEXT = ASCII(CCDCLELIG OF CRCAR_HISTO)
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Terme net, popup sur les termes d'encaissements.
+;
+;
+PROCEDURE INPUT CARTERNET
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TMECLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_TMECATPAT = "NET"
+    RUN SCREEN cr104 MODE F PASSING T_TMECLE, &
+                                    T_TMECATPAT
+    LET FIELDTEXT = TRUNC(T_TMECLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du code de terme-net, il est optionel.
+;
+;
+PROCEDURE EDIT CARTERNET
+BEGIN
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    GET CRTERME VIA TMECLE &
+                USING FIELDTEXT &
+                OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 639 ; Ce terme n'existe pas.
+
+    IF TMECAT OF CRTERME <> "NET"
+    THEN ERROR 640 ; Ce n'est pas un code terme pour le net.
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Procédure pour le calcul des dates due.
+;
+;
+USE ustmecal NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Calcul de la date due pour le terme-net.
+;
+;
+PROCEDURE PROCESS CARTERNET
+BEGIN
+  ;
+  ; Calcul de la date due.
+  ;
+  IF CARTYPECR OF CRCPT_A_REC = "FA"
+  THEN BEGIN
+    IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+    THEN BEGIN
+      LET TZ_DATCAL = CARDAT OF CRCPT_A_REC
+      DO INTERNAL TER_DATE_DUE
+      LET CARDATNET OF CRCPT_A_REC = TZ_DATRES
+    END
+  END
+  ELSE LET CARDATNET OF CRCPT_A_REC = CARDAT OF CRCPT_A_REC
+
+  DISPLAY CARDATNET OF CRCPT_A_REC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Force l'éxécution de la procédure EDIT, car la date due pour le net est
+; obligatoire.
+;
+;
+PROCEDURE INPUT CARDATNET
+BEGIN
+  IF NOT FINDMODE AND  &
+     0 = SIZE(FIELDTEXT)
+  THEN LET FIELDTEXT = ASCII( MOD( CARDATNET OF CRCPT_A_REC,1000000 ),6 )
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la date due avec la date de la facture.
+;
+;
+PROCEDURE EDIT CARDATNET
+BEGIN
+  IF FIELDVALUE < CARDAT OF CRCPT_A_REC
+  THEN ERROR 641 ; La date due ne peut être inférieure à la date de la facture.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Terme d'escompte 1, popup sur les termes d'encaissements.
+;
+;
+PROCEDURE INPUT CARTERESC1
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TMECATPAT = "ESC"
+    LET T_TMECLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cr104 MODE F PASSING T_TMECLE, &
+                                    T_TMECATPAT
+    LET FIELDTEXT = TRUNC(T_TMECLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du code de terme-escmpte(1), il est optionel.
+;
+;
+PROCEDURE EDIT CARTERESC1
+BEGIN
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    GET CRTERME VIA TMECLE &
+                USING FIELDTEXT &
+                OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 639 ; Ce terme n'existe pas.
+
+    IF TMECAT OF CRTERME <> "ESC"
+    THEN ERROR 640 ; Ce n'est pas un code terme pour les escmptes.
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Calcul de la date due pour le terme-escompte(1).
+;
+;
+PROCEDURE PROCESS CARTERESC1
+BEGIN
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    ;
+    ; Calcul de l date due.
+    ;
+    LET TZ_DATCAL = CARDAT OF CRCPT_A_REC
+    DO INTERNAL TER_DATE_DUE
+    LET CARDATESC1 OF CRCPT_A_REC = TZ_DATRES
+  END
+  ELSE BEGIN
+    LET CARDATESC1 OF CRCPT_A_REC = 0
+    LET CARTERESC2 OF CRCPT_A_REC = ""
+    LET CARDATESC2 OF CRCPT_A_REC = 0
+    DISPLAY CARTERESC2 OF CRCPT_A_REC
+    DISPLAY CARDATESC2 OF CRCPT_A_REC
+  END
+  DISPLAY CARDATESC1 OF CRCPT_A_REC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la date due avec la date de la facture.
+;
+;
+PROCEDURE EDIT CARDATESC1
+BEGIN
+  IF FIELDVALUE < CARDAT OF CRCPT_A_REC
+  THEN ERROR 641 ; La date due ne peut être inférieure à la date de la facture.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Terme d'escompte 2, popup sur les termes d'encaissements.
+;
+;
+PROCEDURE INPUT CARTERESC2
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TMECATPAT = "ESC"
+    LET T_TMECLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cr104 MODE F PASSING T_TMECLE, &
+                                    T_TMECATPAT
+    LET FIELDTEXT = TRUNC(T_TMECLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du code de terme-escmpte(2).
+;
+;
+PROCEDURE EDIT CARTERESC2
+BEGIN
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    GET CRTERME VIA TMECLE &
+                USING FIELDTEXT &
+                OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 639 ; Ce terme n'existe pas.
+
+    IF TMECAT OF CRTERME <> "ESC"
+    THEN ERROR 640 ; Ce n'est pas un code terme pour les escmptes.
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Calcul de la date due pour le terme-escompte(2).
+;
+;
+PROCEDURE PROCESS CARTERESC2
+BEGIN
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    ;
+    ; Calcul de l date due.
+    ;
+    LET TZ_DATCAL = CARDAT OF CRCPT_A_REC
+    DO INTERNAL TER_DATE_DUE
+    LET CARDATESC2 OF CRCPT_A_REC = TZ_DATRES
+  END
+  ELSE BEGIN
+    LET CARDATESC2 OF CRCPT_A_REC = 0
+  END
+  DISPLAY CARDATESC2 OF CRCPT_A_REC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la date due avec la date de la facture.
+;
+;
+PROCEDURE EDIT CARDATESC2
+BEGIN
+  IF FIELDVALUE < CARDAT OF CRCPT_A_REC
+  THEN ERROR 641 ; La date due ne peut être inférieure à la date de la facture.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Terme de frais, popup sur les termes d'encaissement.
+;
+;
+PROCEDURE INPUT CARTERFRS
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TMECATPAT = "FRS"
+    LET T_TMECLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cr104 MODE F PASSING T_TMECLE, &
+                                    T_TMECATPAT
+    LET FIELDTEXT = TRUNC(T_TMECLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du code de terme-frais.
+;
+;
+PROCEDURE EDIT CARTERFRS
+BEGIN
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    GET CRTERME VIA TMECLE &
+                USING FIELDTEXT &
+                OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 639 ; Ce terme n'existe pas.
+
+    IF TMECAT OF CRTERME <> "FRS"
+    THEN ERROR 640 ; Ce n'est pas un code terme pour les frais d'administration.
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Calcul de la date due pour le terme-FRAIS.
+;
+;
+PROCEDURE PROCESS CARTERFRS
+BEGIN
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    ;
+    ; Calcul de l date due.
+    ;
+    LET TZ_DATCAL = CARDAT OF CRCPT_A_REC
+    DO INTERNAL TER_DATE_DUE
+    LET CARDATFRS OF CRCPT_A_REC = TZ_DATRES
+  END
+  ELSE BEGIN
+    LET CARDATFRS OF CRCPT_A_REC = 0
+  END
+  DISPLAY CARDATFRS OF CRCPT_A_REC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la date due avec la date de la facture.
+;
+;
+PROCEDURE EDIT CARDATFRS
+BEGIN
+  IF FIELDVALUE < CARDAT OF CRCPT_A_REC
+  THEN ERROR 641 ; La date due ne peut être inférieure à la date de la facture.
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Montant brut du compte à recevoir(facture, note de crédit).
+;
+;
+PROCEDURE EDIT CARMNT
+BEGIN
+  ;
+  ; Valide la partie décimale.
+  ;
+  USE usvaldec NOLIST
+  ;
+  ; Valide le montant pour les notes de crédits.
+  ;
+  IF (     FIELDVALUE > 0 &
+       AND (    CARTYPECR OF CRCPT_A_REC = "NC" &
+             OR CARTYPECR OF CRCPT_A_REC = "CR" ) &
+     ) &
+     OR &
+     (     FIELDVALUE < 0 &
+       AND CARTYPECR OF CRCPT_A_REC = "FA" &
+     )
+  THEN ERROR 642 ; Le signe du montant est invalide pour ce type de trasanction
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  ;
+  ; Période, lot.
+  ;
+  IF    T_PECCLESAI = "" &
+     OR T_LCRCLESAI = ""
+  THEN BEGIN
+    ACCEPT PECCLE OF CRCPT_A_REC
+    ACCEPT LCRCLE OF CRCPT_A_REC
+    LET T_PECCLESAI = PECCLE OF CRCPT_A_REC
+    LET T_LCRCLESAI = LCRCLE OF CRCPT_A_REC
+  END
+  ELSE BEGIN
+    EDIT PECCLE OF CRCPT_A_REC
+    EDIT LCRCLE OF CRCPT_A_REC
+    DISPLAY PECCLE OF CRCPT_A_REC
+    DISPLAY LCRCLE OF CRCPT_A_REC
+  END
+
+  ;
+  ; Type de facture.
+  ;
+  ACCEPT CARTYPECR OF CRCPT_A_REC
+  DISPLAY CBIDSC OF VCBI_DSC
+
+
+  ACCEPT REFCLENUM OF CRCPT_A_REC
+  ;
+  ; Gestion des clients divers.
+  ;
+  IF    CLITYP OF VCLC_CLI = "D" &
+    AND (    CARTYPECR OF CRCPT_A_REC = "FA" &
+          OR CARTYPECR OF CRCPT_A_REC = "CR" )
+  THEN BEGIN
+    ;
+    ; Il faut demander le nom.
+    ;
+    ACCEPT  RADNOM OF MCREF_ADRESSE
+    ;
+    ; Sous-écran pour la saisie de l'adresse.
+    ;
+    RUN SCREEN cr003c PASSING MCREF_ADRESSE MODE E
+    DISPLAY RADADR1  OF MCREF_ADRESSE
+  END
+  ;
+  ; Client régulier.
+  ;
+  ELSE BEGIN
+    DISPLAY RADNOM  OF MCREF_ADRESSE
+    DISPLAY RADCLE  OF CRCPT_A_REC
+    DISPLAY RADADR1 OF MCREF_ADRESSE
+  END
+  ;
+  ; Numéro de facture.
+  ;
+  IF    CARTYPECR OF CRCPT_A_REC = "FA" &
+     OR CARTYPECR OF CRCPT_A_REC = "NC" &
+     OR CARTYPECR OF CRCPT_A_REC = "CR"
+  THEN ACCEPT CARCLE OF CRCPT_A_REC
+  ;
+  ; Date de la facture.
+  ;
+  ACCEPT CARDAT OF CRCPT_A_REC
+  ;
+  ; No référence du client.
+  ;
+  DISPLAY CARCMDCLI OF CRCPT_A_REC
+  ;
+  ; Le numéro de référence est saisie seulement pour les notes de crédit et les
+  ; ajustements.
+  ;
+  IF CARTYPECR OF CRCPT_A_REC = "NC" &
+     OR CARTYPECR OF CRCPT_A_REC = "AJ"
+  THEN BEGIN
+    ACCEPT CARCLE OF CRCAR_HISTO
+    ;
+    ; Assignation du numéro d'adresse selon le document référé.
+    ;
+    LET     RADCLE  OF CRCPT_A_REC = RADCLE OF A_CAR_REFERE
+    EDIT    RADCLE  OF CRCPT_A_REC
+    DISPLAY RADNOM  OF MCREF_ADRESSE
+    DISPLAY RADCLE  OF CRCPT_A_REC
+    DISPLAY RADADR1 OF MCREF_ADRESSE
+    ;
+    ; Note de crédit et ajustement sur facture ou crédit:
+    ;   si le document référé a une seule ligne de cédule, on prend le ligne 01,
+    ;   sinon l'usager doit la saisir.
+    ;
+    IF    CARTYPECR OF CRCPT_A_REC = "NC" &
+       OR (     CARTYPECR OF CRCPT_A_REC = "AJ" &
+            AND CARTYPECR OF A_CAR_REFERE <> "NC" )
+    THEN BEGIN
+      IF CARFLGCED OF A_CAR_REFERE  = "1"
+      THEN ACCEPT CCDCLELIG OF CRCAR_HISTO
+      ELSE BEGIN
+       LET CCDCLELIG OF CRCAR_HISTO = 1
+       DISPLAY CCDCLELIG OF CRCAR_HISTO
+       EDIT CCDCLELIG OF CRCAR_HISTO
+      END
+    END
+    ;
+    ;
+    IF CARTYPECR OF CRCPT_A_REC = "AJ"
+    THEN BEGIN
+      ;
+      ; Si l'ajustement est sur une note de crédit,
+      ; 1- Pour trouver sur quelle facture la note de crédit s'applique il faut
+      ;    faire le lien avec l'historique de la note de crédit.
+      ; 2- il faut ajouter une ligne d'historique pour la facture qui est
+      ;    référée par la note de crédit.
+      ; 3- le numéro de cédule de l'ajustement doit celui de la note de crédit.
+      ;
+      IF CARTYPECR OF A_CAR_REFERE = "NC"
+      THEN BEGIN
+        GET A_CRH_NC VIA CRHCLE1  , &
+                         CRHCLE2  , &
+                         CRHTYPECR  &
+                     USING CIECLE    OF CRCPT_A_REC , &
+                           CARCLE    OF A_CAR_REFERE, &
+                           CARTYPECR OF A_CAR_REFERE  &
+                     OPTIONAL
+        LET CARCLE    OF A_CRH_FACTURE = CARCLE    OF A_CRH_NC
+        LET CCDCLELIG OF CRCAR_HISTO   = CCDCLELIG OF A_CRH_NC
+      END
+      DISPLAY CCDCLELIG OF CRCAR_HISTO
+      ;
+      ; Le numéro d'ajustement est composé du numéro de document plus
+      ; un numéro de séquence. Le numéro de séquence est séparé du numéro
+      ; du document par un #.
+      ;
+      ; Exemple: Facture    ==> A1234
+      ;          Ajustement ==> A1234#01
+      ;
+      LET T_NUMAJT = "00"
+      WHILE RETRIEVING A_CRH_NC VIA CIECLE   , &
+                                    CARCLE   , &
+                                    CRHTYPECR  &
+                                USING CIECLE    OF CRCPT_A_REC, &
+                                      CARCLE    OF CRCAR_HISTO, &
+                                      CARTYPECR OF CRCPT_A_REC
+      BEGIN
+        IF T_NUMAJT < &
+               CRHCLE2 OF A_CRH_NC[SIZE(TRUNCATE(CRHCLE2 OF A_CRH_NC)) - 1 : 2]
+        THEN LET T_NUMAJT = &
+               CRHCLE2 OF A_CRH_NC[SIZE(TRUNCATE(CRHCLE2 OF A_CRH_NC)) - 1 : 2]
+      END
+      LET CARCLE OF CRCPT_A_REC = TRUNCATE( CARCLE OF CRCAR_HISTO ) + "#" + &
+                                  ASCII( NCONVERT(T_NUMAJT) + 1 ,2 )
+      DISPLAY CARCLE OF CRCPT_A_REC
+    END
+  END
+  ;
+  ; Le terme-net ou la date due pour le net sont obligatoire.
+  ;
+  IF 0 = SIZE( TRUNCATE( CARTERNET OF CRCPT_A_REC ) )
+  THEN BEGIN
+    ACCEPT CARTERNET OF CRCPT_A_REC
+    DISPLAY CARDATNET OF CRCPT_A_REC
+  END
+  ;
+  ; Description de la facture.
+  ;
+  ACCEPT CARDSC1 OF CRCPT_A_REC
+  ACCEPT CARDSC2 OF CRCPT_A_REC
+  ;
+  ; Montant avec taxe.
+  ;
+  ACCEPT CARMNT OF CRCPT_A_REC
+
+  RUN SCREEN cr003a MODE E &
+                    PASSING T_CIECLEMNU  , &
+                            T_CIENOM     , &
+                            D_LCRATRJOU  , &
+                            CRCPT_A_REC  , &
+                            MCREF_ADRESSE, &
+                            CRCAR_HISTO  , &
+                            A_CRH_FACTURE
+  DISPLAY CARMNTTPS OF CRCPT_A_REC
+  DISPLAY CARMNTTVP OF CRCPT_A_REC
+  DISPLAY D_DEVCAR
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Le nom de la référence est modifiable si le document est non-journalisé et
+; s'applique que pour le client de type divers.
+;
+;
+PROCEDURE DESIGNER 15
+BEGIN
+  IF CARDATJOU OF CRCPT_A_REC = 0
+  THEN BEGIN
+    IF     CLITYP OF VCLC_CLI = "D" &
+       AND (    CARTYPECR OF CRCPT_A_REC = "FA" &
+             OR CARTYPECR OF CRCPT_A_REC = "CR" )
+    THEN ACCEPT RADNOM OF MCREF_ADRESSE
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Le numéro d'adresse est modifiable si le document n'est pas journalisé.
+;
+;
+PROCEDURE DESIGNER 20
+BEGIN
+  IF    CARDATJOU OF CRCPT_A_REC = 0 &
+    AND (    CARTYPECR OF CRCPT_A_REC = "FA" &
+          OR CARTYPECR OF CRCPT_A_REC = "CR" )
+  THEN ACCEPT RADCLE OF CRCPT_A_REC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; La date est modifiable si le document n'est pas journalisé.
+;
+;
+PROCEDURE DESIGNER 25
+BEGIN
+  IF CARDATJOU OF CRCPT_A_REC = 0
+  THEN ACCEPT CARDAT OF CRCPT_A_REC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Termes d'encaissements.
+;
+;
+PROCEDURE DESIGNER 35
+BEGIN
+  ACCEPT CARTERNET OF CRCPT_A_REC
+  DISPLAY CARDATNET OF CRCPT_A_REC
+  ;
+  ; Le terme-escompte(1) est optionel et la date due est modifiable.
+  ;
+  ACCEPT CARTERESC1 OF CRCPT_A_REC
+
+  ;
+  ; Le terme-escompte(2) est optionel et la date due est modifiable.
+  ;
+  IF 0 <> SIZE( TRUNCATE( CARTERESC1 OF CRCPT_A_REC ) )
+  THEN BEGIN
+    ACCEPT CARDATESC1 OF CRCPT_A_REC
+    ACCEPT CARTERESC2 OF CRCPT_A_REC
+
+    IF 0 <> SIZE( TRUNCATE( CARTERESC2 OF CRCPT_A_REC ) )
+    THEN ACCEPT CARDATESC2 OF CRCPT_A_REC
+  END
+  ;
+  ; Le terme-frais est optionel et la date due est modifiable.
+  ;
+  ACCEPT CARTERFRS OF CRCPT_A_REC
+
+  IF 0 <> SIZE( TRUNCATE( CARTERFRS OF CRCPT_A_REC ) )
+  THEN ACCEPT CARDATFRS OF CRCPT_A_REC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Le montant du document est modifiable si celui-cie n'est pas journalisé.
+;
+;
+PROCEDURE DESIGNER 45
+BEGIN
+  IF CARDATJOU OF CRCPT_A_REC = 0
+  THEN ACCEPT CARMNT OF CRCPT_A_REC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Imputation
+;
+;
+PROCEDURE DESIGNER D001
+BEGIN
+  ;
+  ; Les paiements non-aplliqués non pas d'imputation.
+  ;
+  IF CARTYPECR OF CRCPT_A_REC <> "NA"
+  THEN RUN SCREEN cr003a PASSING T_CIECLEMNU  , &
+                                 T_CIENOM     , &
+                                 D_LCRATRJOU  , &
+                                 CRCPT_A_REC  , &
+                                 MCREF_ADRESSE, &
+                                 CRCAR_HISTO  , &
+                                 A_CRH_FACTURE  &
+                         MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Ecritures comptable
+;
+;
+PROCEDURE DESIGNER D002
+BEGIN
+  ;
+  ; Cette procédure empeche l'accès au sous-écran si l'écriture n'est pas
+  ; journalisée.
+  ;
+  IF CARDATJOU OF CRCPT_A_REC = 0
+  THEN ERROR 646 ; L'écriture doit être journalisée pour accèder le sous-écran.
+
+  RUN SCREEN mc090 MODE F &
+                   PASSING D_HISCLE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Historique des transactions.
+;
+;
+PROCEDURE DESIGNER D003
+BEGIN
+  ;
+  ; Le sous-écran de l'historirque est accessible que pour les factures,
+  ; les crédits, les paiements non-appliqués et les notes de crédit.
+  ;
+  IF    CARTYPECR OF CRCPT_A_REC = "FA" &
+     OR CARTYPECR OF CRCPT_A_REC = "CR" &
+     OR CARTYPECR OF CRCPT_A_REC = "NA" &
+     OR CARTYPECR OF CRCPT_A_REC = "NC"
+  THEN RUN SCREEN cr003e MODE SAME &
+                         PASSING CRCPT_A_REC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Cédule d'encaissement.
+;
+;
+PROCEDURE DESIGNER D004
+BEGIN
+  IF    CARTYPECR OF CRCPT_A_REC = "FA" &
+     OR CARTYPECR OF CRCPT_A_REC = "CR"
+  THEN BEGIN
+    RUN SCREEN cr003b MODE F &
+                      PASSING T_CIECLEMNU, &
+                              T_CIENOM   , &
+                              D_SLD_A_REC, &
+                              D_DEVCAR   , &
+                              CRCPT_A_REC, &
+                              MCREF_ADRESSE
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Adresse - client divers.
+;
+;
+PROCEDURE DESIGNER D005
+BEGIN
+  IF CLITYP OF VCLC_CLI = "D"
+  THEN RUN SCREEN cr003c MODE SAME &
+                         PASSING MCREF_ADRESSE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Gestion des lots.
+;
+;
+PROCEDURE DESIGNER D006
+BEGIN
+  LET T_PECCLE = PECCLE OF CRCPT_A_REC
+  LET T_LCRCLE = LCRCLE OF CRCPT_A_REC
+  RUN SCREEN cr020 MODE F &
+                   PASSING T_CIECLEMNU, &
+                           T_CIENOM   , &
+                           T_PECCLEMNU, &
+                           T_PECCLECOU, &
+                           T_PECCLE   , &
+                           T_LCRCLE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Vérification
+;
+;
+PROCEDURE DESIGNER D007
+BEGIN
+  RUN SCREEN cr003d PASSING CRCPT_A_REC &
+                    MODE SAME
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; La procédure PATH suivante est nécessaire dans le cas où l'écran est
+; appelé autre que par le menu.
+;
+;
+PROCEDURE PATH
+BEGIN
+  IF T_CARCLEFND <> ""
+  THEN LET PATH = 99
+  ELSE BEGIN
+    REQUEST CARCLE OF CRCPT_A_REC
+    IF PROMPTOK
+    THEN LET PATH = 1
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST PECCLE OF CRCPT_A_REC
+      IF PROMPTOK
+      THEN REQUEST LCRCLE OF CRCPT_A_REC
+      IF PROMPTOK
+      THEN LET PATH = 2
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST PECCLE OF CRCPT_A_REC
+      IF PROMPTOK
+      THEN LET PATH = 3
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST REFCLENUM OF CRCPT_A_REC
+      IF PROMPTOK
+      THEN LET PATH = 4
+    END
+
+    IF PATH = 0
+    THEN LET PATH = 5
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; La procédure FIND est pour gérer l'appel en sous-écran (PATH=99)
+;
+;
+PROCEDURE FIND
+BEGIN
+  IF PATH = 1
+  THEN GET CRCPT_A_REC VIA CIECLE, &
+                           CARCLE  &
+                       USING T_CIECLEMNU , &
+                             CARCLE OF CRCPT_A_REC
+  IF PATH = 2
+  THEN GET CRCPT_A_REC VIA CIECLE, &
+                           PECCLE, &
+                           LCRCLE  &
+                       USING T_CIECLEMNU , &
+                             PECCLE OF CRCPT_A_REC , &
+                             LCRCLE OF CRCPT_A_REC   &
+                       ORDERBY CIECLE, &
+                               CARCLE
+
+  IF PATH = 3
+  THEN GET CRCPT_A_REC VIA CIECLE, &
+                           PECCLE  &
+                       USING T_CIECLEMNU , &
+                             PECCLE OF CRCPT_A_REC &
+                       ORDERBY CIECLE, &
+                               CARCLE
+
+  IF PATH = 4
+  THEN GET CRCPT_A_REC VIA REFCIECLE, &
+                           REFCLENUM  &
+                       USING T_CLICIECLE , &
+                             REFCLENUM OF CRCPT_A_REC &
+                       ORDERBY CIECLE, &
+                               CARCLE
+
+  IF PATH = 5
+  THEN GET CRCPT_A_REC VIA CIECLE &
+                       USING T_CIECLEMNU &
+                       ORDERBY CIECLE, &
+                               CARCLE
+
+  IF PATH = 99
+  THEN BEGIN
+    GET CRCPT_A_REC VIA CIECLE, &
+                        CARCLE  &
+                    USING T_CIECLEMNU, &
+                          T_CARCLEFND
+  END
+  GET MCREF_ADRESSE OPTIONAL
+  GET CRCAR_HISTO   OPTIONAL
+  GET A_CRH_FACTURE OPTIONAL
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF CRCPT_A_REC &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF (   ALTEREDRECORD     OF CRCPT_A_REC   &
+      OR ALTEREDRECORD     OF MCREF_ADRESSE &
+      OR ALTEREDRECORD     OF CRCAR_HISTO   &
+     ) &
+     AND NOT NEWRECORD     OF CRCPT_A_REC &
+     AND NOT DELETEDRECORD OF CRCPT_A_REC &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+  ;
+  ; Empêcher la destruction d'une facture journalisé
+  ;
+  IF     DELETEDRECORD OF CRCPT_A_REC &
+     AND CARDATJOU OF CRCPT_A_REC <> 0
+  THEN ERROR 716 ;Impossible de détruire une transaction Journalisé
+  ;
+  ; Le document est non modifiable si le lot est autorisé.
+  ;
+  IF    LCRATRJOU OF CRLOT = "1" &
+    AND CARDATJOU OF CRCPT_A_REC = 0
+  THEN ERROR 713 ; Impossible de mettre à jour la transaction est autorisé.
+  ;
+  ; Empêcher la modification des paiement non-appliqué car
+  ; ces type de document sont seulement pour consultation.
+  ;
+  IF CARTYPECR OF CRCPT_A_REC = "NA"
+  THEN ERROR 648 ;Impossible de Mettre à jour, aucune modification pos-
+                 ;sible pour paiement non-appliqué.
+  ;
+  ; On informe l'usager si l'imputation de balance pas avec le montant du
+  ; document.
+  ;
+  IF CARMNT OF CRCPT_A_REC <> CARCUMMNT OF CRCPT_A_REC
+  THEN WARNING 649 ; L'imputation ne balance pas.
+  ;
+  ; On incrémente le numéro d'adresse pour les clients divers.
+  ;
+  IF     CLITYP OF VCLC_CLI = "D" &
+     AND RADCLE OF CRCPT_A_REC = 0
+  THEN BEGIN
+    START TRANSACTION GEN_RAD_SEQ
+    GET MCRAD_SEQ VIA REFCIECLE, &
+                      REFCLETYP, &
+                      REFCLENUM  &
+                  USING REFCIECLE OF CRCPT_A_REC, &
+                        REFCLETYP OF CRCPT_A_REC, &
+                        REFCLENUM OF CRCPT_A_REC  &
+                  OPTIONAL
+    LET REFCIECLE OF MCRAD_SEQ = REFCIECLE OF CRCPT_A_REC
+    LET REFCLETYP OF MCRAD_SEQ = REFCLETYP OF CRCPT_A_REC
+    LET REFCLENUM OF MCRAD_SEQ = REFCLENUM OF CRCPT_A_REC
+    LET RASNUMSEQ OF MCRAD_SEQ = RASNUMSEQ OF MCRAD_SEQ + 1
+    LET RADCLE    OF CRCPT_A_REC = RASNUMSEQ OF MCRAD_SEQ
+    PUT MCRAD_SEQ
+    COMMIT TRANSACTION GEN_RAD_SEQ
+  END
+END
+
+BUILD
+
+;xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+;************************** Factures / Notes de crédit **************************
+;* Période ......: xxxxx   Lot...........: xxxx  Journalisé le.: xxxxxxxx xxxxx *
+;* Type facture..: xx xxxxxxxxxxxxxxxxxxxxxxxxx                                 *
+;*                                                                              *
+;* No client.....: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              *
+;* No adresse....: xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              *
+;*                                                                              *
+;* Facture.......: xxxxxxxxxxxxxxx               Date facture..: xxxxxxxx       *
+;* No réf. client: xxxxxxxxxxxxxxx               Fact. référée.: xxxxxxxxxxxx xx*
+;*Terme net.....: xxxx xxxxxxxXXx  Esc.(1): xxxx xxxxxxxx Frais: xxxx xxxxxxxx  *
+;*                                 Esc.(2): xxxx xxxxxxxx                       *
+;* Description...: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+;*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+;*                                                                              *
+;* Montant brut..: xxxxxxxxxxxxxx xxxx           Escomptable...: xxxxxxxxxxxxxx *
+;* Ajustement....: xxxxxxxxxxxxxx                Montant de TPS: xxxxxxxxxxxxxx *
+;* Crédit........: xxxxxxxxxxxxxx                Montant de TVQ: xxxxxxxxxxxxxx *
+;* Encaissé/radié: xxxxxxxxxxxxxx                                               *
+;* Escompte......: xxxxxxxxxxxxxx                                               *
+;* Solde à rec...: xxxxxxxxxxxxxx                Solde client..: xxxxxxxxxxxxxx *
+;********************************************************************************
+
+

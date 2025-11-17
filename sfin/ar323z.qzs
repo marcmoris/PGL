@@ -1,0 +1,337 @@
+;/T/ Liste des réceptions / Sommaire
+;
+;/P/ Programmeur...: Nancy Marceau
+;    Date Création.: 3 mai 1994
+;
+;    Description...: Cette liste permet l'impression des réceptions des
+;                    commandes d'achat selon les paramètres demandés.
+;
+;    Paramètres....: Compagnie 
+;                    Entrepôt           (Un, plusieurs ou tous)
+;                    Devise             (Une ou toutes)
+;                    Numéro commande    (Borne de début, <retour>=tous)
+;                    Numéro commande    (Borne de fin)
+;                    Statut             (P=préliminaire, A=approuvée, 
+;                                        S=sélectionnée,C=complète,<retour>=tous)    
+;/M/ Caroline Kaine, 12 nov 96, Format passe de 180 a 175 
+;
+;/M/ Programmeur...: Remi Demers
+;    Date modif....: 13 Novembre 1997
+;    Etat..........: Termine 
+;    Description...: Ajoute les parametres de selection plage de periode.
+;
+;/M/ Pascal Tremblay, 98-01-20
+;
+;    Ajustement pour le changement de siècle
+;
+;
+;/M/ Francois Richard, 99-07-09
+;
+;    Ajustement pour le changement de siècle
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST
+
+ACCESS ARRECEPTION   &
+   ;
+   ; Pour afficher la date de réquisition si la réception de la commande 
+   ; en référait une.
+   ;
+  LINK (CIECLE OF ARRECEPTION, &
+        CMDCLE OF ARRECEPTION, &
+        "000") & 
+     TO CIECLE, &
+        CMDCLE, &
+        CMDAJT OF ARCOMMANDE   &
+
+
+   ;
+   ; Pour afficher le nom de l'entrepôt
+   ; 
+  LINK CIECLE OF ARRECEPTION, &
+       ENTCLE OF ARRECEPTION  &
+    TO CIECLE, &
+       ENTCLE OF ARENTREPOT    & 
+   ;
+   ; Pour sélectionner la devise du fournisseur.
+   ;
+  LINK FOUCIECLE OF ARRECEPTION, &
+       FOUCLE    OF ARRECEPTION, &
+       CIECLE    OF ARRECEPTION  &
+    TO FOUCIECLE, &
+       FOUCLE,    &
+       FOCCIECLE OF VFOC_FOU     &
+   
+   ; 
+   ; Pour afficher le nom du fournisseur divers
+   ;
+  LINK FOUCIECLE OF ARRECEPTION, &
+       REFCLETYP OF ARRECEPTION, &
+       FOUCLE    OF ARRECEPTION, &
+       RADCLE    OF ARRECEPTION  &
+    TO REFCIECLE, &
+       REFCLETYP, &
+       REFCLENUM, &
+       RADCLE OF MCREF_ADRESSE    &
+ 
+   ;
+   ; Statut de la réception
+   ;
+  LINK ("RECSTU",                 &
+         RECSTU OF ARRECEPTION)       &
+    TO XELNOM,                    &
+       CBICLE OF VCBI_DSC   OPTIONAL & 
+ 
+   ;
+   ; Devise du consolidé
+   ;
+  LINK ("1") &
+    TO CIENMC OF MCHOLDING   
+
+    
+
+CHOOSE CIECLE PARM,       &  ; Compagnie du menu
+       ENTCLE PARM,       &  ; Code d'entrepôt
+       CMDCLE PARM RANGE     ; Numéro de commande
+
+DEFINE D_RECSTU CHARACTER SIZE 6 = PARM UPSHIFT  ; Statut de la réception
+
+DEFINE D_DEVCLE CHARACTER SIZE 3 = PARM          ; Devise
+
+
+DEFINE D_PECDEB CHARACTER SIZE 4 = PARM
+DEFINE D_PECFIN CHARACTER SIZE 4 = PARM
+
+
+
+SELECT ARRECEPTION IF (0 <> INDEX(D_RECSTU,RECSTU)) OR (D_RECSTU = "") 
+
+SELECT VFOC_FOU IF D_DEVCLE = DEVCLE OF VFOC_FOU OR D_DEVCLE = ""
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_REC CHARACTER SIZE 5 = "1" + PECCLE OF ARRECEPTION &
+         IF PECCLE OF ARRECEPTION[1:1] < "8" &
+         ELSE "0" + PECCLE OF ARRECEPTION
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECDEB_SEL CHARACTER SIZE 5 = "1" + D_PECDEB &
+         IF D_PECDEB[1:1] < "8" &
+         ELSE "0" + D_PECDEB
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECFIN_SEL CHARACTER SIZE 5 = "1" + D_PECFIN &
+         IF D_PECFIN[1:1] < "8" &
+         ELSE "0" + D_PECFIN
+
+SELECT ARRECEPTION IF D_PECCLE_REC >= D_PECDEB_SEL &
+                AND   D_PECCLE_REC <= D_PECFIN_SEL 
+                
+
+DEFINE D_RADNOM CHARACTER SIZE 40 = RADNOM OF MCREF_ADRESSE[1:40]
+
+; Variables obligatoires pour les en-têtes standards.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+       "Liste des réceptions / Sommaire"
+@ELSE
+       "%%%Liste des réceptions / Sommaire"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+       ""
+@ELSE
+       "%%%"
+@ENDIF
+
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE  7 = "AR323Z"
+;
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM 
+
+
+USE usflgdet NOLIST ;Flag Bilingue (O/N)
+
+;
+;Indique si la réception est journalisée.
+;
+DEFINE D_RECDATJOU CHARACTER SIZE 3 &
+        = DZ_FLGAFFO IF RECDATJOU OF ARRECEPTION <> 0 ELSE &
+          DZ_FLGAFFN 
+
+ ; Statuts de réception demandés
+ ;
+DEFINE D_CBIDSC1 CHARACTER SIZE 15 = "Approuvée " &
+  IF 0 <> INDEX (D_RECSTU,"A") OR  D_RECSTU = "" &
+    ELSE ""
+
+DEFINE D_CBIDSC2 CHARACTER SIZE 15 = "Complète "&
+  IF 0 <> INDEX (D_RECSTU,"C") OR  D_RECSTU = "" &
+    ELSE ""
+
+DEFINE D_CBIDSC3 CHARACTER SIZE 15 = "Préliminaire " &
+  IF 0 <> INDEX (D_RECSTU,"P") OR  D_RECSTU = "" &
+    ELSE ""
+
+DEFINE D_CBIDSC4 CHARACTER SIZE 15 = "Sélectionnée " &
+  IF 0 <> INDEX (D_RECSTU,"S") OR  D_RECSTU = "" &
+    ELSE ""
+
+DEFINE D_CBIDSCDEM CHARACTER SIZE 70 = &
+  PACK (TRUNCATE(D_CBIDSC1) + " " + &
+        TRUNCATE(D_CBIDSC2) + " " + &
+        TRUNCATE(D_CBIDSC3) + " " + &
+        TRUNCATE(D_CBIDSC4))
+
+
+DEFINE D_CBIDSC CHARACTER SIZE 15 = CBIDSC OF VCBI_DSC
+
+DEFINE D_RECCLE CHARACTER SIZE 3 = RECCLE OF ARRECEPTION[10:12]
+
+DEFINE    D_DEVCLEIMP   CHARACTER SIZE 04 = " " &
+          IF DEVCLE OF VFOC_FOU = DEVCLE OF MCHOLDING OR &
+             0 = SIZE(TRUNCATE(FOUCLE OF ARRECEPTION)) &
+          ELSE "/" + DEVCLE OF VFOC_FOU
+
+; Ajustement pour le changement de sièecle
+DEFINE D_CMDCLE_TRI CHARACTER SIZE 10 = "1" + CMDCLE OF ARRECEPTION &
+    IF CMDCLE OF ARRECEPTION[1:1] < "8" &
+    ELSE "0" + CMDCLE OF ARRECEPTION
+
+SORT ON CIECLE OF ARRECEPTION & ; Compagnie
+     ON ENTCLE OF ARRECEPTION & ; Entrepôt
+     ON DEVCLE OF VFOC_FOU    & ; Devise
+     ON RECSTU OF ARRECEPTION & ; Statut de la commande
+     ON D_CMDCLE_TRI          & ; Numéro de commande
+     ON RECCLE OF ARRECEPTION   ; Numéro de réception
+
+
+USE ustit175 NOLIST
+SKIP &
+ TAB 001 "Période de début..:" &
+ TAB 021 D_PECDEB &
+ TAB 030 "Période de fin....:" &
+ TAB 050 D_PECFIN &
+SKIP 2 &
+
+@IF FRANCAIS
+TAB 001 "Devise............:" &
+@ELSE
+TAB 001 "%%%Devise............:" &
+@ENDIF
+
+TAB 021 DEVCLE OF VFOC_FOU    &
+  SKIP &
+@IF FRANCAIS
+TAB 001 "Entrepôt..........:" &
+@ELSE
+TAB 001 "%%%Entrepôt..........:" &
+@ENDIF
+
+TAB 021 ENTCLE OF ARRECEPTION &
+TAB 027 ENTNOM OF ARENTREPOT &
+  SKIP  &
+
+@IF FRANCAIS
+TAB 001 "Statuts demandés..:" &
+@ELSE
+TAB 001 "%%%Statuts demandés..:" &
+@ENDIF
+TAB 021 D_CBIDSCDEM &
+  SKIP 2 &
+
+@IF FRANCAIS
+TAB 001 " Commande  No.                                                                       ------- Dates ------               Nombre Période                Montant" &
+@ELSE
+TAB 001 "%%% Commande  No.                                                                       ------------ Dates -----------               Nombre Période                Montant" &
+@ENDIF
+
+  SKIP &
+@IF FRANCAIS
+TAB 001 "  d'achat  réception Fournisseur                                     Statut          Commande   Réception  Journalisée d'items comptable  Lot            brut  " &
+@ELSE
+TAB 001 "%%%  d'achat  réception Fournisseur                                     Statut          Réquisition Commande Réception  Journalisée d'items comptable  Lot            brut  " &
+@ENDIF
+  SKIP &
+TAB 001 "                                                                                     aa/mm/jj    aa/mm/jj" &
+  SKIP &
+TAB 001 " --------- --------- ----------------------------------------------- --------------- --------   ---------  ----------- ------- --------- ----  ---------------" &
+  SKIP 1
+
+
+REPORT &
+TAB 002 CMDCLE OF ARRECEPTION PRINT AT D_CMDCLE_TRI &
+TAB 015 D_RECCLE  &
+TAB 022 FOUCLE OF ARRECEPTION   PRINT AT D_CMDCLE_TRI &
+TAB 029 D_RADNOM PRINT AT D_CMDCLE_TRI &
+TAB 070 D_CBIDSC  &
+TAB 086 CMDDAT    OF ARCOMMANDE    PRINT AT D_CMDCLE_TRI &
+TAB 097 RECDAT    OF ARRECEPTION   &
+TAB 111 D_RECDATJOU &
+TAB 121 RECNBRITE OF ARRECEPTION &
+TAB 129 PECCLE    OF ARRECEPTION &
+  PICTURE "^^-^^"            &
+TAB 138 LARCLE    OF ARRECEPTION &
+TAB 144 RECMNTTOT OF ARRECEPTION &
+TAB 159 D_DEVCLEIMP
+
+
+FOOTING AT DEVCLE &
+  SKIP 1 &
+TAB 144 "---------------" &
+  SKIP &
+@IF FRANCAIS
+TAB 022 "Total pour l'entrepôt " &
+@ELSE
+TAB 022 "%%%Total pour l'entrepôt " &
+@ENDIF
+
+TAB 044 ENTCLE OF ARCOMMANDE &
+@IF FRANCAIS
+TAB 048 " en devise " &
+@ELSE
+TAB 048 "%%% en devise " &
+@ENDIF
+
+TAB 059 DEVCLE OF VFOC_FOU &
+TAB 144 RECMNTTOT OF ARRECEPTION SUBTOTAL &
+TAB 159 D_DEVCLEIMP &
+  SKIP &
+TAB 144 "---------------" &
+  SKIP PAGE
+
+
+
+BUILD ar323z
+
+
+
+@IF FORMAT
+         1         2         3         4         5         6         7         8         9        10        11        12        13        14        15        16        17        18        19        20
+12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+AR323                                        xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                              Page: 9999
+99/99/99 HH:MM xxxxxxxxxxxx                       Liste des réceptions / Sommaire      
+                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+
+Devise............: xxx
+Entrepôt..........: xxxx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+Statuts demandés..: xxxxxxxxxxxxxxx xxxxxxxxxxxxxxx xxxxxxxxxxxxxxx xxxxxxxxxxxxxxx
+
+ Commande  No.                                                                       ------- Dates ------               Nombre Période                Montant
+  d'achat  réception Fournisseur                                     Statut          Commande   Réception  Journalisée d'items comptable  Lot            brut  
+ --------- --------- ----------------------------------------------- --------------- --------   ---------  ----------- ------- --------- ----  ---------------
+ xxxxxxxxx    xxx    xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxx xx/xx/xx    xx/xx/xx      xxx       999     xx-xx   xxxx  999,999,999.99-/xxx
+ xxxxxxxxx    xxx    xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxx xx/xx/xx    xx/xx/xx      xxx       999     xx-xx   xxxx  999,999,999.99-/xxx
+ xxxxxxxxx    xxx    xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxx xx/xx/xx    xx/xx/xx      xxx       999     xx-xx   xxxx  999,999,999.99-/xxx
+                                                                                                                                               ---------------
+                                Total pour l'entrepôt xxxx en devise xxx                                                                       999,999,999.99-
+                                                                                                                                               ---------------
+
+
+@ENDIF

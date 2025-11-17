@@ -1,0 +1,544 @@
+;/T/ Consultation des projet, sous-projets par format comptable
+
+;/P/ Programmeur..: Steeve Duguay
+;    Date Création: 03 mars 1995
+;
+;/M/ François Déry, 7 mai 1999
+;       Ajout de l'usager dans le fichier de consultation.
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN gp003 ACTIONBAR &
+             MODE LABEL "" AT 2,132 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             FROM 1,1 TO 23,132 &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU, &
+                       T_CIENOM
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie du menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; Compagnie du menu
+
+USE ussectmp NOLIST     ; Variable pour la securite
+    "GP003"             ; Nom de l'écran
+
+USE gp003.hlp nolist ; Use servant à la documentation de l'écran
+
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-ecran
+
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Impression du format       "  ACTION DESIGNER D001
+
+
+FILE GPFRM_AFFICHE  PRIMARY &
+                    OCCURS 14 CACHE 56
+
+   ACCESS VIA   USRCLE &
+          USING LOGONID
+   SELECT IF PRJCLE    OF GPFRM_AFFICHE <> " "
+
+
+
+
+FILE GPFORMATS      SECONDARY &
+                    OCCURS WITH GPFRM_AFFICHE &
+                    NOITEMS &
+                    ALIAS GPFORMATS_2
+
+  ACCESS VIA   FRMCLE  &
+         USING FRMCLE OF GPFRM_AFFICHE
+
+  SELECT IF FRMTYP OF GPFORMATS_2 = "C"
+
+
+
+FILE GPPROJETS      REFERENCE
+  ACCESS VIA   CIECLE, &
+               PRJCLE  &
+         USING CIECLE OF GPFRM_AFFICHE, &
+               PRJCLE OF GPFRM_AFFICHE
+
+
+FILE GPPRO_ACTIVITE REFERENCE
+  ACCESS VIA   CIECLE, &
+               PRJCLE, &
+               PRACLE  &
+         USING CIECLE OF GPFRM_AFFICHE, &
+               PRJCLE OF GPFRM_AFFICHE, &
+               PRACLE OF GPFRM_AFFICHE OPTIONAL
+
+
+FILE GPFORMATS      REFERENCE
+  ACCESS VIA   FRMCLE  &
+         USING FRMCLE OF GPFRM_AFFICHE
+
+
+FILE GPFOR_DETAILS  REFERENCE
+  ACCESS VIA   FRMCLE, &
+               FRDCLE  &
+         USING FRMCLE OF GPFRM_AFFICHE, &
+               FRDCLE OF GPFRM_AFFICHE
+
+
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4  = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+DEFINE D_XPRNOM CHAR SIZE 7 = "GP305"
+DEFINE D_LISPAR CHAR SIZE 204 = "F_CIECLE        |F_PRJCLE        |F_FRMCLE        |F_CIENOM        "
+DEFINE D_INDLON CHAR SIZE 112 = "001004|005008|013005|018040"
+DEFINE D_LISVAL CHAR SIZE 300 = CIECLE + PRJCLE + FRMCLE + T_CIENOM
+
+DEFINE D_PRJDSC  CHARACTER SIZE 100= PACK(TRUNCATE(PRJDSC1 OF GPPROJETS)+" "+&
+                                          TRUNCATE(PRJDSC2 OF GPPROJETS))
+
+DEFINE D_PRADSC  CHARACTER SIZE 100= PACK(TRUNCATE(PRADSC1 OF GPPRO_ACTIVITE)+" "+ &
+                                          TRUNCATE(PRADSC2 OF GPPRO_ACTIVITE))
+
+DEFINE D_TITRE1  CHARACTER SIZE 70 = CENTER(FRMTIT1 OF GPFORMATS)
+DEFINE D_TITRE2  CHARACTER SIZE 70 = CENTER(FRMTIT2 OF GPFORMATS)
+
+DEFINE D_MNTTOT2     FLOAT SIZE 08 = FRAMNTENG OF GPFRM_AFFICHE + &
+                                     FRAMNTREE OF GPFRM_AFFICHE
+
+DEFINE D_MNTDIS2     FLOAT SIZE 08 = FRAMNTBDG OF GPFRM_AFFICHE - &
+                                     D_MNTTOT2
+
+DEFINE D_FRDDSC  CHARACTER SIZE 45 = FRDDSC[1:45]                   &
+                                  IF FRDTYP OF GPFRM_AFFICHE <> "S" &
+                                ELSE " "
+
+;---------------------
+; Montant engagé
+;---------------------
+DEF D_ENG1A CHAR*3 = ASC(NCON(ASC(ABS(FRAMNTENG OF GPFRM_AFFICHE),11)[1:3]))
+DEF D_ENG1B CHAR*3 = RJ(D_ENG1A)
+
+DEF D_ENG2A CHAR*3 = ASC(ABSOLUTE(FRAMNTENG OF GPFRM_AFFICHE),11)[4:3] &
+                  IF D_ENG1B <> "  0"                                  &
+                ELSE ASC(NCON(ASC(ABS(FRAMNTENG OF GPFRM_AFFICHE),11)[4:3]))
+DEF D_ENG2B CHAR*3 = RJ(D_ENG2A)
+
+DEF D_ENG3A CHAR*3 = ASC(ABSOLUTE(FRAMNTENG OF GPFRM_AFFICHE),11)[7:3] &
+                  IF D_ENG2B <> "  0"                                  &
+                ELSE ASC(NCON(ASC(ABS(FRAMNTENG OF GPFRM_AFFICHE),11)[7:3]))
+DEF D_ENG3B CHAR*3 = RJ(D_ENG3A)
+
+DEF D_ENG4A CHAR*1= " " IF FRAMNTENG OF GPFRM_AFFICHE >= 0 ELSE "-"
+DEF D_ENG4B CHAR*4= "." +                                           &
+                    ASC(ABS(FRAMNTENG OF GPFRM_AFFICHE),11)[10:2] + &
+                    D_ENG4A
+
+DEF D_MNTENG CHAR*15 = "       "                     + D_ENG3B + D_ENG4B &
+                    IF D_ENG2B = "  0"                              AND  &
+                      (FRDTYP OF GPFOR_DETAILS = "C" OR                  &
+                       FRDTYP OF GPFOR_DETAILS = "F")                    &
+                  ELSE "   "         + D_ENG2B + "," + D_ENG3B + D_ENG4B &
+                    IF D_ENG1B = "  0"                              AND  &
+                      (FRDTYP OF GPFOR_DETAILS = "C" OR                  &
+                       FRDTYP OF GPFOR_DETAILS = "F")                    &
+                  ELSE D_ENG1B + "," + D_ENG2B + "," + D_ENG3B + D_ENG4B &
+                   IF (FRDTYP OF GPFOR_DETAILS = "C" OR                  &
+                       FRDTYP OF GPFOR_DETAILS = "F")                    &
+                  ELSE FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1]                      &
+                    IF FRDTYP OF GPFOR_DETAILS = "S"                     &
+                  ELSE " "
+
+
+;---------------------
+; Montant réel
+;---------------------
+DEF D_REE1A CHAR*3 = ASC(NCON(ASC(ABS(FRAMNTREE OF GPFRM_AFFICHE),11)[1:3]))
+DEF D_REE1B CHAR*3 = RJ(D_REE1A)
+
+DEF D_REE2A CHAR*3 = ASC(ABSOLUTE(FRAMNTREE OF GPFRM_AFFICHE),11)[4:3] &
+                  IF D_REE1B <> "  0"                                  &
+                ELSE ASC(NCON(ASC(ABS(FRAMNTREE OF GPFRM_AFFICHE),11)[4:3]))
+DEF D_REE2B CHAR*3 = RJ(D_REE2A)
+
+DEF D_REE3A CHAR*3 = ASC(ABSOLUTE(FRAMNTREE OF GPFRM_AFFICHE),11)[7:3] &
+                  IF D_REE2B <> "  0"                                  &
+                ELSE ASC(NCON(ASC(ABS(FRAMNTREE OF GPFRM_AFFICHE),11)[7:3]))
+DEF D_REE3B CHAR*3 = RJ(D_REE3A)
+
+DEF D_REE4A CHAR*1= " " IF FRAMNTREE OF GPFRM_AFFICHE >= 0 ELSE "-"
+DEF D_REE4B CHAR*4= "." +                                           &
+                    ASC(ABS(FRAMNTREE OF GPFRM_AFFICHE),11)[10:2] + &
+                    D_REE4A
+
+DEF D_MNTREE CHAR*15 = "       "                     + D_REE3B + D_REE4B &
+                    IF D_REE2B = "  0"                              AND  &
+                      (FRDTYP OF GPFOR_DETAILS = "C" OR                  &
+                       FRDTYP OF GPFOR_DETAILS = "F")                    &
+                  ELSE "   "         + D_REE2B + "," + D_REE3B + D_REE4B &
+                    IF D_REE1B = "  0"                              AND  &
+                      (FRDTYP OF GPFOR_DETAILS = "C" OR                  &
+                       FRDTYP OF GPFOR_DETAILS = "F")                    &
+                  ELSE D_REE1B + "," + D_REE2B + "," + D_REE3B + D_REE4B &
+                   IF (FRDTYP OF GPFOR_DETAILS = "C" OR                  &
+                       FRDTYP OF GPFOR_DETAILS = "F")                    &
+                  ELSE FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1]                      &
+                    IF FRDTYP OF GPFOR_DETAILS = "S"                     &
+                  ELSE " "
+
+
+;---------------------
+; Montant total
+;---------------------
+DEF D_TOT1A CHAR*3 = ASC(NCON(ASC(ABS(D_MNTTOT2),11)[1:3]))
+DEF D_TOT1B CHAR*3 = RJ(D_TOT1A)
+
+DEF D_TOT2A CHAR*3 = ASC(ABSOLUTE(D_MNTTOT2),11)[4:3] &
+                  IF D_TOT1B <> "  0"                                  &
+                ELSE ASC(NCON(ASC(ABS(D_MNTTOT2),11)[4:3]))
+DEF D_TOT2B CHAR*3 = RJ(D_TOT2A)
+
+DEF D_TOT3A CHAR*3 = ASC(ABSOLUTE(D_MNTTOT2),11)[7:3] &
+                  IF D_TOT2B <> "  0"                                  &
+                ELSE ASC(NCON(ASC(ABS(D_MNTTOT2),11)[7:3]))
+DEF D_TOT3B CHAR*3 = RJ(D_TOT3A)
+
+DEF D_TOT4A CHAR*1= " " IF D_MNTTOT2 >= 0 ELSE "-"
+DEF D_TOT4B CHAR*4= "." +                                           &
+                    ASC(ABS(D_MNTTOT2),11)[10:2] + &
+                    D_TOT4A
+
+DEF D_MNTTOT CHAR*15 = "       "                     + D_TOT3B + D_TOT4B &
+                    IF D_TOT2B = "  0"                              AND  &
+                      (FRDTYP OF GPFOR_DETAILS = "C" OR                  &
+                       FRDTYP OF GPFOR_DETAILS = "F")                    &
+                  ELSE "   "         + D_TOT2B + "," + D_TOT3B + D_TOT4B &
+                    IF D_TOT1B = "  0"                              AND  &
+                      (FRDTYP OF GPFOR_DETAILS = "C" OR                  &
+                       FRDTYP OF GPFOR_DETAILS = "F")                    &
+                  ELSE D_TOT1B + "," + D_TOT2B + "," + D_TOT3B + D_TOT4B &
+                   IF (FRDTYP OF GPFOR_DETAILS = "C" OR                  &
+                       FRDTYP OF GPFOR_DETAILS = "F")                    &
+                  ELSE FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1]                      &
+                    IF FRDTYP OF GPFOR_DETAILS = "S"                     &
+                  ELSE " "
+
+
+
+;---------------------
+; Montant budget
+;---------------------
+DEF D_BDG1A CHAR*3 = ASC(NCON(ASC(ABS(FRAMNTBDG OF GPFRM_AFFICHE),11)[1:3]))
+DEF D_BDG1B CHAR*3 = RJ(D_BDG1A)
+
+DEF D_BDG2A CHAR*3 = ASC(ABSOLUTE(FRAMNTBDG OF GPFRM_AFFICHE),11)[4:3] &
+                  IF D_BDG1B <> "  0"                                  &
+                ELSE ASC(NCON(ASC(ABS(FRAMNTBDG OF GPFRM_AFFICHE),11)[4:3]))
+DEF D_BDG2B CHAR*3 = RJ(D_BDG2A)
+
+DEF D_BDG3A CHAR*3 = ASC(ABSOLUTE(FRAMNTBDG OF GPFRM_AFFICHE),11)[7:3] &
+                  IF D_BDG2B <> "  0"                                  &
+                ELSE ASC(NCON(ASC(ABS(FRAMNTBDG OF GPFRM_AFFICHE),11)[7:3]))
+DEF D_BDG3B CHAR*3 = RJ(D_BDG3A)
+
+DEF D_BDG4A CHAR*1= " " IF FRAMNTBDG OF GPFRM_AFFICHE >= 0 ELSE "-"
+DEF D_BDG4B CHAR*4= "." +                                           &
+                    ASC(ABS(FRAMNTBDG OF GPFRM_AFFICHE),11)[10:2] + &
+                    D_BDG4A
+
+DEF D_MNTBDG CHAR*15 = "       "                     + D_BDG3B + D_BDG4B &
+                    IF D_BDG2B = "  0"                              AND  &
+                      (FRDTYP OF GPFOR_DETAILS = "C" OR                  &
+                       FRDTYP OF GPFOR_DETAILS = "F")                    &
+                  ELSE "   "         + D_BDG2B + "," + D_BDG3B + D_BDG4B &
+                    IF D_BDG1B = "  0"                              AND  &
+                      (FRDTYP OF GPFOR_DETAILS = "C" OR                  &
+                       FRDTYP OF GPFOR_DETAILS = "F")                    &
+                  ELSE D_BDG1B + "," + D_BDG2B + "," + D_BDG3B + D_BDG4B &
+                   IF (FRDTYP OF GPFOR_DETAILS = "C" OR                  &
+                       FRDTYP OF GPFOR_DETAILS = "F")                    &
+                  ELSE FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1]                      &
+                    IF FRDTYP OF GPFOR_DETAILS = "S"                     &
+                  ELSE " "
+
+
+
+;----------------------
+; Montant disponibilité
+;----------------------
+DEF D_DIS1A CHAR*3 = ASC(NCON(ASC(ABS(D_MNTDIS2),11)[1:3]))
+DEF D_DIS1B CHAR*3 = RJ(D_DIS1A)
+
+DEF D_DIS2A CHAR*3 = ASC(ABSOLUTE(D_MNTDIS2),11)[4:3] &
+                  IF D_DIS1B <> "  0"                                  &
+                ELSE ASC(NCON(ASC(ABS(D_MNTDIS2),11)[4:3]))
+DEF D_DIS2B CHAR*3 = RJ(D_DIS2A)
+
+DEF D_DIS3A CHAR*3 = ASC(ABSOLUTE(D_MNTDIS2),11)[7:3] &
+                  IF D_DIS2B <> "  0"                                  &
+                ELSE ASC(NCON(ASC(ABS(D_MNTDIS2),11)[7:3]))
+DEF D_DIS3B CHAR*3 = RJ(D_DIS3A)
+
+DEF D_DIS4A CHAR*1= " " IF D_MNTDIS2 >= 0 ELSE "-"
+DEF D_DIS4B CHAR*4= "." +                                           &
+                    ASC(ABS(D_MNTDIS2),11)[10:2] + &
+                    D_DIS4A
+
+DEF D_MNTDIS CHAR*15 = "       "                     + D_DIS3B + D_DIS4B &
+                    IF D_DIS2B = "  0"                              AND  &
+                      (FRDTYP OF GPFOR_DETAILS = "C" OR                  &
+                       FRDTYP OF GPFOR_DETAILS = "F")                    &
+                  ELSE "   "         + D_DIS2B + "," + D_DIS3B + D_DIS4B &
+                    IF D_DIS1B = "  0"                              AND  &
+                      (FRDTYP OF GPFOR_DETAILS = "C" OR                  &
+                       FRDTYP OF GPFOR_DETAILS = "F")                    &
+                  ELSE D_DIS1B + "," + D_DIS2B + "," + D_DIS3B + D_DIS4B &
+                   IF (FRDTYP OF GPFOR_DETAILS = "C" OR                  &
+                       FRDTYP OF GPFOR_DETAILS = "F")                    &
+                  ELSE FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1]                      &
+                    IF FRDTYP OF GPFOR_DETAILS = "S"                     &
+                  ELSE " "
+
+
+
+TEMPORARY T_PROCLEPOP CHARACTER SIZE 8
+TEMPORARY T_PROSTUPAT CHARACTER SIZE 8 ; Popup sur les projets.
+TEMPORARY T_FRDDSC    CHARACTER SIZE 45
+TEMPORARY T_MNTENG    CHARACTER SIZE 15
+TEMPORARY T_MNTREE    CHARACTER SIZE 15
+TEMPORARY T_MNTBDG    CHARACTER SIZE 15
+TEMPORARY T_MNTTOT    CHARACTER SIZE 15
+TEMPORARY T_MNTDIS    CHARACTER SIZE 15
+
+;-------------------------------------------------------------------------------
+;
+USE usdrw132 NOLIST
+USE ustit132 NOLIST
+USE ushilite NOLIST     ; Hilite pour tout les écrans
+
+HILITE DISPLAY       HALFTONE
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Consultation par format comptable " &
+@ELSE
+      " %%% " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP
+
+ALIGN (,,31)
+FIELD D_TITRE1               DISPLAY
+FIELD D_TITRE2               DISPLAY
+
+SKIP
+
+ALIGN (,3,19) (,,28)
+FIELD PRJCLE  OF GPFRM_AFFICHE  DISPLAY
+FIELD D_PRJDSC                  DISPLAY
+
+FIELD PRACLE  OF GPFRM_AFFICHE  DISPLAY
+FIELD D_PRADSC                  DISPLAY
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      "Titre"  &
+@ELSE
+      " %%% " &
+@ENDIF
+      AT ,3
+
+TITLE &
+@IF FRANCAIS
+      "Engagé" &
+@ELSE
+      " %%% " &
+@ENDIF
+      AT ,58
+
+TITLE &
+@IF FRANCAIS
+      "Réel" &
+@ELSE
+      " %%% " &
+@ENDIF
+      AT ,77
+
+TITLE &
+@IF FRANCAIS
+      "Total" &
+@ELSE
+      " %%% " &
+@ENDIF
+      AT ,93
+
+TITLE &
+@IF FRANCAIS
+      "Budget" &
+@ELSE
+      " %%% " &
+@ENDIF
+      AT ,109
+
+TITLE &
+@IF FRANCAIS
+      "Disponibilité" &
+@ELSE
+      " %%% " &
+@ENDIF
+      AT ,118
+
+
+SKIP
+
+ALIGN (2,2,2) (,,3) (,,50) (,,67) (,,84) (,,101) (,,117)
+CLUSTER OCCURS WITH GPFRM_AFFICHE
+
+FIELD IMMCLE OF GPFRM_AFFICHE  LABEL " " HIDDEN SIZE 1 NOENTRY
+FIELD D_FRDDSC     DISPLAY
+FIELD D_MNTENG     DISPLAY
+FIELD D_MNTREE     DISPLAY
+FIELD D_MNTTOT     DISPLAY
+FIELD D_MNTBDG     DISPLAY
+FIELD D_MNTDIS     DISPLAY
+CLUSTER
+
+PROCEDURE INPUT IMMCLE
+BEGIN
+   IF 0<>SIZE(FIELDTEXT)
+   THEN LET FIELDTEXT = OLDVALUE(IMMCLE OF GPFRM_AFFICHE)
+END
+
+PROCEDURE DESIGNER 1
+BEGIN
+   LET T_FRDDSC = D_FRDDSC
+   LET T_MNTENG = D_MNTENG
+   LET T_MNTREE = D_MNTREE
+   LET T_MNTBDG = D_MNTBDG
+   LET T_MNTTOT = D_MNTTOT
+   LET T_MNTDIS = D_MNTDIS
+
+   RUN SCREEN gp003b MODE F PASSING T_CIECLEMNU, &
+                                    T_CIENOM   , &
+                                    GPFRM_AFFICHE, &
+                                    GPPROJETS, &
+                                    T_FRDDSC, &
+                                    T_MNTENG, &
+                                    T_MNTREE, &
+                                    T_MNTTOT, &
+                                    T_MNTBDG, &
+                                    T_MNTDIS
+
+END
+
+
+PROCEDURE DESIGNER D001
+BEGIN
+  RUN SCREEN gs090 MODE E PASSING D_XPRNOM,D_LISPAR,D_INDLON,D_LISVAL
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+PROCEDURE PREENTRY
+BEGIN
+  CLOSE GPFRM_AFFICHE
+  RUN SCREEN gp003a MODE E PASSING T_CIECLEMNU &
+                           WINDOW WIDTH CONSTANT WHEN CALLING
+  REFRESH ALL
+  PUSH FIND
+END
+
+PROCEDURE FIND
+BEGIN
+   FOR GPFRM_AFFICHE
+   BEGIN
+      GET GPFRM_AFFICHE VIA   USRCLE &
+                        USING LOGONID
+      GET GPFORMATS_2
+   END
+END
+
+BUILD

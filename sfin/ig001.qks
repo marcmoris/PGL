@@ -1,0 +1,407 @@
+;/T/ Enregistrer les blocs en inventaire
+;
+;/P/ Programmeur..: René Bonneau
+;    Date Création: 1996-03-27
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   l'inventaire physique de bloc de granit de Granicor.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN ig001 ACTIONBAR                    &
+             MODE LABEL "" AT 2,80        &
+             NOACTION                     &
+             FIELDMARK RETAIN STARTUP     &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU ,      &
+                       T_CIENOM
+
+;-------------------------------------------------------------------------------
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "IN001"
+
+;-------------------------------------------------------------------------------
+; Documentation de l'écran.
+;
+USE ig001.hlp NOLIST
+
+;-------------------------------------------------------------------------------
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+;-------------------------------------------------------------------------------
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+;-------------------------------------------------------------------------------
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+; Fichier utiliser dans le dans l'écran
+;
+FILE INBLOC PRIMARY OCCURS 18
+
+    ITEM CIECLE     OF INBLOC INITIAL T_CIECLEMNU
+    ITEM IBLNUMPGE  OF INBLOC INIT FIRST(IBLNUMPGE OF INBLOC)
+    ITEM IBLDATINV  OF INBLOC INIT SYSDATE
+;    ITEM IBLHREINV  OF INBLOC INIT SYSTIME
+
+FILE INBLOC DESIGNER ALIAS INBLOC_EXISTE
+    SELECT IF CIECLE OF INBLOC_EXISTE = T_CIECLEMNU
+
+FILE PDBLOC     DESIGNER
+
+FILE INBLOC DESIGNER ALIAS INBLOC_BOUCLE
+
+;-------------------------------------------------------------------------------
+;Variables temporaires
+;
+TEMPORARY T_BLONUMGRA001APR  CHARACTER SIZE 04
+TEMPORARY T_BLONUMGRA002APR  CHARACTER SIZE 05
+TEMPORARY T_BLORECAPR        CHARACTER SIZE 01
+TEMPORARY T_CHAMP            INTEGER UNSIGNED SIZE 01
+
+TEMPORARY T_COD              INTEGER UNSIGNED SIZE 02
+TEMPORARY T_STU              CHARACTER SIZE 01
+
+TEMPORARY TMP_NO             CHARACTER SIZE 198 ;(9+1+1) * 18 (INBLOC) 198 * 2 = 360
+TEMPORARY TMP_NO_PROCHAIN    CHARACTER SIZE 198 ;(9+1+1) * 18 (INBLOC) 198 * 2 = 360
+
+TEMPORARY T_COMPTEUR        INT SIZE 2
+TEMPORARY T_COMPTEUR_BOUCLE INT SIZE 2
+
+TEMPORARY T_HEURE           CHAR SIZE 4
+TEMPORARY T_HEURE_BOUCLE    CHAR SIZE 4
+TEMPORARY T_TEMPS           CHAR SIZE 8
+TEMPORARY T_VARIABLE        CHAR SIZE 6
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " INVENTAIRE DE BLOCS " &
+@ELSE
+      " %%%INVENTAIRE DE BLOCS " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+DRAW 3,01 TO 23,9
+
+SKIP TO LINE 4
+TITLE "PAGE" AT ,3
+
+SKIP
+ALIGN (,,2)
+FIELD IBLNUMPGE OF INBLOC           &
+        REQUIRED
+
+SKIP TO LINE 4
+TITLE "GRAN    NO-BLOC     LOCAL  COMMENTAIRE " AT ,14
+SKIP
+
+ALIGN(11,,14)(,,20)(,24,25)(,30,31)(,,34)(,,41)
+
+CLUSTER OCCURS WITH INBLOC
+
+FIELD TGRCODGRA OF INBLOC           &
+        DISPLAY
+
+FIELD BLONUMGRA001APR OF INBLOC     &
+        REQUIRED                        &
+        AUTONEXT                        &
+        NUMERIC
+
+FIELD BLONUMGRA002APR OF INBLOC     &
+        REQUIRED LABEL "-"              &
+        AUTONEXT                        &
+        NUMERIC
+
+FIELD BLORECAPR OF INBLOC           &
+        REQUIRED LABEL "-"
+
+FIELD IBLNUMLOC OF INBLOC           &
+  PATTERN "##^<"                     &
+  REQUIRED DUPLICATE
+
+FIELD IBLDESC OF INBLOC             &
+        FOR 1,35
+
+CLUSTER
+
+
+PROCEDURE INPUT IBLNUMLOC
+BEGIN
+  IF 0 <> SIZE(TRUNC(FIELDTEXT))
+  THEN BEGIN
+    IF MATCHPATTERN(FIELDTEXT,"#^<")
+    THEN LET FIELDTEXT = "0" + FIELDTEXT
+  END
+END
+
+;-------------------------------------------------------------------------------
+; Appel dépisteur No bloc (attention cet appel est particulier)
+;
+PROCEDURE INPUT BLONUMGRA001APR
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_BLONUMGRA001APR  = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_BLONUMGRA002APR  = ""
+    LET T_BLORECAPR        = ""
+    LET T_CHAMP            = 1
+    LET T_COD              = 0
+    LET T_STU              = ""
+    RUN SCREEN pd121 MODE F &
+                     PASSING T_BLONUMGRA001APR, &
+                             T_BLONUMGRA002APR, &
+                             T_BLORECAPR,       &
+                             T_CHAMP,           &
+                             T_COD,             &
+                             T_STU,             &
+                             T_CIECLEMNU
+    LET FIELDTEXT                 = TRUNCATE( T_BLONUMGRA001APR )
+  END
+  ELSE BEGIN
+         LET BLORECAPR OF INBLOC = ""
+  END
+END
+
+;-------------------------------------------------------------------------------
+; Appel dépisteur No bloc (attention cet appel est particulier)
+;
+PROCEDURE INPUT BLONUMGRA002APR
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_BLONUMGRA001APR  = BLONUMGRA001APR OF INBLOC
+    LET T_BLONUMGRA002APR  = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_BLORECAPR        = ""
+    LET T_CHAMP            = 2
+    LET T_COD              = 0
+    LET T_STU              = ""
+    RUN SCREEN pd121 MODE F &
+                     PASSING T_BLONUMGRA001APR, &
+                             T_BLONUMGRA002APR, &
+                             T_BLORECAPR,       &
+                             T_CHAMP,           &
+                             T_COD,             &
+                             T_STU,             &
+                             T_CIECLEMNU
+    LET BLONUMGRA001APR OF INBLOC = TRUNCATE( T_BLONUMGRA001APR )
+    LET FIELDTEXT                     = TRUNCATE( T_BLONUMGRA002APR )
+  END
+  ELSE BEGIN
+         LET BLORECAPR OF INBLOC = ""
+  END
+  IF 0 <> SIZE( TRUNCATE( T_BLONUMGRA002APR ) ) AND &
+     0 =  SIZE( TRUNCATE( FIELDTEXT) )
+  THEN BEGIN
+    LET FIELDTEXT                 = TRUNCATE( T_BLONUMGRA002APR )
+  END
+END
+
+;-------------------------------------------------------------------------------
+; Appel dépisteur No bloc (attemtion cet appel est particulier)
+;
+PROCEDURE INPUT BLORECAPR
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_BLONUMGRA001APR  = BLONUMGRA001APR OF INBLOC
+    LET T_BLONUMGRA002APR  = BLONUMGRA001APR OF INBLOC
+    LET T_BLORECAPR        = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_CHAMP            = 3
+    LET T_COD              = 0
+    LET T_STU              = ""
+    RUN SCREEN pd121 MODE F &
+                     PASSING T_BLONUMGRA001APR, &
+                             T_BLONUMGRA002APR, &
+                             T_BLORECAPR,       &
+                             T_CHAMP,           &
+                             T_COD,             &
+                             T_STU,             &
+                             T_CIECLEMNU
+    LET BLONUMGRA001APR OF INBLOC = TRUNCATE( T_BLONUMGRA001APR )
+    LET BLONUMGRA002APR OF INBLOC = TRUNCATE( T_BLONUMGRA002APR )
+    LET FIELDTEXT                     = TRUNCATE( T_BLORECAPR )
+  END
+  IF 0 <> SIZE( TRUNCATE( T_BLORECAPR ) ) AND &
+     0 = SIZE( TRUNCATE( FIELDTEXT) )
+  THEN BEGIN
+    LET FIELDTEXT                 = TRUNCATE( T_BLORECAPR )
+  END
+  IF 0 = SIZE( TRUNCATE( T_BLORECAPR ) ) AND &
+     0 = SIZE( TRUNCATE( BLORECAPR OF INBLOC ) ) AND &
+     0 = SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    LET FIELDTEXT                 = " "
+  END
+  IF 0 =  SIZE( TRUNCATE( T_BLORECAPR ) ) AND &
+     0 <> SIZE( TRUNCATE( BLORECAPR OF INBLOC ) ) AND &
+     0 =  SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    LET FIELDTEXT                 = BLORECAPR OF INBLOC
+  END
+END
+
+;------------------------------------------------------------------------------
+PROCEDURE EDIT BLORECAPR
+BEGIN
+  IF 0 <> (IND(TMP_NO,BLONUMGRA001APR           + &
+                      BLONUMGRA002APR           + &
+                      FIELDTEXT)) AND             &
+     OCCURRENCE <> (IND(TMP_NO,BLONUMGRA001APR  + &
+                               BLONUMGRA002APR  + &
+                               FIELDTEXT) - OCCURRENCE) / 10 + 1
+  THEN BEGIN
+    WARNING 1801 ; "CE NUMERO DE BLOC EST DEJA PRESENT A L'ECRAN..."
+  END
+
+; Alias de la table INBLOC
+  GET INBLOC_EXISTE VIA   CIECLE,                        &
+                          BLONUMGRA001APR,               &
+                          BLONUMGRA002APR,               &
+                          BLORECAPR                      &
+                    USING T_CIECLEMNU,                   &
+                          BLONUMGRA001APR OF INBLOC, &
+                          BLONUMGRA002APR OF INBLOC, &
+                          FIELDTEXT OPTIONAL
+
+  IF ACCESSOK AND &
+     0 <> (IND(TMP_NO,BLONUMGRA001APR + BLONUMGRA002APR + FIELDTEXT)) AND &
+     OCCURRENCE <> &
+     (IND(TMP_NO,BLONUMGRA001APR + BLONUMGRA002APR + FIELDTEXT) - OCCURRENCE ) / 10 + 1
+
+  THEN WARNING = &
+        SUBSTITUTE(1802," (" + ASCII(IBLNUMPGE OF INBLOC_EXISTE,6) + ")...")
+        ; CE NUMERO DE BLOC FAIT DEJA PARTIE DE L'INVENTAIRE ( 000001 )...
+
+
+  GET PDBLOC VIA   CIECLE,                        &
+                   BLONUMGRA001APR,               &
+                   BLONUMGRA002APR,               &
+                   BLORECAPR                      &
+             USING T_CIECLEMNU,                   &
+                   BLONUMGRA001APR OF INBLOC, &
+                   BLONUMGRA002APR OF INBLOC, &
+                   FIELDTEXT OPTIONAL
+  IF NOT ACCESSOK
+  THEN WARN 1803 ;"LE NUMERO DE BLOC EST INVALIDE..."
+
+  IF OCCURRENCE > 1
+  THEN BEGIN
+    LET TMP_NO_PROCHAIN = TMP_NO[1:((OCCURRENCE - 1) * 10) + OCCURRENCE - 1] + &
+        BLONUMGRA001APR + BLONUMGRA002APR + FIELDTEXT + "," + &
+        TMP_NO[(OCCURRENCE * 10) + OCCURRENCE + 1:180]
+  END
+  ELSE BEGIN
+    LET TMP_NO_PROCHAIN = BLONUMGRA001APR + BLONUMGRA002APR + FIELDTEXT + &
+        "," + &
+        TMP_NO[(OCCURRENCE * 10) + OCCURRENCE + 1:180]
+  END
+  LET TMP_NO = TMP_NO_PROCHAIN
+
+END
+
+;------------------------------------------------------------------------------
+PROCEDURE PROCESS BLORECAPR
+BEGIN
+  LET TGRCODGRA OF INBLOC = TGRCODGRA OF PDBLOC
+  DISPLAY TGRCODGRA OF INBLOC
+END
+
+;------------------------------------------------------------------------------
+PROCEDURE PATH
+BEGIN
+  REQUEST IBLNUMPGE OF INBLOC
+  IF PROMPTOK
+  THEN LET PATH = 1
+  IF PATH = 0
+  THEN BEGIN
+    REQUEST BLONUMGRA001APR OF INBLOC
+    REQUEST BLONUMGRA002APR OF INBLOC
+    IF PROMPTOK
+    THEN LET PATH = 2
+    ELSE ERROR "UNE CLE EST REQUISE"
+  END
+END
+
+;-------------------------------------------------------------------------------
+PROCEDURE FIND
+BEGIN
+  LET TMP_NO = ""
+  LET TMP_NO_PROCHAIN = ""
+  FOR INBLOC
+  BEGIN
+    IF PATH = 1
+    THEN GET INBLOC VIA     CIECLE,           &
+                                IBLNUMPGE         &
+                        USING   T_CIECLEMNU,      &
+                                IBLNUMPGE       OPTIONAL
+
+    ELSE GET INBLOC VIA     CIECLE,           &
+                                BLONUMGRA001APR , &
+                                BLONUMGRA002APR , &
+                                BLORECAPR         &
+                        USING   T_CIECLEMNU,      &
+                                BLONUMGRA001APR , &
+                                BLONUMGRA002APR , &
+                                "@"             OPTIONAL
+
+    IF 0 <> SIZE(TRUNCATE(BLONUMGRA001APR))
+    THEN LET TMP_NO = TRUNC(TMP_NO) + &
+                      BLONUMGRA001APR + &
+                      BLONUMGRA002APR + &
+                      BLORECAPR + ","
+  END
+END
+
+PROCEDURE PREUPDATE
+BEGIN
+    LET T_COMPTEUR = 0
+    LET T_TEMPS    = ASCII(SYSTIME)
+    LET T_HEURE    = T_TEMPS[1:4]
+    LET T_COMPTEUR_BOUCLE = 0
+    WHILE RETRIEVING INBLOC_BOUCLE VIA CIECLE, IBLNUMPGE &
+                     USING CIECLE    OF INBLOC, &
+                           IBLNUMPGE OF INBLOC
+    BEGIN
+      LET T_HEURE_BOUCLE = ASCII(IBLHREINV OF INBLOC_BOUCLE)[1:4]
+      IF T_HEURE_BOUCLE = T_HEURE
+      THEN LET T_COMPTEUR_BOUCLE = &
+               NCONVERT(ASCII(IBLHREINV OF INBLOC_BOUCLE)[5:2]) + 25
+    END
+    LET T_COMPTEUR = T_COMPTEUR_BOUCLE
+    FOR INBLOC
+      BEGIN
+        IF NEWRECORD OF INBLOC
+        THEN BEGIN
+           LET T_COMPTEUR = T_COMPTEUR + 1
+           LET T_VARIABLE = T_HEURE + ASCII(T_COMPTEUR,2)
+           LET IBLHREINV  OF INBLOC = NCONVERT(T_VARIABLE) * 10000
+        END
+     END
+END
+
+BUILD
+

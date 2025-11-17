@@ -1,0 +1,587 @@
+;/T/ 2.5.8 Retour de marchandises (Produit de dimension).
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1996-06-19
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   les retours de marchandises de produits de dinemsion.
+;
+;/M/ François Déry, 12 mai 1999
+;       Ajout du in dict sur la transaction des séquences.
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd222d ACTIONBAR                     &
+              MODE LABEL "" AT 2,80         &
+              NOACTION                      &
+              FIELDMARK RETAIN STARTUP      &
+              HELP POPUP FROM 4,9 TO 20,72  &
+              RECEIVING T_CIECLEMNU,        &
+                        T_CIENOM,           &
+                        PDRETOUR
+
+
+;-------------------------------------------------------------------------------
+;
+; Déclaration de la transaction pour donner un numéro séquentiel
+;
+
+TRANSACTION NO_SEQ READ WRITE &
+                   RESERVING FOR PROTECTED WRITE PDSEQ_RETOUR IN DICT
+
+
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD222D"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+USE pd222d.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour les dépisteurs
+;
+
+TEMPORARY T_RARCODRET CHARACTER SIZE 03
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire au traitement
+;
+
+TEMPORARY T_TYPE_PROD CHARACTER SIZE 02 INITIAL "TR" RESET AT STARTUP ; Type de produit traiter par l'écran
+TEMPORARY T_SILENT    CHARACTER SIZE 01
+
+;-------------------------------------------------------------------------------
+;
+; Sert à valider les codes bilingue et pour les sous-écrans de consultation
+;
+DEFINE    D_FTRTYPFAC CHARACTER SIZE 16 = "FTRTYPFAC"
+TEMPORARY T_FTRTYPFAC CHARACTER SIZE 04
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du volume d'une pièce de granit
+;
+
+USE usvarvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du prix d'une ligne de détail bon de commande
+;
+USE usvarprigra NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Retour de marchandises
+;
+
+FILE PDRETOUR MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Retour produit de dimension
+;
+
+FILE PDPROD_DIM_RET PRIMARY NOITEM OCCURS 11 TIMES
+
+  ACCESS VIA     CIECLE,       &
+                 RTONUMSEQ     &
+         USING   T_CIECLEMNU,  &
+                 RTONUMSEQ     OF PDRETOUR &
+         ORDERBY CIECLE,       &
+                 RTONUMSEQ,    &
+                 PDILON,       &
+                 PDIHAU,       &
+                 PDIEPA,       &
+                 TGRCODGRA,    &
+                 TYFCODFIN,    &
+                 CAINUMCAI
+
+ITEM CIECLE OF PDPROD_DIM_RET FINAL T_CIECLEMNU
+ITEM RTONUMSEQ OF PDPROD_DIM_RET FINAL RTONUMSEQ OF PDRETOUR
+
+;-------------------------------------------------------------------------------
+;
+; Facture produit de dimension
+;
+
+FILE PDPROD_DIMENSION REFERENCE OCCURS WITH PDPROD_DIM_RET
+
+  ACCESS VIA     CIECLE,          &
+                 PDILON,          &
+                 PDIHAU,          &
+                 PDIEPA,          &
+                 TGRCODGRA,       &
+                 TYFCODFIN        &
+         USING   T_CIECLEMNU,     &
+                 PDILON           OF PDPROD_DIM_RET, &
+                 PDIHAU           OF PDPROD_DIM_RET, &
+                 PDIEPA           OF PDPROD_DIM_RET, &
+                 TGRCODGRA        OF PDPROD_DIM_RET, &
+                 TYFCODFIN        OF PDPROD_DIM_RET
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro séquentiel pour les factures
+;
+
+FILE PDSEQ_RETOUR DESIGNER &
+                  TRANSACTION NO_SEQ
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Emballage produit de dimension
+;
+
+FILE PDEMBAL_PROD_DIM REFERENCE OCCURS WITH PDPROD_DIM_RET
+
+  ACCESS VIA   CIECLE,                               &
+               CAINUMCAI,                            &
+               PDILON,                               &
+               PDIHAU,                               &
+               PDIEPA,                               &
+               TGRCODGRA,                            &
+               TYFCODFIN                             &
+         USING T_CIECLEMNU,                          &
+               CAINUMCAI       OF PDPROD_DIM_RET,    &
+               PDILON          OF PDPROD_DIM_RET,    &
+               PDIHAU          OF PDPROD_DIM_RET,    &
+               PDIEPA          OF PDPROD_DIM_RET,    &
+               TGRCODGRA       OF PDPROD_DIM_RET,    &
+               TYFCODFIN       OF PDPROD_DIM_RET
+
+
+;-------------------------------------------------------------------------------
+;
+; Raison retour
+;
+
+FILE PDRAISON_RETOUR REFERENCE OCCURS WITH PDPROD_DIM_RET
+
+  ACCESS VIA   CIECLE,          &
+               RARCODRET        &
+         USING T_CIECLEMNU,     &
+               RARCODRET        OF PDPROD_DIM_RET
+
+
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+
+SKIP
+
+
+TITLE &
+@IF FRANCAIS
+      " Retour de marchandises " &
+@ELSE
+      " %%%Retour de marchandises " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+
+
+
+ALIGN ( ,3,19) (41,41,57)
+
+
+FIELD RTONUMSEQ        OF PDRETOUR         &
+label "Num. séquence.:"&
+        FIXED
+
+FIELD EXPNUMEXP OF PDRETOUR &
+label "Num expédi...:"&
+       FIXED
+
+FIELD SPRNUMSOR OF PDRETOUR &
+label "No sortie....:"&
+       FIXED
+
+FIELD BLINUMBLI OF PDRETOUR &
+label "Bon livraison:"&
+       FIXED
+
+FIELD RTODATRET        OF PDRETOUR          FORMAT YYYYMMDD &
+PATTERN "####/##/##"&
+label "Date retour...:"&
+        FIXED
+
+;-----
+DRAW 8,2 TO 8,79
+
+
+SKIP TO LINE 08
+
+
+TITLE &
+@IF FRANCAIS
+      " Produit de dimension " &
+@ELSE
+      " %%%Produit de dimension " &
+@ENDIF
+      CENTERED AT ,1
+
+
+SKIP TO LINE 10
+
+
+TITLE &
+@IF FRANCAIS
+      "  Caisson Long Haut Épai Gra Fi   Qte   Rai Description." &
+@ELSE
+      "%%%aisson Long Haut Épai Gra Fi   Qte       Rai Description." &
+@ENDIF
+      AT ,3
+
+
+ALIGN (02,02,03) (,,13) (,,18) (,,23) (,,28) (,,32) (,,35) (,,43) (,,47) (,,51) ;(,,69) (,,72)
+
+
+CLUSTER OCCURS WITH PDPROD_DIM_RET ID BASE 90
+
+
+FIELD CAINUMCAI        OF PDPROD_DIM_RET   &
+        HIDDEN                             &
+        LABEL " "
+
+
+FIELD PDILON           OF PDPROD_DIM_RET   &
+        HIDDEN                             &
+        REQUIRED picture "^^^^"
+
+
+FIELD PDIHAU           OF PDPROD_DIM_RET   &
+        HIDDEN                             &
+        REQUIRED  picture "^^^^"
+
+
+FIELD PDIEPA           OF PDPROD_DIM_RET   &
+        HIDDEN                             &
+        REQUIRED  picture "^^^^"
+
+
+FIELD TGRCODGRA        OF PDPROD_DIM_RET   &
+        HIDDEN                             &
+        REQUIRED
+
+
+FIELD TYFCODFIN        OF PDPROD_DIM_RET   &
+        HIDDEN                             &
+        REQUIRED
+
+
+FIELD T_SILENT                             &
+        SILENT                             ;&
+;        LOOKUP ON PDEMBAL_PROD_DIM         &
+;          VIA   CIECLE,                    &
+;                CAINUMCAI,                 &
+;                PDILON,                    &
+;                PDIHAU,                    &
+;                PDIEPA,                    &
+;                TGRCODGRA,                 &
+;                TYFCODFIN                  &
+;          USING T_CIECLEMNU,               &
+;                CAINUMCAI       OF PDPROD_DIM_RET,   &
+;                PDILON          OF PDPROD_DIM_RET,   &
+;                PDIHAU          OF PDPROD_DIM_RET,   &
+;                PDIEPA          OF PDPROD_DIM_RET,   &
+;                TGRCODGRA       OF PDPROD_DIM_RET,   &
+;                TYFCODFIN       OF PDPROD_DIM_RET    &
+ ;         MESSAGE 3232 , & ; Ce produit de dimension n'existe pas dans ce caisson
+  ;                  ON PDPROD_DIMENSION         &
+  ;        VIA   CIECLE,                    &
+  ;              PDILON,                    &
+  ;              PDIHAU,                    &
+  ;              PDIEPA,                    &
+  ;              TGRCODGRA,                 &
+  ;              TYFCODFIN                  &
+  ;        USING T_CIECLEMNU,               &
+  ;              PDILON          OF PDPROD_DIM_RET,   &
+  ;              PDIHAU          OF PDPROD_DIM_RET,   &
+  ;              PDIEPA          OF PDPROD_DIM_RET,   &
+  ;              TGRCODGRA       OF PDPROD_DIM_RET,   &
+  ;              TYFCODFIN       OF PDPROD_DIM_RET    &
+  ;        MESSAGE 3232 ; Ce produit de dimension n'existe pas dans ce caisson
+
+
+FIELD PFAQTERET        OF PDPROD_DIM_RET &
+        HIDDEN                             &
+        REQUIRED
+
+
+
+FIELD RARCODRET        OF PDPROD_DIM_RET   &
+        HIDDEN                             &
+        LOOKUP ON PDRAISON_RETOUR          &
+          MESSAGE 2976 ; Cette raison n'existe pas
+
+
+FIELD RTPDSCRAIRET     OF PDPROD_DIM_RET   &
+        HIDDEN                             &
+        DEFAULT RARDSCFRA OF PDRAISON_RETOUR &
+        FOR ,30
+
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul du volume d'une pièce de granit
+;
+
+USE uscalvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul du prix d'une ligne de détail bon commande
+;
+
+USE uscalprigra NOLIST
+
+;--------------------------------------------------------------------------
+;
+;
+;
+
+PROCEDURE EDIT T_SILENT
+BEGIN
+  LET     TZ_LARGEUR                           = PDILON OF PDPROD_DIM_RET
+  LET     TZ_HAUTEUR                           = PDIHAU OF PDPROD_DIM_RET
+  LET     TZ_EPAISSEUR                         = PDIEPA OF PDPROD_DIM_RET
+  DO INTERNAL CALVOL
+  LET     PDISURMC2        OF PDPROD_DIM_RET = TZ_MC2
+ IF NEWRECORD OF PDPROD_DIM_RET
+  THEN   LET RTOSURMC2PD  OF PDRETOUR = RTOSURMC2PD  OF PDRETOUR + &
+                                 (PDISURMC2    OF PDPROD_DIM_RET * PFAQTERET OF PDPROD_DIM_RET)
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur pour le champ
+;
+
+PROCEDURE INPUT RARCODRET
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_RARCODRET = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd137 MODE F &
+                     PASSING T_RARCODRET,&
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_RARCODRET )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Initialisation du champ par défaut
+;
+
+PROCEDURE INPUT RTPDSCRAIRET
+BEGIN
+  IF     0 = SIZE( TRUNCATE( FIELDTEXT)) &
+     AND 0 = SIZE( TRUNCATE( RTPDSCRAIRET OF PDPROD_DIM_RET ))
+  THEN BEGIN
+    LET FIELDTEXT = RARDSCFRA OF PDRAISON_RETOUR
+  END
+END
+
+;------------------------------------------------------------------------
+PROCEDURE EDIT CAINUMCAI
+BEGIN
+  IF EXPNUMEXP OF PDRETOUR <> 0
+  THEN BEGIN
+       GET PDEMBAL_PROD_DIM  OPT         &
+          VIA   CIECLE,                    &
+                CAINUMCAI                  &
+          USING T_CIECLEMNU,               &
+                CAINUMCAI       OF PDPROD_DIM_RET
+          IF NOT ACCESSOK
+          THEN ERROR 3129 ; Ce numéro de caisson n'existe pas
+    END
+END
+;-------------------------------------------------------------------------------
+;
+;
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  FOR PDPROD_DIM_RET
+  BEGIN
+
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF PDPROD_DIM_RET &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF PDPROD_DIM_RET &
+       AND NOT NEWRECORD     OF PDPROD_DIM_RET &
+       AND NOT DELETEDRECORD OF PDPROD_DIM_RET &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+  END
+
+
+  ;
+  ; Incrémentation du numéro de séquence
+  ;
+  IF 0 = RTONUMSEQ OF PDRETOUR
+  THEN BEGIN
+    START TRANSACTION NO_SEQ
+    GET PDSEQ_RETOUR OPTIONAL           &
+      VIA   CIECLE                      &
+      USING T_CIECLEMNU
+    IF NOT ACCESSOK
+    THEN BEGIN
+      LET CIECLE OF PDSEQ_RETOUR = T_CIECLEMNU
+    END
+    LET SETNUMRAP        OF PDSEQ_RETOUR     = SETNUMRAP        OF PDSEQ_RETOUR + 1
+    LET RTONUMSEQ        OF PDRETOUR         = SETNUMRAP        OF PDSEQ_RETOUR
+    PUT PDSEQ_RETOUR
+    DISPLAY RTONUMSEQ OF PDRETOUR
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procedure de destruction
+;
+
+PROCEDURE DELETE
+BEGIN
+  FOR PDPROD_DIM_RET
+  BEGIN
+    IF NOT DELETEDRECORD OF PDPROD_DIM_RET
+    THEN BEGIN
+      LET     TZ_LARGEUR                           = PDILON OF PDPROD_DIM_RET
+      LET     TZ_HAUTEUR                           = PDIHAU OF PDPROD_DIM_RET
+      LET     TZ_EPAISSEUR                         = PDIEPA OF PDPROD_DIM_RET
+      DO INTERNAL CALVOL
+      LET     PDISURMC2        OF PDPROD_DIM_RET = TZ_MC2
+      LET RTOSURMC2PD  OF PDRETOUR = RTOSURMC2PD  OF PDRETOUR - &
+                                 (PDISURMC2    OF PDPROD_DIM_RET * PFAQTERET OF PDPROD_DIM_RET)
+      DELETE PDPROD_DIM_RET
+    END
+  END
+END
+;------------------------------------------------------------
+;PROCEDURE INTERNAL CALVOL
+;BEGIN
+;  LET TZ_VOLUME = ROUND ( ((TZ_LARGEUR  /1000) *      &
+;                           (TZ_HAUTEUR  /1000) *      &
+;                           (TZ_EPAISSEUR/1000)),4)
+;  LET TZ_MC2    = ROUND ( ((TZ_LARGEUR  /1000) *      &
+;                           (TZ_HAUTEUR/1000)),4)
+;END
+;-------------------------------------------------------------
+
+BUILD
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+**************************** Retour de marchandises ****************************
+*                                                                              *
+* Num. séquence.: xxxxxxxxx             No. facture...: xxxxxxx                *
+* Date retour...: xxxxxxxx              Type facture..: x xxxxxxxxxxxxxxxxx    *
+*                                                                              *
+***************************** Produit de dimension *****************************
+*                                                                              *
+*   Caisson Long Haut Épai Gra Fi   Qte  Prx vente U/M     Montant Rai Desc.   *
+* xxxxxxxxx xxxx xxxx xxxx xxx xx xxxxx xxxxxxxxxxx xx xxxxxxxxxxx xxx xxxxxxx *
+* xxxxxxxxx xxxx xxxx xxxx xxx xx xxxxx xxxxxxxxxxx xx xxxxxxxxxxx xxx xxxxxxx *
+* xxxxxxxxx xxxx xxxx xxxx xxx xx xxxxx xxxxxxxxxxx xx xxxxxxxxxxx xxx xxxxxxx *
+* xxxxxxxxx xxxx xxxx xxxx xxx xx xxxxx xxxxxxxxxxx xx xxxxxxxxxxx xxx xxxxxxx *
+* xxxxxxxxx xxxx xxxx xxxx xxx xx xxxxx xxxxxxxxxxx xx xxxxxxxxxxx xxx xxxxxxx *
+* xxxxxxxxx xxxx xxxx xxxx xxx xx xxxxx xxxxxxxxxxx xx xxxxxxxxxxx xxx xxxxxxx *
+* xxxxxxxxx xxxx xxxx xxxx xxx xx xxxxx xxxxxxxxxxx xx xxxxxxxxxxx xxx xxxxxxx *
+* xxxxxxxxx xxxx xxxx xxxx xxx xx xxxxx xxxxxxxxxxx xx xxxxxxxxxxx xxx xxxxxxx *
+* xxxxxxxxx xxxx xxxx xxxx xxx xx xxxxx xxxxxxxxxxx xx xxxxxxxxxxx xxx xxxxxxx *
+* xxxxxxxxx xxxx xxxx xxxx xxx xx xxxxx xxxxxxxxxxx xx xxxxxxxxxxx xxx xxxxxxx *
+* xxxxxxxxx xxxx xxxx xxxx xxx xx xxxxx xxxxxxxxxxx xx xxxxxxxxxxx xxx xxxxxxx *
+*                                                                              *
+********************************************************************************
+@ENDIF

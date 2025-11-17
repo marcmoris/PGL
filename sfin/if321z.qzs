@@ -1,0 +1,253 @@
+;/T/ Liste des blocs non facturés par ligne de commande.
+;
+;/M/ Réalisé par.......: Marc Poulin
+;    Date..............: 07 avril 2000
+;    Description.......: Refonte complète de la liste afin de respecter les spécifications du client.
+;
+;    Référence.........: Demande directe - Gestion de blocs (Demandeur: Jacky Lecarlme).
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+; Configuration standard
+;
+USE ussetqzs NOLIST
+;
+; Déclaration des accès
+;
+ACCESS IFBLOC LINK  CIECLE       OF IFBLOC              , & ; Table des blocs
+                    CATCLE       OF IFBLOC                &
+                TO  CIECLE                              , &
+                    CATCLE       OF IFCATEGORIE OPTIONAL  & ; Table des catégories de granit
+
+              LINK  CIECLE       OF IFBLOC              , & 
+                    PJTABR       OF IFBLOC              , &
+                    PJTANN       OF IFBLOC              , &
+                    COMNUMCOMINT OF IFBLOC                &
+                TO  CIECLE                              , &
+                    PJTABR                              , &
+                    PJTANN                              , &
+                    COMNUMCOMINT OF PDCOMMAN_INTERNE      & ; Table des commandes internes
+
+              LINK  CIECLE       OF IFBLOC              , &
+                    PJTABR       OF IFBLOC              , &
+                    PJTANN       OF IFBLOC              , &
+                    COMNUMCOMINT OF IFBLOC              , &
+                    DCINUMLIG    OF IFBLOC                &
+                TO  CIECLE                              , &
+                    PJTABR                              , &
+                    PJTANN                              , &
+                    COMNUMCOMINT                        , &
+                    DCINUMLIG    OF PDDETAIL_C_I          & ; Table du détail des commandes internes
+                   
+              LINK ("----"                              , &
+                    CLICLE       OF IFBLOC)               &
+                TO  CLICIECLE                           , &
+                    CLICLE       OF CRCLIENT              & ; Table des clients (comptes à recevoir)
+                                                   
+              LINK (CLICIECLE OF CRCLIENT               , &
+                    CLIREFTYP OF CRCLIENT               , &
+                    CLICLE    OF CRCLIENT               , &
+                    1)                                    &
+                TO  REFCIECLE                           , &
+                    REFCLETYP                           , &
+                    REFCLENUM                           , &
+                    RADCLE    OF MCREF_ADRESSE            & ; Table des adresses
+                                                   
+              LINK  CIECLE    OF IFBLOC                 , &
+                    CLICIECLE OF CRCLIENT               , &
+                    CLICLE    OF CRCLIENT                 &
+                TO  CIECLE                              , &
+                    CLICIECLE                           , &
+                    CLICLE    OF CRCLI_CIE OPTIONAL         ; Table des clients / compagnie
+;
+; Sélection selon les paramètres saisis par l'utilisateur
+;
+CHOOSE CIECLE       PARM, & ; Code de compagnie
+       PJTABR       PARM, & ; Code de projet
+       PJTANN       PARM, & ; Année du projet
+       COMNUMCOMINT PARM, & ; Numéro de commande
+       CLICLE       PARM, & ; Code de client
+       FTRNUMFAC 0          ; Numéro de facture - Sélection des blocs non facturés uniquement
+;
+; Variables de travail associées aux critères de sélection
+;
+DEFINE D_FLG_EXP CHARACTER SIZE 01 = PARM ; Indique si l'usager désire l'impression des blocs expédiés seulement
+;
+; Sélections selon paramètres
+;
+SELECT IFBLOC IF D_FLG_EXP = "0" OR (EXNCLE OF IFBLOC <> 0 AND D_FLG_EXP = "1")
+;
+; Définition du numéro de commande et du numéro de bloc
+;
+DEFINE D_NUMCOM  CHARACTER SIZE 09 = PJTABR OF IFBLOC    &
+                                   + "-"                 &
+                                   + PJTANN OF IFBLOC    &
+                                   + "-"                 &
+                                   + COMNUMCOMINT     
+
+DEFINE D_NUMBLC  CHARACTER SIZE 14 = TGRCODGRA OF IFBLOC &
+                                   + IFCCLE    OF IFBLOC &
+                                   + "-"                 &
+                                   + BLCCLE    OF IFBLOC &
+                                   + "-"                 &
+                                   + BLCRED    OF IFBLOC
+;
+; Variables associées aux entêtes standards.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = PARM
+DEFINE Dz_NOMRAP2 CHARACTER SIZE 60 = ""
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE  7 = "IF321"
+;
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = PARM
+;
+; Vairalbles de travail
+;
+DEFINE D_EXE_TVQ  CHARACTER SIZE 50 = "Exemption TVQ: "           &
+                                    + CLCEXPTVP OF CRCLI_CIE      &
+                                   IF CLCEXPTVP OF CRCLI_CIE <> " "
+
+DEFINE D_CATCLE   CHARACTER SIZE 03 = RJ(CATCLE OF IFBLOC) ; Catégorie
+;
+; Tri
+;
+SORT ON D_NUMCOM                  & ; Numéro de commande
+     ON DCINUMLIG OF PDDETAIL_C_I & ; Numéro de ligne de commande (détail)
+     ON D_CATCLE                  & ; Catégorie de granit
+     ON D_NUMBLC                    ; Numéro de bloc
+;
+; Entête du rpport - Impression 60 lignes par 132 colonnes
+;
+USE ustit132_60 NOLIST 
+ SKIP 2                                     &
+  TAB 001 "Commande..:"                     &
+  TAB 013 D_NUMCOM                          & ; Numéro de commande
+ SKIP 1                                     &
+  TAB 001 "Client....:"                     &
+  TAB 013 CLICLE OF CRCLIENT                & ; Code de client
+  TAB 020 CLINOM OF CRCLIENT                & ; Nom du client
+ SKIP 1                                     &
+  TAB 001 "Adresse...:"                     &
+  TAB 020 RADADR1 OF MCREF_ADRESSE          & ; Adresse (ligne 1)
+  TAB 063 D_EXE_TVQ                         & ; Numéro d'exemption TVQ du client
+ SKIP 1                                     &
+  TAB 020 RADADR2 OF MCREF_ADRESSE          & ; Adresse (ligne 2)
+ SKIP 1                                     &
+  TAB 020 RADADR3 OF MCREF_ADRESSE          & ; Adresse (ligne 3)
+ SKIP 1                                     &
+  TAB 020 RADCP OF MCREF_ADRESSE            & ; Casier postal du client
+ SKIP 2                                     &
+  TAB 001 "Ligne de                                                 __Dimensions__                       Prix"                   &
+ SKIP 1                                     &
+  TAB 001 "commande        Catégorie de granit      Numéro de bloc  Long Haut Larg   Quantité (m3)  (valeur finale)  Expédition" &
+ SKIP 1                                     &
+  TAB 001 "--------  -----------------------------  --------------  ---- ---- ----   -------------  ---------------  ----------" &
+ SKIP
+;
+; Détail du rapport
+;
+REPORT                                      &
+  TAB 003 DCINUMLIG OF PDDETAIL_C_I         & ; Ligne de commande
+          PRINT AT DCINUMLIG                &
+  TAB 011 D_CATCLE                          & ; Catégorie de granit
+          PRINT AT D_CATCLE                 &
+  TAB 015 CATDSCFRA    OF IFCATEGORIE       & ; Description de la catégorie de granit
+          PRINT AT D_CATCLE                 &
+  TAB 042 D_NUMBLC                          & ; Numéro de bloc
+  TAB 058 BLCVENDULONG OF IFBLOC            & ; Longueur du bloc
+          PICTURE "^^^^"                    &
+          SIGNIFICANCE 4                    &
+          NOBWZ                             &
+  TAB 063 BLCVENDUHAU  OF IFBLOC            & ; Hauteur du bloc
+          PICTURE "^^^^"                    &
+          SIGNIFICANCE 4                    &
+          NOBWZ                             &
+  TAB 068 BLCVENDULAR  OF IFBLOC            & ; Largeur du bloc
+          PICTURE "^^^^"                    &
+          SIGNIFICANCE 4                    &
+          NOBWZ                             &
+  TAB 075 BLCM3TOT     OF IFBLOC            & ; Quantité totale du bloc en mêtres cube
+          PICTURE "^^,^^^,^^^.^^"           &
+          SIGNIFICANCE 4                    &
+          NOBWZ                             &
+  TAB 090 BLCTFINAL    OF IFBLOC            & ; Prix - valeur finale du bloc
+          PICTURE "^^^,^^^,^^^.^^ "         &
+          SIGNIFICANCE 5                    &
+          TRAILING SIGN "-"                 &
+          NOBWZ                             &
+  TAB 109 EXNCLE       OF IFBLOC            & ; Numéro d'expédition (s'il y a lieu)
+          BWZ                               &
+  RESERVE 5 LINES
+;
+; Sous-total par numéro de ligne de commande
+;
+FOOTING AT DCINUMLIG                        &
+  TAB 075 "-------------  ---------------"  &
+ SKIP 1                                     &
+  TAB 075 BLCM3TOT     OF IFBLOC            & ; Quantité totale du bloc en mêtres cube
+          SUBTOTAL                          &
+          PICTURE "^^,^^^,^^^.^^"           &
+          SIGNIFICANCE 4                    &
+          NOBWZ                             &
+  TAB 090 BLCTFINAL    OF IFBLOC            & ; Prix - valeur finale du bloc
+          SUBTOTAL                          &
+          PICTURE "^^^,^^^,^^^.^^ "         &
+          SIGNIFICANCE 5                    &
+          TRAILING SIGN "-"                 &
+          NOBWZ                             &
+ SKIP 2
+;
+; Total par numéro de commande
+;
+FOOTING AT D_NUMCOM                         &
+  TAB 075 "=============  ==============="  &
+ SKIP 1                                     &
+  TAB 075 BLCM3TOT     OF IFBLOC            & ; Quantité totale du bloc en mêtres cube
+          SUBTOTAL                          &
+          PICTURE "^^,^^^,^^^.^^"           &
+          SIGNIFICANCE 4                    &
+          NOBWZ                             &
+  TAB 090 BLCTFINAL    OF IFBLOC            & ; Prix - valeur finale du bloc
+          SUBTOTAL                          &
+          PICTURE "^^^,^^^,^^^.^^ "         &
+          SIGNIFICANCE 5                    &
+          TRAILING SIGN "-"                 &
+          NOBWZ                             &
+ SKIP PAGE
+
+
+BUILD if321z
+
+
+@IF FORMAT
+IF321                                               GRANICOR INC. (Développement)                                     PAGE:   1
+marcpoul                                 Liste des blocs non facturés par ligne de commande                      00/04/06  14:16
+
+Commande..: XX-XX-XXX
+Client....: XXXXXX XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+Adresse...:        XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX   XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                   XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                   XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                   XXXXXXX
+
+Ligne de                                                 __Dimensions__                       Prix
+commande       Catégorie de granit       Numéro de bloc  Long Haut Larg   Quantité (m3)  (valeur finale)  Expédition
+--------  -----------------------------  --------------  ---- ---- ----   -------------  ---------------  ----------
+  999     XXX XXXXXXXXXXXXXXXXXXXXXXXXX  999XX-999999-X  9999 9999 9999   99,999,999.99  999,999,999.99-    99999
+          XXX XXXXXXXXXXXXXXXXXXXXXXXXX  999XX-999999-X  9999 9999 9999   99,999,999.99  999,999,999.99-    99999
+                                         999XX-999999-X  9999 9999 9999   99,999,999.99  999,999,999.99-    99999
+                                         999XX-999999-X  9999 9999 9999   99,999,999.99  999,999,999.99-    99999
+                                         999XX-999999-X  9999 9999 9999   99,999,999.99  999,999,999.99-    99999
+                                         999XX-999999-X  9999 9999 9999   99,999,999.99  999,999,999.99-    99999
+          XXX XXXXXXXXXXXXXXXXXXXXXXXXX  999XX-999999-X  9999 9999 9999   99,999,999.99  999,999,999.99-    99999
+                                                                          -------------  ---------------
+                                                                          99,999,999.99  999,999,999.99-
+
+                                                                          =============  ===============
+                                                                          99,999,999.99  999,999,999.99-
+@ENDIF
+

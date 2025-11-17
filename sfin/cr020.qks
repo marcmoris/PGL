@@ -1,0 +1,794 @@
+;/T/ Gestion des Lot    
+;
+;//M/GRA01/Francois Richard/1999-06-18
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur..: Alain Côté
+;    Date Création: 25 mai 1993
+;
+;    Description..: Cet écran permet de définir les lots de transactions
+;                   pour les recevable. Les autorisations de journalisations
+;                   sont gérées dans cet écran.
+;
+;                   Cet écran est utilisé par les lots de facture et les
+;                   lots d'encaissement la seul chose qui est différente sont
+;                   les type de lot (FA,EN,...)
+;
+;/M/ François Déry, 30 avril 1999
+;       Modifier l'accèss au fichier de séquence car il a
+;       été converti en format interbase au lieu d'indexé.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cr020 ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU, &
+                       T_CIENOM   , &
+                       T_PECCLEMNU, &
+                       T_PECCLECOU, &
+                       T_PECCLEFND, &
+                       T_LCRCLEFND
+
+TEMPORARY T_PECCLECOU_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_FIELDTEXT_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+USE ussectmp  NOLIST
+    "CR020"
+
+USE cr020.hlp NOLIST
+
+USE usactecr  NOLIST
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Vérification                    " ACTION DESIGNER D001
+@ELSE
+ACTIONMENU LABEL "Subscreens"
+  MENUITEM LABEL "Verification                    " ACTION DESIGNER D001
+@ENDIF
+
+;
+; Il faut ouvrir une nouvelle transation, car cet écran est appellé comme
+; sous-écran dans les transactions(facture, encaissement).
+;
+USE ustrasse NOLIST
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE CRLCR_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4 ; Numéro de compagnie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40; Nom de la compagnie du menu.
+
+TEMPORARY T_PECCLEMNU CHARACTER SIZE 4 ; Période du menu
+TEMPORARY T_PECCLECOU CHARACTER SIZE 4 ; Période courante du module C/R.
+TEMPORARY T_PECCLEFND CHARACTER SIZE 4 ; Période de recherche.
+TEMPORARY T_LCRCLEFND CHARACTER SIZE 4 ; Numéro de lot de recherche.
+
+
+;-------------------------------------------------------------------------------
+;
+
+FILE CRLOT            PRIMARY
+  ITEM CIECLE    OF CRLOT INITIAL T_CIECLEMNU
+  ITEM LCRDATCRE OF CRLOT INITIAL SYSDATE
+  ITEM LCRHRECRE OF CRLOT INITIAL SYSTIME / 10000
+  ITEM LCRUSRCRE OF CRLOT INITIAL LOGONID
+  ITEM LCRDATMOD OF CRLOT FINAL   SYSDATE        &
+                                        IF NOT NEWRECORD OF CRLOT AND &
+                                           ALTEREDRECORD OF CRLOT
+  ITEM LCRHREMOD OF CRLOT FINAL   SYSTIME / 10000 &
+                                        IF NOT NEWRECORD OF CRLOT AND &
+                                           ALTEREDRECORD OF CRLOT
+  ITEM LCRUSRMOD OF CRLOT FINAL   LOGONID         &
+                                        IF NOT NEWRECORD OF CRLOT AND &
+                                           ALTEREDRECORD OF CRLOT
+
+;
+; Pour valider et afficher l'usager.
+;
+FILE GSUSAGER         DESIGNER &
+                      OPEN READ
+
+;
+; Numéro séquentiel des lots.
+;
+FILE CRLCR_SEQ        DESIGNER &
+                      TRANSACTION GEN_NUM_SEQ
+;
+; Validation de la période spécifique à la compagnie.
+;
+FILE MCPERIODE_CIE    REFERENCE
+
+  ACCESS  VIA   CIECLE, &
+                PECCLE &
+          USING CIECLE OF CRLOT, &
+                PECCLE OF CRLOT
+
+;
+; Validation du type d'écriture.
+;
+DEFINE    D_LCRTYPECR CHARACTER SIZE 16 = "LCRTYPECR"
+TEMPORARY T_LCRTYPECR CHARACTER SIZE 4
+;
+FILE VCBI_DSC         REFERENCE
+  ACCESS VIA XELNOM, &
+             CBICLE  &
+         USING D_LCRTYPECR, &
+               LCRTYPECR OF CRLOT
+
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_USRCLE    CHARACTER SIZE 12 ; Popup sur les usagers
+TEMPORARY T_PECCLE    CHARACTER SIZE  4 ; Popup sur les périodes
+TEMPORARY T_MODCLE    CHARACTER SIZE  2 ; Popup sur les périodes
+
+;
+; Pour afficher le nom des usagers.
+;
+TEMPORARY T_LCRUSR_NOM    CHARACTER SIZE 40
+TEMPORARY T_LCRUSRVAL_NOM CHARACTER SIZE 40
+TEMPORARY T_LCRUSRJOU_NOM CHARACTER SIZE 40
+TEMPORARY T_LCRUSRATR_NOM CHARACTER SIZE 40
+
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER(T_CIENOM)
+
+;
+; Calcul de l'écart entre le montant vérifier et le montant cumulé dans le
+; lot.
+;
+DEFINE D_DIFMNTTRS FLOAT   SIZE 8 = LCRCUMMNTVER OF CRLOT - &
+                                    LCRCUMMNT    OF CRLOT
+;
+; Calcul de l'écart entre le nombre vérifier et le nombre cumulé dans le
+; lot.
+;
+DEFINE D_DIFNBRTRS INTEGER SIZE 2 = LCRNBRTRSVER OF CRLOT - &
+                                    LCRNBRTRS    OF CRLOT
+;
+; Hors balance.
+;
+DEFINE D_HRSBLC CHARACTER SIZE 20 = &
+@IF FRANCAIS
+                                    "*** Hors Balance ***" &
+@ELSE
+                                    "** Out of balance **" &
+@ENDIF
+                                    IF  0 <> LCRNBRTRSERR OF CRLOT
+
+
+;-------------------------------------------------------------------------------
+
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Gestion des lots " &
+@ELSE
+      " Batch Management " &
+@ENDIF
+      CENTERED AT ,1
+
+SKIP
+
+USE ustitoff NOLIST
+
+ALIGN (19,3,19) (,40,56)
+
+FIELD PECCLE OF CRLOT HIDDEN ID 05 &
+LABEL "Période ......:"&
+        DEFAULT T_PECCLEMNU &
+        NOCHANGE &
+        DUPLICATE &
+        LOOKUP ON MCPERIODE_CIE &
+          MESSAGE 606 ; Cette période n'existe pas.
+
+FIELD LCRCLE     OF CRLOT &
+LABEL "Lot...........:"&
+        DISPLAY &
+        NUMERIC &
+        SIGNIFICANCE 4
+
+SKIP 1
+
+ALIGN (19,3,19)
+
+FIELD LCRDSC     OF CRLOT HIDDEN ID 10 &
+LABEL "Description...:"
+
+
+SKIP 1
+
+ALIGN (19,3,19) (,,22)
+
+FIELD LCRTYPECR  OF CRLOT HIDDEN ID 15 &
+LABEL "Type de lot...:"&
+        REQUIRED &
+        NOCHANGE &
+        DUPLICATE &
+        LOOKUP ON VCBI_DSC &
+          MESSAGE 609 ; Ce type d'ecriture est invalide
+
+FIELD CBIDSC OF VCBI_DSC &
+        DISPLAY
+
+ALIGN (19,3,19) (,,32)
+
+FIELD LCRUSR     OF CRLOT HIDDEN ID 20 &
+LABEL "Usager........:"&
+        DEFAULT LOGONID &
+        DUPLICATE &
+        LOOKUP ON GSUSAGER &
+          VIA USRCLE &
+          USING LCRUSR OF CRLOT &
+          MESSAGE 610 ; Cette usager est inexistant
+
+FIELD T_LCRUSR_NOM &
+        DISPLAY
+
+SKIP 1
+
+FIELD LCRDATVAL  OF CRLOT  FORMAT YYYYMMDD PATTERN "####/##/##" HIDDEN ID 25 &
+        DISPLAY
+SKIP
+FIELD LCRUSRVAL  OF CRLOT HIDDEN ID 30 &
+        DISPLAY
+
+FIELD T_LCRUSRVAL_NOM &
+        DISPLAY
+
+SKIP 1
+
+ALIGN (19,3,19) (,,24)
+
+FIELD LCRATRJOU  OF CRLOT HIDDEN ID 35 &
+        NOENTRY &
+        SIZE 3
+HILITE DISPLAY OFF
+
+FIELD D_HRSBLC &
+        DISPLAY &
+        HILITE DISPLAY INVERSE BLINKING IF D_HRSBLC <> ""
+
+USE ushilite NOLIST
+
+ALIGN (19,3,19) (,,32)
+FIELD LCRUSRATR OF CRLOT HIDDEN ID 40 &
+        DISPLAY
+
+FIELD T_LCRUSRATR_NOM &
+        DISPLAY
+
+SKIP 1
+
+ALIGN(19,3,19) (,,32)
+FIELD LCRDATJOU  OF CRLOT  FORMAT YYYYMMDD PATTERN "####/##/##" HIDDEN ID 45 &
+        DISPLAY
+FIELD LCRHREJOU  OF CRLOT &
+        DISPLAY
+
+ALIGN (19,3,19) (,,32)
+FIELD LCRUSRJOU OF CRLOT HIDDEN ID 50 &
+        DISPLAY
+
+FIELD T_LCRUSRJOU_NOM &
+        DISPLAY
+
+SKIP
+
+DRAW ,1 TO ,80
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+      "    Vérifié            Cumulé             Ecart" &
+@ELSE
+      "   Verified          Totalled           %%ecart" &
+@ENDIF
+      AT ,21
+
+SKIP
+
+ALIGN(19,3,19) (,,37) (,,55)
+FIELD LCRCUMMNTVER OF CRLOT HIDDEN ID 55 &
+@IF FRANCAIS
+        LABEL "Montant total.:"
+@ELSE
+        LABEL "Total amount..:"
+@ENDIF
+
+FIELD LCRCUMMNT    OF CRLOT &
+        DISPLAY
+
+FIELD D_DIFMNTTRS &
+        DISPLAY &
+        PICTURE "^^,^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5
+
+ALIGN(19,3,24) (,,42) (,,60)
+FIELD LCRNBRTRSVER OF CRLOT HIDDEN ID 60 &
+@IF FRANCAIS
+        LABEL "Nombre total..:"
+@ELSE
+        LABEL "Total number..:"
+@ENDIF
+
+FIELD LCRNBRTRS    OF CRLOT &
+        DISPLAY
+
+FIELD D_DIFNBRTRS &
+        DISPLAY &
+        PICTURE "^,^^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 2
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT PECCLE
+BEGIN
+  ;
+  ; Popup sur les périodes.
+  ;
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PECCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    LET T_MODCLE = "CR"
+    RUN SCREEN mc109 PASSING T_CIECLEMNU, T_PECCLE, T_MODCLE MODE F
+    LET FIELDTEXT = TRUNC(T_PECCLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du statut de la période.
+;
+;
+PROCEDURE EDIT PECCLE
+BEGIN
+
+  ; Ajustement pour le changement de siècle
+  IF FIELDTEXT[1:1] < "8"
+  THEN LET T_FIELDTEXT_SIE = "1" + FIELDTEXT
+  ELSE LET T_FIELDTEXT_SIE = "0" + FIELDTEXT
+
+  ; Ajustement pour le changement de siècle
+  IF T_PECCLECOU[1:1] < "8"
+  THEN LET T_PECCLECOU_SIE = "1" + T_PECCLECOU
+  ELSE LET T_PECCLECOU_SIE = "0" + T_PECCLECOU
+
+  IF T_FIELDTEXT_SIE < T_PECCLECOU_SIE
+  THEN ERROR 607 ; Cette periode est fermée.
+
+  IF FIELDTEXT <> T_PECCLECOU
+  THEN WARNING 608 ; Cette periode diffère de la période courante.
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les types de lot(code bilingue).
+;
+;
+PROCEDURE INPUT LCRTYPECR
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_LCRTYPECR = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_LCRTYPECR, T_LCRTYPECR
+    LET FIELDTEXT = TRUNC(T_LCRTYPECR)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les usagers.
+;
+;
+PROCEDURE INPUT LCRUSR
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_USRCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gs104 PASSING T_USRCLE MODE F
+    LET FIELDTEXT = TRUNC(T_USRCLE)
+  END
+END
+
+
+;------------------------------------------------------------------------------
+;
+;
+; Seul l'usager affecter au lot peut le donner a un autre lot
+;
+;
+PROCEDURE EDIT LCRUSR
+BEGIN
+  IF NOT ENTRYMODE
+  THEN BEGIN
+    IF FIELDTEXT <> OLDVALUE(LCRUSR OF CRLOT) AND &
+       LOGONID   <> OLDVALUE(LCRUSR OF CRLOT)
+    THEN ERROR 613 ; seul l'usager du lot peut le reaffecter a une autre usager
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Pour afficher le nom de l'usager du lot(Utilisateur).
+;
+;
+PROCEDURE OUTPUT T_LCRUSR_NOM
+BEGIN
+  GET GSUSAGER VIA USRCLE &
+               USING LCRUSR OF CRLOT &
+               OPTIONAL
+  LET FIELDTEXT = USREMPNOM OF GSUSAGER
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Pour afficher le nom de l'usager de validation.
+;
+;
+PROCEDURE OUTPUT T_LCRUSRVAL_NOM
+BEGIN
+  GET GSUSAGER VIA USRCLE &
+               USING LCRUSRVAL OF CRLOT &
+               OPTIONAL
+  LET FIELDTEXT = USREMPNOM OF GSUSAGER
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; On transpose les valeurs O et N en valeurs 1 et 0.
+;
+;
+PROCEDURE INPUT LCRATRJOU
+BEGIN
+  USE usflginp NOLIST
+END
+
+
+; Procédure permettant de valider que le lot est validé avant d'être autorisé.
+;
+PROCEDURE EDIT LCRATRJOU
+BEGIN
+  IF LCRDATVAL OF CRLOT = 0 AND FIELDTEXT = "1"
+  THEN ERROR 727 ; Le lot doit être validé avant de l'autoriser.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; On conserve dans le lot le nom de l'usager qui a autorisé le lot
+;
+;
+PROCEDURE PROCESS LCRATRJOU
+BEGIN
+  IF FIELDTEXT = "1"
+  THEN LET LCRUSRATR OF CRLOT = LOGONID
+  ELSE LET LCRUSRATR OF CRLOT = " "
+  DISPLAY LCRUSRATR OF CRLOT
+  DISPLAY T_LCRUSRATR_NOM
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; On affiche les valeurs 1 et 0 sous la forme Oui et Non.
+;
+;
+PROCEDURE OUTPUT LCRATRJOU
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Pour afficher le nom de l'usager qui a autorisé le lot.
+;
+;
+PROCEDURE OUTPUT T_LCRUSRATR_NOM
+BEGIN
+  GET GSUSAGER VIA USRCLE &
+               USING LCRUSRATR OF CRLOT &
+               OPTIONAL
+  LET FIELDTEXT = USREMPNOM OF GSUSAGER
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Pour afficher le nom de l'usager qui a journalisé le lot.
+;
+;
+PROCEDURE OUTPUT T_LCRUSRJOU_NOM
+BEGIN
+  GET GSUSAGER VIA USRCLE &
+               USING LCRUSRJOU OF CRLOT &
+               OPTIONAL
+  LET FIELDTEXT = USREMPNOM OF GSUSAGER
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du nombre de décimal saisie par l'usager.
+;
+;
+PROCEDURE EDIT LCRCUMMNTVER
+BEGIN
+  USE usvaldec NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; On peut modifier le montant vérifié seulement si l'usager
+; est l'utilisateur du lot et qu'il n'y a aucune transaction de saisie
+; sur le lot.
+;
+;
+PROCEDURE DESIGNER 55
+BEGIN
+  IF     LOGONID = LCRUSR OF CRLOT &
+     AND LCRNBRTRS OF CRLOT = 0
+  THEN ACCEPT LCRCUMMNTVER OF CRLOT
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; On peut modifier le nombre vérifié seulement si l'usager
+; est l'utilisateur du lot et qu'il n'y a aucune transaction de saisie
+; sur le lot.
+;
+;
+PROCEDURE DESIGNER 60
+BEGIN
+  IF     LOGONID = LCRUSR OF CRLOT &
+     AND LCRNBRTRS OF CRLOT = 0
+  THEN ACCEPT LCRNBRTRSVER OF CRLOT
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Vérification
+;
+;
+PROCEDURE DESIGNER D001
+BEGIN
+  RUN SCREEN cr020a PASSING CRLOT
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Le path suivant tient compte de la période et du lot reçu en paramètres.
+;
+;
+PROCEDURE PATH
+BEGIN
+  IF T_PECCLEFND = ""
+  THEN BEGIN
+    REQUEST PECCLE OF CRLOT
+    IF PROMPTOK
+    THEN REQUEST LCRCLE OF CRLOT
+    IF PROMPTOK
+    THEN LET PATH = 1
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST PECCLE OF CRLOT
+      IF PROMPTOK
+      THEN LET PATH = 2
+    END
+    IF PATH = 0
+    THEN LET PATH = 3
+  END
+  ELSE LET PATH = 99
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Find spécial du au path 99.
+;
+;
+PROCEDURE FIND
+BEGIN
+  IF PATH = 1
+  THEN GET CRLOT VIA CIECLE, &
+                     PECCLE, &
+                     LCRCLE  &
+                 USING T_CIECLEMNU, &
+                       PECCLE OF CRLOT, &
+                       LCRCLE OF CRLOT  &
+                 ORDERBY PECCLE, &
+                         LCRCLE
+  IF PATH = 2
+  THEN GET CRLOT VIA CIECLE, &
+                     PECCLE  &
+                 USING T_CIECLEMNU, &
+                       PECCLE OF CRLOT &
+                 ORDERBY PECCLE, &
+                         LCRCLE
+  IF PATH = 3
+  THEN GET CRLOT VIA CIECLE     &
+                 USING T_CIECLEMNU &
+                 ORDERBY PECCLE, &
+                         LCRCLE
+  IF PATH = 99
+  THEN GET CRLOT VIA CIECLE, &
+                     PECCLE, &
+                     LCRCLE  &
+                 USING T_CIECLEMNU, &
+                       T_PECCLEFND, &
+                       T_LCRCLEFND  &
+                 ORDERBY PECCLE, &
+                         LCRCLE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF CRLOT &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF CRLOT &
+     AND NOT NEWRECORD     OF CRLOT &
+     AND NOT DELETEDRECORD OF CRLOT &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  IF LCRDATJOU OF CRLOT <> 0
+  THEN ERROR 614 ; Impossible de mettre à jour le lot est journalisé
+
+  IF DELETEDRECORD OF CRLOT AND &
+     LCRNBRTRS OF CRLOT <> 0
+  THEN ERROR 647 ;Vous ne pouvez pas supprimer un lot qui a des transactions.
+
+  IF 0 = SIZE( TRUNCATE( LCRCLE OF CRLOT ) )
+  THEN BEGIN
+    ;
+    ; Attribution du numéro de lot selon la cie et la periode
+    ; dans la table CRLCR_SEQ se trouve le dernier numero de lot
+    ; utilisé.
+    ;
+    START TRANSACTION GEN_NUM_SEQ
+    GET CRLCR_SEQ VIA CIECLE, &
+                      PECCLE     &
+                  USING CIECLE OF CRLOT,&
+                        PECCLE OF CRLOT &
+                  OPTIONAL
+    LET CIECLE    OF CRLCR_SEQ = CIECLE    OF CRLOT
+    LET PECCLE    OF CRLCR_SEQ = PECCLE    OF CRLOT
+    LET LRSNUMSEQ OF CRLCR_SEQ = LRSNUMSEQ OF CRLCR_SEQ + 1
+
+    LET LCRCLE OF CRLOT = ASCII(LRSNUMSEQ OF CRLCR_SEQ,LRSLONNUM OF CRLCR_SEQ)
+    PUT CRLCR_SEQ
+    COMMIT TRANSACTION GEN_NUM_SEQ
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Pour afficher le numéro de lot nouvellement créé et que l'écran ne s'afface
+; pas.
+;
+;
+PROCEDURE POSTUPDATE
+BEGIN
+  IF CORRECTMODE
+  THEN BEGIN
+    DISPLAY LCRCLE OF CRLOT
+    WARNING = " "
+  END
+END
+
+
+BUILD
+
+;
+;xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+;******************************* Gestion des lots *******************************
+;* Période ......: xxxxx                Lot...........: xxxx                    *
+;*                                                                              *
+;* Description...: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+;*                                                                              *
+;* Type de lot...: xx xxxxxxxxxxxxxxxxxxxxxxxxx                                 *
+;* Usager........: xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        *
+;*                                                                              *
+;* Vérifié le....: xxxxxxxx                                                     *
+;* Vérifié par...: xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        *
+;*                                                                              *
+;* Autorisé......: xxx  xxxxxxxxxxxxxxxxxxxx                                    *
+;* Autorisé par..: xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        *
+;*                                                                              *
+;* Journalisé le.: xxxxxxxx xxxxx                                               *
+;* Journalisé par: xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        *
+;********************************************************************************
+;*                       Vérifié            Cumulé             Ecart            *
+;* Montant total.: xxxxxxxxxxxxxx    xxxxxxxxxxxxxx    xxxxxxxxxxxxxx           *
+;* Nombre total..:      xxxxx             xxxxx             xxxxxx              *
+;********************************************************************************

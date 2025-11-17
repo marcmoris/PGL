@@ -1,0 +1,1109 @@
+;/T/ Impression de l'inventaire physique des caissons avec valorisation
+;
+;/P/ Programmeur..: René Bonneau
+;    Date Création: 1996-06-12
+;
+;    Description..: Le but de cette unité de traitement est d'imprimer
+;                   la liste de valorisation des caissons de tranches,
+;                   de diagrammes et de produits de dimension
+;                   de l'inventaire de caissons de granit de Granicor.
+;
+;    Paramètres....:
+;
+;/M/ François Déry, 6 mai 1999
+;       Correction du lien sur record 1 de unix à vax
+;
+;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;-------------------------------------------------------------------------------
+;
+; initialisation des paramètres globales de QUIZ.
+;
+CANCEL CLEAR
+
+USE ussetqzs NOLIST
+;==============================================================================
+;
+; TROUVE LA PERIODE COMPTABLE
+;
+ACCESS MCPERIODE_CTB
+
+SELECT IF PECCLE OF MCPERIODE_CTB[1:2] = ASCII(SYSDATE)[3:2]
+
+DEFINE D-ANNEE CHARACTER SIZE 4 = ASCII(SYSDATE)[1:4]
+
+SORT ON D-ANNEE
+
+SET SUBFILE NAME WIG316Z AT D-ANNEE
+
+REPORT SUMMARY &
+  D-ANNEE
+
+BUILD ig316z
+
+;==============================================================================
+;
+; Recherche des diagrammes en inventaire
+;
+ACCESS PDCAISSON &
+
+  LINK CAINUMCAI        OF PDCAISSON,           &
+       CIECLE           OF PDCAISSON            &
+    TO CAINUMCAI,                               &
+       CIECLE           OF PDEMBAL_DIAG         &
+
+  LINK DIANUM002        OF PDEMBAL_DIAG,        &
+       CIECLE           OF PDEMBAL_DIAG         &
+    TO DIANUM002,                               &
+       CIECLE           OF PDDIAGRAMME          &
+
+  LINK TGRCODGRA        OF PDDIAGRAMME,         &
+       CIECLE           OF PDDIAGRAMME          &
+    TO TGRCODGRA,                               &
+       CIECLE           OF PDTYPE_GRANIT        &
+
+  LINK TYFCODFIN        OF PDDIAGRAMME,         &
+       CIECLE           OF PDDIAGRAMME          &
+    TO TYFCODFIN,                               &
+       CIECLE           OF PDTYPE_FINI          &
+
+ LINK TO RECORD (0) OF *WIG316Z
+
+
+CHOOSE CIECLE PARM
+
+SELECT PDCAISSON IF CAISTU      OF PDCAISSON = "I"  AND &
+                   (CAIETA      OF PDCAISSON = "F"   OR &
+                    CAIETA      OF PDCAISSON = "C") AND &
+                    TPDTYPPRD   OF PDCAISSON = "DI"
+
+
+DEFINE D-NBRE-CAISSON   INTEGER SIZE 2 = 1
+
+DEFINE D-SURFACE        FLOAT SIZE 8 = &
+                        ROUND(DIASURMC2 OF PDDIAGRAMME * &
+                              EMDQTEPRD OF PDEMBAL_DIAG * 10000,4)
+
+DEFINE D-VOLUME         FLOAT SIZE 8 = &
+                        ROUND(DIASURMC2 OF PDDIAGRAMME * &
+                              (DIAEPA    OF PDDIAGRAMME / 1000 ) * &
+                              EMDQTEPRD OF PDEMBAL_DIAG * 10000 ,4)
+
+DEFINE D-NUMERO-PIECE   CHARACTER SIZE 12 = DIANUMDIA002 OF PDDIAGRAMME
+
+DEFINE D-QUANTITE       CHARACTER SIZE 7 = ASCII(EMDQTEPRD OF PDEMBAL_DIAG)
+
+DEFINE D-EPAISSEUR      CHARACTER SIZE 4 = ASCII(DIAEPA OF PDDIAGRAMME)
+
+;DEFINE D-POIDS-KG       INTEGER SIZE 4 PIC "^^^,^^^.^^^kg" SIGNIF 8 = &
+;                        CAIPOIEST OF PDCAISSON * 1000 &
+;                IF CAIPOIREE OF PDCAISSON = 0 &
+;                ELSE &
+;                        CAIPOIREE OF PDCAISSON * 1000
+
+DEFINE D-POIDS-KG       INTEGER SIZE 4 = CAIPOIEST OF PDCAISSON  &
+                IF CAIPOIREE OF PDCAISSON = 0 &
+                ELSE &
+                        CAIPOIREE OF PDCAISSON
+
+;SORT ON PJTNUMPRO OF PDCAISSON   &
+;     ON CAINUMCAI OF PDCAISSON   &
+;     ON D-NUMERO-PIECE
+SORT ON COMNUMCOM OF PDCAISSON   &
+     ON CAINUMCAI OF PDCAISSON   &
+     ON D-NUMERO-PIECE
+
+SET SUBFILE NAME WIG316Z1 keep
+
+REPORT SUMMARY                  &
+  CIECLE        OF PDCAISSON    &
+  CAINUMCAI     OF PDCAISSON    &
+  PJTABR        OF PDCAISSON    &
+  PJTANN        OF PDCAISSON    &
+  PJTNUMSEQ     OF PDCAISSON    &
+  COMNUMCOMINT  OF PDCAISSON    &
+  PJTNUMPRO     OF PDCAISSON    &
+  D-NUMERO-PIECE                &
+  D-QUANTITE                    &
+  TGRCODGRA     OF PDDIAGRAMME  &
+  TGRCOUGRA     OF PDTYPE_GRANIT &
+  TYFCODFIN     OF PDDIAGRAMME  &
+  TYFFACPOL     OF PDTYPE_FINI  &
+  TYFFACBRU     OF PDTYPE_FINI  &
+  D-EPAISSEUR                   &
+  TPDTYPPRD     OF PDCAISSON    &
+  D-SURFACE                     &
+  D-VOLUME                      &
+  D-POIDS-KG                    &
+  D-NBRE-CAISSON SUBTOTAL RESET AT CAINUMCAI OF PDCAISSON &
+  D-ANNEE                       &
+  COMNUMCOM     OF PDDIAGRAMME
+
+BUILD ig316z1
+
+;===============================================================================
+;
+; Recherche des tranches en inventaire
+;
+ACCESS PDCAISSON                                &
+
+  LINK CAINUMCAI        OF PDCAISSON,           &
+       CIECLE           OF PDCAISSON            &
+    TO CAINUMCAI,                               &
+       CIECLE           OF PDEMBAL_TRANCHE      &
+
+  LINK TRANUMTRA002     OF PDEMBAL_TRANCHE,     &
+       CIECLE           OF PDEMBAL_TRANCHE      &
+    TO TRANUMTRA002,                            &
+       CIECLE           OF PDTRANCHE            &
+
+  LINK TGRCODGRA        OF PDTRANCHE,           &
+       CIECLE           OF PDTRANCHE            &
+    TO TGRCODGRA,                               &
+       CIECLE           OF PDTYPE_GRANIT        &
+
+  LINK TYFCODFIN        OF PDTRANCHE,           &
+       CIECLE           OF PDTRANCHE            &
+    TO TYFCODFIN,                               &
+       CIECLE           OF PDTYPE_FINI          &
+
+  LINK TO RECORD (0) OF *WIG316Z
+
+
+CHOOSE CIECLE PARM
+
+SELECT PDCAISSON IF CAISTU      OF PDCAISSON = "I"  AND &
+                   (CAIETA      OF PDCAISSON = "F"   OR &
+                    CAIETA      OF PDCAISSON = "C") AND &
+                    TPDTYPPRD   OF PDCAISSON = "TR"
+
+DEFINE D-NBRE-CAISSON   INTEGER SIZE 1 = 1
+
+DEFINE D-EPAISSEUR      CHARACTER SIZE 4 = &
+                        ASCII(TRAEPA OF PDTRANCHE)
+
+DEFINE D-SURFACE        FLOAT SIZE 8 = &
+                        (EMTLONVEN OF PDEMBAL_TRANCHE * &
+                         EMTHAUVEN OF PDEMBAL_TRANCHE) / 100
+
+DEFINE D-VOLUME         FLOAT SIZE 8 = &
+                        D-SURFACE * (EMTEPAVEN OF PDEMBAL_TRANCHE / 1000)
+
+DEFINE D-NUMERO-PIECE   CHARACTER SIZE 12 = "SL-" + TRANUMTRA002
+
+DEFINE D-QUANTITE       CHARACTER SIZE 7 = "1"
+
+;DEFINE D-POIDS-KG       INTEGER SIZE 4 PIC "^^^,^^^.^^^kg" SIGNIF 8 = &
+;                        CAIPOIEST OF PDCAISSON * 1000 &
+;                IF CAIPOIREE OF PDCAISSON = 0 &
+;                ELSE &
+;                        CAIPOIREE OF PDCAISSON * 1000
+
+DEFINE D-POIDS-KG       INTEGER SIZE  4 = CAIPOIEST OF PDCAISSON  &
+                IF CAIPOIREE OF PDCAISSON = 0 &
+                ELSE &
+                        CAIPOIREE OF PDCAISSON
+
+
+;DEFINE D-COMNUMCOM CHARACTER SIZE 7 = ""
+
+;SORT ON PJTNUMPRO OF PDCAISSON  &
+;     ON CAINUMCAI OF PDCAISSON  &
+;     ON D-NUMERO-PIECE
+SORT ON COMNUMCOM OF PDCAISSON  &
+     ON CAINUMCAI OF PDCAISSON  &
+     ON D-NUMERO-PIECE
+
+SET SUBFILE NAME WIG316Z1 APPEND
+
+REPORT SUMMARY                  &
+  CIECLE        OF PDCAISSON    &
+  CAINUMCAI     OF PDCAISSON    &
+  PJTABR        OF PDCAISSON    &
+  PJTANN        OF PDCAISSON    &
+  PJTNUMSEQ     OF PDCAISSON    &
+  COMNUMCOMINT  OF PDCAISSON    &
+  PJTNUMPRO     OF PDCAISSON    &
+  D-NUMERO-PIECE                &
+  D-QUANTITE                    &
+  TGRCODGRA     OF PDTRANCHE    &
+  TGRCOUGRA     OF PDTYPE_GRANIT &
+  TYFCODFIN     OF PDTRANCHE    &
+  TYFFACPOL     OF PDTYPE_FINI  &
+  TYFFACBRU     OF PDTYPE_FINI  &
+  D-EPAISSEUR                   &
+  TPDTYPPRD     OF PDCAISSON    &
+  D-SURFACE                     &
+  D-VOLUME                      &
+  D-POIDS-KG                    &
+  D-NBRE-CAISSON SUBTOTAL RESET AT CAINUMCAI OF PDCAISSON &
+  D-ANNEE                       &
+  COMNUMCOM OF PDCAISSON
+;D-COMNUMCOM
+
+BUILD ig316z2
+;----------------PARTIE 2
+;===============================================================================
+;
+; Recherche des caissons de produits de dimension en inventaire
+;
+ACCESS PDCAISSON &
+
+   LINK CAINUMCAI       OF PDCAISSON,           &
+        CIECLE          OF PDCAISSON            &
+     TO CAINUMCAI,                              &
+        CIECLE          OF PDEMBAL_PROD_DIM     &
+
+   LINK PDILON          OF PDEMBAL_PROD_DIM,    &
+        PDIHAU          OF PDEMBAL_PROD_DIM,    &
+        PDIEPA          OF PDEMBAL_PROD_DIM,    &
+        TGRCODGRA       OF PDEMBAL_PROD_DIM,    &
+        TYFCODFIN       OF PDEMBAL_PROD_DIM,    &
+        CIECLE          OF PDEMBAL_PROD_DIM     &
+     TO PDILON,                                 &
+        PDIHAU,                                 &
+        PDIEPA,                                 &
+        TGRCODGRA,                              &
+        TYFCODFIN,                              &
+        CIECLE          OF PDPROD_DIMENSION     &
+
+   LINK TGRCODGRA       OF PDEMBAL_PROD_DIM,    &
+        CIECLE          OF PDEMBAL_PROD_DIM     &
+     TO TGRCODGRA,                              &
+        CIECLE          OF PDTYPE_GRANIT        &
+
+   LINK TYFCODFIN       OF PDEMBAL_PROD_DIM,    &
+        CIECLE          OF PDEMBAL_PROD_DIM     &
+     TO TYFCODFIN,                              &
+        CIECLE          OF PDTYPE_FINI          &
+
+  LINK TO RECORD (0) OF *WIG316Z
+
+
+CHOOSE CIECLE PARM
+
+SELECT PDCAISSON IF CAISTU      OF PDCAISSON = "I"  AND &
+                   (CAIETA      OF PDCAISSON = "F"   OR &
+                    CAIETA      OF PDCAISSON = "C") AND &
+                    TPDTYPPRD   OF PDCAISSON = "PD"
+
+DEFINE D-NBRE-CAISSON   INTEGER SIZE 1 = 1
+
+DEFINE D-EPAISSEUR      CHARACTER SIZE 4 = &
+                        ASCII(PDIEPA OF PDPROD_DIMENSION)
+
+DEFINE D-SURFACE        FLOAT SIZE 8 = &
+                        ROUND(PDISURMC2 OF PDPROD_DIMENSION * &
+                              EMPQTEPRD OF PDEMBAL_PROD_DIM * 10000,4)
+
+DEFINE D-VOLUME         FLOAT SIZE 8 = &
+                        ROUND(PDIVOLMC3 OF PDPROD_DIMENSION * &
+                             (PDIEPA    OF PDPROD_DIMENSION / 1000 ) * &
+                              EMPQTEPRD OF PDEMBAL_PROD_DIM * 10000,4)
+
+DEFINE D-NUMERO-PIECE   CHARACTER SIZE 12 = ""
+
+DEFINE D-QUANTITE       CHARACTER SIZE 7 = &
+                        ASCII(EMPQTEPRD OF PDEMBAL_PROD_DIM)
+
+;DEFINE D-POIDS-KG       INTEGER SIZE 4 PIC "^^^,^^^.^^^kg" SIGNIF 8 = &
+;                        CAIPOIEST OF PDCAISSON * 1000 &
+;                IF CAIPOIREE OF PDCAISSON = 0 &
+;                ELSE &
+;                        CAIPOIREE OF PDCAISSON * 1000
+
+
+DEFINE D-POIDS-KG       INTEGER SIZE 4 = CAIPOIEST OF PDCAISSON  &
+                IF CAIPOIREE OF PDCAISSON = 0 &
+                ELSE &
+                        CAIPOIREE OF PDCAISSON
+
+;DEFINE D-COMNUMCOM CHARACTER SIZE 7 = ""
+
+;SORT ON PJTNUMPRO OF PDCAISSON &
+;     ON CAINUMCAI OF PDCAISSON &
+;     ON D-NUMERO-PIECE
+SORT ON COMNUMCOM OF PDCAISSON &
+     ON CAINUMCAI OF PDCAISSON &
+     ON D-NUMERO-PIECE
+
+SET SUBFILE NAME WIG316Z1 APPEND
+
+REPORT SUMMARY                          &
+  CIECLE        OF PDCAISSON            &
+  CAINUMCAI     OF PDCAISSON            &
+  PJTABR        OF PDCAISSON            &
+  PJTANN        OF PDCAISSON            &
+  PJTNUMSEQ     OF PDCAISSON            &
+  COMNUMCOMINT  OF PDCAISSON            &
+  PJTNUMPRO     OF PDCAISSON            &
+  D-NUMERO-PIECE                        &
+  D-QUANTITE                            &
+  TGRCODGRA     OF PDEMBAL_PROD_DIM     &
+  TGRCOUGRA     OF PDTYPE_GRANIT        &
+  TYFCODFIN     OF PDEMBAL_PROD_DIM     &
+  TYFFACPOL     OF PDTYPE_FINI          &
+  TYFFACBRU     OF PDTYPE_FINI          &
+  D-EPAISSEUR                           &
+  TPDTYPPRD     OF PDCAISSON            &
+  D-SURFACE                     &
+  D-VOLUME                      &
+  D-POIDS-KG                    &
+  D-NBRE-CAISSON SUBTOTAL RESET AT CAINUMCAI OF PDCAISSON &
+  D-ANNEE                       &
+  COMNUMCOM OF PDCAISSON
+;D-COMNUMCOM &
+
+BUILD ig316z3
+
+;================================================================================
+;
+; Impression du detail des caissons
+;
+ACCESS *WIG316Z1 &
+
+   LINK PJTABR          OF WIG316Z1,    &
+        PJTANN          OF WIG316Z1,    &
+        COMNUMCOMINT    OF WIG316Z1,    &
+        CIECLE          OF WIG316Z1     &
+     TO PJTABR,                         &
+        PJTANN,                         &
+        COMNUMCOMINT,                   &
+        CIECLE          OF PDCOMMAN_INTERNE &
+
+  LINK CIECLE           OF WIG316Z1     &
+    TO CIECLE           OF MCCOMPAGNIE  &
+
+  LINK TO RECORD (0) OF *WIG316Z
+
+;-------------------------------------------------------------------------------
+; Variables obligatoires pour les en-têtes standards.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = PARM
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = ""
+
+;-------------------------------------------------------------------------------
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE  7 = "IG316"
+
+;-------------------------------------------------------------------------------
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM        CHARACTER SIZE 40 = CENTRE (CIENOM OF MCCOMPAGNIE)
+
+DEFINE D-CAISSON        CHARACTER SIZE 19 = &
+                        RJ((TRUNC(D-NUMERO-PIECE) + "= " &
+                        + TRUNC(D-QUANTITE))[1:19])
+
+DEFINE D-NUMERO-CAISSON CHARACTER SIZE 9 = &
+                        CAINUMCAI OF WIG316Z1 &
+                IF D-NBRE-CAISSON OF WIG316Z1 = 1
+
+DEFINE D-TITRE-CAISSON CHARACTER SIZE 20  =  "NUMÉRO CAISSON" &
+                IF D-NBRE-CAISSON OF WIG316Z1 = 1
+
+DEFINE D-TITRE-LIG-CAISSON CHARACTER SIZE 20 = "--------------" &
+                IF D-NBRE-CAISSON OF WIG316Z1 = 1
+
+
+;DEFINE D-NUMERO-PROJET  CHARACTER SIZE  5 = PJTNUMPRO OF PDCAISSON
+
+;DEFINE D-NOM-PROJET     CHARACTER SIZE 32 = &
+;                        COMNOM OF PDCOMMAN_INTERNE &
+;                IF COMNUMCOMINT OF PDCOMMAN_INTERNE <> "000" &
+;                ELSE &
+;                        "DIVERS GENERAL"
+
+; Ajustement pour le changement de siècle
+DEFINE D_PJTANN_SIE1 CHARACTER SIZE 3 = "1" + PJTANN OF WIG316Z1[1:2] &
+         IF PJTANN OF WIG316Z1[1:1] < "8" &
+         ELSE "0" + PJTANN OF WIG316Z1[1:2]
+
+SORT ON D_PJTANN_SIE1  &
+     ON COMNUMCOM OF WIG316Z1  &
+     ON D-ANNEE   OF WIG316Z1  &
+     ON PJTNUMPRO OF WIG316Z1  &
+     ON CAINUMCAI OF WIG316Z1  &
+     ON D-NUMERO-PIECE
+
+DEFINE D-TITRE-CENTRE1 CHARACTER SIZE 80 = &
+        CENTRE ("DETAIL DES CAISSONS DANS LA COUR                                                ")
+
+DEFINE D-TITRE-TEMP2   CHARACTER SIZE 80 = &
+        "NO COMMANDE: " + COMNUMCOM OF WIG316Z1 + " " + COMNOM OF PDCOMMAN_INTERNE ;D-NOM-PROJET
+
+DEFINE D-TITRE-CENTRE2 CHARACTER SIZE 80 = &
+        CENTRE (D-TITRE-TEMP2)
+
+USE ustitgor200_55 NOLIST
+
+SKIP 3 &
+  TAB 025 D-TITRE-CENTRE1 &
+SKIP 1 &
+  TAB 025 D-TITRE-CENTRE2 &
+SKIP 3 &
+;  TAB 003 "NUMÉRO CAISSON" &
+;SKIP 1 &
+;  TAB 003 "--------------" &
+;SKIP 2
+  TAB 003 D-TITRE-CAISSON &
+SKIP &
+  TAB 003 D-TITRE-LIG-CAISSON &
+SKIP 2
+
+;HEADING AT PJTNUMPRO OF WIG316Z1 SKIP PAGE
+HEADING AT COMNUMCOM OF WIG316Z1 SKIP PAGE
+
+REPORT &
+  TAB 003 D-NUMERO-CAISSON &
+  TAB 013 D-CAISSON &
+      RESERVE 4 LINES
+
+FOOTING AT CAINUMCAI OF WIG316Z1  &
+SKIP 2 &
+  TAB 009 "METRE 2:" D-SURFACE   SUBTOTAL PICTURE "^^^,^^^.^^^^" &
+  TAB 039 "METRE 3:" D-VOLUME    SUBTOTAL PICTURE "^^^,^^^.^^^^" &
+  TAB 069 "POIDS:"   D-POIDS-KG PIC "^^^,^^^.^^^^kg" SIGNIF 8 &
+SKIP 1 &
+  TAB 001 &
+"--------------------------------------------------------------------------" &
+  TAB 068 "--------------------------------" &
+SKIP 2
+
+;FOOTING AT PJTNUMPRO OF WIG316Z1  &
+FOOTING AT COMNUMCOM OF WIG316Z1  &
+
+SKIP 2 &
+  TAB 043 "*** RÉSUMÉ DU DE LA COMMANDE ***" SKIP 2 &
+  TAB 010 "METRE 2 EMBALLE"  &
+  TAB 035 "METRE 3 EMBALLE"  &
+  TAB 060 "POIDS TOTAL"  &
+  TAB 082 "NOMBRE CAISSONS" &
+SKIP 2 &
+  TAB 008 D-SURFACE     SUBTOTAL PICTURE "^^^,^^^.^^^^ M2" &
+  TAB 033 D-VOLUME      SUBTOTAL & ;AT CAINUMCAI OF WIG316Z1  &
+                                 PICTURE "^^^,^^^.^^^^ M3" &
+  TAB 058 D-POIDS-KG SUBTOTAL AT CAINUMCAI OF WIG316Z1  &
+                                 PICTURE "^^,^^^,^^^.^^^^kg" &
+  TAB 085 COUNT AT CAINUMCAI OF WIG316Z1  &
+SKIP 3
+
+FINAL FOOTING &
+SKIP 2 &
+  TAB 046 "RÉSUMÉ DES PROJETS" SKIP 2 &
+  TAB 010 "METRE 2 EMBALLE"  &
+  TAB 035 "METRE 3 EMBALLE"  &
+  TAB 060 "POIDS TOTAL"  &
+  TAB 082 "NOMBRE CAISSONS" &
+SKIP 2 &
+  TAB 008 D-SURFACE     SUBTOTAL PICTURE "^^^,^^^.^^^^ M2" &
+  TAB 033 D-VOLUME      SUBTOTAL & ;AT CAINUMCAI OF WIG316Z1  &
+                                 PICTURE "^^^,^^^.^^^^ M3" &
+  TAB 058 D-POIDS-KG SUBTOTAL AT CAINUMCAI OF WIG316Z1  &
+                               PICTURE "^^,^^^,^^^.^^^^kg" &
+  TAB 085 COUNT AT CAINUMCAI OF WIG316Z1
+
+BUILD ig316z4
+
+;==============================================================================
+;
+; Cette etape fait l'impression des caisson de tuile et ecrit dans le
+; sous-fichier WIG316Z1
+;
+
+ACCESS PDCAISSON &
+
+   LINK CAINUMCAI       OF PDCAISSON,           &
+        CIECLE          OF PDCAISSON            &
+     TO CAINUMCAI,                              &
+        CIECLE          OF PDEMBAL_PROD_DIM     &
+
+   LINK PDILON          OF PDEMBAL_PROD_DIM,    &
+        PDIHAU          OF PDEMBAL_PROD_DIM,    &
+        PDIEPA          OF PDEMBAL_PROD_DIM,    &
+        TGRCODGRA       OF PDEMBAL_PROD_DIM,    &
+        TYFCODFIN       OF PDEMBAL_PROD_DIM,    &
+        CIECLE          OF PDEMBAL_PROD_DIM     &
+     TO PDILON,                                 &
+        PDIHAU,                                 &
+        PDIEPA,                                 &
+        TGRCODGRA,                              &
+        TYFCODFIN,                              &
+        CIECLE          OF PDPROD_DIMENSION     &
+
+   LINK TGRCODGRA       OF PDEMBAL_PROD_DIM,    &
+        CIECLE          OF PDEMBAL_PROD_DIM     &
+     TO TGRCODGRA,                              &
+        CIECLE          OF PDTYPE_GRANIT        &
+
+   LINK TYFCODFIN       OF PDEMBAL_PROD_DIM,    &
+        CIECLE          OF PDEMBAL_PROD_DIM     &
+     TO TYFCODFIN,                              &
+        CIECLE          OF PDTYPE_FINI          &
+
+  LINK CIECLE           OF PDCAISSON            &
+    TO CIECLE           OF MCCOMPAGNIE          &
+
+  LINK TO RECORD (0) OF *WIG316Z
+
+
+CHOOSE CIECLE PARM
+
+;-------------------------------------------------------------------------------
+; Variables obligatoires pour les en-têtes standards.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = PARM
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = ""
+
+;-------------------------------------------------------------------------------
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE  7 = "IG316"
+
+;-------------------------------------------------------------------------------
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM        CHARACTER SIZE 40 = CENTRE (CIENOM OF MCCOMPAGNIE)
+
+SELECT PDCAISSON IF TPDTYPPRD     OF PDCAISSON = "PD" AND &
+                   (CAIETA        OF PDCAISSON = "F"   OR &
+                    CAIETA        OF PDCAISSON = "C") AND &
+                    CAISTU        OF PDCAISSON = "I"
+
+DEFINE D-NBRE-CAISSON   INTEGER SIZE 2 = 0
+
+DEFINE D-EPAISSEUR      CHARACTER SIZE 4 = &
+                        ASCII(PDIEPA OF PDEMBAL_PROD_DIM)
+
+DEFINE D-SURFACE        FLOAT SIZE 8 = &
+                        ROUND(PDISURMC2 OF PDPROD_DIMENSION * &
+                         EMPQTEPRD OF PDEMBAL_PROD_DIM * 10000,4)
+
+DEFINE D-VOLUME         FLOAT SIZE 8 = &
+                        ROUND(PDIVOLMC3 OF PDPROD_DIMENSION * &
+                             (PDIEPA    OF PDPROD_DIMENSION / 1000 ) * &
+                              EMPQTEPRD OF PDEMBAL_PROD_DIM * 10000,4)
+
+DEFINE D-NUMERO-PIECE   CHARACTER SIZE 12 = ""
+
+DEFINE D-QUANTITE       CHARACTER SIZE 7 = ""
+
+;DEFINE D-POIDS-KG       INTEGER SIZE 4 PIC "^^^,^^^.^^^kg" SIGNIF 8 = &
+;                        CAIPOIEST OF PDCAISSON * 1000 &
+;                IF CAIPOIREE OF PDCAISSON = 0 &
+;                ELSE &
+;                        CAIPOIREE OF PDCAISSON * 1000
+
+
+DEFINE D-POIDS-KG       INTEGER SIZE 4 = CAIPOIEST OF PDCAISSON  &
+                IF CAIPOIREE OF PDCAISSON = 0 &
+                ELSE &
+                        CAIPOIREE OF PDCAISSON
+
+;DEFINE D-COMNUMCOM CHARACTER SIZE 7 = ""
+
+SORT ON TGRCODGRA OF PDEMBAL_PROD_DIM &
+     ON TYFCODFIN OF PDEMBAL_PROD_DIM &
+     ON D-EPAISSEUR &
+     ON CAINUMCAI OF PDCAISSON
+
+SET SUBFILE NAME WIG316Z1 APPEND
+
+REPORT SUMMARY                          &
+  CIECLE        OF PDCAISSON            &
+  CAINUMCAI     OF PDCAISSON            &
+  PJTABR        OF PDCAISSON    &
+  PJTANN        OF PDCAISSON    &
+  PJTNUMSEQ     OF PDCAISSON    &
+  COMNUMCOMINT  OF PDCAISSON   &
+  PJTNUMPRO     OF PDCAISSON            &
+  D-NUMERO-PIECE                        &
+  D-QUANTITE                            &
+  TGRCODGRA     OF PDEMBAL_PROD_DIM     &
+  TGRCOUGRA     OF PDTYPE_GRANIT        &
+  TYFCODFIN     OF PDEMBAL_PROD_DIM     &
+  TYFFACPOL     OF PDTYPE_FINI          &
+  TYFFACBRU     OF PDTYPE_FINI          &
+  D-EPAISSEUR                           &
+  TPDTYPPRD     OF PDCAISSON            &
+  D-SURFACE                     &
+  D-VOLUME                      &
+  D-POIDS-KG                            &
+  D-NBRE-CAISSON SUBTOTAL RESET AT CAINUMCAI OF PDCAISSON &
+  D-ANNEE                       &
+  COMNUMCOM OF PDCAISSON
+;D-COMNUMCOM
+
+
+DEFINE D-TGRDSCFRA001 CHARACTER SIZE 12 = TGRDSCFRA001 OF PDTYPE_GRANIT[1:12]
+
+DEFINE D-TYFDSCFRA001 CHARACTER SIZE 12 = TYFDSCFRA001 OF PDTYPE_FINI[1:12]
+
+DEFINE D-TITRE-CENTRE CHARACTER SIZE 80 = &
+        CENTRE ("INVENTAIRE DES PRODUITS DE DIMENSION PAR CAISSON                                ")
+
+USE ustitgor200_55 NOLIST
+
+SKIP 3 &
+  TAB 025 D-TITRE-CENTRE  &
+SKIP 4 &
+  TAB 003 "NUMÉRO CAISSON   TYPE GRANIT    TYPE FINI      EPAI  LONG  HAUT    QUANTITÉE  SURFACE VENTE  POID CAISSON " &
+SKIP 1 &
+  TAB 003 "--------------   -----------    ---------      ----  ----  ----    ---------  -------------  ------------" &
+SKIP 2
+
+FOOTING AT CAINUMCAI OF PDCAISSON               &
+  TAB 003 CAINUMCAI     OF PDCAISSON            &
+  TAB 020 D-TGRDSCFRA001                        &
+  TAB 035 D-TYFDSCFRA001                        &
+  TAB 050 PDIEPA        OF PDEMBAL_PROD_DIM     &
+  TAB 056 PDILON        OF PDEMBAL_PROD_DIM     &
+  TAB 062 PDIHAU        OF PDEMBAL_PROD_DIM     &
+  TAB 068 EMPQTEPRD     OF PDEMBAL_PROD_DIM     PICTURE "^^^,^^^,^^^" &
+  TAB 081 D-SURFACE                             PICTURE "^^^,^^^.^^^^" &
+  TAB 096 D-POIDS-KG PIC "^^^,^^^.^^^^kg" SIGNIF 8
+
+FOOTING AT D-EPAISSEUR SKIP 2
+FINAL FOOT &
+SKIP 1 &
+  TAB 068 "-----------" &
+  TAB 081 "------------" &
+SKIP 1 &
+  TAB 035 "TOTAL:" &
+  TAB 042 COUNT "CAISSONS" &
+  TAB 068 EMPQTEPRD OF PDEMBAL_PROD_DIM SUBTOTAL PICTURE "^^^,^^^,^^^" &
+  TAB 081 D-SURFACE                     SUBTOTAL PICTURE "^^^,^^^.^^^^"
+
+BUILD ig316z5
+
+;==============================================================================
+;
+; Cette etape ecrit dans le sous-fichier WIG316Z1
+;
+
+ACCESS PDCAISSON &
+
+   LINK CAINUMCAI       OF PDCAISSON,           &
+        CIECLE          OF PDCAISSON            &
+     TO CAINUMCAI,                              &
+        CIECLE          OF PDEMBAL_PROD_DIM     &
+
+   LINK PDILON          OF PDEMBAL_PROD_DIM,    &
+        PDIHAU          OF PDEMBAL_PROD_DIM,    &
+        PDIEPA          OF PDEMBAL_PROD_DIM,    &
+        TGRCODGRA       OF PDEMBAL_PROD_DIM,    &
+        TYFCODFIN       OF PDEMBAL_PROD_DIM,    &
+        CIECLE          OF PDEMBAL_PROD_DIM     &
+     TO PDILON,                                 &
+        PDIHAU,                                 &
+        PDIEPA,                                 &
+        TGRCODGRA,                              &
+        TYFCODFIN,                              &
+        CIECLE          OF PDPROD_DIMENSION     &
+
+   LINK TGRCODGRA       OF PDEMBAL_PROD_DIM,    &
+        CIECLE          OF PDEMBAL_PROD_DIM     &
+     TO TGRCODGRA,                              &
+        CIECLE          OF PDTYPE_GRANIT        &
+
+   LINK TYFCODFIN       OF PDEMBAL_PROD_DIM,    &
+        CIECLE          OF PDEMBAL_PROD_DIM     &
+     TO TYFCODFIN,                              &
+        CIECLE          OF PDTYPE_FINI          &
+
+  LINK CIECLE           OF PDCAISSON            &
+    TO CIECLE           OF MCCOMPAGNIE          &
+
+  LINK TO RECORD (0) OF *WIG316Z
+
+
+CHOOSE CIECLE PARM
+
+;-------------------------------------------------------------------------------
+; Variables obligatoires pour les en-têtes standards.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = PARM
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = ""
+
+;-------------------------------------------------------------------------------
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE  7 = "IG318"
+
+;-------------------------------------------------------------------------------
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM        CHARACTER SIZE 40 = CENTRE (CIENOM OF MCCOMPAGNIE)
+
+SELECT PDCAISSON IF TPDTYPPRD     OF PDCAISSON = "PD" AND &
+                   (CAIETA        OF PDCAISSON = "F"   OR &
+                    CAIETA        OF PDCAISSON = "C") AND &
+                    CAISTU        OF PDCAISSON = "I"
+
+DEFINE D-NBRE-CAISSON   INTEGER SIZE 2 = 0
+
+DEFINE D-EPAISSEUR      CHARACTER SIZE 4 = &
+                        ASCII(PDIEPA OF PDEMBAL_PROD_DIM)
+
+DEFINE D-SURFACE        FLOAT SIZE 8 = &
+                        ROUND(PDISURMC2 OF PDPROD_DIMENSION * &
+                         EMPQTEPRD OF PDEMBAL_PROD_DIM * 10000,4)
+
+DEFINE D-VOLUME         FLOAT SIZE 8 = &
+                        ROUND(PDIVOLMC3 OF PDPROD_DIMENSION * &
+                             (PDIEPA    OF PDPROD_DIMENSION / 1000 ) * &
+                              EMPQTEPRD OF PDEMBAL_PROD_DIM * 10000,4)
+
+DEFINE D-NUMERO-PIECE   CHARACTER SIZE 12 = ""
+
+DEFINE D-QUANTITE       CHARACTER SIZE 7 = ""
+
+DEFINE D-POIDS-KG       INTEGER SIZE 4 = CAIPOIEST OF PDCAISSON  &
+                IF CAIPOIREE OF PDCAISSON = 0 &
+                ELSE &
+                        CAIPOIREE OF PDCAISSON
+
+;DEFINE D-COMNUMCOM CHARACTER SIZE 7 = ""
+
+SORT ON TGRCODGRA OF PDEMBAL_PROD_DIM &
+     ON TYFCODFIN OF PDEMBAL_PROD_DIM &
+     ON D-EPAISSEUR &
+     ON CAINUMCAI OF PDCAISSON
+
+SET SUBFILE NAME WIG316Z1 APPEND
+
+REPORT SUMMARY                                            &
+  CIECLE        OF PDCAISSON                              &
+  CAINUMCAI     OF PDCAISSON                              &
+  PJTABR        OF PDCAISSON                              &
+  PJTANN        OF PDCAISSON                              &
+  PJTNUMSEQ     OF PDCAISSON                              &
+  COMNUMCOMINT  OF PDCAISSON                              &
+  PJTNUMPRO     OF PDCAISSON                              &
+  D-NUMERO-PIECE                                          &
+  D-QUANTITE                                              &
+  TGRCODGRA     OF PDEMBAL_PROD_DIM                       &
+  TGRCOUGRA     OF PDTYPE_GRANIT                          &
+  TYFCODFIN     OF PDEMBAL_PROD_DIM                       &
+  TYFFACPOL     OF PDTYPE_FINI                            &
+  TYFFACBRU     OF PDTYPE_FINI                            &
+  D-EPAISSEUR                                             &
+  TPDTYPPRD     OF PDCAISSON                              &
+  D-SURFACE                                               &
+  D-VOLUME                                                &
+  D-POIDS-KG                                              &
+  D-NBRE-CAISSON SUBTOTAL RESET AT CAINUMCAI OF PDCAISSON &
+  D-ANNEE                                                 &
+  COMNUMCOM OF PDCAISSON
+
+
+BUILD ig316z8
+
+;===================================================================================================================================
+;
+;  Impresssion du sommaire de l'inventaire des produits finis
+;
+ACCESS *WIG316Z1 &
+
+   LINK PJTABR          OF WIG316Z1,    &
+        PJTANN          OF WIG316Z1,    &
+        COMNUMCOMINT    OF WIG316Z1,    &
+        CIECLE          OF WIG316Z1     &
+     TO PJTABR,                         &
+        PJTANN,                         &
+        COMNUMCOMINT,                   &
+        CIECLE          OF PDCOMMAN_INTERNE &
+
+  LINK CIECLE           OF WIG316Z1     &
+    TO CIECLE           OF MCCOMPAGNIE  &
+
+  LINK CIECLE          OF WIG316Z1,     &
+       D-ANNEE                          &
+    TO CIECLE,                          &
+       CPRANN          OF PDCOUT_PRODUCT       OPTIONAL
+
+;-------------------------------------------------------------------------------
+; Variables obligatoires pour les en-têtes standards.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = PARM
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = ""
+
+;-------------------------------------------------------------------------------
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE  7 = "IG316"
+
+;-------------------------------------------------------------------------------
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM        CHARACTER SIZE 40 = CENTRE (CIENOM OF MCCOMPAGNIE)
+
+;DEFINE D-NUMERO-PROJET  CHARACTER SIZE 5 = PJTNUMPRO OF WIG316Z1
+
+DEFINE D-NOM-PROJET     CHARACTER SIZE 32 = &
+                        COMNOM OF PDCOMMAN_INTERNE &
+                IF COMNUMCOMINT OF PDCOMMAN_INTERNE <> "000" &
+                ELSE &
+                        "DIVERS GENERAL"
+
+;DEFINE D-PROJET         CHARACTER SIZE 30 =  PJTNUMPRO OF WIG316Z1 + "/" + D-NOM-PROJET
+DEFINE D-PROJET         CHARACTER SIZE 30 =  COMNUMCOM OF WIG316Z1 + "/" + D-NOM-PROJET
+
+; Le coût de polissage est multiplié par un facteur de multiplication
+; présent dans la table "PDTYPE_FINI"
+DEFINE D-CPRCUTPOL      FLOAT SIZE 8 = &
+                        ((CPRCUTPOL OF PDCOUT_PRODUCT * 10000) * &
+                          TYFFACPOL OF WIG316Z1)
+
+; Le coût de brûlage est multiplié par un facteur de multiplication
+; présent dans la table "PDTYPE_FINI"
+DEFINE D-CPRCUTBRU      FLOAT SIZE 8 = &
+                        ((CPRCUTBRU OF PDCOUT_PRODUCT * 10000) * &
+                          TYFFACBRU OF WIG316Z1)
+
+DEFINE D-CPRPCTPTE      FLOAT SIZE 8 OUTPUT SCALE 2 = &
+                        ((CPRPCTPTE OF PDCOUT_PRODUCT * 100) + 1)
+
+DEFINE D-EPA            FLOAT SIZE 8 OUTPUT SCALE 4 = &
+                        ((NCONVERT(D-EPAISSEUR OF WIG316Z1) + &
+                         CPREPATRTLAM OF PDCOUT_PRODUCT) / 1000)
+
+DEFINE D-COUT-MC2       FLOAT SIZE 8 = &
+                        ROUND((TGRCOUGRA OF WIG316Z1 * &
+                               D-EPA + &
+                              (CPRCUTSCI OF PDCOUT_PRODUCT * 10000) + &
+                               D-CPRCUTPOL + &
+                               D-CPRCUTBRU + &
+                              (CPRFIN OF PDCOUT_PRODUCT * 10000) + &
+                              (CPREMB OF PDCOUT_PRODUCT * 10000)) / 100 , 2) * 100 &
+                IF TPDTYPPRD OF WIG316Z1 = "TR" &
+                ELSE &
+                        ROUND(((TGRCOUGRA OF WIG316Z1 * &
+                                D-EPA + &
+                               (CPRCUTSCI OF PDCOUT_PRODUCT * 10000) + &
+                                D-CPRCUTPOL + &
+                                D-CPRCUTBRU) * &
+                                D-CPRPCTPTE + &
+                               (CPRCUTJOI OF PDCOUT_PRODUCT * 10000) + &
+                               (CPRDES OF PDCOUT_PRODUCT * 10000) + &
+                               (CPRFIN OF PDCOUT_PRODUCT * 10000) + &
+                               (CPREMB OF PDCOUT_PRODUCT * 10000)) / 100 , 2) * 100
+
+DEFINE D-COUT-PIECE     FLOAT SIZE 8 PICTURE " ^^^,^^^,^^^.^^" FLOAT "$" = &
+                        D-COUT-MC2 * D-SURFACE OF WIG316Z1 / 10000
+
+DEFINE D-ERREUR CHARACTER SIZE 4 = "****" IF NOT RECORD PDCOUT_PRODUCT EXIST
+
+; Ajustement pour le changement de siècle
+DEFINE D_PJTANN_SIE2 CHARACTER SIZE 3 = "1" + PJTANN OF WIG316Z1[1:2] &
+         IF PJTANN OF WIG316Z1[1:1] < "8" &
+         ELSE "0" + PJTANN OF WIG316Z1[1:2]
+
+SORT ON D_PJTANN_SIE2 &
+     ON COMNUMCOM       OF WIG316Z1 &
+     ON PJTNUMPRO       OF WIG316Z1 &
+     ON TPDTYPPRD       OF WIG316Z1 &
+     ON TGRCODGRA       OF WIG316Z1 &
+     ON TYFCODFIN       OF WIG316Z1 &
+     ON D-EPAISSEUR     OF WIG316Z1
+
+
+
+DEFINE D-TITRE-CENTRE CHARACTER SIZE 80 = &
+        CENTRE ("SOMMAIRE DE L'INVENTAIRE DES PRODUITS FINIS                                     ")
+
+USE ustitgor200_55 NOLIST
+
+SKIP 3 &
+  TAB 025 D-TITRE-CENTRE  &
+SKIP 4 &
+  TAB 003 "                                NUMÉRO    ---- TYPE ----   FINI DE          " &
+  TAB 079 "  MÈTRE 2            VALEUR             VALEUR" &
+SKIP 1 &
+  TAB 003 "COMMANDE                        CLIENT    PRODUIT  GRANIT  SURFACE  EPAI    " &
+  TAB 079 "PRODUIT FINI        UTILISÉE            TOTALE" &
+SKIP 1 &
+  TAB 003 "--------                        ------    -------  ------  -------  ----    " &
+  TAB 079 "------------        --------            ------" &
+SKIP 2
+
+FOOTING AT D-EPAISSEUR                          &
+;   TAB 003 D-PROJET     PRINT AT PJTNUMPRO      &
+   TAB 003 D-PROJET     PRINT AT COMNUMCOM &
+   TAB 035 CLICLE       OF PDCOMMAN_INTERNE     &
+   TAB 047 TPDTYPPRD    OF WIG316Z1             &
+   TAB 055 TGRCODGRA    OF WIG316Z1             &
+   TAB 064 TYFCODFIN    OF WIG316Z1             &
+   TAB 072 D-EPAISSEUR                          &
+   TAB 078 D-SURFACE            SUBTOTAL PICTURE "^^^,^^^.^^^^ M2" &
+   TAB 093 D-COUT-MC2                    PICTURE " ^,^^^,^^^.^^"   &
+   TAB 110 D-COUT-PIECE         SUBTOTAL &
+   TAB 127 D-ERREUR
+
+;FOOTING AT PJTNUMPRO &
+FOOTING AT COMNUMCOM &
+SKIP 1 &
+  TAB 081 "------------" &
+  TAB 114 "-----------" &
+SKIP 1 &
+  TAB 059 "TOTAL:" &
+  TAB 078 D-SURFACE     SUBTOTAL PICTURE "^^^,^^^.^^^^ M2" &
+  TAB 110 D-COUT-PIECE  SUBTOTAL &
+SKIP 1 &
+  TAB 001 "___________________________________________________" &
+  TAB 040 "__________________________________________________" &
+  TAB 080 "___________________________________________________" &
+SKIP 2
+
+FINAL FOOTING  &
+SKIP 1 &
+  TAB 059 "GRAND TOTAL:" &
+  TAB 078 D-SURFACE     SUBTOTAL PICTURE "^^^,^^^.^^^^ M2" &
+  TAB 110 D-COUT-PIECE  SUBTOTAL
+
+BUILD ig316z6
+
+;==================================================================================================================================
+;
+; Resume de la valorisation des produits finis
+;
+ACCESS *WIG316Z1 &
+
+   LINK PJTABR          OF WIG316Z1,    &
+        PJTANN          OF WIG316Z1,    &
+        COMNUMCOMINT    OF WIG316Z1,    &
+        CIECLE          OF WIG316Z1     &
+     TO PJTABR,                         &
+        PJTANN,                         &
+        COMNUMCOMINT,                   &
+        CIECLE          OF PDCOMMAN_INTERNE &
+
+  LINK CIECLE           OF WIG316Z1    &
+    TO CIECLE           OF MCCOMPAGNIE &
+
+  LINK CIECLE          OF WIG316Z1,    &
+       D-ANNEE                         &
+    TO CIECLE,                         &
+       CPRANN          OF PDCOUT_PRODUCT       OPTIONAL
+
+;-------------------------------------------------------------------------------
+; Variables obligatoires pour les en-têtes standards.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = PARM
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = ""
+
+;-------------------------------------------------------------------------------
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE  7 = "IG316"
+
+;-------------------------------------------------------------------------------
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM        CHARACTER SIZE 40 = CENTRE (CIENOM OF MCCOMPAGNIE)
+
+;DEFINE D-NUMERO-PROJET  CHARACTER SIZE  5 = PJTNUMPRO
+
+DEFINE D-NOM-PROJET     CHARACTER SIZE 32 = &
+                        COMNOM OF PDCOMMAN_INTERNE &
+                IF COMNUMCOMINT OF PDCOMMAN_INTERNE <> "000" &
+                ELSE &
+                        "DIVERS GENERAL"
+
+
+DEFINE D-PROJET         CHARACTER SIZE 30 =  COMNUMCOM OF WIG316Z1 + "/" + D-NOM-PROJET
+
+; Le coût de polissage est multiplié par un facteur de multiplication
+; présent dans la table "PDTYPE_FINI"
+DEFINE D-CPRCUTPOL      FLOAT SIZE 8 = &
+                        ((CPRCUTPOL OF PDCOUT_PRODUCT * 10000) * &
+                          TYFFACPOL OF WIG316Z1)
+
+; Le coût de brûlage est multiplié par un facteur de multiplication
+; présent dans la table "PDTYPE_FINI"
+DEFINE D-CPRCUTBRU      FLOAT SIZE 8 = &
+                        ((CPRCUTBRU OF PDCOUT_PRODUCT * 10000) * &
+                          TYFFACBRU OF WIG316Z1)
+
+DEFINE D-CPRPCTPTE      FLOAT SIZE 8 OUTPUT SCALE 2 = &
+                        ((CPRPCTPTE OF PDCOUT_PRODUCT * 100) + 1)
+
+DEFINE D-EPA            FLOAT SIZE 8 OUTPUT SCALE 4 = &
+                        ((NCONVERT(D-EPAISSEUR OF WIG316Z1) + &
+                         CPREPATRTLAM OF PDCOUT_PRODUCT) / 1000)
+
+DEFINE D-COUT-MC2       FLOAT SIZE 8 = &
+                        ROUND((TGRCOUGRA OF WIG316Z1 * &
+                               D-EPA + &
+                              (CPRCUTSCI OF PDCOUT_PRODUCT * 10000) + &
+                               D-CPRCUTPOL + &
+                               D-CPRCUTBRU + &
+                              (CPRFIN OF PDCOUT_PRODUCT * 10000) + &
+                              (CPREMB OF PDCOUT_PRODUCT * 10000)) / 100 , 2) * 100&
+                IF TPDTYPPRD OF WIG316Z1 = "TR" &
+                ELSE &
+                        ROUND(((TGRCOUGRA OF WIG316Z1 * &
+                                D-EPA + &
+                               (CPRCUTSCI OF PDCOUT_PRODUCT * 10000) + &
+                                D-CPRCUTPOL + &
+                                D-CPRCUTBRU) * &
+                                D-CPRPCTPTE + &
+                               (CPRCUTJOI OF PDCOUT_PRODUCT * 10000) + &
+                               (CPRDES OF PDCOUT_PRODUCT * 10000) + &
+                               (CPRFIN OF PDCOUT_PRODUCT * 10000) + &
+                               (CPREMB OF PDCOUT_PRODUCT * 10000)) /100 , 2) * 100
+
+DEFINE D-COUT-PIECE     FLOAT SIZE 8 PICTURE " ^,^^^,^^^.^^" FLOAT "$" = &
+                        D-COUT-MC2 * D-SURFACE OF WIG316Z1 / 10000
+
+; Ajustement pour le changement de siècle
+DEFINE D_PJTANN_SIE3 CHARACTER SIZE 3 = "1" + PJTANN OF WIG316Z1[1:2] &
+         IF PJTANN OF WIG316Z1[1:1] < "8" &
+         ELSE "0" + PJTANN OF WIG316Z1[1:2]
+
+SORT ON D_PJTANN_SIE3  &
+     ON COMNUMCOM OF WIG316Z1  &
+     ON D-ANNEE   OF WIG316Z1  &
+     ON PJTNUMPRO OF WIG316Z1  &
+     ON CAINUMCAI OF WIG316Z1  &
+     ON D-NUMERO-PIECE
+
+
+DEFINE D-TITRE-CENTRE CHARACTER SIZE 80 = &
+        CENTRE ("RÉSUMÉ DES PRODUITS FINIS PAR COMMANDE                                            ")
+
+USE ustitgor200_55 NOLIST
+
+SKIP 3 &
+  TAB 025 D-TITRE-CENTRE  &
+SKIP 4 &
+  TAB 003 "                                       MÈTRE 2           NOMBRE               VALEUR" &
+SKIP 1 &
+  TAB 003 "COMMANDE                             PRODUIT FINI        CAISSON              TOTALE" &
+SKIP 1 &
+  TAB 003 "--------                             ------------        -------              ------" &
+SKIP 2
+
+;FOOTING AT PJTNUMPRO &
+FOOTING AT COMNUMCOM &
+;  TAB 003 D-PROJET PRINT AT PJTNUMPRO &
+  TAB 003 D-PROJET PRINT AT COMNUMCOM &
+  TAB 037 D-SURFACE SUBTOTAL    PICTURE "^^^,^^^.^^^^ M2"&
+  TAB 059 COUNT AT CAINUMCAI OF WIG316Z1  &
+  TAB 074 D-COUT-PIECE SUBTOTAL
+
+FINAL FOOT &
+  TAB 003 "                                     ------------        -------        ------------" &
+SKIP &
+  TAB 010 "GRAND TOTAL:" &
+  TAB 037 D-SURFACE SUBTOTAL    PICTURE "^^^,^^^.^^^^ M2"&
+  TAB 059 COUNT AT CAINUMCAI OF WIG316Z1  &
+  TAB 074 D-COUT-PIECE SUBTOTAL
+
+BUILD ig316z7

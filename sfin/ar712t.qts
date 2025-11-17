@@ -1,0 +1,207 @@
+;/T/ Transfert des décomptes physiques en mouvements d'inventaire
+;
+;/P/ Programmeur...: Nancy Marceau
+;    Date Création.: 25 mai 1994
+;
+;    Description...: Cette procédure permet de transférer les décomptes
+;                    physiques vers les mouvements d'inventaire afin qu'ils
+;                    soient éventuellement journalisés.
+;
+;    Paramètres....: Compagnie (Compagnie du menu)
+;                    Entrepôt  (Un, plusieurs ou tous)
+;                    Période   (Obligatoire)
+;
+;    Particularités: La période d'inventaire ne doit pas être fermée. Les
+;                    mouvements d'inventaire sont pré-approuvés. Ainsi, ils ont
+;                    leur imputation comptable et la quantité en main des
+;                    produits est mise à jour.
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST   ; set process nolimit
+
+
+RUN ar712t
+
+;
+; Pour arrêter la procédure en cas d'erreur
+;
+GLOBAL TEMPORARY G_ERREUR       CHARACTER SIZE 5
+
+
+;-------------------------------------------------------------------------------
+; Cette première étape permet de valider que la période d'inventaire n'est pas
+; fermée et d'extraire les décomptes physiques approuvés afin de les transférer
+; vers des mouvements d'inventaire.
+;
+REQUEST EXTRAIRE_DECOMPTES
+
+ACCESS ARDECOMPTE   &
+  LINK CIECLE OF ARDECOMPTE, &
+       PECCLE OF ARDECOMPTE  &
+    TO CIECLE,               &
+       PECCLE OF  MCPERIODE_CIE   OPTIONAL
+
+CHOOSE CIECLE PARM, &  ; Compagnie
+       PECCLE PARM, &  ; Période
+       ENTCLE PARM, &  ; Entrepôt
+       DECSTU "A"      ; (A = Approuvé)
+
+
+TEMPORARY T_MESERR CHARACTER SIZE 80 ; Pour les erreurs.
+
+ITEM T_MESERR = &
+@IF FRANCAIS
+  "La période d'achat est fermée. " &
+
+@ELSE
+  "%%%La période d'inventaire est fermée. " &
+@ENDIF
+  IF PCCSTUAR OF MCPERIODE_CIE = "F"  ELSE &
+
+@IF FRANCAIS
+  "Cette période n'existe pas." + PECCLE OF ARDECOMPTE &
+
+@ELSE
+  "%%%Cette période n'existe pas." + PECCLE OF ARDECOMPTE &
+@ENDIF
+  IF NOT RECORD MCPERIODE_CIE EXISTS
+
+
+
+ITEM G_ERREUR = "ARRET" IF T_MESERR <> ""
+
+
+
+SUBFILE WAR712DE KEEP &
+  INCLUDE CIECLE       OF ARDECOMPTE , &
+          PECCLE       OF ARDECOMPTE , &
+          ENTCLE       OF ARDECOMPTE , &
+          DECNUMINV    OF ARDECOMPTE , &
+          PRDGRPINV    OF ARDECOMPTE , &
+          DECDSC1      OF ARDECOMPTE , &
+          DECDSC2      OF ARDECOMPTE
+
+
+
+SUBFILE WUS900ER KEEP &
+                 IF T_MESERR <> "" &
+  INCLUDE CIECLE OF MCPERIODE_CIE ALIAS CIECLE, &
+          PECCLE OF MCPERIODE_CIE ALIAS PECCLE, &
+          T_MESERR
+
+
+;-------------------------------------------------------------------------------
+; Cette étape permet d'extraire tous les décomptes approuvés pour les transférer
+; vers un mouvement d'inventaire.
+;
+REQUEST CREER_MOUVEMENTS TERMINATE IF G_ERREUR <> ""
+
+ACCESS *WAR712DE  &
+    ;
+    ; Pour générer séquentiellement le numéro d'inventaire du mouvement.
+    ;
+  LINK  CIECLE OF WAR712DE,      &
+        PECCLE OF WAR712DE[1:2]  &
+    TO CIECLE, &
+       MOSANNCLE OF ARMOU_SEQ    &
+
+    ;
+    ;
+    ; Détail du décompte.
+    ;
+  LINK CIECLE    OF WAR712DE, &
+       ENTCLE    OF WAR712DE, &
+       DECNUMINV OF WAR712DE, &
+       PRDGRPINV OF WAR712DE  &
+    TO CIECLE,    &
+       ENTCLE,    &
+       DECNUMINV, &
+       PRDGRPINV OF ARDEC_DETAIL    &
+
+    ;
+    ; Pour le poste d'ajustement de l'entrepôt.
+    ;
+  LINK CIECLE OF WAR712DE, &
+       ENTCLE OF WAR712DE  &
+    TO CIECLE, &
+       ENTCLE OF ARENTREPOT
+
+SELECT IF DEDQTEPHY OF ARDEC_DETAIL <> 0
+
+TEMPORARY T_MOUNBRITE INTEGER SIZE 4
+TEMPORARY T_MOSNUMSEQ INTEGER SIZE 4
+TEMPORARY T_MOUMNTNET FLOAT   SIZE 8
+TEMPORARY T_MODQTE    FLOAT   SIZE 8
+
+SORT ON CIECLE    OF WAR712DE &  ; Compagnie
+     ON ENTCLE    OF WAR712DE &  ; Entrepôt
+     ON DECNUMINV OF WAR712DE &  ; Numéro d'inventaire
+     ON PRDGRPINV OF WAR712DE &  ; Groupe d'inventaire
+     ON PRDCLE    OF ARDEC_DETAIL ; Numéro de produit
+
+
+ITEM T_MOUNBRITE COUNT RESET AT PRDGRPINV
+ITEM T_MOSNUMSEQ COUNT AT PRDGRPINV
+ITEM T_MOUMNTNET SUBTOTAL DEDMNT OF ARDEC_DETAIL RESET AT PRDGRPINV
+
+  ;
+  ; On calcule la quantité qui doit être ajustée. Si la quantité physique est
+  ; plus grande que la quantité informatique c'est un ajustement positif sinon
+  ; c'est un ajustement négatif.
+  ;
+ITEM T_MODQTE = DEDQTEPHY OF ARDEC_DETAIL - &
+                DEDQTEINF OF ARDEC_DETAIL
+
+
+OUTPUT ARMOU_DETAIL  ADD NOITEM AT PRDCLE
+  ITEM CIECLE     OF ARMOU_DETAIL FINAL CIECLE    OF WAR712DE
+  ITEM MOUCLE     OF ARMOU_DETAIL FINAL MOSANNCLE + &
+                                        ASCII(MOSNUMSEQ OF ARMOU_SEQ + T_MOSNUMSEQ + 1,&
+                                              MOSLONNUM OF ARMOU_SEQ)
+  ITEM MODTIMSTP  OF ARMOU_DETAIL FINAL SYSDATE * 1000000 + &
+                                        ROUND(SYSTIME / 100)
+  ITEM PRDCLE     OF ARMOU_DETAIL FINAL PRDCLE    OF ARDEC_DETAIL
+  ITEM MODQTE     OF ARMOU_DETAIL FINAL T_MODQTE
+  ITEM CPTCLE     OF ARMOU_DETAIL FINAL ENTCPTAJT OF ARENTREPOT
+  ITEM UNACLE     OF ARMOU_DETAIL FINAL ENTUNAAJT OF ARENTREPOT
+  ITEM MODPRIUNI  OF ARMOU_DETAIL FINAL 0
+  ITEM MODMNTNET  OF ARMOU_DETAIL FINAL DEDMNT OF ARDEC_DETAIL
+
+
+
+OUTPUT ARMOUVEMENT  ADD NOITEM AT PRDGRPINV
+  ITEM CIECLE     OF ARMOUVEMENT FINAL CIECLE OF WAR712DE
+  ITEM ENTCLE     OF ARMOUVEMENT FINAL ENTCLE OF WAR712DE
+  ITEM MOUCLE     OF ARMOUVEMENT FINAL MOSANNCLE + &
+                                       ASCII(MOSNUMSEQ OF ARMOU_SEQ + T_MOSNUMSEQ,&
+                                             MOSLONNUM OF ARMOU_SEQ)
+  ITEM PECCLE     OF ARMOUVEMENT FINAL PECCLE OF WAR712DE
+  ITEM MOUSTU     OF ARMOUVEMENT FINAL "P" ; Préliminaire
+  ITEM MOUTYP     OF ARMOUVEMENT FINAL "I" ; Inventaire physique
+  ITEM MOUDAT     OF ARMOUVEMENT FINAL SYSDATE
+  ITEM MOUUSRCRE  OF ARMOUVEMENT FINAL LOGONID
+  ITEM MOUDATCRE  OF ARMOUVEMENT FINAL SYSDATE
+  ITEM MOUHRECRE  OF ARMOUVEMENT FINAL SYSTIME / 10000
+  ITEM MOUDSC1    OF ARMOUVEMENT FINAL DECDSC1 OF WAR712DE
+  ITEM MOUDSC2    OF ARMOUVEMENT FINAL DECDSC2 OF WAR712DE
+  ITEM MOUNBRITE  OF ARMOUVEMENT FINAL T_MOUNBRITE
+  ITEM MOUMNTNET  OF ARMOUVEMENT FINAL T_MOUMNTNET
+
+
+
+
+OUTPUT ARDECOMPTE  UPDATE AT PRDGRPINV
+  ITEM DECSTU    OF ARDECOMPTE FINAL "C" ; Complet
+  ITEM DECDATTRF OF ARDECOMPTE FINAL SYSDATE
+  ITEM DECUSRTRF OF ARDECOMPTE FINAL LOGONID
+  ITEM DECHRETRF OF ARDECOMPTE FINAL SYSTIME / 10000
+
+
+OUTPUT ARMOU_SEQ  UPDATE AT FINAL
+  ITEM MOSNUMSEQ OF ARMOU_SEQ FINAL MOSNUMSEQ + T_MOSNUMSEQ
+
+
+SUBFILE WAR712PR2 KEEP AT PRDGRPINV INCLUDE ARMOUVEMENT
+
+BUILD

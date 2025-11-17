@@ -1,0 +1,528 @@
+;/T/ Décompte physique
+;
+;/P/ Programmeur..: Nancy Marceau
+;    Date Création: 19 mai 1994
+;
+;    Description..: Cet écran permet de faire la gestion des décomptes
+;                   physiques. Le fichier du décompte physique est généré
+;                   automatiquement par une procédure. Une prise d'inventaire
+;                   appartient à un et un seul entrepôt.  Le décompte physique
+;                   est transféré vers un mouvement d'inventaire par une 
+;                   procédure.
+;
+;/M/ Pascal Tremblay, 98-01-21
+;
+;    Ajustement pour le changement de siècle
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN ar015 ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             AUTOUPDATE &
+             ACTIVITIES FIND, CHANGE, DELETE &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72  &
+             RECEIVING T_CIECLEMNU, &
+                       T_CIENOM,    &
+                       T_PECCLEMNU, &
+                       T_FOUCIECLE
+
+            
+
+
+USE ussectmp NOLIST     ; Variable pour la sécurité
+    "AR015"             ; Nom de l'écran
+
+USE ar015.hlp NOLIST   ; Use servant à la documentation de l'écran
+
+USE ustraecr NOLIST
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-ecran
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Détail d'inventaire" ACTION DESIGNER D001
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%Détail d'inventaire" ACTION DESIGNER D001
+@ENDIF
+
+;-------------------------------------------------------------------------------
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de la compagnie
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie
+TEMPORARY T_PECCLEMNU CHARACTER SIZE 4  ; Période du menu
+TEMPORARY T_FOUCIECLE CHARACTER SIZE 4  ; Compagnie fournisseur
+;-------------------------------------------------------------------------------
+
+
+FILE ARDECOMPTE   PRIMARY NOITEM
+  ACCESS VIA   CIECLE,               &
+               DECNUMINV             &   
+         USING T_CIECLEMNU,          &
+               DECNUMINV OF ARDECOMPTE &
+         REQUEST DECNUMINV &  
+         ORDERBY CIECLE,   &
+                 DECNUMINV
+
+  ACCESS VIA   CIECLE,               &
+               ENTCLE                &
+         USING T_CIECLEMNU,          &
+               ENTCLE OF ARDECOMPTE &
+         REQUEST ENTCLE  &
+         ORDERBY CIECLE, &
+                 ENTCLE, &
+                 PECCLE, &
+                 DECNUMINV
+
+  ACCESS VIA   CIECLE,               &
+               PECCLE                &
+         USING T_CIECLEMNU,          &
+               PECCLE OF ARDECOMPTE  &
+         REQUEST PECCLE  &
+         ORDERBY CIECLE, &
+                 ENTCLE, &
+                 PECCLE, &
+                 DECNUMINV
+
+
+  ACCESS VIA   CIECLE               &
+         USING T_CIECLEMNU          &
+         ORDERBY CIECLE,   &
+                 DECNUMINV
+
+  ITEM DECDATMOD OF ARDECOMPTE FINAL   SYSDATE        &
+                                        IF NOT NEWRECORD OF ARDECOMPTE AND &
+                                           ALTEREDRECORD OF ARDECOMPTE 
+  ITEM DECHREMOD OF ARDECOMPTE FINAL   SYSTIME / 10000 &
+                                        IF NOT NEWRECORD OF ARDECOMPTE AND &
+                                           ALTEREDRECORD OF ARDECOMPTE 
+  ITEM DECUSRMOD OF ARDECOMPTE FINAL   TZ_LOGONID         &
+                                        IF NOT NEWRECORD OF ARDECOMPTE AND &
+                                           ALTEREDRECORD OF ARDECOMPTE
+
+
+;-------------------------------------------------------------------------------
+; Pour valider que l'entrepôt existe
+;
+FILE ARENTREPOT  REFERENCE 
+  ACCESS VIA   CIECLE, &
+               ENTCLE  &
+         USING T_CIECLEMNU, &
+               ENTCLE OF ARDECOMPTE
+
+
+;-------------------------------------------------------------------------------
+; Fichier du détail du décompte physique lors de la destruction.
+;
+FILE ARDECOMPTE  ALIAS A_ARDECOMPTE DELETE NOITEM 
+  ACCESS VIA  CIECLE,    &
+              ENTCLE,    &
+              DECNUMINV, & 
+              PRDGRPINV  &
+         USING CIECLE    OF ARDECOMPTE, &
+               ENTCLE    OF ARDECOMPTE, &
+               DECNUMINV OF ARDECOMPTE, &
+               PRDGRPINV OF ARDECOMPTE
+
+
+;-------------------------------------------------------------------------------
+;
+; Sert à valider les codes bilingues
+;
+DEFINE    D_DECSTU CHARACTER SIZE 16 = "DECSTU"
+TEMPORARY T_DECSTU CHARACTER SIZE 4
+
+FILE VCBI_DSC  REFERENCE ALIAS A_CBI_DECSTU
+  ACCESS  VIA XELNOM, &
+              CBICLE &
+          USING D_DECSTU, &
+                DECSTU OF ARDECOMPTE
+
+;
+; Pour afficher le nom de l'usager de création
+;
+FILE GSUSAGER          REFERENCE &
+                      ALIAS A_USR_CRE
+  ACCESS VIA USRCLE &
+         USING DECUSRCRE OF ARDECOMPTE
+
+;
+; Pour afficher le nom de l'usager de modification
+;
+FILE GSUSAGER          REFERENCE &
+                      ALIAS A_USR_MOD
+  ACCESS VIA USRCLE &
+         USING DECUSRMOD OF ARDECOMPTE
+
+;
+; Pour afficher le nom de l'usager de transfert
+;
+FILE GSUSAGER          REFERENCE &
+                      ALIAS A_USR_TRF
+  ACCESS VIA USRCLE &
+         USING DECUSRTRF OF ARDECOMPTE
+
+
+;
+; Paramètres pour la compagnie consolidée(holding)
+;
+FILE MCHOLDING  REFERENCE
+  ACCESS VIA CIENMC USING "1"
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_CIECLE    CHARACTER SIZE 4 ; Compagnie pour écran dépisteur.
+TEMPORARY T_ENTCLE    CHARACTER SIZE 4 ; Popup sur entrepôts
+TEMPORARY T_PECCLE    CHARACTER SIZE 4 ; Popup sur les périodes.
+TEMPORARY T_MOD       CHARACTER SIZE 2 ; Code de module.
+TEMPORARY T_DECSTUOLD CHARACTER SIZE 1  ; Ancienne valeur du statut du décompte
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM)
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST     ; Draw pour les écrans pleine page
+USE ustitstd NOLIST     ; En-tête pour les écrans pleine page
+USE ushilite NOLIST     ; Hilite pour tous les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Décompte physique " &
+@ELSE
+      " %%%Décompte physique " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+;-------------------------------------------------------------------------------
+
+ALIGN (3,3,19) (,,24)
+
+FIELD ENTCLE OF ARDECOMPTE   &
+        HIDDEN ID 05 &
+        DISPLAY
+
+
+FIELD ENTNOM OF ARENTREPOT &
+        DISPLAY
+
+SKIP 1
+ALIGN (3,3,19)
+
+FIELD PECCLE OF ARDECOMPTE &
+        HIDDEN ID 10  &
+        DISPLAY
+        
+SKIP 1
+ALIGN (3,3,19) (,40,59)
+
+FIELD DECNUMINV OF ARDECOMPTE &
+        HIDDEN ID 15  &
+        DISPLAY
+        
+FIELD PRDGRPINV OF ARDECOMPTE      &
+        LABEL "Groupe inventaire:" &
+        DISPLAY
+
+SKIP 1
+;ALIGN (3,3,19) (,,29) (,,36) (,,49)
+ALIGN (3,3,19) (,,31) (,,38) (,,51)
+
+FIELD DECDATCRE OF ARDECOMPTE  FORMAT YYYYMMDD &
+      HIDDEN ID 20 &
+@IF FRANCAIS
+       LABEL "Généré le.....:" &
+@ELSE        
+       LABEL "%%%Généré le.....:" & 
+@ENDIF
+       DISPLAY
+
+FIELD DECHRECRE OF ARDECOMPTE &
+        DISPLAY
+
+FIELD DECUSRCRE OF ARDECOMPTE &
+        DISPLAY
+  
+FIELD USREMPNOM OF A_USR_CRE  &
+        DISPLAY &
+        SIZE 28
+
+SKIP 
+;ALIGN (3,3,19) (,,29) (,,36) (,,49)
+ALIGN (3,3,19) (,,31) (,,38) (,,51)
+
+FIELD DECDATMOD OF ARDECOMPTE  FORMAT YYYYMMDD &
+       HIDDEN ID 25 &
+@IF FRANCAIS
+       LABEL "Modifié le....:" &
+@ELSE        
+       LABEL "%%%Modifié le....:" & 
+@ENDIF
+       DISPLAY
+
+FIELD DECHREMOD OF ARDECOMPTE &
+        DISPLAY
+
+FIELD DECUSRMOD OF ARDECOMPTE &
+        DISPLAY
+  
+FIELD USREMPNOM OF A_USR_MOD  &
+        DISPLAY &
+        SIZE 28
+
+SKIP 1
+ALIGN (3,3,19)
+
+FIELD DECDATAPP OF ARDECOMPTE  FORMAT YYYYMMDD &
+        HIDDEN ID 30 &
+        DISPLAY
+
+SKIP 1
+;ALIGN (3,3,19) (,,29) (,,36) (,,49)
+ALIGN (3,3,19) (,,31) (,,38) (,,51)
+
+FIELD DECDATTRF OF ARDECOMPTE  FORMAT YYYYMMDD &
+        HIDDEN ID 35 &
+        DISPLAY
+
+FIELD DECHRETRF OF ARDECOMPTE &
+        DISPLAY
+
+FIELD DECUSRTRF OF ARDECOMPTE &
+        DISPLAY
+  
+FIELD USREMPNOM OF A_USR_TRF  &
+        DISPLAY &
+        SIZE 28
+
+SKIP 1
+ALIGN (3,3,19)
+
+FIELD DECDSC1 OF ARDECOMPTE &
+        HIDDEN ID 40 
+
+FIELD DECDSC2 OF ARDECOMPTE &
+        HIDDEN ID SAME &
+        NOLABEL
+
+SKIP 1
+ALIGN (3,3,19) (,,21) (,48,64)
+ 
+FIELD DECSTU OF ARDECOMPTE &
+        LOOKUP ON A_CBI_DECSTU &
+          MESSAGE 1463 ; Ce statut de décompte physique est invalide.
+
+FIELD CBIDSC OF A_CBI_DECSTU &
+        DISPLAY &
+        SIZE 15
+
+FIELD DECMNT OF ARDECOMPTE &
+        DISPLAY PREDISPLAY &
+        REFRESH
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de faire un écran dépisteur pour l'entrepôt
+;
+PROCEDURE INPUT ENTCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = T_CIECLEMNU
+    LET T_ENTCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN ar100 MODE F PASSING T_CIECLE, T_ENTCLE
+    LET FIELDTEXT = TRUNCATE(T_ENTCLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+; Ecran dépisteur pour la période comptable. 
+;
+PROCEDURE INPUT PECCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_MOD = "IN"
+    LET T_PECCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN  mc109 PASSING T_CIECLEMNU, T_PECCLE, T_MOD  MODE F
+    LET FIELDTEXT = TRUNCATE(T_PECCLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour le statut du décompte physique.
+;
+;
+PROCEDURE INPUT DECSTU
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_DECSTU = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_DECSTU, T_DECSTU 
+    LET FIELDTEXT = TRUNCATE(T_DECSTU)
+  END
+END
+
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de valider que le seul statut modifiable est "P" et
+; que la seul valeur permise en saisie est "A" ou "X"
+;
+PROCEDURE EDIT DECSTU 
+BEGIN  
+  IF "P" = FIELDTEXT OR &
+     "C" = FIELDTEXT
+  THEN ERROR 1370 ; Cette valeur n'est pas permise.
+
+  IF    FIELDTEXT = "A" &
+    AND OLDVALUE(DECSTU OF ARDECOMPTE) <> "P"
+  THEN ERROR 1441 ; On ne peut changer le statut du décompte.
+
+  IF    FIELDTEXT = "X" &
+    AND OLDVALUE (DECSTU OF ARDECOMPTE) <> "A" 
+  THEN ERROR 1441 ; On ne peut changer le statut du décompte.
+END
+
+;------------------------------------------------------------------------------
+; Cette procédure permet de mettre à jour la date d'approbation du décompte.
+;
+PROCEDURE PROCESS DECSTU
+BEGIN
+ IF DECSTU OF ARDECOMPTE = "A" 
+  THEN BEGIN 
+    LET DECDATAPP OF ARDECOMPTE = SYSDATE
+    DISPLAY DECDATAPP OF ARDECOMPTE
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de conserver l'ancien statut du décompt pour 
+; vérifier lors du PREUPDATE si la modification est permise.
+; 
+PROCEDURE POSTFIND
+BEGIN
+  LET T_DECSTUOLD = DECSTU OF ARDECOMPTE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+; Procédure d'appel du sous-écran du détail du décompte.
+;
+PROCEDURE DESIGNER D001
+BEGIN
+  IF  (    ALTEREDRECORD OF ARDECOMPTE &
+       AND DECSTU OF ARDECOMPTE <> "P")   
+  THEN ERROR 1390 ; Vous devez faire une mise à jour avant d'accéder le sous-écran.
+  ELSE RUN SCREEN ar015a &
+               PASSING T_CIECLEMNU, &
+                       T_CIENOM,    &
+                       T_DECSTUOLD, &
+                       ARDECOMPTE &
+               MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF ARDECOMPTE &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF ARDECOMPTE &
+     AND NOT NEWRECORD     OF ARDECOMPTE &
+     AND NOT DELETEDRECORD OF ARDECOMPTE &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  ; Enlever le droit de modification si la décompte n'est plus préliminaire.
+  ; Cependant, on permet la mise à jour si le statut vient juste d'être changer
+  ; pour "A".
+  ;
+  IF ((    ALTEREDRECORD OF ARDECOMPTE &
+       AND NOT NEWRECORD OF ARDECOMPTE) &  
+       OR DELETEDRECORD  OF ARDECOMPTE )&
+    AND T_DECSTUOLD  <> "P"             &
+    AND DECSTU OF ARDECOMPTE <> "X"
+  THEN ERROR 1467 ; Seule la modification d'un décompte préliminaire est
+                  ; permise. 
+END
+
+PROCEDURE POSTUPDATE
+BEGIN
+  LET T_DECSTUOLD = DECSTU OF ARDECOMPTE
+END
+
+BUILD
+
+@IF FORMAT
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+****************************** Décompte physique *******************************
+* Entrepôt......: xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                *
+*                                                                              *
+* Période ......: xxxxx                                                        *
+*                                                                              *
+* # Inventaire..: xxxxxxxxx            Groupe invent.: xxx                     *
+*                                                                              *
+* Généré le.....: xxxxxxxx  xxxxx  xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx *
+* Modifié le....: xxxxxxxx  xxxxx  xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx *
+*                                                                              *
+* Date approb...: xxxxxxxx                                                     *
+*                                                                              *
+* Date transfert: xxxxxxxx  xxxxx  xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx *
+*                                                                              *
+* Description...: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                                                                              *
+* Statut........: x xxxxxxxxxxxxxxx            Variation.....: xxxxxxxxxxxxxxx *
+*                                                                              *
+*                                                                              *
+********************************************************************************
+
+@ENDIF

@@ -1,0 +1,799 @@
+;/T/ Plan comptable
+;
+;/P/ Programmeur..: Alain Côté
+;    Date Création: 27 février 1992
+;
+;    Description..: Définition des comptes comptables.
+;
+;
+;-------------------------------------------------------------------------------
+;/V/ 3.00.02    Guy Chabot 12-mai-1994 (197).
+;
+;/M/ Marie-Josée Hamel, 96.04.01, établir un lien entre le plan comptable et
+;                                 la charte pour les périodes d'activité
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN mc010 ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIENOM
+
+USE ussectmp NOLIST     ; Variable pour la securite
+    "MC010"
+
+USE mc010.hlp NOLIST
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-ecran
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_CIENOM   CHARACTER SIZE 40; Nom de la compagnie-holding
+
+
+;-------------------------------------------------------------------------------
+;
+;
+FILE MCCOMPTE         PRIMARY &
+                      OCCURS 8
+  ACCESS REQUEST CPTCLE OF MCCOMPTE &
+         VIA     CPTCLE &
+         USING   CPTCLE OF MCCOMPTE &
+         ORDERED
+
+  ACCESS SEQUENTIAL &
+         ORDERBY CPTCLE
+
+  ITEM CPTPECDEBA OF MCCOMPTE INITIAL " "
+  ITEM CPTPECDEBI OF MCCOMPTE INITIAL " "
+
+;
+; Destruction de la charte de compte selon le compte détruit.
+;
+FILE MCCHARTE_UNA     DELETE &
+                      NOITEM &
+                      OCCURS WITH MCCOMPTE
+  ACCESS VIA CPTCLE &
+         USING CPTCLE OF MCCOMPTE
+
+;
+;
+; Pour afficher le code abrégé du code nature comptable
+;
+FILE VNAC_DSC         REFERENCE
+  ACCESS VIA NACCLE USING NACCLE OF MCCOMPTE
+
+;
+; Pour assigner le code de nature comptable au compte en mode ENTRY.
+;
+FILE MCNATURE_CTB     DESIGNER &
+                      OPEN READ
+  SELECT IF CPTCLE OF MCCOMPTE >= NACBORINF OF MCNATURE_CTB AND &
+            CPTCLE OF MCCOMPTE <= NACBORSUP OF MCNATURE_CTB
+
+;
+; Validation des codes bilingue(CPTTYP,CPTCAT,CPTNIVDET)
+;
+FILE VCBI_DSC         DESIGNER &
+                      OPEN READ
+;
+; Validation de la devise
+;
+FILE VDEV_DSC         DESIGNER &
+                      OPEN READ
+
+;
+; Validation de la devise selon celle du holding
+;
+FILE MCHOLDING        REFERENCE
+  ACCESS VIA CIENMC USING "1"
+
+;
+; Validation du compte lié
+;
+FILE MCCOMPTE         REFERENCE &
+                      ALIAS A_CPT_LIE
+
+;
+; Validation que la catégorie "BN" ,"RD", "GP" ou "MC" soit une seul fois dans
+; la table compte.
+;
+FILE MCCOMPTE         REFERENCE &
+                      ALIAS A_CPT_CAT
+
+;
+; Pour mettre toutes les chartes avec les memes périodes d'activité
+;
+FILE MCCHARTE_UNA     DESIGNER &
+                      ALIAS A_CCU_ACTIVE
+
+;-------------------------------------------------------------------------------
+;
+; Sert à valider les codes bilingue et pour les sous-écrans de consultation
+;
+DEFINE D_CPTTYP     CHARACTER SIZE 16 = "CPTTYP"
+DEFINE D_CPTNIVDET  CHARACTER SIZE 16 = "CPTNIVDET"
+DEFINE D_CPTCAT     CHARACTER SIZE 16 = "CPTCAT"
+TEMPORARY T_CPTTYP     CHARACTER SIZE 4
+TEMPORARY T_CPTNIVDET  CHARACTER SIZE 4
+TEMPORARY T_CPTCAT     CHARACTER SIZE 4
+
+TEMPORARY T_DEVCLE     CHARACTER SIZE 3 ; Popup sur les devises
+
+TEMPORARY T_CPTCLE     CHARACTER SIZE 6 ; Popup sur les comptes
+TEMPORARY T_PECCLE     CHARACTER SIZE 4 ; Popup sur les comptes
+TEMPORARY T_CPTTYPPAT  CHARACTER SIZE 1 ; Popup sur les comptes
+TEMPORARY T_CPTCATPAT  CHARACTER SIZE 8 ; Popup sur les comptes
+
+TEMPORARY T_CPTCAT_BN integer size 4    ;Pour valider duplicate des catégories
+TEMPORARY T_CPTCAT_RD integer size 4    ;Pour valider duplicate des catégories
+TEMPORARY T_CPTCAT_MC integer size 4    ;Pour valider duplicate des catégories
+TEMPORARY T_CPTCAT_GP integer size 4    ;Pour valider duplicate des catégories
+
+TEMPORARY T_FLGCPT     INT  SIZE 2 ; Validation du compte lié
+
+TEMPORARY T_FLGDEL CHARACTER SIZE 1 ; Flag pour le sous-écran de destruction
+
+TEMPORARY T_PECDEBA CHARACTER SIZE 4 OCCURS WITH MCCOMPTE RESET AT STARTUP
+TEMPORARY T_PECDEBI CHARACTER SIZE 4 OCCURS WITH MCCOMPTE RESET AT STARTUP
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = " "
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Plan comptable " &
+@ELSE
+      " Accounts " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP
+
+@IF FRANCAIS
+TITLE "Numéro"          AT , 3
+TITLE "Nc"              AT ,10
+TITLE "Desc. Française" AT ,16
+TITLE "Desc. Anglaise"  AT ,38
+TITLE "Typ"             AT ,57
+TITLE "Dev"             AT ,61
+TITLE "Cat"             AT ,65
+TITLE "Période"         AT ,71
+SKIP
+TITLE "Longue / Abrégée" AT ,15
+TITLE "Longue / Abrégée" AT ,37
+TITLE "Nv"               AT ,57
+TITLE "Cpt"              AT ,61
+TITLE "Act. inact"       AT ,70
+SKIP
+@ELSE
+TITLE "Number"          AT , 3
+TITLE "Gr"              AT ,10
+TITLE "French Desc."    AT ,16
+TITLE "English Desc."   AT ,38
+TITLE "Typ"             AT ,57
+TITLE "Dev"             AT ,61
+TITLE "Cat"             AT ,65
+TITLE "Period "         AT ,71
+SKIP
+TITLE "Long / Abbreviated" AT ,15
+TITLE "Long / Abbreviated" AT ,37
+TITLE "Lvl"               AT ,57
+TITLE "Cpt"              AT ,61
+TITLE "Act. inact"       AT ,70
+SKIP 1
+@ENDIF
+
+ALIGN(3,2,3)(,,10)(,,13)(,,35)(,,58)(,,61)(,,65)(,,69)(,,75)
+
+CLUSTER OCCURS WITH MCCOMPTE
+FIELD CPTCLE OF MCCOMPTE &
+        HIDDEN LABEL " " &
+        NOCHANGE &
+        REQUIRED &
+        LOOKUP NOTON MCCOMPTE &
+          VIA CPTCLE USING CPTCLE OF MCCOMPTE &
+          MESSAGE 124 ; Ce numéro de compte existe déjà
+FIELD NACDSCABR OF VNAC_DSC &
+        DISPLAY
+FIELD CPTDSCFRA    OF MCCOMPTE &
+        REQUIRED &
+        FOR 1,20 &
+        POPUP FROM 5,14 TO 7,50
+FIELD CPTDSCANG    OF MCCOMPTE &
+        DEFAULT CPTDSCFRA OF MCCOMPTE &
+        FOR 1,20 &
+        POPUP FROM 5,36 TO 7,72
+FIELD CPTTYP    OF MCCOMPTE &
+      LOOKUP ON VCBI_DSC &
+        VIA XELNOM, CBICLE &
+        USING D_CPTTYP, CPTTYP &
+        MESSAGE 112 ; Ce type de compte est invalide
+FIELD DEVCLE    OF MCCOMPTE
+FIELD CPTCAT    OF MCCOMPTE &
+      LOOKUP ON VCBI_DSC &
+        VIA XELNOM, CBICLE &
+        USING D_CPTCAT, CPTCAT &
+        MESSAGE 112 ; Cette catégorie est invalide
+FIELD CPTPECDEBA OF MCCOMPTE &
+      REQUIRED
+FIELD CPTPECDEBI OF MCCOMPTE
+SKIP
+ALIGN (,,13) (,,35) (,,58) (,,61) (,69,77) ; mp
+FIELD CPTDSCABRFRA OF MCCOMPTE &
+        DEFAULT CPTDSCFRA OF MCCOMPTE
+FIELD CPTDSCABRANG OF MCCOMPTE &
+        DEFAULT CPTDSCANG OF MCCOMPTE
+FIELD CPTNIVDET OF MCCOMPTE &
+        LOOKUP ON VCBI_DSC &
+          VIA XELNOM, CBICLE &
+          USING D_CPTNIVDET, CPTNIVDET &
+          MESSAGE 112 ; Ce code de niveau est invalide
+FIELD CPTCPTLIE OF MCCOMPTE &
+        REQUIRED
+
+FIELD CPTINDCLS OF MCCOMPTE                               & ; mp
+  LABEL "classe:"                                         &
+  UPSHIFT                                                 &
+  DEFAULT "AU"                                            &
+  SELECTBOX FROM 08,37 TO 13,68 ON EDIT                   &
+      VALUE "AU" caption "Autre (taxes, transport, etc.)" &
+      VALUE "CO" caption "Commission agent              " &
+      VALUE "GR" caption "Granit - ventes               " &
+      VALUE "DE" caption "Dépense commission agent      "
+CLUSTER
+
+DRAW 4,12 TO 23,12
+DRAW 5,34 TO 23,34
+DRAW 4,56 TO 23,56
+DRAW 4,60 TO 23,60
+DRAW 4,68 TO 23,68
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Assigne la nature ctb au compte.
+;
+;
+PROCEDURE PROCESS CPTCLE
+BEGIN
+  GET MCNATURE_CTB SEQUENTIAL OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 125 ; Ce numéro de compte est en conflit avec les natures ctb
+
+  LET NACCLE OF MCCOMPTE = NACCLE OF MCNATURE_CTB
+  ;
+  ; Assignation du code débit/crédit au compte selon la naure comptable.
+  ;
+  ; 1 - Actif             = débit
+  ; 2 - Passif            = Crédit
+  ; 3 - Avoir actionnaire = Crédit
+  ; 4 - Revenu            = Crédit
+  ; 5 - Dépense           = Débit
+  ;
+  IF NACCLE OF MCCOMPTE = 1 OR &
+     NACCLE OF MCCOMPTE = 5
+  THEN LET CPTCODDC OF MCCOMPTE = "D"
+  ELSE LET CPTCODDC OF MCCOMPTE = "C"
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les types de comptes.
+;
+;
+PROCEDURE INPUT CPTTYP
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTTYP = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_CPTTYP, T_CPTTYP
+    LET FIELDTEXT = TRUNC(T_CPTTYP)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Si c'est un compte cumulatif, on ne peut pas spécifier de catégorie.
+;
+;
+PROCEDURE EDIT CPTTYP
+BEGIN
+  IF     CPTTYP OF MCCOMPTE = "C" &
+     AND CPTCAT OF MCCOMPTE <> "--"
+  THEN ERROR 187 ; Un compte cumulatif ne peut pas avoir de catégorie.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les devises.
+;
+;
+PROCEDURE INPUT DEVCLE
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_DEVCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc101 MODE F PASSING T_DEVCLE
+    LET FIELDTEXT = TRUNC(T_DEVCLE)
+  END
+
+  ;
+  ; On assigne la devise de base du Holding aux comptes comptables.
+  ;
+  IF    ENTRYMODE &
+    AND 0 = SIZE(TRUNC(FIELDTEXT)) &
+    AND 0 = SIZE(TRUNC(DEVCLE OF MCCOMPTE))
+  THEN LET FIELDTEXT = DEVCLE OF MCHOLDING
+
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Le code de devise est optionel.
+;
+;
+PROCEDURE EDIT DEVCLE
+BEGIN
+  GET VDEV_DSC VIA DEVCLE USING FIELDTEXT OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 103 ; Ce code de devise n'existe pas.
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Si c'est la devise de base,alors le compte lié doit être à blanc.
+;
+;
+PROCEDURE PROCESS DEVCLE
+BEGIN
+  IF FIELDTEXT = DEVCLE OF MCHOLDING
+  THEN BEGIN
+    LET CPTCPTLIE OF MCCOMPTE = " "
+    DISPLAY CPTCPTLIE OF MCCOMPTE
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; On affiche pas la devise du compte si c'est la même que celle du Holding.
+;
+;
+;PROCEDURE OUTPUT DEVCLE OF MCCOMPTE
+;BEGIN
+;  IF FIELDTEXT = DEVCLE OF MCHOLDING
+;  THEN LET FIELDTEXT = " "
+;END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT CPTCAT
+BEGIN
+  ;
+  ; Popup sur les catégories de comptes.
+  ;
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCAT = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_CPTCAT, T_CPTCAT
+    LET FIELDTEXT = TRUNC(T_CPTCAT)
+  END
+  ;
+  ; Pour forcer l'éxécution de la procédure EDIT.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(CPTCAT OF MCCOMPTE))
+  THEN BEGIN
+    LET FIELDTEXT = CPTCAT OF MCCOMPTE
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sert à conserver que le code de base dans le DATA.
+;
+; Catégorie de compte:  Catégorie  Description             Nature CTB
+;                          EN      encaisse                    1
+;                          AV      avance                      1
+;                          AC      avance compagnie            1,2
+;                          CR      C.A.R.                      1
+;                          CP      C.A.P.                      2
+;                          RD      Relevé de dépense           2
+;                          BN      Bénéfice non répartis       3
+;                          MC      Provision mauvaise créance
+;
+PROCEDURE EDIT CPTCAT
+BEGIN
+  ;
+  ; Si c'est un compte cumulatif, on ne peut pas spécifier de catégorie.
+  ;
+  ;
+  IF     CPTTYP OF MCCOMPTE = "C" &
+     AND CPTCAT OF MCCOMPTE <> "--"
+  THEN ERROR 187 ; Un compte cumulatif ne peut pas avoir de catégorie.
+  ;
+  ; Les catégories suivante doivent être spécifiées une seule fois pour la
+  ; charte de compte au complet.
+  ;
+  IF CBICLE OF VCBI_DSC = "BN" OR CBICLE OF VCBI_DSC = "RD" OR &
+     CBICLE OF VCBI_DSC = "MC" OR CBICLE OF VCBI_DSC = "GP"
+  THEN BEGIN
+    ;
+    ; Validation dans le fichier lui même
+    ;
+    GET A_CPT_CAT VIA CPTCAT USING CBICLE OF VCBI_DSC OPTIONAL
+    IF ACCESSOK AND CPTCLE OF MCCOMPTE <> CPTCLE OF A_CPT_CAT
+    THEN ERROR 126 ;Cette Catégorie est déja spécifié dans la table des compte
+  END
+
+
+  IF ( ( FIELDTEXT = "EN" OR &
+         FIELDTEXT = "AV" OR &
+         FIELDTEXT = "MC" OR &
+         FIELDTEXT = "CR") AND &
+       NACCLE OF MCCOMPTE <> 1 ) OR &
+     ( ( FIELDTEXT = "CP" OR &
+         FIELDTEXT = "RD") AND &
+       NACCLE OF MCCOMPTE <> 2 ) OR &
+     ( FIELDTEXT = "BN"    AND &
+       NACCLE OF MCCOMPTE <> 3 ) OR &
+     ( FIELDTEXT = "AC"    AND &
+       ( NACCLE OF MCCOMPTE = 3 OR &
+         NACCLE OF MCCOMPTE = 4 OR &
+         NACCLE OF MCCOMPTE = 5 ) )
+  THEN ERROR 127 ; Conflit entre la catégorie et nature comptable
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur le niveau de détail du compte.
+;
+;
+PROCEDURE INPUT CPTNIVDET
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTNIVDET = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_CPTNIVDET, T_CPTNIVDET
+    LET FIELDTEXT = TRUNC(T_CPTNIVDET)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Accés au sous-écran de consultation des comptes et force l'éxécution de
+; la procédure EDIT.
+;
+;
+PROCEDURE INPUT CPTCPTLIE
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE    = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    LET T_CPTTYPPAT = "R"
+    LET T_CPTCATPAT = "@"
+    LET T_PECCLE    = " "
+    RUN SCREEN mc103 MODE F PASSING T_CPTCLE, T_CPTTYPPAT, T_CPTCATPAT, T_PECCLE
+    LET FIELDTEXT = TRUNC(T_CPTCLE)
+  END
+
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT)
+  THEN LET FIELDTEXT = CPTCPTLIE OF MCCOMPTE
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du compte lié.
+;
+;
+PROCEDURE EDIT CPTCPTLIE
+BEGIN
+
+  IF CPTCLE OF MCCOMPTE = CPTCPTLIE OF MCCOMPTE
+  THEN ERROR 128 ; Le compte lié ne peut pas pointer sur lui même.
+
+  LET T_FLGCPT = 0
+  ;
+  ; Le flag suivant indique que le compte lié est présent dans les comptes
+  ; affichés à l'écran.
+  ;
+  FOR MCCOMPTE
+  BEGIN
+    IF CPTCLE OF MCCOMPTE = FIELDTEXT AND &
+       CPTCLE OF MCCOMPTE <> ""
+    THEN BEGIN
+      LET T_FLGCPT = 1
+
+      IF DEVCLE OF MCCOMPTE <> DEVCLE OF MCHOLDING
+      THEN ERROR 186 ; Le compte lié doit être dans la devise du Grand Livre.
+    END
+  END
+
+  IF T_FLGCPT = 0
+  THEN BEGIN
+    ;
+    ; S'il n'est pas à l'écran au vérifie dans le fichier.
+    ;
+    GET A_CPT_LIE VIA CPTCLE &
+                  USING FIELDTEXT &
+                  OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 111 ; Ce numéro de compte n'existe pas
+
+    IF DEVCLE OF A_CPT_LIE <> DEVCLE OF MCHOLDING
+    THEN ERROR 186 ; Le compte lié doit être dans la devise du Grand Livre.
+  END
+
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; L'ordre de saisie des chmpas a été modifié par rapport à la procédure
+; standard, ATTENTION à la procédure DESIGNER 01
+;
+;
+PROCEDURE APPEND
+BEGIN
+  ACCEPT CPTCLE         OF MCCOMPTE
+  DISPLAY NACDSCABR     OF VNAC_DSC
+  ACCEPT CPTDSCFRA      OF MCCOMPTE
+  ACCEPT CPTDSCABRFRA   OF MCCOMPTE
+  ACCEPT CPTDSCANG      OF MCCOMPTE
+  ACCEPT CPTDSCABRANG   OF MCCOMPTE
+  ACCEPT CPTTYP         OF MCCOMPTE
+  ACCEPT CPTNIVDET      OF MCCOMPTE
+  ACCEPT DEVCLE         OF MCCOMPTE
+
+  IF DEVCLE OF MCCOMPTE <> DEVCLE OF MCHOLDING
+  THEN ACCEPT CPTCPTLIE OF MCCOMPTE
+
+  ACCEPT CPTCAT         OF MCCOMPTE
+  ACCEPT CPTPECDEBA     OF MCCOMPTE
+  ACCEPT CPTPECDEBI     OF MCCOMPTE
+  ACCEPT CPTINDCLS      OF MCCOMPTE ; mp
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE INPUT CPTCLE
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; L'ordre de saisie des chmpas a été modifié par rapport à la procédure
+; standard
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  FOR MCCOMPTE
+    PERFORM APPEND
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; L'ordre de saisie des chmpas a été modifié par rapport à la procédure
+; standard, ATTENTION à la procédure APPEND.
+;
+;
+PROCEDURE DESIGNER 01
+BEGIN
+  ;
+  ; Description française
+  ;
+  ACCEPT CPTDSCFRA      OF MCCOMPTE
+  ACCEPT CPTDSCABRFRA   OF MCCOMPTE
+  ;
+  ; Description anglaise
+  ;
+  ACCEPT CPTDSCANG      OF MCCOMPTE
+  ACCEPT CPTDSCABRANG   OF MCCOMPTE
+  ACCEPT CPTTYP         OF MCCOMPTE
+  ACCEPT CPTNIVDET      OF MCCOMPTE
+  ACCEPT DEVCLE         OF MCCOMPTE
+
+  IF DEVCLE OF MCCOMPTE <> DEVCLE OF MCHOLDING
+  THEN ACCEPT CPTCPTLIE OF MCCOMPTE
+
+  ACCEPT CPTCAT         OF MCCOMPTE
+  ACCEPT CPTPECDEBA     OF MCCOMPTE
+  ACCEPT CPTPECDEBI     OF MCCOMPTE
+  ACCEPT CPTINDCLS      OF MCCOMPTE ; mp
+END
+
+PROCEDURE POSTFIND
+BEGIN
+  FOR MCCOMPTE
+  BEGIN
+    LET T_PECDEBA = CPTPECDEBA OF MCCOMPTE
+    LET T_PECDEBI = CPTPECDEBI OF MCCOMPTE
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ;Pour initialiser les variables qui vont permettre de vérifier que les
+  ;catégories de compte "BN", "RD" et "MC" soit seulement spécifier une
+  ;seul fois à l'écran
+  ;
+  LET T_CPTCAT_BN = 0
+  LET T_CPTCAT_RD = 0
+  LET T_CPTCAT_MC = 0
+  LET T_CPTCAT_GP = 0
+
+  ;
+  ; Validation de la destruction
+  ;
+  FOR MCCOMPTE
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF MCCOMPTE &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF MCCOMPTE &
+       AND NOT NEWRECORD     OF MCCOMPTE &
+       AND NOT DELETEDRECORD OF MCCOMPTE &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+    ;
+    ; Pour compter le nombre de type de catégorie "BN", "RD" ou "MC"
+    ;
+    IF CPTCAT = "BN"
+    THEN LET T_CPTCAT_BN = T_CPTCAT_BN + 1
+
+    IF CPTCAT = "RD"
+    THEN LET T_CPTCAT_RD = T_CPTCAT_RD + 1
+
+    IF CPTCAT = "MC"
+    THEN LET T_CPTCAT_MC = T_CPTCAT_MC + 1
+
+    IF CPTCAT = "GP"
+    THEN LET T_CPTCAT_GP = T_CPTCAT_GP + 1
+    ;
+    ; Destruction d'un compte comptable.
+    ;
+    IF DELETEDRECORD OF MCCOMPTE
+    THEN BEGIN
+      ;
+      ; On initialise le flag de retour pour savoir si le sous-écran a
+      ; bien fonctionné.
+      ;
+      LET T_FLGDEL = ""
+      ;
+      ; Appel du sous-écran qui valide si le compte est référé.
+      ;
+      RUN SCREEN mc010x MODE SAME &
+                        PASSING MCCOMPTE , &
+                                T_FLGDEL
+      ;
+      ; Si la valeur de retour égale 1, cela indique que le sous-écran
+      ; n'a trouvé aucune référence pour l'identifiant demandé.
+      ;
+      IF T_FLGDEL = ""
+      THEN ERROR " "
+    END
+  END
+  ;
+  ; Si une catégorie est spécifier plus d'une fois
+  ;
+  IF T_CPTCAT_BN > 1 OR T_CPTCAT_RD > 1 OR T_CPTCAT_MC > 1
+  THEN ERROR 129 ; Vous ne pouvez spécifier plus d'une fois les compte
+                 ; de catégorie BN,RD,GP ou MC
+
+  IF   T_PECDEBA <> CPTPECDEBA OF MCCOMPTE &
+    OR T_PECDEBI <> CPTPECDEBI OF MCCOMPTE
+  THEN BEGIN
+    WHILE RETRIEVING A_CCU_ACTIVE &
+                         VIA CPTCLE &
+                         USING CPTCLE OF MCCOMPTE
+    BEGIN
+      LET CCUPECDEBA OF A_CCU_ACTIVE = CPTPECDEBA OF MCCOMPTE
+      LET CCUPECDEBI OF A_CCU_ACTIVE = CPTPECDEBI OF MCCOMPTE
+      PUT A_CCU_ACTIVE
+    END
+  END
+END
+
+PROCEDURE POSTUPDATE
+BEGIN
+  FOR MCCOMPTE
+  BEGIN
+    LET T_PECDEBA = CPTPECDEBA OF MCCOMPTE
+    LET T_PECDEBI = CPTPECDEBI OF MCCOMPTE
+  END
+END
+
+
+BUILD
+@IF FORMAT
+
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+******************************** Plan comptable ********************************
+* Numéro Nc*   Desc. Française       Desc. Anglaise    *Typ*Dev Cat*  Période  *
+*          *  Longue / Abrégée   *  Longue / Abrégée   *Nv *Cpt    * Act. inact*
+* xxxxxx x *xxxxxxxxxxxxxxxxxxxx *xxxxxxxxxxxxxxxxxxxx * x *xxx xx *xxxxx xxxxx*
+*          *xxxxxxxxxxxxxxxxxxxx *xxxxxxxxxxxxxxxxxxxx * x *xxxxxx *           *
+* xxxxxx x *xxxxxxxxxxxxxxxxxxxx *xxxxxxxxxxxxxxxxxxxx * x *xxx xx *xxxxx xxxxx*
+*          *xxxxxxxxxxxxxxxxxxxx *xxxxxxxxxxxxxxxxxxxx * x *xxxxxx *           *
+* xxxxxx x *xxxxxxxxxxxxxxxxxxxx *xxxxxxxxxxxxxxxxxxxx * x *xxx xx *xxxxx xxxxx*
+*          *xxxxxxxxxxxxxxxxxxxx *xxxxxxxxxxxxxxxxxxxx * x *xxxxxx *           *
+* xxxxxx x *xxxxxxxxxxxxxxxxxxxx *xxxxxxxxxxxxxxxxxxxx * x *xxx xx *xxxxx xxxxx*
+*          *xxxxxxxxxxxxxxxxxxxx *xxxxxxxxxxxxxxxxxxxx * x *xxxxxx *           *
+* xxxxxx x *xxxxxxxxxxxxxxxxxxxx *xxxxxxxxxxxxxxxxxxxx * x *xxx xx *xxxxx xxxxx*
+*          *xxxxxxxxxxxxxxxxxxxx *xxxxxxxxxxxxxxxxxxxx * x *xxxxxx *           *
+* xxxxxx x *xxxxxxxxxxxxxxxxxxxx *xxxxxxxxxxxxxxxxxxxx * x *xxx xx *xxxxx xxxxx*
+*          *xxxxxxxxxxxxxxxxxxxx *xxxxxxxxxxxxxxxxxxxx * x *xxxxxx *           *
+* xxxxxx x *xxxxxxxxxxxxxxxxxxxx *xxxxxxxxxxxxxxxxxxxx * x *xxx xx *xxxxx xxxxx*
+*          *xxxxxxxxxxxxxxxxxxxx *xxxxxxxxxxxxxxxxxxxx * x *xxxxxx *           *
+* xxxxxx x *xxxxxxxxxxxxxxxxxxxx *xxxxxxxxxxxxxxxxxxxx * x *xxx xx *xxxxx xxxxx*
+*          *xxxxxxxxxxxxxxxxxxxx *xxxxxxxxxxxxxxxxxxxx * x *xxxxxx *           *
+*          *                     *                     *   *       *           *
+********************************************************************************
+@ENDIF

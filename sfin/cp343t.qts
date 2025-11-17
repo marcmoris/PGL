@@ -1,0 +1,178 @@
+;/T/ Historique des comptes à payer
+;
+;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur...: Alain Côté / Adapté pour les CP par Thomas BRENNEUR
+;    Date Création.: 5 Aout 1993
+;
+;    Description...: Impression de l'historique des comptes à payer
+;                    d'un fournisseur pour un interval de période. Cet
+;                    historique imprime toutes les factures(FA,CR) avec les
+;                    transactions associées à celles-ci.
+;                    Les paiements automatiques et les paiements directs
+;                    n'apparaissent pas dans cette liste CAP ils ne modifient
+;                    pas le solde du fournisseur.
+;
+;    Note..........: Ce QTP est nécéssaire à cause du compteur T_CNTCAP. Qui va
+;                    permettre de calculer le solde du fournisseur pour la
+;                    période.
+;
+;    Paramètres....: Cie du menu
+;                    Numéro du fournisseur
+;
+;/M/ Modifié par..: Guy Chabot le 18 octobre 1994
+;
+;    Description..: Introduction du P.N.A. aux payables sur le même principe
+;                   ou presque des recevables.
+;
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST
+
+RUN cp343t
+
+
+GLOBAL TEMPORARY G_PECDEB CHARACTER SIZE  4 PARM ; Période de début
+GLOBAL TEMPORARY G_PECFIN CHARACTER SIZE  4 PARM ; Période de fin de la recherche
+
+
+;-------------------------------------------------------------------------------
+
+REQUEST RECHERCHE_TRANSACTIONS
+
+ACCESS CPCPT_A_PAYER &
+  ;
+  ; Information sur le fournisseur.
+  ;
+  LINK REFCIECLE OF CPCPT_A_PAYER, &
+       REFCLENUM OF CPCPT_A_PAYER  &
+    TO FOUCIECLE , &
+       FOUCLE OF                 CPFOURNISSEUR &
+  ;
+  ; Historique de la facture.
+  ;
+  LINK FOUCIECLE  OF CPCPT_A_PAYER, &
+       FOUCLE     OF CPCPT_A_PAYER, &
+       CAPCLE     OF CPCPT_A_PAYER  &
+    TO FOUCIECLE, &
+       FOUCLE   , &
+       CAPCLE OF              CPCAP_HISTO OPTIONAL
+
+
+CHOOSE CAPCIECLE PARM, & ; Compagnie du menu
+       REFCLENUM PARM    ; Numéro de fournisseur
+
+
+;
+; On ne sélectionne que les factures (FA) et crédits (CR). Les notes de crédit,
+; ajustements, paiements sont retrouvés grace à l'historique.
+; Les transactions de l'historiques ne sont sélectionnées que si elles font
+; parties de l'intervalle de période demandée. Les pièces (FA,CR) ne sont
+; sélectionnées que si elles font parties de l'intervalle de période demandé.
+; Ou bien, si elles possèdent des transactions dans cet intervalle.
+;
+
+;
+; On sélectionne les factures, les crédits comme étant une transaction maitre.
+;
+SELECT CPCPT_A_PAYER IF     CAPTYPECR OF CPCPT_A_PAYER = "FA" &
+                        OR  CAPTYPECR OF CPCPT_A_PAYER = "CR" &
+                        OR  CAPTYPECR OF CPCPT_A_PAYER = "NA"
+
+;
+; Les transactions de l'historiques sont sélectionnées que si elles font
+; parties de l'intervalle de période demandée. L'historique contient les
+; ajustements, les notes de crédit, et les paiements.
+;
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE1 CHARACTER SIZE 5 = "1" + PECCLE OF CPCAP_HISTO &
+         IF PECCLE OF CPCAP_HISTO[1:1] < "8" &
+         ELSE "0" + PECCLE OF CPCAP_HISTO
+; Ajustement pour le changement de siècle
+DEFINE D_PECDEB_SIE1 CHARACTER SIZE 5 = "1" + G_PECDEB &
+         IF G_PECDEB[1:1] < "8" &
+         ELSE "0" + G_PECDEB
+; Ajustement pour le changement de siècle
+DEFINE D_PECFIN_SIE1 CHARACTER SIZE 5 = "1" + G_PECFIN &
+         IF G_PECFIN[1:1] < "8" &
+         ELSE "0" + G_PECFIN
+
+
+SELECT CPCAP_HISTO &
+          IF     (D_PECCLE_SIE1 >= D_PECDEB_SIE1 OR G_PECDEB = "" ) &
+             AND (D_PECCLE_SIE1 <= D_PECFIN_SIE1 OR G_PECFIN = "" )
+
+;
+; Les transactions maitre(facture) sont sélectionnées que si elles font
+; parties de l'intervalle de période demandé, ou bien, si elles possèdent des
+; transactions(historique) dans cet intervalle.
+;
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE2 CHARACTER SIZE 5 = "1" + PECCLE OF CPCPT_A_PAYER &
+         IF PECCLE OF CPCPT_A_PAYER[1:1] < "8" &
+         ELSE "0" + PECCLE OF CPCPT_A_PAYER
+; Ajustement pour le changement de siècle
+DEFINE G_PECDEB_SIE2 CHARACTER SIZE 5 = "1" + G_PECDEB &
+         IF G_PECDEB[1:1] < "8" &
+         ELSE "0" + G_PECDEB
+; Ajustement pour le changement de siècle
+DEFINE D_PECFIN_SIE2 CHARACTER SIZE 5 = "1" + G_PECFIN &
+         IF G_PECFIN[1:1] < "8" &
+         ELSE "0" + G_PECFIN
+
+SELECT IF   (     (D_PECCLE_SIE2 >= G_PECDEB_SIE2 OR G_PECDEB = "") &
+              AND (D_PECCLE_SIE2 <= D_PECFIN_SIE2 OR G_PECFIN = "") ) &
+         OR RECORD CPCAP_HISTO EXISTS
+
+
+;
+; Compteur permettant d'identifier la première ligne du CAP pour calculer le
+; solde (voir le quiz)
+;
+TEMPORARY T_CNTCAP INTEGER SIZE 4
+
+
+
+SORT ON REFCLENUM OF CPCPT_A_PAYER, & ; Numéro de fournisseur
+        CAPDAT    OF CPCPT_A_PAYER, & ; Date de la facture
+        CAPCLE    OF CPCPT_A_PAYER, & ; Numéro de facture
+        CPHDAT    OF CPCAP_HISTO      ; Date de l'historique
+
+
+
+ITEM T_CNTCAP COUNT RESET AT CAPCLE
+
+;
+; Transfert des données vers le quiz
+;
+SUBFILE WCP343A KEEP &
+          INCLUDE   FOUCLE    OF CPFOURNISSEUR                , &
+                    FOUNOM    OF CPFOURNISSEUR                , &
+                    DEVCLE    OF CPFOURNISSEUR                , &
+                    G_PECDEB                                  , &
+                    G_PECFIN                                  , &
+                    CAPCLE    OF CPCPT_A_PAYER                , &
+                    PECCLE    OF CPCPT_A_PAYER                , &
+                    LCPCLE    OF CPCPT_A_PAYER                , &
+                    CAPDAT    OF CPCPT_A_PAYER                , &
+                    CAPDATJOU OF CPCPT_A_PAYER                , &
+                    CAPMNT    OF CPCPT_A_PAYER                , &
+                    T_CNTCAP                                  , &
+                    CPHCLE3   OF CPCAP_HISTO                  , &
+                    CPHDAT    OF CPCAP_HISTO                  , &
+                    CPHDATJOU OF CPCAP_HISTO                  , &
+                    CPHTYPTRA OF CPCAP_HISTO                  , &
+                    PECCLE    OF CPCAP_HISTO ALIAS CPH_PECCLE , &
+                    LCPCLE    OF CPCAP_HISTO ALIAS CPH_LCPCLE , &
+                    CPHMNTCAP OF CPCAP_HISTO                  , &
+                    CPHMNTPYE OF CPCAP_HISTO                  , &
+                    CPHMNTESC OF CPCAP_HISTO
+
+BUILD cp343t

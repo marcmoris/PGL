@@ -1,0 +1,1557 @@
+;/T/ Préparation de facture
+;
+;/P/ Programmeur..: Nancy Marceau
+;    Date Création: 18 avril 1994
+;
+;    Description..: Cet écran permet de faire le match de facture vs réception.
+;                   Ces facture d'achat seront éventuellement transférées dans
+;                   les comptes payables lors d'une procédure de transfert.
+;
+;/M/ Pascal Tremblay, 98-01-20
+;
+;    Ajustement pour le changement de siècle
+;
+;
+;/M/ Programmeur.......: Patrick Langlois
+;    Date modification.: 09 Juin 1999
+;    Description.......: Migration Achat/Réception/Inventaire de l'environnement (BOC) 
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN ar011 ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU, &
+                       T_CIENOM,    &
+                       T_PECCLEMNU, &
+                       T_FOUCIECLE, &
+                       T_FOUCLEFND, &
+                       T_FACCLEFND
+
+USE ussectmp NOLIST     ; Variable pour la sécurité
+    "AR011"             ; Nom de l'écran
+
+USE ar011.hlp NOLIST ; Use servant à la documentation de l'écran
+
+USE ustraecr NOLIST
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-ecran
+
+
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE MCRAD_SEQ IN DICT
+                        
+                        
+@IF FRANCAIS                                    
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Réception facturée          " ACTION DESIGNER D001
+  MENUITEM LABEL "Détail du crédit            " ACTION DESIGNER D002
+  MENUITEM LABEL "Écriture comptable          " ACTION DESIGNER D007
+  MENUITEM LABEL "Adresse - fournisseur divers" ACTION DESIGNER D003
+  MENUITEM LABEL "Facture - payables          " ACTION DESIGNER D006
+  MENUITEM LABEL "Vérification                " ACTION DESIGNER D004
+  MENUITEM LABEL "Mémo - achat                " ACTION DESIGNER D005
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%Réception facturée          " ACTION DESIGNER D001
+  MENUITEM LABEL "%%%Détail du crédit            " ACTION DESIGNER D002
+  MENUITEM LABEL "%%%Écriture comptable          " ACTION DESIGNER D007
+  MENUITEM LABEL "%%%Adresse - fournisseur divers" ACTION DESIGNER D003
+  MENUITEM LABEL "%%%Facture - payables          " ACTION DESIGNER D006
+  MENUITEM LABEL "%%%Vérification                " ACTION DESIGNER D004
+  MENUITEM LABEL "%%%Mémo - achat                " ACTION DESIGNER D005
+@ENDIF
+
+;-------------------------------------------------------------------------------
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de la compagnie
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie
+TEMPORARY T_PECCLEMNU CHARACTER SIZE 4  ; Période du menu
+TEMPORARY T_FOUCIECLE CHARACTER SIZE 4  ; Compagnie fournisseur
+TEMPORARY T_FOUCIEFND CHARACTER SIZE 4  ; Compagnie fournisseur
+TEMPORARY T_FOUCLEFND CHARACTER SIZE 6  ; Fournisseur
+TEMPORARY T_FACCLEFND CHARACTER SIZE 12 ; Facture
+;-------------------------------------------------------------------------------
+
+
+FILE ARFACTURE_REC   PRIMARY NOITEM
+  ACCESS VIA   FACCIECLE,            &
+               FOUCLE,               &
+               FACCLE                &
+         USING T_CIECLEMNU,          &
+               FOUCLE OF ARFACTURE_REC, &
+               FACCLE OF ARFACTURE_REC  &
+         REQUEST FOUCLE,    &
+                 FACCLE     &
+         ORDERBY FACCIECLE, &
+                 FOUCLE,    &
+                 FACCLE,    &
+                 PECCLE
+
+  ACCESS VIA   FACCIECLE,            &
+               FOUCLE                &
+         USING T_CIECLEMNU,          &
+               FOUCLE OF ARFACTURE_REC  &
+         REQUEST FOUCLE     &
+         ORDERBY FACCIECLE, &
+                 FOUCLE,    &
+                 FACCLE,    &
+                 PECCLE
+
+  ACCESS VIA   FACCIECLE,            &
+               PECCLE   ,            &
+               LCPCLE                &
+         USING T_CIECLEMNU,          &
+               PECCLE OF ARFACTURE_REC,&
+               LCPCLE OF ARFACTURE_REC &
+         REQUEST PECCLE, &
+                 LCPCLE  &
+         ORDERBY FACCIECLE, &
+                 FOUCLE, &
+                 PECCLE, &
+                 LCPCLE, &
+                 FACCLE
+
+  ACCESS VIA   FACCIECLE,            &
+               PECCLE                &
+         USING T_CIECLEMNU,          &
+               PECCLE OF ARFACTURE_REC &
+         REQUEST PECCLE, &
+                 LCPCLE  &
+         ORDERBY FACCIECLE, &
+                 FOUCLE, &
+                 PECCLE, &
+                 FACCLE
+
+
+  ACCESS VIA   FACCIECLE            &
+         USING T_CIECLEMNU          &
+         ORDERBY FACCIECLE,   &
+                 FACCLE
+
+
+
+  ITEM FACCIECLE    OF ARFACTURE_REC INITIAL T_CIECLEMNU
+  ITEM FOUCIECLE    OF ARFACTURE_REC INITIAL T_FOUCIECLE
+  ITEM REFCLETYP    OF ARFACTURE_REC INITIAL "F"
+  ITEM FACDATCRE OF ARFACTURE_REC INITIAL SYSDATE
+  ITEM FACHRECRE OF ARFACTURE_REC INITIAL SYSTIME / 10000
+  ITEM FACUSRCRE OF ARFACTURE_REC INITIAL TZ_LOGONID
+  ITEM FACDATMOD OF ARFACTURE_REC FINAL   SYSDATE        &
+                                        IF NOT NEWRECORD OF ARFACTURE_REC AND &
+                                           ALTEREDRECORD OF ARFACTURE_REC
+  ITEM FACHREMOD OF ARFACTURE_REC FINAL   SYSTIME / 10000 &
+                                        IF NOT NEWRECORD OF ARFACTURE_REC AND &
+                                           ALTEREDRECORD OF ARFACTURE_REC
+  ITEM FACUSRMOD OF ARFACTURE_REC FINAL   TZ_LOGONID         &
+                                        IF NOT NEWRECORD OF ARFACTURE_REC AND &
+                                           ALTEREDRECORD OF ARFACTURE_REC
+
+
+;
+; Fichier pour valider que les réceptions facturées sont détruites lors
+; de la destruction de la facture.
+;
+FILE ARDER_ITEM    DESIGNER &
+                  OPEN READ SHARE
+  ACCESS VIA   FOUCIECLE, &
+               FOUCLE,    &
+               FACCLE,    &
+               FACCIECLE  &
+         USING FOUCIECLE OF ARFACTURE_REC, &
+               FOUCLE    OF ARFACTURE_REC, &
+               FACCLE    OF ARFACTURE_REC, &
+               FACCIECLE OF ARFACTURE_REC
+
+;------------------------------------------------------------------------------
+;
+; Destruction des réceptions facturées
+;
+FILE ARFAC_DETAIL  DELETE NOITEM
+
+  ACCESS VIA   FOUCIECLE, &
+               FOUCLE,    &
+               FACCLE,    &
+               FACCIECLE  &
+         USING FOUCIECLE OF ARFACTURE_REC, &
+               FOUCLE    OF ARFACTURE_REC, &
+               FACCLE    OF ARFACTURE_REC, &
+               FACCIECLE OF ARFACTURE_REC
+
+;
+; Fichier pour valider que le numéro de facture n'est pas déjà utilisé.
+;
+FILE CPCPT_A_PAYER  REFERENCE
+  ACCESS VIA   FOUCIECLE, &
+               FOUCLE,    &
+               CAPCLE     &
+         USING T_FOUCIECLE, &
+               FOUCLE OF ARFACTURE_REC,  &
+               FACCLE OF ARFACTURE_REC
+
+;
+; Fichier des lots.
+;
+FILE CPLOT             REFERENCE
+
+  ACCESS  VIA   CIECLE, &
+                PECCLE, &
+                LCPCLE &
+          USING FACCIECLE OF ARFACTURE_REC, &
+                PECCLE    OF ARFACTURE_REC,&
+                LCPCLE    OF ARFACTURE_REC
+
+;-------------------------------------------------------------------------------
+;
+; Recherche du code des paiements automatiques pour interdire de
+; commencer un numéro de facture par ce code
+;
+FILE CPPARAMETRE       REFERENCE
+
+  ACCESS  VIA   CIENMC &
+          USING "1"
+
+
+
+;-------------------------------------------------------------------------------
+; Fichier du terme d'escompte d'achat du fournisseur.
+;
+FILE CPTERME           DESIGNER
+
+
+; Fichier permettant de valider que le fournisseur existe.
+;
+FILE VFOC_FOU          REFERENCE
+  ACCESS VIA   FOUCIECLE, &
+               FOUCLE,    &
+               FOCCIECLE  &
+         USING T_FOUCIECLE,          &
+               FOUCLE OF ARFACTURE_REC, &
+               FACCIECLE OF ARFACTURE_REC
+
+;
+; Paramètres pour la compagnie consolidée(holding)
+;
+FILE MCHOLDING         REFERENCE
+  ACCESS VIA CIENMC USING "1"
+
+;
+; Fichier pour valider la période
+;
+FILE MCPERIODE_CIE     DESIGNER &
+                      OPEN READ SHARE
+  ACCESS VIA   CIECLE, &
+               PECCLE &
+         USING T_CIECLEMNU, &
+               PECCLE OF ARFACTURE_REC
+
+FILE MCPERIODE_CTB     REFERENCE
+
+  ACCESS  VIA   PECCLE  &
+          USING PECCLE OF ARFACTURE_REC
+
+
+;
+; Fichier pour afficher le nom du fournisseur
+;
+FILE MCREF_ADRESSE    SECONDARY NOITEM NODELETE
+  ACCESS VIA   REFCIECLE, &
+               REFCLETYP, &
+               REFCLENUM, &
+               RADCLE     &
+         USING FOUCIECLE OF ARFACTURE_REC, &
+               REFCLETYP OF ARFACTURE_REC, &
+               FOUCLE    OF ARFACTURE_REC, &
+               RADCLE    OF ARFACTURE_REC
+
+  ITEM REFCIECLE OF MCREF_ADRESSE FINAL FOUCIECLE OF ARFACTURE_REC
+  ITEM REFCLETYP OF MCREF_ADRESSE FINAL REFCLETYP OF ARFACTURE_REC
+  ITEM REFCLENUM OF MCREF_ADRESSE FINAL FOUCLE    OF ARFACTURE_REC
+  ITEM RADCLE    OF MCREF_ADRESSE FINAL RADCLE    OF ARFACTURE_REC
+  ITEM RADPAMCP  OF MCREF_ADRESSE INITIAL "1"
+
+;
+; Numéro de séquence des adresses pour les clients divers.
+;
+FILE MCRAD_SEQ         DESIGNER  TRANSACTION GEN_NUM_SEQ
+
+;------------------------------------------------------------------------------
+;
+; Codes bilingues du type de la facture
+;
+DEFINE    D_FACTYPECR CHARACTER SIZE 16 = "FACTYPECR"
+TEMPORARY T_FACTYPECR CHARACTER SIZE 4
+
+FILE VCBI_DSC   REFERENCE ALIAS A_CBI_FACTYPECR
+  ACCESS  VIA XELNOM, &
+              CBICLE  &
+          USING D_FACTYPECR, &
+                FACTYPECR OF ARFACTURE_REC
+
+;-------------------------------------------------------------------------------
+;
+; Pour valider que l'entrepôt existe
+;
+FILE ARENTREPOT  REFERENCE
+  ACCESS VIA   CIECLE, &
+               ENTCLE  &
+         USING T_CIECLEMNU, &
+               ENTCLE OF ARFACTURE_REC
+
+
+;-------------------------------------------------------------------------------
+TEMPORARY T_PECCLE    CHARACTER SIZE 4 ; Popup sur les périodes.
+TEMPORARY T_ENTCLE    CHARACTER SIZE 4 ; Popup sur entrepôts
+TEMPORARY T_CIECLE    CHARACTER SIZE 4 ; Compagnie pour écran dépisteur.
+TEMPORARY T_MOD       CHARACTER SIZE 2 ; Code de module.
+TEMPORARY T_FOUCLE    CHARACTER SIZE 6 ; Popup sur les fournisseurs.
+TEMPORARY T_FOCCIECLE CHARACTER SIZE 4 ; Popup sur les fournisseurs.
+TEMPORARY T_REFCLETYP CHARACTER SIZE 1 ; Popup sur adresses achat.
+TEMPORARY T_TYPADR    CHARACTER SIZE 3 ; Popup sur adresses achat.
+TEMPORARY T_RADCLE    INTEGER UNSIGNED SIZE  2 ; Popup sur adresses achat.
+
+TEMPORARY T_TERCLE    CHARACTER SIZE  4 ; Popup sur termes.
+TEMPORARY T_TERCAT    CHARACTER SIZE  4 ; Popup sur termes.
+
+TEMPORARY T_SILDATNET CHARACTER SIZE  1 ; Pour la validation de la date due
+TEMPORARY T_PECCLECOU CHARACTER SIZE  4 ; Période courante
+TEMPORARY T_CAPCLEFND CHARACTER SIZE 15 ; # de facture     de recherche
+;-------------------------------------------------------------------------------
+;
+; Pour duplicater la période et le lot en mode ENTRY.
+;
+TEMPORARY T_PECCLE_DUP CHARACTER SIZE  4 RESET AT MODE
+
+;
+; Gestion des mémos.
+;
+TEMPORARY T_ARMTYPFND   CHARACTER SIZE 1  INITIAL "4"
+TEMPORARY T_NUMREFFND   CHARACTER SIZE 12
+
+DEFINE    D_DEVCLE CHARACTER SIZE 4 = " " IF DEVCLE OF VFOC_FOU = &
+                                             DEVCLE OF MCHOLDING &
+                                 ELSE "/" + DEVCLE OF VFOC_FOU
+
+;
+; Si le lot est autorisé, pour empêcher modification
+;
+DEFINE D_LCPATRJOU    CHARACTER SIZE 1 = LCPATRJOU OF CPLOT
+
+;-------------------------------------------------------------------------------
+;
+; Clef d'accès pour la consultation des écritures.
+;
+DEFINE D_HISCLE    INTEGER UNSIGNED SIZE 4 = HISCLE OF ARFACTURE_REC
+
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4  = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+;
+; Pour le calcul des dates due.
+;
+USE ustertmp NOLIST
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST     ; Draw pour les écrans pleine page
+USE ustitstd NOLIST     ; En-tête pour les écrans pleine page
+USE ushilite NOLIST     ; Hilite pour tous les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Consolidation de facture d'achat " &
+@ELSE
+      " %%%Préparation de facture " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+
+SKIP 1
+ALIGN (3,3,19) (,27,43) (,49,65)
+
+FIELD PECCLE OF ARFACTURE_REC &
+        HIDDEN ID 05 &
+        DEFAULT T_PECCLEMNU &
+        NOCHANGE &
+        PICTURE "^^-^^" &
+        LOOKUP ON MCPERIODE_CIE &
+          MESSAGE 1307 ; Cette période n'existe pas
+
+
+FIELD LCPCLE OF ARFACTURE_REC &
+        NUMERIC &
+        SIGNIFICANCE 4 &
+        DISPLAY
+
+FIELD FACDATTRF OF ARFACTURE_REC  FORMAT YYYYMMDD &
+        DISPLAY
+
+SKIP 1
+ALIGN (3,3,19) (,,26)
+
+FIELD FOUCLE OF ARFACTURE_REC &
+        HIDDEN ID 10       &
+        REQUIRED           &
+        NOCHANGE           &
+        LOOKUP ON VFOC_FOU &
+          MESSAGE 1355 ; Ce fournisseur n'existe pas.
+
+FIELD RADNOM OF MCREF_ADRESSE &
+        REQUIRED &
+        FOR 2,30
+
+
+ALIGN (3,3,19) (,,26)
+
+FIELD RADCLE OF ARFACTURE_REC &
+        HIDDEN ID 15  &
+        NOENTRY       &
+        REQUIRED      &
+        LOOKUP ON MCREF_ADRESSE &
+          VIA   REFCIECLE, &
+                REFCLETYP, &
+                REFCLENUM, &
+                RADCLE     &
+          USING FOUCIECLE, &
+                REFCLETYP, &
+                FOUCLE   , &
+                RADCLE OF ARFACTURE_REC &
+          MESSAGE 1363  & ; Cette adresse n'existe pas pour ce fournisseur.
+@IF FRANCAIS
+        LABEL "Adr. paiement.:"
+@ELSE
+        LABEL "%%%Adr. paiement.:"
+@ENDIF
+
+
+
+FIELD RADADR1 OF MCREF_ADRESSE DISPLAY
+
+SKIP 1
+ALIGN (3,3,19) (,49,65) (,,68)
+
+FIELD FACCLE OF ARFACTURE_REC &
+        HIDDEN ID 20 &
+        REQUIRED     &
+        NOCHANGE     &
+        LOOKUP NOTON ARFACTURE_REC &
+          VIA   FOUCIECLE, &
+                FOUCLE,    &
+                FACCLE     &
+          USING T_FOUCIECLE, &
+                FOUCLE OF ARFACTURE_REC, &
+                FACCLE OF ARFACTURE_REC &
+          MESSAGE 1416, & ; Cette facture existe déjà.
+        NOTON CPCPT_A_PAYER &
+          MESSAGE 1416 ; Cette facture existe déjà.
+
+
+FIELD FACTYPECR OF ARFACTURE_REC &
+        DEFAULT "FA" &
+        NOCHANGE     &
+        LOOKUP ON A_CBI_FACTYPECR &
+          MESSAGE 1349 ; Le type est invalide
+
+FIELD CBIDSC OF A_CBI_FACTYPECR &
+        DISPLAY &
+        SIZE 10
+
+ALIGN (3,3,19)
+
+FIELD FACDAT OF ARFACTURE_REC  FORMAT YYYYMMDD &
+        HIDDEN ID 25 &
+        REQUIRED
+;
+ALIGN (3,3,19) (,,24) (,40,56) (,,61)
+
+FIELD FACTERNET OF ARFACTURE_REC &
+        HIDDEN ID 30 &
+        NOENTRY
+
+
+FIELD FACDATDUE  OF ARFACTURE_REC FORMAT YYYYMMDD
+
+FIELD T_SILDATNET &
+        SILENT
+
+FIELD FACTERESC1 OF ARFACTURE_REC &
+        NOENTRY
+
+FIELD FACDATESC1 OF ARFACTURE_REC FORMAT YYYYMMDD
+
+ALIGN (,40,56) (,,61)
+
+FIELD FACTERESC2 OF ARFACTURE_REC &
+        NOENTRY
+
+FIELD FACDATESC2 OF ARFACTURE_REC FORMAT YYYYMMDD
+
+
+ALIGN (3,3,19) (,,26)
+
+FIELD ENTCLE OF ARFACTURE_REC   &
+        HIDDEN ID   32          &
+        REQUIRED NOCHANGE       &
+        LOOKUP ON ARENTREPOT &
+          MESSAGE 1337        ; Ce code d'entrepôt n'existe pas.
+
+
+FIELD ENTNOM OF ARENTREPOT DISPLAY
+
+ALIGN (3,3,19)
+
+FIELD FACCOM1 OF ARFACTURE_REC &
+        HIDDEN ID 35
+
+ALIGN (,,19)
+
+FIELD FACCOM2 OF ARFACTURE_REC &
+        ID SAME
+
+SKIP 1
+ALIGN (3,3,19) (,,34) (,40,56)
+
+FIELD FACMNTTOT OF ARFACTURE_REC &
+         HIDDEN ID 40 &
+         DISPLAY PREDISPLAY &
+         REFRESH
+
+
+FIELD D_DEVCLE   DISPLAY PREDISPLAY
+
+FIELD FACMNTNET OF ARFACTURE_REC &
+        DISPLAY PREDISPLAY &
+        REFRESH
+
+ALIGN (3,3,19) (,40,56)
+
+FIELD FACMNTTPS OF ARFACTURE_REC &
+        HIDDEN ID 45 &
+        DISPLAY PREDISPLAY &
+        REFRESH
+
+FIELD FACMNTCTI OF ARFACTURE_REC &
+        DISPLAY PREDISPLAY &
+        REFRESH
+
+ALIGN (3,3,19) (,40,56)
+
+FIELD FACMNTTVQ OF ARFACTURE_REC &
+        HIDDEN ID 50 &
+        DISPLAY PREDISPLAY &
+        REFRESH
+
+FIELD FACMNTRTI OF ARFACTURE_REC &
+        DISPLAY PREDISPLAY &
+        REFRESH
+
+
+
+ALIGN (3,3,19)
+
+FIELD FACMNTESC OF ARFACTURE_REC &
+        HIDDEN ID 55 &
+        DISPLAY PREDISPLAY &
+        REFRESH
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+  ;
+  ; Si l'écran n'est pas appelé par le menu alors on interdit le saisie,
+  ; la modification et la destruction des données.
+  ;
+  IF 0 <> SIZE(TRUNCATE(T_FACCLEFND))
+  THEN BEGIN
+    LET TZ_SECENT = "0"
+    LET TZ_SECMOD = "0"
+    LET TZ_SECDEL = "0"
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+; Ecran dépisteur pour la période comptable.
+;
+PROCEDURE INPUT PECCLE
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_MOD = "CP"
+    LET T_PECCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN  mc109 PASSING T_CIECLEMNU, T_PECCLE, T_MOD  MODE F
+    LET FIELDTEXT = TRUNC(T_PECCLE)
+  END
+  ;
+  ; On force la validation de la période.
+  ;
+  IF 0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(PECCLE OF ARFACTURE_REC))
+  THEN LET FIELDTEXT = PECCLE OF ARFACTURE_REC
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du statut de la période.
+;
+;
+PROCEDURE EDIT PECCLE
+BEGIN
+  ;
+  IF PCCSTUCP OF MCPERIODE_CIE = "F"
+  THEN ERROR 1309 ; Cette période est fermée.
+  ;
+  IF PCCSTUCP OF MCPERIODE_CIE <> "C"
+  THEN WARNING 1310 ; La période saisie n'est pas la courante.
+END
+
+
+
+;-------------------------------------------------------------------------------
+; Ecran de consultation (dépisteur) des fournisseurs
+;
+;
+PROCEDURE INPUT FOUCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_FOUCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_FOCCIECLE = T_CIECLEMNU
+    RUN SCREEN cp104 MODE F PASSING T_FOUCIECLE, T_FOUCLE, T_FOCCIECLE
+    LET FIELDTEXT = TRUNCATE(T_FOUCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Le fournisseur doit être Actif.
+;
+PROCEDURE EDIT FOUCLE
+BEGIN
+  IF FOUSTU OF VFOC_FOU = "I"
+  THEN ERROR 1391 ; Le fournisseur est inactif.
+
+  IF FOURTU OF VFOC_FOU = "1"
+  THEN WARNING 1392 ; Le fournisseur est présentement retenu.
+END
+
+
+;-------------------------------------------------------------------------------
+; Procédure permettant d'initialiser les informations du fournisseur sur la
+; facture.
+;
+PROCEDURE PROCESS FOUCLE
+BEGIN
+  LET FACTERNET  OF ARFACTURE_REC = FOCTERNET  OF VFOC_FOU
+  LET FACTERESC1 OF ARFACTURE_REC = FOCTERESC1 OF VFOC_FOU
+  LET FACTERESC2 OF ARFACTURE_REC = FOCTERESC2 OF VFOC_FOU
+  IF FOUTYP OF VFOC_FOU <> "D"
+  THEN BEGIN
+    LET     RADCLE     OF ARFACTURE_REC = FOCADRPAM OF VFOC_FOU
+    EDIT    RADCLE     OF ARFACTURE_REC
+    DISPLAY RADCLE     OF ARFACTURE_REC
+  END
+  ELSE LET RADCLE OF ARFACTURE_REC = 0
+  DISPLAY FACTERNET  OF ARFACTURE_REC
+  DISPLAY FACTERESC1 OF ARFACTURE_REC
+  DISPLAY FACTERESC2 OF ARFACTURE_REC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Si l'usager modifie le nom du fournisseur divers, il faut mettre à jour
+; le nom abrégé si celui-ci correspond à l'ancienne valeur.
+;
+PROCEDURE EDIT RADNOM
+BEGIN
+  IF RADNOMABR OF MCREF_ADRESSE = OLDVALUE( RADNOM OF MCREF_ADRESSE )[1:20]
+  THEN LET RADNOMABR OF MCREF_ADRESSE = RADNOM OF MCREF_ADRESSE
+END
+
+;-------------------------------------------------------------------------------
+; Ecran dépisteur dur l'adresse d'achat du fournisseur
+;
+PROCEDURE INPUT RADCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE    = FOUCIECLE OF ARFACTURE_REC
+    LET T_REFCLETYP = REFCLETYP OF ARFACTURE_REC
+    LET T_FOUCLE    = FOUCLE    OF ARFACTURE_REC
+    LET T_TYPADR    = "PAM"
+    LET T_RADCLE = 0
+    RUN SCREEN mc108 MODE F PASSING   T_CIECLE, &
+                                      T_REFCLETYP, &
+                                      T_FOUCLE, &
+                                      T_TYPADR, &
+                                      T_RADCLE
+    IF T_RADCLE <> 0
+    THEN LET FIELDTEXT = ASCII(T_RADCLE)
+    ELSE LET FIELDTEXT = ""
+  END
+END
+
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation que l'adresse est une adresse de paiement.
+;
+PROCEDURE EDIT RADCLE
+BEGIN
+  IF RADPAMCP OF MCREF_ADRESSE <> "1"
+  THEN ERROR 1369 ; Ce n'est pas une adresse de paiement.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Affiche le nom du fournisseur provenant de l'adresse (permet d'avoir le
+; nom du fournisseur divers)
+;
+PROCEDURE PROCESS RADCLE
+BEGIN
+  DISPLAY RADNOM  OF MCREF_ADRESSE
+  DISPLAY RADADR1 OF MCREF_ADRESSE
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+; SAISIE & VALIDATION DU NUMERO DE FACTURE
+;
+
+;
+; Cette procédure force le LOOKUP du numéro de facture si l'usager recule
+; et modifie le numéro de fournisseur sans modifier le numéro de facture
+;
+PROCEDURE INPUT FACCLE
+BEGIN
+  IF ENTRYMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     FACCLE OF ARFACTURE_REC <> ""
+  THEN LET FIELDTEXT = FACCLE OF ARFACTURE_REC
+END
+
+;
+; Validation du numéro de facture. Celui-ci ne doit pas dépasser 12 caractères
+; pour pouvoir laisser de la place au numéro d'ajustement. et il ne doit pas
+; commencer par les mêmes lettres que le code des paiements automatiques.
+;
+PROCEDURE EDIT FACCLE
+BEGIN
+  IF 12 < SIZE(TRUNCATE(FIELDTEXT))
+  THEN ERROR 1418 ; Le numéro de facture est trop long.
+
+  IF FIELDTEXT[1:2] = CPPCODPAU OF CPPARAMETRE
+  THEN ERROR 1426 ; Le numéro ne peut pas débuter par le code des paiements automatiques.
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour le code bilingue type de facture.
+;
+PROCEDURE INPUT FACTYPECR
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_FACTYPECR = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_FACTYPECR, T_FACTYPECR
+    LET FIELDTEXT = TRUNCATE(T_FACTYPECR)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; VALIDATION DE LA DATE DE LA FACTURE
+;
+;
+PROCEDURE EDIT FACDAT
+BEGIN
+  IF FIELDVALUE < PECDATDEB OF MCPERIODE_CTB
+  THEN WARNING 1434 ; La date est inférieure à la date de début de la période
+
+  IF FIELDVALUE > PECDATFIN OF MCPERIODE_CTB
+  THEN WARNING 1436 ; La date est supérieure à la date de fin de la période.
+END
+
+;
+; Calcul et affichage des dates dues.
+;
+PROCEDURE PROCESS FACDAT
+BEGIN
+  EDIT FACTERNET  OF ARFACTURE_REC
+  EDIT FACTERESC1 OF ARFACTURE_REC
+  EDIT FACTERESC2 OF ARFACTURE_REC
+END
+
+;-------------------------------------------------------------------------------
+;
+; PROCEDURE DE CALCUL DES DATES DUES APPELÉS PAR LES TERMES
+;
+;
+USE ustercal NOLIST
+
+
+
+;-------------------------------------------------------------------------------
+; Consultation des termes nets.
+;
+;
+PROCEDURE INPUT FACTERNET
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TERCAT = "NET"
+    LET T_TERCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cp102 MODE F PASSING T_TERCLE, T_TERCAT
+    LET FIELDTEXT = TRUNCATE(T_TERCLE)
+  END
+
+
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de valider que le terme saisi est de type NET
+; (net)
+;
+PROCEDURE EDIT FACTERNET
+BEGIN
+  IF 0 <> SIZE (TRUNCATE (FIELDTEXT) )
+  THEN BEGIN
+    GET CPTERME &
+      VIA   TERCLE &
+      USING FIELDTEXT OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 1428 ; Ce terme net n'existe pas.
+
+    ELSE BEGIN
+      IF TERCAT OF CPTERME <> "NET"
+      THEN ERROR 1430 ; Ce terme n'est pas de type net.
+    END
+  END
+
+END
+
+
+;
+; Calcul de la date due.
+; Seules les factures (FA) utilisent les termes. Les autres types de pièces
+; ne sont pas concernées et prennent la date de la facture comme
+; date due.
+;
+PROCEDURE PROCESS FACTERNET
+BEGIN
+  IF 0 <> SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    LET TZ_DATCAL = FACDAT OF ARFACTURE_REC
+    DO INTERNAL TER_DATE_DUE
+    LET FACDATDUE OF ARFACTURE_REC = TZ_DATRES
+  END
+  DISPLAY FACDATDUE OF ARFACTURE_REC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; VALIDATION DE LA DATE DUE POUR LE TERME NET
+;
+; Cette date est obligatoire. Normalement elle est calculée lors de la saisie
+; du terme net mais l'usager peut la modifier.
+;
+; Valide la date due avec la date de la facture.
+;
+;
+PROCEDURE EDIT T_SILDATNET
+BEGIN
+  IF FACDATDUE OF ARFACTURE_REC < FACDAT OF ARFACTURE_REC
+  THEN ERROR 1432 ; La date due ne peut être inférieure à la date de la facture.
+END
+
+
+
+;-------------------------------------------------------------------------------
+; Consultation des termes nets.
+;
+;
+PROCEDURE INPUT FACTERESC1
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TERCAT = "ESC"
+    LET T_TERCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cp102 MODE F PASSING T_TERCLE, T_TERCAT
+    LET FIELDTEXT = TRUNCATE(T_TERCLE)
+  END
+
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de valider que le terme saisi est de type escompte
+; (escompte)
+;
+PROCEDURE EDIT FACTERESC1
+BEGIN
+  IF 0 <> SIZE (TRUNCATE (FIELDTEXT) )
+  THEN BEGIN
+    GET CPTERME &
+      VIA   TERCLE &
+      USING FIELDTEXT OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 1377 ; Ce terme d'escompte n'existe pas.
+
+    ELSE BEGIN
+      IF TERCAT OF CPTERME <> "ESC"
+      THEN ERROR 1378 ; Ce terme n'est pas de type escompte.
+    END
+  END
+
+END
+
+
+;
+; Calcul de la date due.
+;
+PROCEDURE PROCESS FACTERESC1
+BEGIN
+  IF 0 <> SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    LET TZ_DATCAL = FACDAT OF ARFACTURE_REC
+    DO INTERNAL TER_DATE_DUE
+    LET FACDATESC1 OF ARFACTURE_REC = TZ_DATRES
+  END
+  ELSE BEGIN
+    ;
+    ; Le deuxième escompte ne peut pas exister sans le premier.
+    ;
+    LET FACDATESC1 OF ARFACTURE_REC = 0
+    LET FACTERESC2 OF ARFACTURE_REC = ""
+    LET FACDATESC2 OF ARFACTURE_REC = 0
+    DISPLAY FACTERESC2 OF ARFACTURE_REC
+    DISPLAY FACDATESC2 OF ARFACTURE_REC
+  END
+  DISPLAY FACDATESC1 OF ARFACTURE_REC
+END
+
+;-------------------------------------------------------------------------------
+;
+; VALIDATION DE LA DATE DUE POUR LE PREMIER TERME D'ESCOMPTE
+;
+;
+PROCEDURE EDIT FACDATESC1
+BEGIN
+  IF FIELDVALUE < FACDAT OF ARFACTURE_REC
+  THEN ERROR 1432 ; La date due ne peut être inférieure à la date de la facture.
+END
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION / VALIDATION / ET CALCUL DU DEUXIEME TERME D'ESCOMPTE
+;
+;
+PROCEDURE INPUT FACTERESC2
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TERCAT = "ESC"
+    LET T_TERCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cp102 MODE F PASSING T_TERCLE, T_TERCAT
+    LET FIELDTEXT = TRUNCATE(T_TERCLE)
+  END
+END
+
+;
+; Validation du deuxième code d'escompte.
+;
+PROCEDURE EDIT FACTERESC2
+BEGIN
+  IF 0 <> SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    GET CPTERME &
+        VIA     TERCLE &
+        USING   FIELDTEXT &
+        OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 1377 ; Ce terme d'escompte n'existe pas.
+
+    IF TERCAT OF CPTERME <> "ESC"
+    THEN ERROR 1378 ; Ce terme n,est pas de type escompte.
+  END
+END
+
+;
+; Calcul de la date due.
+;
+PROCEDURE PROCESS FACTERESC2
+BEGIN
+  IF 0 <> SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    LET TZ_DATCAL = FACDAT OF ARFACTURE_REC
+    DO INTERNAL TER_DATE_DUE
+    LET FACDATESC2 OF ARFACTURE_REC = TZ_DATRES
+  END
+  ELSE BEGIN
+    LET FACDATESC2 OF ARFACTURE_REC = 0
+  END
+  DISPLAY FACDATESC2 OF ARFACTURE_REC
+END
+
+;-------------------------------------------------------------------------------
+;
+; VALIDATION DE LA DATE DUE DU DEUXIEMME TERME D'ESCOMPTE
+;
+;
+PROCEDURE EDIT FACDATESC2
+BEGIN
+  IF FIELDVALUE < FACDAT OF ARFACTURE_REC
+  THEN ERROR 1432 ; La date due ne peut être inférieure à la date de la facture.
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de faire un écran dépisteur pour l'entrepôt
+;
+PROCEDURE INPUT ENTCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = T_CIECLEMNU
+    LET T_ENTCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN ar100 MODE F PASSING T_CIECLE, T_ENTCLE
+    LET FIELDTEXT = TRUNCATE(T_ENTCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure est codée car il faut saisir l'adresse du fournisseur divers
+; s'il y a lieu.
+;
+PROCEDURE ENTRY
+BEGIN
+  ;
+  ; La période et le lot reste les mêmes pour la durée d'une saisie.
+  ;
+  IF T_PECCLE_DUP = ""
+  THEN BEGIN
+    ACCEPT PECCLE OF ARFACTURE_REC
+    LET T_PECCLE_DUP = PECCLE OF ARFACTURE_REC
+  END
+  ELSE BEGIN
+    LET PECCLE OF ARFACTURE_REC = T_PECCLE_DUP
+    DISPLAY PECCLE OF ARFACTURE_REC
+  END
+
+  DISPLAY LCPCLE    OF ARFACTURE_REC
+  DISPLAY FACDATTRF OF ARFACTURE_REC
+
+  ACCEPT FOUCLE OF ARFACTURE_REC
+  ;
+  ; Saisie du nom et adresse du fournisseur divers.
+  ;
+  IF FOUTYP    OF VFOC_FOU      = "D"
+  THEN BEGIN
+    ACCEPT RADNOM OF MCREF_ADRESSE
+    ;
+    ; Sous-écran pour la saisie de l'adresse.
+    ;
+    RUN SCREEN ar011e &
+          PASSING MCREF_ADRESSE &
+          MODE E
+    DISPLAY RADADR1  OF MCREF_ADRESSE
+  END
+  ELSE BEGIN
+    DISPLAY RADNOM    OF MCREF_ADRESSE
+    DISPLAY RADCLE    OF ARFACTURE_REC
+    DISPLAY RADADR1   OF MCREF_ADRESSE
+  END
+
+  ACCEPT FACCLE OF ARFACTURE_REC
+  ACCEPT FACTYPECR OF ARFACTURE_REC
+  DISPLAY CBIDSC OF A_CBI_FACTYPECR
+  ACCEPT FACDAT OF ARFACTURE_REC
+  ;
+  ; Le terme-net ou la date due pour le net sont obligatoires.
+  ;
+  IF 0 = SIZE(TRUNCATE(FACTERNET OF ARFACTURE_REC))
+  THEN BEGIN
+    ACCEPT FACTERNET OF ARFACTURE_REC
+    ACCEPT FACDATDUE OF ARFACTURE_REC
+    EDIT   T_SILDATNET
+  END
+
+  IF "CR" = FACTYPECR OF ARFACTURE_REC
+  THEN ACCEPT ENTCLE OF ARFACTURE_REC
+  DISPLAY ENTNOM OF ARENTREPOT
+  ACCEPT FACCOM1 OF ARFACTURE_REC
+  ACCEPT FACCOM2 OF ARFACTURE_REC
+
+  DISPLAY FACMNTTOT OF ARFACTURE_REC
+  DISPLAY D_DEVCLE
+  DISPLAY FACMNTNET OF ARFACTURE_REC
+  DISPLAY FACMNTTPS OF ARFACTURE_REC
+  DISPLAY FACMNTCTI OF ARFACTURE_REC
+  DISPLAY FACMNTTVQ OF ARFACTURE_REC
+  DISPLAY FACMNTRTI OF ARFACTURE_REC
+
+  IF "FA" = FACTYPECR OF ARFACTURE_REC
+  THEN RUN SCREEN ar011a &
+                PASSING T_CIECLEMNU, &
+                        T_CIENOM,    &
+                        ARFACTURE_REC, &
+                        MCREF_ADRESSE  &
+                        MODE E
+  ELSE RUN SCREEN ar011f &
+                PASSING T_CIECLEMNU, &
+                        T_CIENOM,    &
+                        ARFACTURE_REC, &
+                        MCREF_ADRESSE  &
+                        MODE E
+
+END
+
+;-------------------------------------------------------------------------------
+;
+; MODIFICATION DU NOM DU FOURNISSEUR DIVERS
+;
+;
+PROCEDURE DESIGNER 10
+BEGIN
+  IF    FOUTYP    OF VFOC_FOU      = "D" &
+    AND CAPDATJOU OF CPCPT_A_PAYER = 0
+  THEN ACCEPT RADNOM OF MCREF_ADRESSE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; MODIFICATION DES CODES DE TERMES
+;
+;
+PROCEDURE DESIGNER 30
+BEGIN
+  ACCEPT FACTERNET OF ARFACTURE_REC
+  ACCEPT FACDATDUE OF ARFACTURE_REC
+  EDIT   T_SILDATNET
+  ;
+  ; Le terme-escompte(1) est optionel et la date due est modifiable.
+  ;
+  ACCEPT FACTERESC1 OF ARFACTURE_REC
+  IF 0 <> SIZE(TRUNCATE(FACTERESC1 OF ARFACTURE_REC))
+  THEN ACCEPT FACDATESC1 OF ARFACTURE_REC
+  ;
+  ; Le terme-escompte(2) est optionel et la date due est modifiable.
+  ;
+  IF 0 <> SIZE(TRUNCATE(FACTERESC1 OF ARFACTURE_REC))
+  THEN BEGIN
+    ACCEPT FACTERESC2 OF ARFACTURE_REC
+    IF 0 <> SIZE(TRUNCATE(FACTERESC2 OF ARFACTURE_REC))
+    THEN ACCEPT FACDATESC2 OF ARFACTURE_REC
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; MODIFICATION DE LA DESCRIPTION DE LA PIÈCE
+;
+; la modification est autorisée seulement si la facture n'est pas journalisée
+;
+PROCEDURE DESIGNER 35
+BEGIN
+  IF CAPDATJOU OF CPCPT_A_PAYER = 0
+  THEN BEGIN
+    ACCEPT FACCOM1 OF ARFACTURE_REC
+    ACCEPT FACCOM2 OF ARFACTURE_REC
+  END
+END
+
+;-------------------------------------------------------------------------------
+; Procédure d'appel du sous-écran de la réception facturée.
+;
+PROCEDURE DESIGNER D001
+BEGIN
+
+  IF "FA" = FACTYPECR OF ARFACTURE_REC
+  THEN BEGIN
+    IF    ALTEREDRECORD OF ARFACTURE_REC &
+      AND FACDATTRF OF ARFACTURE_REC <> 0
+    THEN ERROR 1390 ; Vous devez faire une mise à jour avant d'accéder le sous-écran.
+
+    RUN SCREEN ar011a &
+               PASSING T_CIECLEMNU, &
+                       T_CIENOM,    &
+                       ARFACTURE_REC, &
+                       MCREF_ADRESSE  &
+               MODE SAME
+  END
+
+END
+
+;-------------------------------------------------------------------------------
+; Procédure d'appel du sous-écran du détail du crédit
+;
+PROCEDURE DESIGNER D002
+BEGIN
+
+  IF "CR" = FACTYPECR OF ARFACTURE_REC
+  THEN BEGIN
+    IF    ALTEREDRECORD OF ARFACTURE_REC &
+      AND FACDATTRF OF ARFACTURE_REC <> 0
+    THEN ERROR 1390 ; Vous devez faire une mise à jour avant d'accéder le sous-écran.
+
+    RUN SCREEN ar011f &
+               PASSING T_CIECLEMNU, &
+                       T_CIENOM,    &
+                       ARFACTURE_REC, &
+                       MCREF_ADRESSE  &
+               MODE SAME
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+; Procédure d'appel du sous-écran de l'adresse du fournisseur divers.
+;
+PROCEDURE DESIGNER D003
+BEGIN
+  IF FOUTYP OF VFOC_FOU = "D"
+  THEN RUN SCREEN ar011e &
+             PASSING MCREF_ADRESSE  &
+             MODE F
+END
+
+
+
+;-------------------------------------------------------------------------------
+; Procédure d'appel du sous-écran de la piste de vérification.
+;
+PROCEDURE DESIGNER D004
+BEGIN
+  RUN SCREEN ar011c &
+             PASSING ARFACTURE_REC &
+             MODE F
+END
+
+;-------------------------------------------------------------------------------
+;
+; Procédure d'appel du sous-écran des mémos.
+;
+PROCEDURE DESIGNER D005
+BEGIN
+  LET T_NUMREFFND = FACCLE OF ARFACTURE_REC
+  LET T_FOUCLE    = FOUCLE OF ARFACTURE_REC
+  RUN SCREEN ar012 MODE F &
+                PASSING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        T_ARMTYPFND, &
+                        T_NUMREFFND, &
+                        T_FOUCIECLE, &
+                        T_FOUCLE
+END
+
+;-------------------------------------------------------------------------------
+;
+; Procédure d'appel du sous-écran des facture des payables
+;
+PROCEDURE DESIGNER D006
+BEGIN
+
+  LET T_FOUCLEFND = FOUCLE OF ARFAC_DETAIL
+  LET T_CAPCLEFND = FACCLE OF ARFAC_DETAIL
+  LET T_PECCLECOU = T_PECCLEMNU
+
+  IF 0 <> FACDATTRF OF ARFACTURE_REC
+  THEN RUN SCREEN cp003 MODE F &
+                     PASSING T_FOUCIECLE, &
+                             T_CIECLEMNU, &
+                             T_CIENOM   , &
+                             T_PECCLEMNU, &
+                             T_PECCLECOU, &
+                             T_FOUCLEFND, &
+                             T_CAPCLEFND
+
+END
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION DE L'ÉCRITURE COMPTABLE
+;
+;
+PROCEDURE DESIGNER D007
+BEGIN
+  IF CAPDATJOU OF CPCPT_A_PAYER = 0
+  THEN ERROR 460 ; L'écriture doit être journalisée pour accèder le sous-écran.
+  ;
+  ;
+  RUN SCREEN mc090  MODE F PASSING D_HISCLE
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure est codée afin d'en permettre l'appel par l'écran d'historique
+; des transactions des produits
+;
+PROCEDURE PATH
+BEGIN
+  IF T_FACCLEFND <> "" ; L'appel provient de l'historique des produits
+  THEN BEGIN
+    LET PATH = 99
+  END
+
+  ELSE BEGIN
+    REQUEST FOUCLE OF ARFACTURE_REC
+    IF PROMPTOK
+    THEN REQUEST FACCLE OF ARFACTURE_REC
+    IF PROMPTOK
+     THEN LET PATH = 1
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST FOUCLE OF ARFACTURE_REC
+      IF PROMPTOK
+      THEN LET PATH = 2
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST PECCLE OF ARFACTURE_REC
+      IF PROMPTOK
+      THEN REQUEST LCPCLE OF ARFACTURE_REC
+      IF PROMPTOK
+      THEN LET PATH = 3
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST PECCLE OF ARFACTURE_REC
+      IF PROMPTOK
+      THEN LET PATH = 4
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      LET PATH = 5
+    END
+
+  END
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure est codée afin d'en permettre l'appel par l'écran d'historique
+; des transactions des produits
+;
+PROCEDURE FIND
+BEGIN
+  IF PATH = 1
+  THEN GET ARFACTURE_REC &
+     VIA FACCIECLE , &
+         FOUCLE ,    &
+         FACCLE      &
+     USING T_CIECLEMNU , &
+           FOUCLE OF ARFACTURE_REC , &
+           FACCLE OF ARFACTURE_REC   &
+     ORDERBY FACCIECLE , &
+             FOUCLE ,    &
+             FACCLE ,    &
+             PECCLE
+
+  IF PATH = 2
+  THEN GET ARFACTURE_REC &
+         VIA FACCIECLE , &
+             FOUCLE      &
+         USING T_CIECLEMNU , &
+               FOUCLE OF ARFACTURE_REC &
+         ORDERBY FACCIECLE , &
+                 FOUCLE ,    &
+                 FACCLE ,    &
+                 PECCLE
+
+
+  IF PATH = 3
+  THEN GET ARFACTURE_REC &
+          VIA FACCIECLE , &
+              PECCLE ,    &
+              LCPCLE      &
+          USING T_CIECLEMNU , &
+                PECCLE OF ARFACTURE_REC , &
+                LCPCLE OF ARFACTURE_REC   &
+          ORDERBY FACCIECLE , &
+                  FOUCLE ,    &
+                  PECCLE ,    &
+                  LCPCLE ,    &
+                  FACCLE
+
+  IF PATH = 4
+  THEN GET ARFACTURE_REC &
+          VIA FACCIECLE , &
+              PECCLE      &
+          USING T_CIECLEMNU , &
+                PECCLE OF ARFACTURE_REC &
+          ORDERBY FACCIECLE,  &
+                  FOUCLE ,    &
+                  PECCLE ,    &
+                  LCPCLE ,    &
+                  FACCLE
+
+  IF PATH = 5
+  THEN GET ARFACTURE_REC &
+          VIA FACCIECLE &
+          USING T_CIECLEMNU &
+          ORDERBY FACCIECLE , &
+                  FACCLE
+
+
+   ; L'appel provient de l'historique des produits.
+   ;
+   IF PATH = 99
+   THEN BEGIN
+     GET ARFACTURE_REC &
+        VIA   FOUCIECLE, &
+              FOUCLE   , &
+              FACCLE &
+        USING T_FOUCIECLE, &
+              T_FOUCLEFND, &
+              T_FACCLEFND
+     LET T_FACCLEFND = ""
+   END
+
+
+  GET MCREF_ADRESSE OPTIONAL
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF ARFACTURE_REC &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+
+  ;
+  ; Validation de la modification.
+  ;
+  IF (    ALTEREDRECORD     OF ARFACTURE_REC  &
+      OR  ALTEREDRECORD     OF MCREF_ADRESSE ) &
+     AND NOT NEWRECORD     OF ARFACTURE_REC &
+     AND NOT DELETEDRECORD OF ARFACTURE_REC &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  ;
+  ; Le document est non modifiable si le lot est autorisé.
+  ;
+  IF    LCPATRJOU OF CPLOT = "1" &
+    AND CAPDATJOU OF CPCPT_A_PAYER = 0
+  THEN ERROR 1438 ; Impossible de mettre à jour la transaction est déjà autorisée
+
+  ;
+  ; Modification interdite si la facture est tranférée
+  IF FACDATTRF OF ARFACTURE_REC <> 0
+  THEN ERROR 1452 ; Impossible de modifier la facture, elle est transférée.
+
+  IF     NOT NEWRECORD     OF ARFACTURE_REC &
+     AND DELETEDRECORD     OF ARFACTURE_REC
+  THEN BEGIN
+    GET ARDER_ITEM OPTIONAL
+    IF ACCESSOK
+    THEN ERROR 1468 ; Vous devez d'abord détruire les lignes de détail.
+  END
+
+
+  ;
+  ; On incrémente le numéro d'adresse pour les clients divers.
+  ;
+  IF     FOUTYP OF VFOC_FOU = "D" &
+     AND RADCLE OF ARFACTURE_REC = 0
+  THEN BEGIN 
+    START TRANSACTION GEN_NUM_SEQ
+    GET MCRAD_SEQ VIA REFCIECLE, &
+                      REFCLETYP, &
+                      REFCLENUM  &
+                  USING FOUCIECLE OF ARFACTURE_REC, &
+                        REFCLETYP OF ARFACTURE_REC, &
+                        FOUCLE    OF ARFACTURE_REC &
+                  OPTIONAL
+    LET REFCIECLE OF MCRAD_SEQ = FOUCIECLE OF ARFACTURE_REC
+    LET REFCLETYP OF MCRAD_SEQ = REFCLETYP OF ARFACTURE_REC
+    LET REFCLENUM OF MCRAD_SEQ = FOUCLE    OF ARFACTURE_REC
+    LET RASNUMSEQ OF MCRAD_SEQ = RASNUMSEQ OF MCRAD_SEQ + 1
+    LET RADCLE    OF ARFACTURE_REC = RASNUMSEQ OF MCRAD_SEQ
+    PUT MCRAD_SEQ
+  END
+  COMMIT TRANSACTION GEN_NUM_SEQ
+
+END
+
+
+BUILD
+@IF FORMAT
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+**************************** Préparation de facture ****************************
+*                                                                              *
+* Période ......: xxxxx   Numéro de lot.: xxxx  Transféré le..: xxxxxxxx       *
+*                                                                              *
+* Fournisseur...: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              *
+* Adr. paiement.: xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              *
+*                                                                              *
+* Facture.......: xxxxxxxxxxxx                  Type..........: xx xxxxxxxxxx  *
+* Date..........: xxxxxxxx                                                     *
+* Net...........: xxxx xxxxxxxx        Terme esc.(1).: xxxx xxxxxxxx           *
+*                                      Terme esc.(2).: xxxx xxxxxxxx           *
+* Entrepôt......: xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              *
+* Description...: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                                                                              *
+* Montant brut..: xxxxxxxxxxxxxxxxxxx  Montant net...: xxxxxxxxxxxxxxx         *
+*                                                                              *
+* Montant TPS...: xxxxxxxxxxxxxxx      Montant CTI...: xxxxxxxxxxxxxxx         *
+* Montant TVQ...: xxxxxxxxxxxxxxx      Montant RTI...: xxxxxxxxxxxxxxx         *
+* Montant esc...: xxxxxxxxxxxxxxx                                              *
+********************************************************************************
+@ENDIF
+

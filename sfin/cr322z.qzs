@@ -1,0 +1,294 @@
+;/T/ Prévision des encaissements
+;
+;/P/ Programmeur...: Alain Côté
+;    Date Création.: 28 juillet 1993
+;
+;    Description...: Prévision des encaissements par client, nous fourni
+;                    une vision global des encaissements prévue par
+;                    intervalle de date.
+;
+;                    Toutes les transactions journalisées sont sélectionnées,
+;                    les soldes sont répartie dans la bonne colonne selon la
+;                    date spécifiée par l'usager.
+;
+;                    Les transactions doivent être journalisées.
+;
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST
+
+ACCESS *WCR322 &
+  ;
+  ; Client de la facture, pour avoir la catégorie...
+  ;
+  LINK REFCIECLE OF WCR322 , &
+       REFCLENUM OF WCR322   &
+    TO CLICIECLE, &
+       CLICLE OF                 CRCLIENT &
+  ;
+  ; Nom du client/divers.
+  ;
+  LINK REFCIECLE OF WCR322 , &
+       REFCLETYP OF WCR322 , &
+       REFCLENUM OF WCR322 , &
+       RADCLE    OF WCR322   &
+    TO REFCIECLE , &
+       REFCLETYP , &
+       REFCLENUM , &
+       RADCLE OF                 MCREF_ADRESSE OPTIONAL &
+  ;
+  ; Intervalle choisi par l'usager. Le code 2 identifie que c'est une liste
+  ; de type "prévision des encaissements".
+  ;
+  LINK ( CIECLE OF WCR322, &
+         "2"             , &
+         G_ITVCOD )        &
+    TO CIECLE , &
+       ITVTYP , &
+       ITVCOD OF             CRINTERVALLE &
+  ;
+  ; Compte ctb à recevoir, pour avoir la description et la devise.
+  ;
+  LINK CARCPTCAR OF WCR322 &
+    TO CPTCLE OF             VCPT_DSC
+
+
+;
+; Titre du rapport.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+             "Prévision des encaissements"
+@ELSE
+             "Cash receipt projection"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = CENTER( ITVDSC OF CRINTERVALLE[1:60] )
+
+;
+; Numéro du raport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "CR322"
+
+;
+; Nom de la compagnie du menu.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM
+
+;
+; On calcul le nombre de jours entre la date demandée et la date due.
+;
+DEFINE D_DIF_DAT INTEGER SIZE 4 = DAYS(CCDDATDUE OF WCR322) - DAYS(G_DATDEB)
+
+;
+; Solde précédent, c'est les factures dont la date due est inférieure à la date
+; de fin. Exemple, si on demande une prévision pour le mois de mai, alors
+; les factures due en avril, mars sont dûe.
+;
+DEFINE D_SLD_PREC   FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF D_DIF_DAT < ITVDEB1 OF CRINTERVALLE
+
+;
+; Répartition du solde dans la bonne colonne selon les intervalles de la
+; table CRINTERVALLE.
+;
+DEFINE D_SLD_01     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= ITVDEB1 OF CRINTERVALLE &
+                                      AND D_DIF_DAT <= ITVFIN1 OF CRINTERVALLE
+;
+DEFINE D_SLD_02     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= ITVDEB2 OF CRINTERVALLE &
+                                      AND D_DIF_DAT <= ITVFIN2 OF CRINTERVALLE
+;
+DEFINE D_SLD_03     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= ITVDEB3 OF CRINTERVALLE &
+                                      AND D_DIF_DAT <= ITVFIN3 OF CRINTERVALLE
+;
+DEFINE D_SLD_04     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= ITVDEB4 OF CRINTERVALLE &
+                                      AND D_DIF_DAT <= ITVFIN4 OF CRINTERVALLE
+;
+DEFINE D_SLD_05     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= ITVDEB5 OF CRINTERVALLE
+
+
+
+SORT ON CIECLE    OF WCR322 , & ; No compagnie
+        CARCPTCAR OF WCR322 , & ; Compte ctb à recevoir
+        REFCLENUM OF WCR322 , & ; Numéro de client
+        RADCLE    OF WCR322     ; Numéro d'adresse
+
+
+
+;
+; Impression de l'en-tête.
+;
+USE ustitstd NOLIST
+ SKIP &
+  TAB 061 &
+@IF FRANCAIS
+          "au" &
+@ELSE
+          "at" &
+@ENDIF
+  TAB 064 G_DATDEB &
+ SKIP 2 &
+
+  TAB 001 &
+@IF FRANCAIS
+          "Compte CAR.....:" &
+@ELSE
+          "Account recev..:" &
+@ENDIF
+  TAB 018 CARCPTCAR OF WCR322 &
+  TAB 025 CPTDSC OF VCPT_DSC  &
+  TAB 068 &
+@IF FRANCAIS
+          "Devise.........:"  &
+@ELSE
+          "Currency.......:"  &
+@ENDIF
+  TAB 085 DEVCLE OF VCPT_DSC &
+ SKIP 2 &
+
+  TAB 001 &
+@IF FRANCAIS
+"                                                     Solde" &
+@ELSE
+"                                                    Previous" &
+@ENDIF
+ SKIP &
+
+  TAB 001 &
+@IF FRANCAIS
+"           Client            Cat.   Solde total    précédent" &
+@ELSE
+"%%%        Client            Cat.   Solde total    précédent" &
+@ENDIF
+  TAB 065 ITVCOLTIT1 OF CRINTERVALLE &
+  TAB 079 ITVCOLTIT2 OF CRINTERVALLE &
+  TAB 093 ITVCOLTIT3 OF CRINTERVALLE &
+  TAB 107 ITVCOLTIT4 OF CRINTERVALLE &
+  TAB 121 ITVCOLTIT5 OF CRINTERVALLE &
+ SKIP &
+  TAB 001 &
+"--------------------------  ----  ------------- ------------- ------------- ------------- ------------- ------------- -------------"
+
+
+
+FOOTING AT RADCLE &
+  TAB 001 REFCLENUM OF WCR322 &
+  TAB 008 RADNOMABR OF MCREF_ADRESSE &
+  TAB 030 CLICAT    OF CRCLIENT &
+  TAB 036 T_SLD_TOT SUBTOTAL        &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 050 D_SLD_PREC SUBTOTAL     &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 064 D_SLD_01     SUBTOTAL     &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 078 D_SLD_02     SUBTOTAL     &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 092 D_SLD_03     SUBTOTAL     &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 106 D_SLD_04     SUBTOTAL     &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 120 D_SLD_05     SUBTOTAL     &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5
+
+
+FOOTING AT CARCPTCAR &
+SKIP 2 &
+ TAB 035 "--------------" &
+ TAB 050 "-------------"  &
+ TAB 064 "-------------"  &
+ TAB 078 "-------------"  &
+ TAB 092 "-------------"  &
+ TAB 106 "-------------"  &
+ TAB 120 "-------------"  &
+SKIP 1 &
+  TAB 035 T_SLD_TOT    SUBTOTAL      &
+            PICTURE "^^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 0050 D_SLD_PREC SUBTOTAL     &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 064 D_SLD_01     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 078 D_SLD_02     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 092 D_SLD_03     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 106 D_SLD_04     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  TAB 120 D_SLD_05     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+SKIP &
+ TAB 035 "==============" &
+ TAB 050 "============="  &
+ TAB 064 "============="  &
+ TAB 078 "============="  &
+ TAB 092 "============="  &
+ TAB 106 "============="  &
+ TAB 120 "============="  &
+SKIP PAGE
+
+
+BUILD cr322z
+
+@IF FORMAT
+
+CR322A                                        xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                    Page: 9999
+99/99/99 HH:MM xxxxxxxxxxxx                         Prévision des encaissements
+                                    XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                                                            au 99/99/99
+
+Compte CAR.....: XXXXXX XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX   Devise.........: xxx
+
+                                                     Solde
+           Client            Cat.   Solde total    précédent    xxxxxxxxxxx   xxxxxxxxxxx   xxxxxxxxxxx   xxxxxxxxxxx   xxxxxxxxxxx
+---------------------------  ----  ------------- ------------- ------------- ------------- ------------- ------------- -------------
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+                                  -------------- ------------- ------------- ------------- ------------- ------------- -------------
+                                  999999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+                                  ============== ============= ============= ============= ============= ============= =============
+@ENDIF

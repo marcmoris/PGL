@@ -1,0 +1,332 @@
+;/T/ Factures
+;
+;/P/ Programmeur..: Thomas BRENNEUR
+;    Date Création: 21-Mai-1993
+;
+;    Description..: Consultation des factures du fournisseur
+;                   Les factures sont affichées en ordre chronologique
+;                   inversé. C'est à dire que les factures les plus récentes
+;                   sont affichés en premières. La date de sélection permet
+;                   d'afficher des factures jusqu'à une date donnée. Par
+;                   exemple si on donne le 1er juillet, alors les facture
+;                   affichés sont les factures du fournisseur depuis sa
+;                   première facture jusqu'au factures du 1er juillet.
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+;-------------------------------------------------------------------------------
+SCREEN cp001g ACTIONBAR &
+              MODE LABEL "" AT 2,132 &
+              NOACTION &
+              from 1,1 to 23,132 &
+              FIELDMARK RETAIN STARTUP &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              ACTIVITIES FIND &
+              RECEIVING CPFOURNISSEUR, &
+                        T_CIECLEMNU  , &
+                        T_CIENOM     , &
+                        T_FOUCIECLE  , &
+                        T_PECCLEMNU  , &
+                        T_PECCLECOU
+
+USE ussectmp   NOLIST
+    "CP001G"
+
+USE cp001g.hlp NOLIST
+
+USE usactecr   NOLIST
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE  4 ; Cie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie
+TEMPORARY T_FOUCIECLE CHARACTER SIZE  4 ; Cie du fournisseur
+TEMPORARY T_PECCLEMNU CHARACTER SIZE  4 ; Période du menu
+TEMPORARY T_PECCLECOU CHARACTER SIZE  4 ; Période courante
+TEMPORARY T_CIECLE    CHARACTER SIZE  4
+TEMPORARY T_CAPCLE    CHARACTER SIZE 15
+TEMPORARY T_FOUCLE    CHARACTER SIZE  6
+TEMPORARY T_FOUCLEFND CHARACTER SIZE  6 ;
+TEMPORARY T_CAPCLEFND CHARACTER SIZE 15 ;
+TEMPORARY T_DATSEL    DATE          ; Selection jusqu'au
+TEMPORARY T_FACPAY    CHARACTER SIZE  1 ; Afficher les factures payées ?
+
+;-------------------------------------------------------------------------------
+;
+; Fournisseur dont on veut voir les factures
+;
+;
+FILE CPFOURNISSEUR  MASTER
+
+;-------------------------------------------------------------------------------
+;
+; Recherche des soldes des comptes à payer du fournisseur
+; (Note : la vue ne sélectionne que les pièces journalisées)
+;
+FILE VCAP_SLD_FA  PRIMARY &
+                  NOITEM &
+                  OCCURS 13
+
+  ACCESS  VIA     FOUCIECLE, &
+                  FOUCLE   , &
+                  CAPCIECLE  &
+          USING   FOUCIECLE OF CPFOURNISSEUR, &
+                  FOUCLE OF CPFOURNISSEUR, &
+                  T_CIECLEMNU &
+          REQUEST T_DATSEL, &
+                  T_FACPAY &
+          ORDERBY CAPDAT DESCENDING
+
+  SELECT IF     (     CAPDAT <= T_DATSEL                    &
+                  OR  T_DATSEL = 0                        ) &
+            AND (     0 <>    CAPMNT      OF VCAP_SLD_FA    &
+                            + V_CAPMNTAUG OF VCAP_SLD_FA    &
+                            - V_CAPMNTDIM OF VCAP_SLD_FA    &
+                  OR  T_FACPAY = "1"                      )
+
+
+DEFINE    D_CAPMNT  FLOAT SIZE 8 &
+          = CAPMNT      OF VCAP_SLD_FA &
+          + V_CAPMNTAUG OF VCAP_SLD_FA
+
+DEFINE    D_CAPSLD  FLOAT SIZE 8 &
+          = CAPMNT      OF VCAP_SLD_FA &
+          + V_CAPMNTAUG OF VCAP_SLD_FA &
+          - V_CAPMNTDIM OF VCAP_SLD_FA
+
+TEMPORARY T_CAPCLETMP CHARACTER SIZE 15 OCCURS WITH VCAP_SLD_FA
+
+;-------------------------------------------------------------------------------
+
+DEFINE    DZ_CIECLE   CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE    DZ_CIENOM   CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+
+USE usdrwecr132 NOLIST  ; Draw pour les écrans pleine page
+USE ustitstd132 NOLIST  ; Draw pour les écrans pleine page
+USE ushilite NOLIST     ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Factures " &
+@ELSE
+      " Invoices " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST   ; Pour placer le TITLE OFF
+
+SKIP
+
+ALIGN(,3,19) (,,26)
+
+FIELD FOUCLE OF CPFOURNISSEUR &
+label "Fournisseur.:"&
+      DISPLAY &
+      PREDISPLAY
+
+FIELD FOUNOM OF CPFOURNISSEUR &
+      DISPLAY &
+      PREDISPLAY
+
+ALIGN(,3,32)
+
+FIELD T_DATSEL &
+ FORMAT YYYYMMDD PATTERN "####/##/##" &
+@IF FRANCAIS
+      LABEL "Sélectionner jusqu'au......:" &
+      HELP  "Date jusqu'à laquelle on sélectionne les factures."
+@ELSE
+      LABEL "Select to..................:" &
+      HELP  "%%%"
+@ENDIF
+
+FIELD T_FACPAY &
+      SIZE 3 &
+      UPSHIFT &
+@IF FRANCAIS
+      LABEL "Inclure factures payé (o/n):" &
+      HELP  "Faut-il aussi afficher les factures payées ?"
+@ELSE
+      LABEL "Include paid invoices (y/n):" &
+      HELP  "%%%"
+@ENDIF
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+      "     No        Date         Montant          Solde     Compte # chèq.    Date" &
+@ELSE
+      "     %%        %%%%         %%%%%%%          %%%%%     %%%%%% %%%%%%%    %%%%" &
+@ENDIF
+      AT ,3
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      "  facture    facture        facture        à payer     encai. inform.   chèque" &
+@ELSE
+      "  %%%%%%%    %%%%%%%        %%%%%%%        %%%%%%%     %%%%%% %%%%%%%   %%%%%%" &
+@ENDIF
+      AT ,3
+
+SKIP
+
+ALIGN(2,2,3) (,,16) (,,27) (,,42) (,,57) (,,65) (,,73)
+
+CLUSTER OCCURS WITH VCAP_SLD_FA ID BASE 10
+
+FIELD T_CAPCLETMP &
+      HIDDEN &
+      LABEL " " &
+      SIZE 12
+
+FIELD CAPDAT OF VCAP_SLD_FA  FORMAT YYYYMMDD PATTERN "####/##/##"&
+      DISPLAY
+
+FIELD D_CAPMNT &
+      DISPLAY &
+      PICTURE "^^,^^^,^^^.^^ " &
+      TRAILING SIGN "-" SIGNIFICANCE 5
+
+FIELD D_CAPSLD &
+      DISPLAY &
+      PICTURE "^^,^^^,^^^.^^ " &
+      TRAILING SIGN "-" SIGNIFICANCE 5
+
+FIELD LBQCPTENC OF VCAP_SLD_FA &
+      DISPLAY
+
+FIELD PAMCLE OF VCAP_SLD_FA &
+      DISPLAY
+
+FIELD PAMDAT OF VCAP_SLD_FA  FORMAT YYYYMMDD PATTERN "####/##/##"&
+      DISPLAY
+
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès pour l'écran par son code.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; SELECTION PAR DATE :
+;
+;   Par defaut on sélectionne toutes les factures présentes dans le système
+;
+;
+PROCEDURE INPUT T_DATSEL
+BEGIN
+  IF 0 = SIZE (TRUNCATE(FIELDTEXT))
+  THEN LET FIELDTEXT = "0"
+END
+
+;-------------------------------------------------------------------------------
+;
+; Flag OUI/NON sur T_FACPAY, par défaut on ne sélectionne pas les pièces
+; entierement payées.
+;
+PROCEDURE INPUT T_FACPAY
+BEGIN
+  USE usflginp NOLIST
+
+  IF 0 = SIZE (TRUNCATE(FIELDTEXT))
+  THEN LET FIELDTEXT = "0"
+END
+
+PROCEDURE OUTPUT T_FACPAY
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Consultation détaillée de la pièce
+;
+;
+PROCEDURE INPUT T_CAPCLETMP
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE    = FOUCIECLE OF VCAP_SLD_FA
+    LET T_FOUCLE    = FOUCLE    OF VCAP_SLD_FA
+    LET T_CAPCLE    = CAPCLE    OF VCAP_SLD_FA
+    LET T_FOUCLEFND = FOUCLE    OF VCAP_SLD_FA
+    LET T_CAPCLEFND = CAPCLE    OF VCAP_SLD_FA
+    RUN SCREEN cp003 &
+        MODE F &
+        PASSING T_FOUCIECLE, &
+                T_CIECLEMNU, &
+                T_CIENOM   , &
+                T_PECCLEMNU, &
+                T_PECCLECOU, &
+                T_FOUCLEFND, &
+                T_CAPCLEFND
+  END
+  LET FIELDTEXT = ""
+END
+
+;-------------------------------------------------------------------------------
+;
+; Initialisation et affichage du temporaire qui contient le numéro de
+; facture. Celui-ci permet de saisir une "*" sur le No de facture alors
+; que l'écran est en mode FIND.
+;
+PROCEDURE POSTFIND
+BEGIN
+  FOR VCAP_SLD_FA
+  BEGIN
+    LET T_CAPCLETMP = CAPCLE OF VCAP_SLD_FA
+    DISPLAY T_CAPCLETMP
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel de la procédure de consultation de la facture si l'usager fait un
+; return sur la ligne de la pièce
+;
+PROCEDURE DESIGNER 10
+BEGIN
+  PROMPT T_CAPCLETMP
+END
+
+BUILD
+@IF FORMAT
+
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+*********************************** Factures ***********************************
+* Fournisseur...: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              *
+* Sélectionner jusqu'au......: xxxxxxxx                                        *
+* Inclure factures payé (o/n): xxx                                             *
+*                                                                              *
+*      No        Date         Montant          Solde  Compte # chèq.    Date   *
+*   facture    facture        facture        à payer  encai. inform.   chèque  *
+* xxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxx xxxxxx  xxxxxxx xxxxxxxx *
+* xxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxx xxxxxx  xxxxxxx xxxxxxxx *
+* xxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxx xxxxxx  xxxxxxx xxxxxxxx *
+* xxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxx xxxxxx  xxxxxxx xxxxxxxx *
+* xxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxx xxxxxx  xxxxxxx xxxxxxxx *
+* xxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxx xxxxxx  xxxxxxx xxxxxxxx *
+* xxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxx xxxxxx  xxxxxxx xxxxxxxx *
+* xxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxx xxxxxx  xxxxxxx xxxxxxxx *
+* xxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxx xxxxxx  xxxxxxx xxxxxxxx *
+* xxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxx xxxxxx  xxxxxxx xxxxxxxx *
+* xxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxx xxxxxx  xxxxxxx xxxxxxxx *
+* xxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxx xxxxxx  xxxxxxx xxxxxxxx *
+* xxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxx xxxxxx  xxxxxxx xxxxxxxx *
+********************************************************************************
+@ENDIF

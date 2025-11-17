@@ -1,0 +1,234 @@
+;/T/ Rapport de Vérification des paiements annulés
+;
+;/P/ Programmeur...: Thomas BRENNEUR
+;    Date Création.: 3 Aout 1993
+;
+;    Description...: Liste de Vérification des lots des paiements annulés
+;
+;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST   ; permet de faire les SET REPORT DEV....
+SET NOBLANK           ; Empêche l'impression de ligne blanche
+
+;
+; Subfile contenant les paiements à imprimer
+;
+
+ACCESS                      *WCP306A &
+
+  ;
+  ; Récupération de la référence à qui est destiné le paiement
+  ;
+
+  LINK REFCIECLE OF WCP306A , &
+       REFCLETYP OF WCP306A , &
+       REFCLENUM OF WCP306A , &
+       RADCLE    OF WCP306A   &
+    TO REFCIECLE            , &
+       REFCLETYP            , &
+       REFCLENUM            , &
+       RADCLE               OF MCREF_ADRESSE &
+  OPTIONAL
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_WCP CHARACTER SIZE 5 = "1" + PECCLE OF WCP306A &
+         IF PECCLE OF WCP306A[1:1] < "8" &
+         ELSE "0" + PECCLE OF WCP306A
+
+SORT ON CIECLE    OF WCP306A, &
+        D_PECCLE_WCP        , &
+        LCPCLE    OF WCP306A, &
+        REFCLETYP OF WCP306A, &
+        REFCLENUM OF WCP306A, &
+        LBQCPTENC OF WCP306A, &
+        PAMCLE    OF WCP306A
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 & ; Premier titre du rapport
+@IF FRANCAIS
+        = "Vérification des paiements annulés"
+@ELSE
+        = "%%%Vérification des paiements annulés"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 & ; Deuxiemme titre du rapport
+        = " "
+
+DEFINE DZ_NUMRAP  CHARACTER SIZE 12 & ; numéro du rapport
+        = "CP306"
+
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 & ; Nom de la compagnie
+       = PARM
+
+USE usflgdet NOLIST ;Flag Bilingue (O/N)
+
+;
+;Indique si le lot est hors balance
+;
+DEFINE D_HRSBLC   CHARACTER SIZE 3 &
+        = DZ_FLGAFFO IF LCPNBRTRSERR OF WCP306A <> 0 ELSE &
+          DZ_FLGAFFN
+
+;
+; Indique si le lot est journalisé
+;
+DEFINE  D_JOURNALISE CHAR SIZE 12 &
+@IF FRANCAIS
+        = "Journalisé" &
+@ELSE
+        = "Posted" &
+@ENDIF
+        IF LCPDATJOU OF WCP306A <> 0 ELSE ""
+
+;
+; Calcul de la différence entre le nombre de transactions réelles et le
+; nombre de transactions évalué
+;
+DEFINE  D_LCPNBRTRSDIF INTEGER SIZE 4 &
+        = LCPNBRTRSVER - LCPNBRTRS
+
+;
+; Calcul de la différence entre le montant total des transactions réelles
+; et le montant total des transactions évalué
+;
+DEFINE  D_LCPCUMMNTDIF FLOAT SIZE 8 &
+        = LCPCUMMNTVER - LCPCUMMNT
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+USE ustitstd NOLIST  ; Titre standard pour l'application a 180
+SKIP 2 &
+@IF FRANCAIS
+    TAB 001 "Lot....: "   &
+@ELSE
+    TAB 001 "Batch..: "   &
+@ENDIF
+    TAB 011 LCPCLE OF WCP306A &
+    TAB 016 LCPDSC OF WCP306A &
+    TAB 060 D_JOURNALISE &
+  SKIP &
+@IF FRANCAIS
+    TAB 001 "Période: " &
+@ELSE
+    TAB 001 "Period.: " &
+@ENDIF
+    TAB 010 PECCLE OF WCP306A &
+  SKIP 2 &
+@IF FRANCAIS
+    TAB 001 "                            Compte    No        No     annulé" &
+@ELSE
+    TAB 001 "                            %%%%%%    %%        %%     %%%%%%" &
+@ENDIF
+  SKIP &
+@IF FRANCAIS
+    TAB 001 "    Fournisseur/Employé     banque  Annul.   paiement    le       Montant" &
+@ELSE
+    TAB 001 "    %%%%%%%%%%%%%%%%%%%     %%%%%%  %%%%%%   %%%%%%%%    %%       %%%%%%%" &
+@ENDIF
+  SKIP &
+    TAB 001 "--------------------------- ------- -------- -------- -------- ---------------"
+
+REPORT &
+    TAB 001 REFCLENUM     OF WCP306A &
+    TAB 008 RADNOMABR     OF MCREF_ADRESSE &
+    TAB 029 LBQCPTENC     OF WCP306A &
+    TAB 037 PAMCLE        OF WCP306A &
+    TAB 046 PAMPAMCLEANN  OF WCP306A &
+    TAB 055 PAMDAT        OF WCP306A &
+    TAB 064 PAMMNT        OF WCP306A PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5
+
+FOOTING AT LCPCLE &
+  SKIP 1 &
+    TAB 001 "                                                               ---------------" &
+  SKIP &
+@IF FRANCAIS
+    TAB 051 "Total lot :" &
+@ELSE
+    TAB 051 "%%%%%%%%%%:" &
+@ENDIF
+    TAB 064 PAMMNT OF WCP306A SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+  SKIP &
+    TAB 001 "                                                               ===============" &
+  SKIP 1 &
+    TAB 001  "------------------------------------------------------------------------------------------------------------------------------------" &
+  SKIP &
+@IF FRANCAIS
+    TAB 050   "    Vérifiés         Cumulés             Ecart        Hors balance(*)" &
+@ELSE
+    TAB 050   "%%% Vérifiés         Cumulés             Ecart        Hors balance(*)" &
+@ENDIF
+  SKIP 1 &
+    TAB 050   "--------------    --------------    --------------    --------------- "&
+  SKIP &
+@IF FRANCAIS
+    TAB 023   "Montant total.........:" &
+@ELSE
+    TAB 023   "%%%tant total.........:" &
+@ENDIF
+    TAB 050 LCPCUMMNTVER OF WCP306A   PICTURE "^^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5 &
+    TAB 068 LCPCUMMNT    OF WCP306A   PICTURE "^^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5 &
+    TAB 087 D_LCPCUMMNTDIF            PICTURE "^^,^^^,^^^.^^ "  TRAILING SIGN "-" SIGNIFICANCE 5 &
+    TAB 109 D_HRSBLC &
+  SKIP &
+@IF FRANCAIS
+    TAB 023   "Nombre de transactions:" &
+@ELSE
+    TAB 023   "%%%bre de transactions:" &
+@ENDIF
+    TAB 056 LCPNBRTRSVER   OF WCP306A PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+    TAB 074 LCPNBRTRS      OF WCP306A PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+    TAB 092 D_LCPNBRTRSDIF            PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+  SKIP 1 &
+    TAB 001  "------------------------------------------------------------------------------------------------------------------------------------" &
+  SKIP PAGE
+
+BUILD cp306z
+
+@IF FORMAT
+
+                                                                                                   1         1         1         1
+         1         2         3         4         5         6         7         8         9         0         1         2         3
+123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012
+CP306B                                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                    Page: 9999
+99/99/99 HH:MM xxxxxxxxxxxx                      Vérification des paiements annulé
+                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+Lot....: xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+Période: 99-99
+
+                            Compte    No        No     annulé
+    Fournisseur/Employé     banque  Annul.   paiement    le       Montant
+--------------------------- ------- -------- -------- -------- ---------------
+123456 xxxxxxxxxxxxxxxxxxxx 123456  1234567  1234567  xx/xx/xx 999,999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx 123456  1234567  1234567  xx/xx/xx 999,999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx 123456  1234567  1234567  xx/xx/xx 999,999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx 123456  1234567  1234567  xx/xx/xx 999,999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx 123456  1234567  1234567  xx/xx/xx 999,999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx 123456  1234567  1234567  xx/xx/xx 999,999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx 123456  1234567  1234567  xx/xx/xx 999,999,999.99-
+
+                                                               ---------------
+                                                  Total lot :  999,999,999.99-
+                                                               ===============
+------------------------------------------------------------------------------------------------------------------------------------
+                                                    Vérifiés         Cumulés             Ecart        Hors balance(*)
+                                                --------------    --------------    --------------    ---------------
+                      Montant total.........:   999,999,999.99    999,999,999.99    999,999,999.99-         xxx
+                      Nombre de transactions:         9,999             9,999             9,999-
+
+@ENDIF

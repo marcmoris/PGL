@@ -1,0 +1,238 @@
+;/T/ Solde par compagnie
+;
+;/P/ Programmeur..: Thomas BRENNEUR
+;    Date Création: 7 Juin 1993
+;
+;    Description..: Cet ecran permet de visionnner les soldes du fournisseur.
+;                   Pour chaque compagnie accessible si on utilise la charte
+;                   universel ou pour la compagnie nu menu si on utilise un
+;                   charte par compagnie.
+;
+;/M/ Modifié par..: Guy Chabot le 11 aout 1994
+;    Description..: Les soldes se retrouve dans la table MCREF_SOLDE au lieu
+;                   de la table CRCLI_CIE.
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+;
+SCREEN cp001c ACTIONBAR &
+              MODE LABEL "" AT 2,80 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              FOR 11 LINES &
+              ON LINE 13 &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              ACTIVITIES FIND &
+              RECEIVING CPFOURNISSEUR
+
+USE ussectmp   NOLIST
+    "CP001C"
+
+USE cp001c.hlp NOLIST
+
+USE usactecr   NOLIST
+
+;-------------------------------------------------------------------------------
+;
+; FICHIER MAÎTRE PROVENANT DE L'ÉCRAN PRINCIPAL
+;
+;
+FILE CPFOURNISSEUR MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Consultation des compagnies accessibles par le FOURNISSEUR
+;
+;
+FILE MCREF_SOLDE PRIMARY &
+                 NOITEM &
+                 OCCURS 5
+
+  ACCESS  VIA   REFCIECLE, &
+                FOUCLE &
+          USING FOUCIECLE OF CPFOURNISSEUR, &
+                FOUCLE    OF CPFOURNISSEUR
+
+;-------------------------------------------------------------------------------
+;
+; Alias de la relation MCREF_SOLDE pour calculer le solde global du fournisseur
+;
+;
+FILE MCREF_SOLDE DESIGNER &
+                 ALIAS A_FOU_SLDGLB &
+                 OPEN READ
+
+  ACCESS  VIA   REFCIECLE, &
+                FOUCLE     &
+          USING FOUCIECLE OF CPFOURNISSEUR, &
+                FOUCLE    OF CPFOURNISSEUR
+
+
+;-------------------------------------------------------------------------------
+;
+; Alias de la relation MCREF_SOLDE pour calculer le solde global du client
+;
+;
+FILE MCREF_SOLDE DESIGNER &
+                 ALIAS A_CLI_SLDGLB &
+                 OPEN READ
+
+  ACCESS  VIA   REFCIECLE, &
+                CLICLE  &
+          USING FOUCIECLE OF CPFOURNISSEUR, &
+                CLICLE    OF CPFOURNISSEUR
+
+;-------------------------------------------------------------------------------
+;
+; Récupération du nom de la compagnie recherchée
+;
+FILE MCCOMPAGNIE  REFERENCE &
+                  OCCURS WITH MCREF_SOLDE
+  ACCESS VIA   CIECLE  &
+         USING CIECLE OF MCREF_SOLDE
+
+;-------------------------------------------------------------------------------
+TEMPORARY T_SLDACJGLBFOU INTEGER SIZE 4 RESET AT STARTUP ; solde a ce jour global
+                                                         ; fournisseur
+TEMPORARY T_SLDACJGLBCLI INTEGER SIZE 4 RESET AT STARTUP ; solde a ce jour global
+                                                         ; client
+;-------------------------------------------------------------------------------
+
+USE ushilite NOLIST
+
+DRAW FROM  2, 1 TO  2,79
+DRAW FROM  2, 1 TO 11, 1
+DRAW FROM  3,80 TO 11,80
+DRAW FROM 11, 1 TO 11,80
+
+TITLE &
+@IF FRANCAIS
+      " Solde par compagnie " &
+@ELSE
+      " Balance by company " &
+@ENDIF
+      CENTERED AT 2,1
+
+USE ustitoff NOLIST
+
+SKIP
+
+ALIGN(,3,20) (,48,65)
+
+FIELD T_SLDACJGLBFOU &
+      DISPLAY &
+      PICTURE "^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+@IF FRANCAIS
+      LABEL "Solde fourn....:"
+@ELSE
+      LABEL "%%%de fourn....:"
+@ENDIF
+
+
+FIELD T_SLDACJGLBCLI &
+      DISPLAY &
+      PICTURE "^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+@IF FRANCAIS
+      LABEL "Solde client...:"
+@ELSE
+      LABEL "%%%de client...:"
+@ENDIF
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+      "Cie  Nom                                           Solde C/P       Solde C/R" &
+@ELSE
+      "%%%% %%%%%%%%%%%%%%%%%%%%%%                        %%%%%%%         %%%%%" &
+@ENDIF
+      AT ,3
+
+SKIP
+
+ALIGN(,,3) (,,8) (,,49) (,,65)
+
+CLUSTER OCCURS WITH MCREF_SOLDE
+
+FIELD CIECLE OF MCREF_SOLDE &
+      DISPLAY
+
+FIELD CIENOM OF MCCOMPAGNIE  &
+      DISPLAY
+
+FIELD FOCSLDACJ OF MCREF_SOLDE &
+      DISPLAY &
+      PICTURE "^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5
+
+FIELD CLCSLDACJ OF MCREF_SOLDE &
+      DISPLAY &
+      PICTURE "^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5
+
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du solde global du client. Ce solde global est la somme de
+; tous les soldes de toutes les compagnies accessibles par le client.
+; Note : On ne tient pas compte de la sécurité d'accès par compagnie de
+; l'usager. Car on désire voir les vrais informations et cet écran ne
+; permet que la consultation.
+;
+PROCEDURE INTERNAL CALCULER_SOLDE_CLIENT
+BEGIN
+  LET T_SLDACJGLBCLI = 0
+
+  WHILE RETRIEVING A_CLI_SLDGLB
+  BEGIN
+    LET T_SLDACJGLBCLI = T_SLDACJGLBCLI + CLCSLDACJ OF A_CLI_SLDGLB
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du solde global du fournisseur. Ce solde global est la somme de
+; tous les soldes de toutes les compagnies accessibles par le fournisseur.
+; Note : On ne tient pas compte de la sécurité d'accès par compagnie de
+; l'usager. Car on désire voir les vrais informations et cet écran ne
+; permet que la consultation.
+;
+PROCEDURE INTERNAL CALCULER_SOLDE_FOURNISSEUR
+BEGIN
+  LET T_SLDACJGLBFOU = 0
+
+  WHILE RETRIEVING A_FOU_SLDGLB
+  BEGIN
+    LET T_SLDACJGLBFOU = T_SLDACJGLBFOU + FOCSLDACJ OF A_FOU_SLDGLB
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès pour l'écran par son code.
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+  DO INTERNAL CALCULER_SOLDE_FOURNISSEUR
+  DO INTERNAL CALCULER_SOLDE_CLIENT
+END
+
+
+BUILD
+;
+@IF FORMAT
+***************************** Solde par compagnie *****************************x
+* Solde fourn....: xxxxxxxxxxxxxx              Solde client...: xxxxxxxxxxxxxx *
+*                                                                              *
+* Cie  Nom                                           Solde C/P       Solde C/R *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxx  xxxxxxxxxxxxxx *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxx  xxxxxxxxxxxxxx *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxx  xxxxxxxxxxxxxx *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxx  xxxxxxxxxxxxxx *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxx  xxxxxxxxxxxxxx *
+********************************************************************************
+@ENDIF

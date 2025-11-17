@@ -1,0 +1,934 @@
+;/T/ Encaissements - Ventilation de fatures
+;
+;//M/GRA01/Francois Richard/1999-06-18
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur..: Alain Côté
+;    Date Création: 25 juin 1993
+;
+;    Description..: ...
+;
+;/M/ François Déry, 30 avril 1999
+;       Modifier l'accèss au fichier de séquence car il a
+;       été converti en format interbase au lieu d'indexé.
+;
+;/M/ Adaptation...: Marc Morissette 10 Nov 1993
+;/M/ REMY DEMERS 17-MARS-1999
+;     VALIDATION DE LA PERIODE DE LA FACTURE
+;-------------------------------------------------------------------------------
+;/V/ 3.00.02    Guy Chabot 12-mai-1994 (197).
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cr007b ACTIONBAR &
+              MODE LABEL "" AT 2,80 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU  , &
+                        T_CIENOM     , &
+                        D_LCRATRJOU  , &
+                        D_DPONOM     , &
+                        CRDEPOT
+
+USE ussectmp   NOLIST
+    "CR007B"
+
+USE cr007b.hlp NOLIST
+
+USE usactecr   NOLIST
+
+;
+; Ouverture d'une transaction QUERY indépendante de l'écran maitre.
+;
+USE ustrasse   NOLIST
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE CRDPO_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+TRANSACTION GEN_NUM_SEQ2 READ WRITE &
+                        RESERVING FOR PROTECTED WRITE CRPAIE_NA_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+
+;-------------------------------------------------------------------------------
+;
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de compagnie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie du menu.
+DEFINE    D_LCRATRJOU CHARACTER SIZE 1  ; Si le lot est autorisé.
+DEFINE    D_DPONOM    CHARACTER SIZE 40 ; Nom identifiant le dépôt.
+
+;-------------------------------------------------------------------------------
+
+FILE CRDEPOT          MASTER
+
+;
+; Ventilation factures.
+;
+FILE CRCAR_HISTO      PRIMARY &
+                      NOITEM  &
+                      OCCURS 13
+
+  ACCESS VIA CRHCLE1, &
+             CRHCLE2, &
+             CRHTYPECR &
+         USING CIECLE OF CRDEPOT, &
+               DPOCLE OF CRDEPOT, &
+               DPOTYPECR OF CRDEPOT &
+         ORDERBY CIECLE, &
+                 CARCLE
+
+  ITEM CIECLE    OF CRCAR_HISTO INITIAL CIECLE    OF CRDEPOT
+  ITEM CRHCLE1   OF CRCAR_HISTO INITIAL CIECLE    OF CRDEPOT
+  ITEM CRHCLE2   OF CRCAR_HISTO FINAL   DPOCLE    OF CRDEPOT
+  ITEM CRHTYPECR OF CRCAR_HISTO INITIAL DPOTYPECR OF CRDEPOT
+  ITEM CRHTYPTRA OF CRCAR_HISTO INITIAL DPOTYPECR OF CRDEPOT
+  ITEM CRHTIMSTP OF CRCAR_HISTO INITIAL SYSDATE * 1000000 + ROUND(SYSTIME / 100)
+  ITEM CRHDAT    OF CRCAR_HISTO FINAL   DPODAT    OF CRDEPOT
+  ITEM PECCLE    OF CRCAR_HISTO FINAL   PECCLE    OF CRDEPOT
+  ITEM LCRCLE    OF CRCAR_HISTO FINAL   LCRCLE    OF CRDEPOT
+  ITEM CRHMNTCAR OF CRCAR_HISTO FINAL   CRHMNTREC OF CRCAR_HISTO + &
+                                        CRHMNTESC OF CRCAR_HISTO
+
+;
+; Création des paiements non-appliqués.
+;
+FILE CRCPT_A_REC      DESIGNER
+
+;
+; Ajout de la cédule pour les paiements non-appliqués.
+;
+FILE CRCAR_CEDULE     DESIGNER
+
+;
+; Pour avoir le compte comptable du C/R du client et de l'adresse de
+; l'état de compte lors de l'ajout d'un paiement non-appliqué.
+;
+FILE CRCLI_CIE        REFERENCE
+  ACCESS VIA CLICIECLE, &
+             CLICLE   , &
+             CIECLE     &
+         USING REFCIECLE OF CRDEPOT, &
+               REFCLENUM OF CRDEPOT, &
+               CIECLE    OF CRDEPOT
+
+;
+; Validation de la facture et de la cédule. Pour avoir le montant due...
+;
+FILE VCAR_CCD         DESIGNER &
+                      OPEN READ SHARE &
+                      OCCURS WITH CRCAR_HISTO
+
+;
+; Séquence des paiements non-appliqués(fichier indexé).
+;
+FILE CRPAIE_NA_SEQ    DESIGNER &
+                      TRANSACTION GEN_NUM_SEQ2
+
+;
+; Séquence des encaissements(fichier indexé).
+;
+FILE CRDPO_SEQ        DESIGNER &
+                      TRANSACTION GEN_NUM_SEQ
+
+;
+; Pour avoir le code des paiements non-appliqué.
+;
+FILE CRPARAMETRE      REFERENCE
+  ACCESS VIA CIENMC &
+         USING "1"
+
+FILE CRCPT_A_REC ALIAS A_CRCPT_A_REC DESIGNER
+;-------------------------------------------------------------------------------
+
+TEMPORARY  T_PECCLE_SIE     CHARACTER SIZE 5
+TEMPORARY  T_PECCLE_SIE_FAC CHARACTER SIZE 5
+
+TEMPORARY T_SILENT    CHARACTER SIZE 1  ; Champ silent
+
+TEMPORARY T_REFCIECLE CHARACTER SIZE 4  ; Popup sur le C.A.R./cédule.
+TEMPORARY T_REFCLENUM CHARACTER SIZE 6  ; Popup sur le C.A.R./cédule.
+TEMPORARY T_CARCLE    CHARACTER SIZE 15 ; Popup sur le C.A.R./cédule.
+TEMPORARY T_CCDCLELIG INTEGER   SIZE 2  ; Popup sur le C.A.R./cédule.
+
+TEMPORARY T_MNTDUE    FLOAT     SIZE 8 OCCURS WITH CRCAR_HISTO
+
+;
+; Montant du compte à recevoir(cédule).
+;
+DEFINE D_MNTCED FLOAT SIZE 8 =   CCDMNT      OF VCAR_CCD &
+                               + V_CCDMNTAUG OF VCAR_CCD
+
+;
+; Solde à recevoir(cédule).
+;
+DEFINE D_SLDCED FLOAT SIZE 8 =  D_MNTCED - V_CCDMNTDIM OF VCAR_CCD
+
+
+;
+; Ecart entre le montant reçu et la sommation des factures.
+;
+DEFINE    D_ECART  FLOAT SIZE 8 = DPOMNTPAM OF CRDEPOT - &
+                                  DPOMNTFAC OF CRDEPOT
+
+
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Ventilation de factures " &
+@ELSE
+      " Invoice Breakdown " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST
+
+SKIP
+
+ALIGN(3,3,19) (,,21) (,,28)
+
+FIELD REFCLETYP OF CRDEPOT &
+@IF FRANCAIS
+        LABEL "Client/employé:" &
+@ELSE
+        LABEL "Client/employe:" &
+@ENDIF
+        FIXED
+
+FIELD REFCLENUM OF CRDEPOT &
+        FIXED
+
+FIELD D_DPONOM &
+        FIXED
+
+
+ALIGN(,3,19)
+
+FIELD DPOMNTPAM OF CRDEPOT &
+        FIXED
+
+ALIGN(,3,19) (,50,66)
+
+FIELD DPOMNTESC OF CRDEPOT &
+        DISPLAY &
+        PREDISPLAY
+
+FIELD D_ECART &
+        DISPLAY &
+        PICTURE "^^,^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5 &
+@IF FRANCAIS
+      LABEL "Solde à vent..:"
+@ELSE
+      LABEL "Balance.......:"
+@ENDIF
+
+SKIP
+
+DRAW ,1 TO ,80
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+  "                        No          Montant        Montant         Montant" &
+@ELSE
+  "                      Sched.     To receive        Receive        Discount" &
+@ENDIF
+  AT ,3
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+  "Facture       Client  Cédule     à recevoir           reçu        escompte" &
+@ELSE
+  "Invoice       Client    No           amount         amount          amount" &
+@ENDIF
+  AT ,3
+
+
+ALIGN (3,2,3) (,,17) (,,27) (,,33) (,,48) (,,64)
+
+CLUSTER OCCURS WITH CRCAR_HISTO ID BASE 10
+
+FIELD CARCLE    OF CRCAR_HISTO  HIDDEN LABEL " " &
+        SIZE 12  &
+        NOCHANGE
+
+FIELD REFCLENUM OF VCAR_CCD &
+        DISPLAY
+
+FIELD CCDCLELIG OF CRCAR_HISTO &
+        REQUIRED  &
+        NOCHANGE
+
+FIELD T_SILENT &
+        SILENT &
+        LOOKUP &
+          ON VCAR_CCD &
+            VIA CIECLE, &
+                CARCLE, &
+                CCDCLELIG &
+            USING CIECLE    OF CRCAR_HISTO, &
+                  CARCLE    OF CRCAR_HISTO, &
+                  CCDCLELIG OF CRCAR_HISTO  &
+            MESSAGE 694, & ; Cette ligne de cédule n'existe pas
+          NOTON CRCAR_HISTO &
+            VIA CIECLE   , &
+                CARCLE   , &
+                CCDCLELIG, &
+                CRHTYPECR, &
+                CRHCLE1  , &
+                CRHCLE2    &
+            USING CIECLE    OF CRCAR_HISTO, &
+                  CARCLE    OF CRCAR_HISTO, &
+                  CCDCLELIG OF CRCAR_HISTO, &
+                  CRHTYPECR OF CRCAR_HISTO, &
+                  CIECLE    OF CRDEPOT    , &
+                  DPOCLE    OF CRDEPOT      &
+            MESSAGE 663 ; Cette facture/cédule est déjà présente dans cet
+                        ; encaissement
+
+FIELD T_MNTDUE &
+        DISPLAY &
+        PICTURE "^^,^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5
+
+FIELD CRHMNTREC OF CRCAR_HISTO &
+        REQUIRED
+
+FIELD CRHMNTESC OF CRCAR_HISTO
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Averti l'usager si l'écriture ne balance pas.
+;
+;
+PROCEDURE EXIT
+BEGIN
+  IF D_ECART <> 0
+  THEN WARNING 620 ; La ventilation de factures ne balance pas.
+END
+
+
+;------------------------------------------------------------------------------
+;
+;
+; Popup sur les factures/cédule.
+;
+;
+PROCEDURE INPUT CARCLE
+BEGIN
+  LET T_CCDCLELIG = 0
+  ;
+  ; Sous-écran de consultation des factures.
+  ;
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_REFCIECLE = REFCIECLE OF CRDEPOT
+    LET T_REFCLENUM = REFCLENUM OF CRDEPOT
+    LET T_CARCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cr105 MODE F PASSING T_REFCIECLE, &
+                                    T_REFCLENUM, &
+                                    T_CIECLEMNU, &
+                                    T_CARCLE   , &
+                                    T_CCDCLELIG
+    IF 0 <> SIZE( TRUNCATE( T_CARCLE ) )
+    THEN LET FIELDTEXT = T_CARCLE
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du numéro de facture.
+;
+;
+PROCEDURE EDIT CARCLE
+BEGIN
+  IF "" <> TRUNCATE( CARCLE OF CRCAR_HISTO )
+  THEN BEGIN
+    ;
+    ; Validation du numéro, la vue VCAR_CCD sélectionne que les types FA,CR et
+    ; NA.
+    ;
+    GET VCAR_CCD VIA CIECLE, &
+                     CARCLE  &
+                 USING CIECLE    OF CRCAR_HISTO, &
+                       CARCLE    OF CRCAR_HISTO  &
+                 OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 634 ; Cette facture n'existe pas.
+
+    IF CARDATJOU OF VCAR_CCD = 0
+    THEN ERROR 636 ; La facture doit être journalisée pour la référer.
+
+    IF REFCLENUM OF VCAR_CCD <> REFCLENUM OF CRDEPOT
+    THEN WARNING 621;Le client de la facture diffère de celui de l'encaissement.
+
+    ;
+    ;validation de la periode de la facture
+    ;
+    GET A_CRCPT_A_REC VIA CIECLE,CARCLE USING CIECLE OF CRCAR_HISTO,CARCLE OF CRCAR_HISTO OPT
+    IF ACCESSOK
+    THEN BEGIN
+
+        ; Ajustement pour le changement de siècle
+       IF PECCLE OF CRDEPOT[1:1] < "8"
+       THEN LET T_PECCLE_SIE = "1" + PECCLE OF CRDEPOT
+       ELSE LET T_PECCLE_SIE = "0" + PECCLE OF CRDEPOT
+
+       ; Ajustement pour le changement de siècle
+       IF PECCLE OF A_CRCPT_A_REC[1:1] < "8"
+       THEN LET T_PECCLE_SIE_FAC = "1" + PECCLE OF A_CRCPT_A_REC
+       ELSE LET T_PECCLE_SIE_FAC = "0" + PECCLE OF A_CRCPT_A_REC
+
+       IF T_PECCLE_SIE < T_PECCLE_SIE_FAC
+       THEN ERROR ="la periode de la facture est plus petit que celle de l'encaissement"
+    END
+ END
+END
+
+;------------------------------------------------------------------------------
+;
+;
+; Popup sur la cédule.
+;
+;
+PROCEDURE INPUT CCDCLELIG
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CARCLE    = CARCLE    OF CRCAR_HISTO
+    LET T_CCDCLELIG = 0
+    RUN SCREEN cr107 MODE F PASSING T_CIECLEMNU, &
+                                    T_CARCLE   , &
+                                    T_CCDCLELIG
+    LET FIELDTEXT = ASCII(T_CCDCLELIG)
+  END
+  ;
+  ; On assigne le numéro de cédule choisi par l'usager lors de l'appel
+  ; du popup sur les factures(INPUT CARCLE).
+  ;
+  IF     NOT FINDMODE &
+     AND 0 = SIZE( TRUNCATE( FIELDTEXT ) ) &
+     AND T_CCDCLELIG <> 0
+  THEN LET FIELDTEXT = ASCII( T_CCDCLELIG )
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE PROCESS T_SILENT
+BEGIN
+  ;
+  ; On conserve le montant due de la cédule pour par la suite vérifier si
+  ; la montant reçu + escompte dépasse le montant due.
+  ;
+  LET T_MNTDUE = D_SLDCED &
+                 - CRHMNTREC OF CRCAR_HISTO &
+                 - CRHMNTESC OF CRCAR_HISTO
+  DISPLAY T_MNTDUE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Affectation du montant due dans le montant reçu si aucune valeur est saisie.
+;
+;
+PROCEDURE INPUT CRHMNTREC
+BEGIN
+  IF     NEWRECORD OF CRCAR_HISTO &
+     AND 0 = SIZE( TRUNCATE( FIELDTEXT ) ) &
+     AND 0 = CRHMNTREC OF CRCAR_HISTO &
+     AND "" <> TRUNCATE( CARCLE OF CRCAR_HISTO )
+  THEN LET FIELDTEXT = ASCII( D_SLDCED / 100) + "." + &
+                       ASCII( MOD( ABSOLUTE( D_SLDCED ),100),2)
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE EDIT CRHMNTREC
+BEGIN
+  ;
+  ; Valide la partie décimale.
+  ;
+  USE usvaldec NOLIST
+  ;
+  ; On maintient le montant due par ligne de cédule.
+  ;
+  LET T_MNTDUE = T_MNTDUE + &
+                 OLDVALUE(CRHMNTREC OF CRCAR_HISTO) - &
+                 FIELDVALUE
+  ;
+  ; Mise à jour de la sommation des ventilations factures dans l'encaissement.
+  ;
+  LET DPOMNTFAC OF CRDEPOT = DPOMNTFAC OF CRDEPOT - &
+                             OLDVALUE(CRHMNTREC OF CRCAR_HISTO) + &
+                             FIELDVALUE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Affiche l'écart entre le montant reçu et la sommatioin des factures.
+;
+;
+PROCEDURE PROCESS CRHMNTREC
+BEGIN
+  DISPLAY T_MNTDUE
+  DISPLAY D_ECART
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Force la procedure edit du montant d'escompte car il valide que l'ont ne
+; puisse payer plus que le montant due.
+;
+;
+PROCEDURE INPUT CRHMNTESC
+BEGIN
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> CRHMNTESC OF CRCAR_HISTO
+  THEN LET FIELDTEXT = ASCII( CRHMNTESC OF CRCAR_HISTO /100 ) + "." + &
+                       ASCII( MOD( ABSOLUTE( CRHMNTESC OF CRCAR_HISTO ),100),2)
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE EDIT CRHMNTESC
+BEGIN
+  ;
+  ; Valide la partie décimale.
+  ;
+  USE usvaldec NOLIST
+  ;
+  ; Le montant d'escompte doit être sous le même signe que le montant reçu et
+  ; ne doit pas être supérieure.
+  ;
+  IF (     CRHMNTREC OF CRCAR_HISTO >= 0 &
+       AND (    CRHMNTESC OF CRCAR_HISTO < 0 &
+             OR CRHMNTESC OF CRCAR_HISTO > CRHMNTREC OF CRCAR_HISTO ) &
+     ) &
+     OR &
+     (     CRHMNTREC OF CRCAR_HISTO < 0 &
+       AND (    CRHMNTESC OF CRCAR_HISTO > 0 &
+             OR CRHMNTESC OF CRCAR_HISTO < CRHMNTREC OF CRCAR_HISTO ) &
+     )
+  THEN ERROR 692 ; Montant d'escompte est invalide par rapport au montant reçu.
+
+  ;
+  ; On maintient le montant due par ligne de cédule.
+  ;
+  LET T_MNTDUE = T_MNTDUE + &
+                 OLDVALUE(CRHMNTESC OF CRCAR_HISTO) - &
+                 FIELDVALUE
+
+  IF (     CRHMNTREC OF CRCAR_HISTO > 0 &
+       AND T_MNTDUE < 0 ) &
+     OR &
+     (     CRHMNTREC OF CRCAR_HISTO < 0 &
+       AND T_MNTDUE > 0 )
+  THEN WARNING 693 ; Le montant payé est plus élevé que le montant due.
+
+  ;
+  ; mise a jour du montant total de l'escompte.
+  ;
+  LET DPOMNTESC OF CRDEPOT = DPOMNTESC OF CRDEPOT - &
+                             OLDVALUE(CRHMNTESC OF CRCAR_HISTO) + &
+                             FIELDVALUE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Affiche, - le montant due par ligne de cédule.
+;          - l'écart entre le montant reçu et la sommation facture.
+;          - le total des escomptes.
+;
+;
+PROCEDURE PROCESS CRHMNTESC
+BEGIN
+  DISPLAY T_MNTDUE
+  DISPLAY D_ECART
+  DISPLAY DPOMNTESC OF CRDEPOT
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE APPEND
+BEGIN
+
+  USE ussecent NOLIST
+
+  ACCEPT CARCLE    OF CRCAR_HISTO
+  ;
+  ; Traitement des non appliqués.
+  ;
+  IF "" = TRUNCATE( CARCLE OF CRCAR_HISTO )
+  THEN BEGIN
+    DISPLAY CARCLE    OF CRCAR_HISTO
+    DISPLAY REFCLENUM OF VCAR_CCD    FROM REFCLENUM OF CRDEPOT
+    LET CCDCLELIG OF CRCAR_HISTO = 1
+    DISPLAY CCDCLELIG OF CRCAR_HISTO
+    LET T_MNTDUE = 0 &
+                   - CRHMNTREC OF CRCAR_HISTO &
+                   - CRHMNTESC OF CRCAR_HISTO
+    DISPLAY T_MNTDUE
+  END
+  ;
+  ; Ventilation standard.
+  ;
+  ELSE BEGIN
+    DISPLAY REFCLENUM OF VCAR_CCD
+    ;
+    ; Si la facture a une seule ligne de cédule, on prend la ligne 01.
+    ;
+    IF CARFLGCED OF VCAR_CCD = "0"
+    THEN BEGIN
+      LET CCDCLELIG OF CRCAR_HISTO = 1
+      EDIT CCDCLELIG OF CRCAR_HISTO
+      DISPLAY CCDCLELIG OF CRCAR_HISTO
+    END
+    ELSE ACCEPT CCDCLELIG OF CRCAR_HISTO
+    EDIT T_SILENT
+  END
+  ACCEPT CRHMNTREC OF CRCAR_HISTO
+  ACCEPT CRHMNTESC OF CRCAR_HISTO
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  DISPLAY DPOMNTESC OF CRDEPOT
+  DISPLAY D_ECART
+
+  FOR CRCAR_HISTO
+  BEGIN
+    PERFORM APPEND
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Seul les montants sont modifiables sur la ligne de ventilation.
+; J'ai écrit cette procédure pour éviter que le champs silent soit
+; exécuté en mode change.
+;
+;
+PROCEDURE DESIGNER 10
+BEGIN
+  ACCEPT CRHMNTREC OF CRCAR_HISTO
+  ACCEPT CRHMNTESC OF CRCAR_HISTO
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE POSTFIND
+BEGIN
+  FOR CRCAR_HISTO
+  BEGIN
+    ;
+    ; Il faut lire manuellement la cédule, car j'ai deux accès sur cette
+    ; relation(il est défini DESIGNER).
+    ;
+    GET VCAR_CCD VIA CIECLE, &
+                     CARCLE, &
+                     CCDCLELIG &
+                 USING CIECLE    OF CRCAR_HISTO, &
+                       CARCLE    OF CRCAR_HISTO, &
+                       CCDCLELIG OF CRCAR_HISTO
+    ;
+    ; On conserve le montant due de la cédule pour par la suite vérifier si
+    ; la montant reçu + escompte dépasse le montant due.
+    ;
+    LET T_MNTDUE = D_SLDCED
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  FOR CRCAR_HISTO
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF CRCAR_HISTO &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF CRCAR_HISTO &
+       AND NOT NEWRECORD     OF CRCAR_HISTO &
+       AND NOT DELETEDRECORD OF CRCAR_HISTO &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+    ;
+    ; La ventilation est non modifiable aprés journalisation.
+    ;
+    IF (    NEWRECORD     OF CRCAR_HISTO &
+         OR ALTEREDRECORD OF CRCAR_HISTO &
+         OR DELETEDRECORD OF CRCAR_HISTO &
+       ) &
+       AND DPODATJOU OF CRDEPOT <> 0
+    THEN ERROR 614 ; Impossible de mettre à jour la transaction est journalisée.
+    ;
+    ; Le timbre de modification est mis à jour si l'usager modifie
+    ; la table CRCAR_HISTO.
+    ;
+    IF        NEWRECORD OF CRCAR_HISTO &
+       OR ALTEREDRECORD OF CRCAR_HISTO &
+       OR DELETEDRECORD OF CRCAR_HISTO
+    THEN BEGIN
+      LET DPODATMOD OF CRDEPOT = SYSDATE
+      LET DPOHREMOD OF CRDEPOT = SYSTIME / 10000
+      LET DPOUSRMOD OF CRDEPOT = LOGONID
+    END
+  END
+  ;
+  ; L'imputation est non modifiable aprés que le lot est été autorisé.
+  ;
+  IF     D_LCRATRJOU = "1" &
+     AND DPODATJOU OF CRDEPOT = 0
+  THEN ERROR 713 ; Impossible de mettre à jour la transaction, lot autorisé.
+  ;
+  ; Paiement non-appliqués.
+  ;
+  FOR CRCAR_HISTO
+  BEGIN
+    ;
+    ; Lors de la saisie initiale d'un paiement non-appliqué, il faut ajouter
+    ; un enregistrement dans la relation CRCPT_A_REC.
+    ;
+    IF     "" = TRUNCATE( CARCLE OF CRCAR_HISTO ) &
+       AND NEWRECORD OF CRCAR_HISTO &
+       AND NOT DELETEDRECORD OF CRCAR_HISTO
+    THEN BEGIN
+      ;
+      ; Génération du numéro de facture pour les paiements non-appliqués.
+      ;
+      START TRANSACTION GEN_NUM_SEQ2
+      GET CRPAIE_NA_SEQ VIA CIECLE   , &
+                            PNSANNCLE  &
+                        USING CIECLE OF CRDEPOT, &
+                              PECCLE OF CRDEPOT[1:2] &
+                        OPTIONAL
+      LET CIECLE    OF CRPAIE_NA_SEQ = CIECLE    OF CRDEPOT
+      LET PNSANNCLE OF CRPAIE_NA_SEQ = PECCLE    OF CRDEPOT[1:2]
+      ;LET PNSNUMSEQ OF CRPAIE_NA_SEQ = PNSNUMSEQ OF CRPAIE_NA_SEQ + 1
+      ;an 2000
+      if newrecord of crpaie_na_seq
+      then LET PNSNUMSEQ OF CRPAIE_NA_SEQ = 0
+      LET PNSNUMSEQ OF CRPAIE_NA_SEQ = PNSNUMSEQ OF CRPAIE_NA_SEQ + 1
+
+      LET CARCLE    OF CRCAR_HISTO   = TRUNCATE(CRPCODPNA OF CRPARAMETRE) + &
+                                       PNSANNCLE OF CRPAIE_NA_SEQ         + &
+                                       ASCII( PNSNUMSEQ OF CRPAIE_NA_SEQ, &
+                                              PNSLONNUM OF CRPAIE_NA_SEQ )
+      PUT CRPAIE_NA_SEQ
+      COMMIT TRANSACTION GEN_NUM_SEQ2
+      ;
+      ; Ajout du paiement non-appliqué.
+      ;
+      LET CIECLE    OF CRCPT_A_REC = CIECLE       OF CRCAR_HISTO
+      LET CARCLE    OF CRCPT_A_REC = CARCLE       OF CRCAR_HISTO
+      LET REFCIECLE OF CRCPT_A_REC = REFCIECLE    OF CRDEPOT
+      LET REFCLETYP OF CRCPT_A_REC = REFCLETYP    OF CRDEPOT
+      LET REFCLENUM OF CRCPT_A_REC = REFCLENUM    OF CRDEPOT
+      LET RADCLE    OF CRCPT_A_REC = CLCADRETACPT OF CRCLI_CIE
+      LET PECCLE    OF CRCPT_A_REC = PECCLE       OF CRDEPOT
+      LET CARTYPECR OF CRCPT_A_REC = "NA"
+      LET CARDAT    OF CRCPT_A_REC = DPODAT       OF CRDEPOT
+      LET CARDATNET OF CRCPT_A_REC = DPODAT       OF CRDEPOT
+      IF "" <> TRUNCATE( CLCTERFRS OF CRCLI_CIE )
+      THEN BEGIN
+        LET CARTERFRS OF CRCPT_A_REC = CLCTERFRS OF CRCLI_CIE
+        LET CARDATFRS OF CRCPT_A_REC = DPODAT    OF CRDEPOT
+      END
+      LET CARCPTCAR OF CRCPT_A_REC = CLCCPTCAR    OF CRCLI_CIE
+      LET CARDATCRE OF CRCPT_A_REC = SYSDATE
+      LET CARHRECRE OF CRCPT_A_REC = SYSTIME / 10000
+      LET CARUSRCRE OF CRCPT_A_REC = LOGONID
+      PUT CRCPT_A_REC RESET
+      ;
+      ; Cédule du paiement non-appliqué.
+      ;
+      LET CIECLE    OF CRCAR_CEDULE = CIECLE OF CRCAR_HISTO
+      LET CARCLE    OF CRCAR_CEDULE = CARCLE OF CRCAR_HISTO
+      LET CCDCLELIG OF CRCAR_CEDULE = 1
+      LET CCDDATDUE OF CRCAR_CEDULE = DPODAT OF CRDEPOT
+      PUT CRCAR_CEDULE RESET
+    END
+    ;
+    ; Si on détruit une ligne de ventilation qui réfère un paiement
+    ; non-appliqué, et que c'est cette même ligne qui a créé le paiement
+    ; non-appliqué, il faut détruire le paiement non-appliqué. Si la date
+    ; de journalisation du paiement non-appliqué est à zéro, cela indique
+    ; que c'est un nouveau paiement non-appliqué.
+    ;
+    IF     DELETEDRECORD OF CRCAR_HISTO &
+       AND ALTEREDRECORD OF CRCAR_HISTO &
+       AND NOT NEWRECORD OF CRCAR_HISTO &
+       AND CARTYPECR     OF VCAR_CCD = "NA" &
+       AND CARDATJOU     OF VCAR_CCD = 0
+    THEN BEGIN
+      GET CRCPT_A_REC VIA CIECLE, &
+                          CARCLE  &
+                      USING CIECLE OF CRCAR_HISTO, &
+                            CARCLE OF CRCAR_HISTO
+      DELETE CRCPT_A_REC
+      PUT CRCPT_A_REC
+
+      GET CRCAR_CEDULE VIA CIECLE, &
+                           CARCLE, &
+                           CCDCLELIG &
+                      USING CIECLE    OF CRCAR_HISTO, &
+                            CARCLE    OF CRCAR_HISTO, &
+                            CCDCLELIG OF CRCAR_HISTO
+      DELETE CRCAR_CEDULE
+      PUT CRCAR_CEDULE
+    END
+  END
+  ;
+  ; On incrémente le numéro d'encaissment.
+  ;
+  IF DPOCLE OF CRDEPOT = ""
+  THEN BEGIN
+    START TRANSACTION GEN_NUM_SEQ
+    GET CRDPO_SEQ VIA CIECLE, &
+                      PECCLE, &
+                      LCRCLE  &
+                  USING CIECLE OF CRDEPOT, &
+                        PECCLE OF CRDEPOT, &
+                        LCRCLE OF CRDEPOT  &
+                  OPTIONAL
+    LET CIECLE    OF CRDPO_SEQ = CIECLE    OF CRDEPOT
+    LET PECCLE    OF CRDPO_SEQ = PECCLE    OF CRDEPOT
+    LET LCRCLE    OF CRDPO_SEQ = LCRCLE    OF CRDEPOT
+    ;LET DPSNUMSEQ OF CRDPO_SEQ = DPSNUMSEQ OF CRDPO_SEQ + 1
+;an 2000
+    if newrecord of crdpo_seq
+    then LET DPSNUMSEQ OF CRDPO_SEQ = 0
+    LET DPSNUMSEQ OF CRDPO_SEQ = DPSNUMSEQ OF CRDPO_SEQ + 1
+
+    LET DPOCLE    OF CRDEPOT   = PECCLE    OF CRDEPOT + &
+                                 LCRCLE    OF CRDEPOT + &
+                            ASCII(DPSNUMSEQ OF CRDPO_SEQ,DPSLONNUM OF CRDPO_SEQ - 2)
+    PUT CRDPO_SEQ
+    COMMIT TRANSACTION GEN_NUM_SEQ
+  END
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Mise à jour des cumulatifs dans l'encaissement.
+;
+;
+PROCEDURE DELETE
+BEGIN
+  IF NOT DELETEDRECORD OF CRCAR_HISTO
+  THEN BEGIN
+    LET DPOMNTFAC OF CRDEPOT = DPOMNTFAC OF CRDEPOT        - &
+                               CRHMNTREC OF CRCAR_HISTO
+    LET DPOMNTESC OF CRDEPOT = DPOMNTESC OF CRDEPOT - &
+                               CRHMNTESC OF CRCAR_HISTO
+    LET T_MNTDUE = 0
+
+    DISPLAY DPOMNTESC OF CRDEPOT
+    DISPLAY D_ECART
+    DISPLAY T_MNTDUE
+    DELETE CRCAR_HISTO
+  END
+END
+
+BUILD
+
+;
+;xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+;*************************** Ventilation de factures ****************************
+;* Client/employé: x xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            *
+;* Montant reçu..: xxxxxxxxxxxxxx                                               *
+;* Escompte......: xxxxxxxxxxxxxx                 Ecart.........: xxxxxxxxxxxxxx*
+;********************************************************************************
+;*                         No          Montant        Montant         Montant   *
+;* Facture       Client  Cédule     à recevoir           reçu        escompte   *
+;* xxxxxxxxxxxx  xxxxxx    xx    xxxxxxxxxxxxxx xxxxxxxxxxxxxx  xxxxxxxxxxxxxx  *
+;* xxxxxxxxxxxx  xxxxxx    xx    xxxxxxxxxxxxxx xxxxxxxxxxxxxx  xxxxxxxxxxxxxx  *
+;* xxxxxxxxxxxx  xxxxxx    xx    xxxxxxxxxxxxxx xxxxxxxxxxxxxx  xxxxxxxxxxxxxx  *
+;* xxxxxxxxxxxx  xxxxxx    xx    xxxxxxxxxxxxxx xxxxxxxxxxxxxx  xxxxxxxxxxxxxx  *
+;* xxxxxxxxxxxx  xxxxxx    xx    xxxxxxxxxxxxxx xxxxxxxxxxxxxx  xxxxxxxxxxxxxx  *
+;* xxxxxxxxxxxx  xxxxxx    xx    xxxxxxxxxxxxxx xxxxxxxxxxxxxx  xxxxxxxxxxxxxx  *
+;* xxxxxxxxxxxx  xxxxxx    xx    xxxxxxxxxxxxxx xxxxxxxxxxxxxx  xxxxxxxxxxxxxx  *
+;* xxxxxxxxxxxx  xxxxxx    xx    xxxxxxxxxxxxxx xxxxxxxxxxxxxx  xxxxxxxxxxxxxx  *
+;* xxxxxxxxxxxx  xxxxxx    xx    xxxxxxxxxxxxxx xxxxxxxxxxxxxx  xxxxxxxxxxxxxx  *
+;* xxxxxxxxxxxx  xxxxxx    xx    xxxxxxxxxxxxxx xxxxxxxxxxxxxx  xxxxxxxxxxxxxx  *
+;* xxxxxxxxxxxx  xxxxxx    xx    xxxxxxxxxxxxxx xxxxxxxxxxxxxx  xxxxxxxxxxxxxx  *
+;* xxxxxxxxxxxx  xxxxxx    xx    xxxxxxxxxxxxxx xxxxxxxxxxxxxx  xxxxxxxxxxxxxx  *
+;* xxxxxxxxxxxx  xxxxxx    xx    xxxxxxxxxxxxxx xxxxxxxxxxxxxx  xxxxxxxxxxxxxx  *
+;********************************************************************************

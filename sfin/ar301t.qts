@@ -1,0 +1,323 @@
+;/T/ Liste de vérification des réceptions
+;
+;/M/ Réalisé par.......: Marc Poulin     
+;    Date..............: 16 février 2000
+;
+;    Description.......: Refonte du rapport selon les spécifications du clients
+;                        Rapporter: (1) les réceptions transférées aux comptes payables ;
+;                                   (2) les réceptions non transferées (si demandé) ;
+;                                   (3) Soustraire des réceptions, si demandé, les montants et quantités consolidés.
+;
+;    Référence.........: Stabilisation du module Achat/Réception Inventaire (point 2).
+;    
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+USE ussetqts NOLIST   ; permet de faire les SET REPORT NOLIMIT....
+
+RUN ar301t
+
+GLOBAL TEMPORARY G_RECINC CHARACTER SIZE 1 PARM ; Flag pour inclure les receptions non transférées aux comptes payables.
+GLOBAL TEMPORARY G_RECCON CHARACTER SIZE 1 PARM ; Flag pour inclure la partie consolidée
+
+REQUEST SELECT_RECEPTIONS_TRANSFEREES
+;-----------------------------------------------------------------------------------------------------------------------------------
+; Sélectionne seulement les réceptions transférées aux comptes payables (associées à un lot).
+;
+ACCESS ARRECEPTION LINK CIECLE OF ARRECEPTION , &
+                        PECCLE OF ARRECEPTION , &
+                        LARCLE OF ARRECEPTION   &
+                     TO CIECLE                , &
+                        PECCLE                , &
+                        LARCLE OF ARLOT         &
+
+                   LINK CIECLE OF ARRECEPTION , &
+                        RECCLE OF ARRECEPTION   &
+                     TO CIECLE                , &
+                        RECCLE OF ARREC_DETAIL  OPTIONAL
+
+CHOOSE CIECLE PARM, &
+       LARCLE PARM, &
+       CMDCLE PARM, &
+       RECCLE PARM, &
+       RECSTU PARM
+
+DEFINE D_PECCLE      CHARACTER SIZE 4 = PARM
+
+DEFINE D_PECCLE_REC  CHARACTER SIZE 5 = "1" + PECCLE OF ARRECEPTION      &
+                                     IF PECCLE OF ARRECEPTION[1:1] < "8" &
+                                   ELSE "0" + PECCLE OF ARRECEPTION
+
+DEFINE D_PECCLE_PARM CHARACTER SIZE 5 = "1" + D_PECCLE        &
+                                     IF  D_PECCLE [1:1] < "8" &
+                                   ELSE "0" + D_PECCLE
+
+SELECT ARRECEPTION IF (G_RECCON = "0" AND RECSTU OF ARRECEPTION <> "C") OR & 
+                       G_RECCON = "1"
+
+SELECT IF D_PECCLE_REC              <=  D_PECCLE_PARM AND &
+          RECSTU    OF ARRECEPTION  <> "X"            AND &
+          REDSTU    OF ARREC_DETAIL <> "X"            
+ 
+SORT ON CIECLE OF ARRECEPTION  &
+     ON D_PECCLE_REC           &
+     ON LARCLE OF ARRECEPTION  &
+     ON FOUCLE OF ARRECEPTION  &
+     ON RECCLE OF ARRECEPTION  &
+     ON CPTCLE OF ARREC_DETAIL &
+     ON UNACLE OF ARREC_DETAIL 
+
+TEMPORARY T_REDMNTTOT FLOAT SIZE 8
+TEMPORARY T_REDMNTNET FLOAT SIZE 8
+TEMPORARY T_REDMNTTPS FLOAT SIZE 8 
+TEMPORARY T_REDMNTTVQ FLOAT SIZE 8
+
+ITEM T_REDMNTTOT = REDMNTTOT OF ARREC_DETAIL
+ITEM T_REDMNTNET = REDMNTNET OF ARREC_DETAIL
+ITEM T_REDMNTTPS = REDMNTTPS OF ARREC_DETAIL
+ITEM T_REDMNTTVQ = REDMNTTVQ OF ARREC_DETAIL
+
+SUBFILE WAR301 KEEP IF (G_RECCON = "0" AND REDSTU OF ARREC_DETAIL <> "C") OR G_RECCON = "1" &
+                    APPEND INCLUDE LARDSC       OF ARLOT       , &
+                                   LARDATJOU    OF ARLOT       , &
+                                   LARNBRTRS    OF ARLOT       , &
+                                   LARNBRTRSVER OF ARLOT       , &
+                                   LARCUMMNT    OF ARLOT       , &
+                                   LARCUMMNTVER OF ARLOT       , &
+                                   LARNBRTRSERR OF ARLOT       , &
+                                   CIECLE       OF ARRECEPTION , &
+                                   PECCLE       OF ARRECEPTION , &
+                                   LARCLE       OF ARRECEPTION , &
+                                   RECCLE       OF ARRECEPTION , &
+                                   CMDCLE       OF ARRECEPTION , &
+                                   ENTCLE       OF ARRECEPTION , &
+                                   RECSTU       OF ARRECEPTION , &
+                                   RECCUMMNT    OF ARRECEPTION , &
+                                   FOUCIECLE    OF ARRECEPTION , &
+                                   FOUCLE       OF ARRECEPTION , &
+                                   REFCLETYP    OF ARRECEPTION , &
+                                   RADCLE       OF ARRECEPTION , &
+                                   RECTYPECR    OF ARRECEPTION , &
+                                   RECDAT       OF ARRECEPTION , &
+                                   RECNBRITE    OF ARRECEPTION , &
+                                   RECMNTTPS    OF ARRECEPTION , &
+                                   RECMNTTVQ    OF ARRECEPTION , &
+                                   RECMNTRTI    OF ARRECEPTION , &
+                                   RECMNTCTI    OF ARRECEPTION , &
+                                   RECMNTNET    OF ARRECEPTION , &
+                                   RECCOM       OF ARRECEPTION , &
+                                   RECMNTTOT    OF ARRECEPTION , &
+                                   REDCLE       OF ARREC_DETAIL, &
+                                   REDSTU       OF ARREC_DETAIL, &
+                                   PRJCLE       OF ARREC_DETAIL, &
+                                   PRACLE       OF ARREC_DETAIL, &
+                                   IMMCLE       OF ARREC_DETAIL, &
+                                   CPTCLE       OF ARREC_DETAIL, &
+                                   UNACLE       OF ARREC_DETAIL, &
+                                   CMDAJT       OF ARREC_DETAIL, &
+                                   REDTAXCODTPS OF ARREC_DETAIL, &
+                                   REDMNTESC    OF ARREC_DETAIL, &
+                                   REDTAXCODTVQ OF ARREC_DETAIL, &
+                                   T_REDMNTTOT                 , &
+                                   T_REDMNTNET                 , &
+                                   T_REDMNTTPS                 , &
+                                   T_REDMNTTVQ                 , &
+                                   D_PECCLE_REC
+
+SUBFILE WAR301X KEEP AT RECCLE  IF RECSTU OF ARRECEPTION = "S" &
+                           INCLUDE CIECLE OF ARRECEPTION     , &
+                                   D_PECCLE_REC              , &
+                                   LARCLE OF ARRECEPTION     , &
+                                   FOUCLE OF ARRECEPTION     , &
+                                   RECCLE OF ARRECEPTION     
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+; Sélectionne seulement les réceptions non transférées aux comptes payables (non associées à un lot).
+;
+REQUEST SELECT_RECEPTIONS_NON_TRANSFERRES
+
+ACCESS ARRECEPTION LINK CIECLE OF ARRECEPTION , &
+                        PECCLE OF ARRECEPTION , &
+                        LARCLE OF ARRECEPTION   &
+                     TO CIECLE                , &
+                        PECCLE                , &
+                        LARCLE OF ARLOT         OPTIONAL &
+
+                   LINK CIECLE OF ARRECEPTION , &
+                        RECCLE OF ARRECEPTION   &
+                     TO CIECLE                , &
+                        RECCLE OF ARREC_DETAIL  OPTIONAL
+
+CHOOSE CIECLE PARM, &
+       LARCLE " " , &
+       CMDCLE PARM, &
+       RECCLE PARM, &
+       RECSTU PARM
+
+DEFINE D_PECCLE      CHARACTER SIZE 4 = PARM
+
+DEFINE D_PECCLE_REC  CHARACTER SIZE 5 = "1" + PECCLE OF ARRECEPTION      &
+                                     IF PECCLE OF ARRECEPTION[1:1] < "8" &
+                                   ELSE "0" + PECCLE OF ARRECEPTION
+
+DEFINE D_PECCLE_PARM CHARACTER SIZE 5 = "1" + D_PECCLE        &
+                                     IF  D_PECCLE [1:1] < "8" &
+                                   ELSE "0" + D_PECCLE
+
+
+SELECT ARRECEPTION IF G_RECINC <> "0"
+
+SELECT IF D_PECCLE_REC              <=  D_PECCLE_PARM AND &
+          RECSTU    OF ARRECEPTION  <> "X"            AND &
+          REDSTU    OF ARREC_DETAIL <> "X"            
+ 
+SORT ON CIECLE OF ARRECEPTION  &
+     ON D_PECCLE_REC           &
+     ON LARCLE OF ARRECEPTION  &
+     ON FOUCLE OF ARRECEPTION  &
+     ON RECCLE OF ARRECEPTION  &
+     ON CPTCLE OF ARREC_DETAIL &
+     ON UNACLE OF ARREC_DETAIL 
+
+TEMPORARY T_REDMNTTOT FLOAT SIZE 8
+TEMPORARY T_REDMNTNET FLOAT SIZE 8
+TEMPORARY T_REDMNTTPS FLOAT SIZE 8 
+TEMPORARY T_REDMNTTVQ FLOAT SIZE 8
+
+ITEM T_REDMNTTOT = REDMNTTOT OF ARREC_DETAIL
+ITEM T_REDMNTNET = REDMNTNET OF ARREC_DETAIL
+ITEM T_REDMNTTPS = REDMNTTPS OF ARREC_DETAIL
+ITEM T_REDMNTTVQ = REDMNTTVQ OF ARREC_DETAIL
+
+SUBFILE WAR301 KEEP APPEND INCLUDE LARDSC       OF ARLOT       , &
+                                   LARDATJOU    OF ARLOT       , &
+                                   LARNBRTRS    OF ARLOT       , &
+                                   LARNBRTRSVER OF ARLOT       , &
+                                   LARCUMMNT    OF ARLOT       , &
+                                   LARCUMMNTVER OF ARLOT       , &
+                                   LARNBRTRSERR OF ARLOT       , &
+                                   CIECLE       OF ARRECEPTION , &
+                                   PECCLE       OF ARRECEPTION , &
+                                   LARCLE       OF ARRECEPTION , &
+                                   RECCLE       OF ARRECEPTION , &
+                                   CMDCLE       OF ARRECEPTION , &
+                                   ENTCLE       OF ARRECEPTION , &
+                                   RECSTU       OF ARRECEPTION , &
+                                   RECCUMMNT    OF ARRECEPTION , &
+                                   FOUCIECLE    OF ARRECEPTION , &
+                                   FOUCLE       OF ARRECEPTION , &
+                                   REFCLETYP    OF ARRECEPTION , &
+                                   RADCLE       OF ARRECEPTION , &
+                                   RECTYPECR    OF ARRECEPTION , &
+                                   RECDAT       OF ARRECEPTION , &
+                                   RECNBRITE    OF ARRECEPTION , &
+                                   RECMNTTPS    OF ARRECEPTION , &
+                                   RECMNTTVQ    OF ARRECEPTION , &
+                                   RECMNTRTI    OF ARRECEPTION , &
+                                   RECMNTCTI    OF ARRECEPTION , &
+                                   RECMNTNET    OF ARRECEPTION , &
+                                   RECCOM       OF ARRECEPTION , &
+                                   RECMNTTOT    OF ARRECEPTION , &
+                                   REDCLE       OF ARREC_DETAIL, &
+                                   REDSTU       OF ARREC_DETAIL, &
+                                   PRJCLE       OF ARREC_DETAIL, &
+                                   PRACLE       OF ARREC_DETAIL, &
+                                   IMMCLE       OF ARREC_DETAIL, &
+                                   CPTCLE       OF ARREC_DETAIL, &
+                                   UNACLE       OF ARREC_DETAIL, &
+                                   CMDAJT       OF ARREC_DETAIL, &
+                                   REDTAXCODTPS OF ARREC_DETAIL, &
+                                   REDMNTESC    OF ARREC_DETAIL, &
+                                   REDTAXCODTVQ OF ARREC_DETAIL, &
+                                   T_REDMNTTOT                 , &
+                                   T_REDMNTNET                 , &
+                                   T_REDMNTTPS                 , &
+                                   T_REDMNTTVQ                 , &
+                                   D_PECCLE_REC
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+; Cumuler la patie consolidée pour les réceptions "sélectionnées" (statut "S")
+;
+REQUEST CUMUL_PARTIE_CONSOLIDEE EXECUTE IF G_RECCON = "0"
+
+ACCESS *WAR301X LINK CIECLE    OF WAR301X   , &
+                     RECCLE    OF WAR301X     &
+                  TO FACCIECLE              , &
+                     RECCLE    OF ARDER_ITEM
+
+SORT ON CIECLE OF WAR301X  &
+     ON D_PECCLE_REC       &
+     ON LARCLE OF WAR301X  &
+     ON FOUCLE OF WAR301X  &
+     ON RECCLE OF WAR301X  &
+     ON DEICLE OF ARDER_ITEM 
+
+TEMPORARY T_DEIMNTTOT FLOAT SIZE 8
+TEMPORARY T_DEIMNTNET FLOAT SIZE 8
+TEMPORARY T_DEIMNTTPS FLOAT SIZE 8 
+TEMPORARY T_DEIMNTTVQ FLOAT SIZE 8
+
+ITEM T_DEIMNTTOT SUBTOTAL DEIMNTTOT OF ARDER_ITEM RESET AT DEICLE
+ITEM T_DEIMNTNET SUBTOTAL DEIMNTNET OF ARDER_ITEM RESET AT DEICLE
+ITEM T_DEIMNTTPS SUBTOTAL DEIMNTTPS OF ARDER_ITEM RESET AT DEICLE
+ITEM T_DEIMNTTVQ SUBTOTAL DEIMNTTVQ OF ARDER_ITEM RESET AT DEICLE
+
+SUBFILE WAR301Y KEEP AT DEICLE INCLUDE CIECLE      OF WAR301X   , &
+                                       RECCLE      OF WAR301X   , &
+                                       DEICLE      OF ARDER_ITEM, &
+                                       T_DEIMNTTOT              , &
+                                       T_DEIMNTNET              , &
+                                       T_DEIMNTTPS              , &
+                                       T_DEIMNTTVQ                &
+                                 INDEX WAR301Y_IDX                &
+                               SEGMENT CIECLE                   , &
+                                       RECCLE                   , &
+                                       DEICLE                   
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+; Ne pas inclure la patie consolidée pour les réceptions "sélectionnées" (statut "S")
+;
+REQUEST MAJ_RECEPTIONS_QTE_MNT_CONSOLIDES EXECUTE IF G_RECCON = "0"
+
+ACCESS *WAR301 LINK CIECLE OF WAR301  , &
+                    RECCLE OF WAR301  , &
+                    REDCLE OF WAR301    &
+                 TO CIECLE            , &
+                    RECCLE            , &
+                    DEICLE OF *WAR301Y
+
+OUTPUT WAR301 UPDATE
+  ITEM T_REDMNTTOT OF WAR301 FINAL T_REDMNTTOT OF WAR301 - T_DEIMNTTOT OF WAR301Y
+  ITEM T_REDMNTNET OF WAR301 FINAL T_REDMNTNET OF WAR301 - T_DEIMNTNET OF WAR301Y
+  ITEM T_REDMNTTPS OF WAR301 FINAL T_REDMNTTPS OF WAR301 - T_DEIMNTTPS OF WAR301Y
+  ITEM T_REDMNTTVQ OF WAR301 FINAL T_REDMNTTVQ OF WAR301 - T_DEIMNTTVQ OF WAR301Y
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+; Cumul du montant total et du nombre d'item par réception
+;
+REQUEST CUMUL_MNT_NBRITE
+
+ACCESS *WAR301
+
+SORT ON CIECLE OF WAR301 &
+     ON D_PECCLE_REC     &
+     ON LARCLE OF WAR301 &
+     ON FOUCLE OF WAR301 &
+     ON RECCLE OF WAR301 
+
+TEMPORARY T_RECMNTTOT FLOAT   SIZE 8
+TEMPORARY T_RECNBRITE INTEGER SIZE 4
+
+ITEM T_RECMNTTOT SUBTOTAL T_REDMNTTOT OF WAR301 RESET AT RECCLE
+ITEM T_RECNBRITE COUNT                          RESET AT RECCLE
+
+SUBFILE WAR301Z KEEP AT RECCLE INCLUDE CIECLE OF WAR301, &
+                                       RECCLE OF WAR301, &
+                                       T_RECMNTTOT     , &
+                                       T_RECNBRITE       &
+                                 INDEX WAR301Z_IDX       &
+                               SEGMENT CIECLE          , &
+                                       RECCLE          
+
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+BUILD

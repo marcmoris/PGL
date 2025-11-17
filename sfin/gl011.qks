@@ -1,0 +1,988 @@
+;/T/ Etat financier
+;
+;/P/ Programmeur..: Alain Côté
+;    Date Création: 13 mars 1992
+;
+;/V3.02.00/ Alain Côté, 6 avril 1994, 199
+;/V3.03.00/ Marc Morissette, 9 Juin 1994, 251
+;
+;    Description..: Définition des états financier.
+;
+;    Modifications:
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+;
+SCREEN gl011 ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU, &
+                       T_CIENOM   , &
+                       T_FLGMNU
+
+USE gl011.hlp NOLIST
+
+USE ussectmp NOLIST     ; Variable pour la securite
+"GL011"                 ; Nom de l'écran
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-ecran
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Détail - état financier         "  ACTION ID 90
+  MENUITEM LABEL "Ratios des colonnes B à F       " ACTION DESIGNER D002
+  MENUITEM LABEL "Ratios des colonnes G à K       " ACTION DESIGNER D003
+  MENUITEM LABEL "Ratios des colonnes L à P       " ACTION DESIGNER D004
+@ELSE
+ACTIONMENU LABEL "Subscreens"
+  MENUITEM LABEL "Detail - Financial State        " ACTION DESIGNER ID 90
+  MENUITEM LABEL "%%%Ratios des colonnes B à F    " ACTION DESIGNER D002
+  MENUITEM LABEL "%%%Ratios des colonnes G à K    " ACTION DESIGNER D003
+  MENUITEM LABEL "%%%Ratios des colonnes L à P    " ACTION DESIGNER D004
+@ENDIF
+
+;------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4 ; Compagnie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40; Compagnie du menu.
+TEMPORARY T_FLGMNU    CHARACTER SIZE 1 ; Provenance du menu.
+
+;------------------------------------------------------------------------------
+;
+; Fichier primaire de de définition des états financiers
+;
+
+FILE GLETAT_FINANCIER PRIMARY
+
+  ACCESS  VIA     EFICIECLE, EFICLE &
+          USING   T_CIECLEMNU, EFICLE OF GLETAT_FINANCIER &
+          REQUEST EFICLE OF GLETAT_FINANCIER
+
+  ACCESS  VIA     EFICIECLE, EFITYP &
+          USING   T_CIECLEMNU, EFITYP OF GLETAT_FINANCIER &
+          REQUEST EFITYP OF GLETAT_FINANCIER
+
+  ACCESS  VIA     EFICIECLE &
+          USING   T_CIECLEMNU &
+          ORDERBY EFICLE
+
+  ITEM EFICIECLE OF GLETAT_FINANCIER INITIAL T_CIECLEMNU
+  ITEM EFFCIECLE OF GLETAT_FINANCIER INITIAL T_CIECLEMNU
+
+;------------------------------------------------------------------------------
+;
+; Définition des 16 colonnes.
+;
+
+FILE GLEFI_COLONNE    SECONDARY &
+                      OCCURS 16 &
+                      NOITEMS
+
+  ACCESS  VIA     EFICIECLE,EFICLE &
+          USING   EFICIECLE OF GLETAT_FINANCIER, EFICLE OF GLETAT_FINANCIER &
+          ORDERBY EFCNUMCOL
+
+  ITEM EFICIECLE OF GLEFI_COLONNE FINAL EFICIECLE OF GLETAT_FINANCIER
+  ITEM EFICLE    OF GLEFI_COLONNE FINAL EFICLE    OF GLETAT_FINANCIER
+
+;------------------------------------------------------------------------------
+;
+; Destruction du détail de l'état financier.
+;
+
+FILE GLEFI_DETAIL     DELETE &
+                      NOITEM
+  ACCESS VIA   EFICIECLE, &
+               EFICLE &
+         USING EFICIECLE OF GLETAT_FINANCIER , &
+               EFICLE    OF GLETAT_FINANCIER
+
+;------------------------------------------------------------------------------
+;
+; Déclaration du fichier des formats d'entete et de bas de page
+;
+
+FILE GLEF_FORMAT      REFERENCE
+
+  ACCESS VIA   EFFCIECLE,EFFCLE &
+         USING EFFCIECLE OF GLETAT_FINANCIER, EFFCLE OF GLETAT_FINANCIER
+
+;------------------------------------------------------------------------------
+;
+; Pour valider et afficher les codes bilingues
+;
+
+FILE VCBI_DSC REFERENCE ALIAS VCBI_DSC_EFITYP
+FILE VCBI_DSC REFERENCE ALIAS VCBI_DSC_EFIIMPINFSUP
+FILE VCBI_DSC REFERENCE ALIAS VCBI_DSC_EFCANNCOL
+FILE VCBI_DSC REFERENCE ALIAS VCBI_DSC_EFCTYPCOL
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU      IF T_FLGMNU = "C"
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER(T_CIENOM)
+
+;
+; Sert à valider les codes bilingue et pour les sous-écrans de consultation
+;
+DEFINE    D_EFITYP        CHAR SIZE 16 = "EFITYP"
+DEFINE    D_EFIIMPINFSUP  CHAR SIZE 16 = "EFIIMPINFSUP"
+DEFINE    D_EFCTYPCOL     CHAR SIZE 16 = "EFCTYPCOL"
+DEFINE    D_EFCANNCOL     CHAR SIZE 16 = "EFCANNCOL"
+TEMPORARY T_EFITYP        CHAR SIZE 4
+TEMPORARY T_EFIIMPINFSUP  CHAR SIZE 4
+TEMPORARY T_EFCTYPCOL     CHAR SIZE 4
+TEMPORARY T_EFCANNCOL     CHAR SIZE 4
+
+TEMPORARY T_EFFCIECLE CHAR SIZE 4
+TEMPORARY T_EFFCLE    CHAR SIZE 4
+
+TEMPORARY T_CBIDSCTYP CHAR SIZE 25 ; Desc. du type d'E/F.
+;
+; Nom des colonnes
+;
+TEMPORARY T_CODASC      INT  SIZE 1 ; Code ascii de la lettre (A À P)
+TEMPORARY T_NOMCOL      CHAR SIZE 1 OCCURS WITH GLEFI_COLONNE
+;
+; Indices de recherches des "^" dans les entêtes des colonnes
+;
+TEMPORARY T_IND1        INT  SIZE 2
+TEMPORARY T_IND2        INT  SIZE 2
+
+TEMPORARY T_FLGDEL CHARACTER SIZE 1 ; Flag pour le sous-écran de destruction
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Etat financier " &
+@ELSE
+      " Financial Statement " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP
+
+ALIGN (2,3,19) (,35,51) (,,54)
+
+FIELD EFICLE OF GLETAT_FINANCIER ID 05 HIDDEN &
+      REQUIRED &
+      NOCHANGE &
+      LOOKUP NOTON GLETAT_FINANCIER &
+             VIA   EFICIECLE, EFICLE &
+             USING T_CIECLEMNU, EFICLE OF GLETAT_FINANCIER &
+      MESSAGE 268 ; Ce code d'état financier existe déjà.
+
+FIELD EFITYP OF GLETAT_FINANCIER &
+      REQUIRED &
+      LOOKUP  ON    VCBI_DSC_EFITYP &
+              VIA   XELNOM, CBICLE &
+              USING D_EFITYP, EFITYP OF GLETAT_FINANCIER &
+      MESSAGE 269 ; Ce type d'E/F est invalide.
+
+FIELD CBIDSC OF VCBI_DSC_EFITYP &
+      DISPLAY
+
+SKIP 1
+
+FIELD EFIUSRCRE OF GLETAT_FINANCIER ID 10 HIDDEN &
+      DEFAULT LOGONID
+
+FIELD EFIFLGIMP OF GLETAT_FINANCIER
+
+SKIP
+
+FIELD EFFCLE    OF GLETAT_FINANCIER ID 12 HIDDEN &
+      REQUIRED &
+      LOOKUP ON GLEF_FORMAT &
+      MESSAGE 306 ; Format de Haut et Bas de page inconnu...
+
+FIELD EFIIMPINFSUP OF GLETAT_FINANCIER &
+      REQUIRED &
+      LOOKUP  ON    VCBI_DSC_EFIIMPINFSUP &
+              VIA   XELNOM, CBICLE &
+              USING D_EFIIMPINFSUP, EFIIMPINFSUP OF GLETAT_FINANCIER &
+      MESSAGE 340 ; Cette option n'existe pas.
+
+FIELD CBIDSC OF VCBI_DSC_EFIIMPINFSUP &
+      DISPLAY
+
+SKIP
+
+DRAW ,1 TO ,80
+
+TITLE &
+@IF FRANCAIS
+      "En-tête spécifique" &
+@ELSE
+      "Specific Heading" &
+@ENDIF
+      CENTERED AT ,1
+
+SKIP
+ALIGN(2,3,19)
+FIELD EFITITCIE OF GLETAT_FINANCIER ID 15 HIDDEN
+
+ALIGN(2,3,24)
+FIELD EFITITEF  OF GLETAT_FINANCIER ID 20 HIDDEN
+
+ALIGN(2,3,24)
+FIELD EFITITPER OF GLETAT_FINANCIER ID 25 HIDDEN
+
+ALIGN(2,3,19)
+FIELD EFITITCOM OF GLETAT_FINANCIER ID 30 HIDDEN
+SKIP
+
+DRAW ,1  TO ,80
+DRAW ,40 TO 23,40
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+      "Type An Lc En-tête    Calcul     Nt" &
+@ELSE
+      "Type Yr Cw Heading   Calculation Nt" &
+@ENDIF
+      AT ,5
+
+TITLE &
+@IF FRANCAIS
+      "Type An Lc En-tête    Calcul     Nt" &
+@ELSE
+      "Type Yr Cw Heading   Calculation Nt" &
+@ENDIF
+      AT ,44
+
+SKIP
+
+CLUSTER VERTICAL OCCURS WITH GLEFI_COLONNE ID BASE 35 FOR 1,39
+ALIGN (3,2,3) (,,5) (,,11) (,,13) (,,16) (,,27) (,,39)
+
+FIELD T_NOMCOL HIDDEN LABEL " " &
+      DISPLAY &
+      HILITE DISPLAY OFF
+
+FIELD EFCTYPCOL OF GLEFI_COLONNE
+
+FIELD EFCANNCOL OF GLEFI_COLONNE &
+      IF    EFCTYPCOL OF GLEFI_COLONNE <> " "   &
+        AND EFCTYPCOL OF GLEFI_COLONNE <> "COM" &
+      LOOKUP  ON VCBI_DSC_EFCANNCOL &
+              VIA XELNOM, CBICLE &
+              USING D_EFCANNCOL, EFCANNCOL OF GLEFI_COLONNE &
+              MESSAGE 278 ; Type d'année  invalide.
+
+FIELD EFCLARCOL OF GLEFI_COLONNE
+
+FIELD EFCENTCOL OF GLEFI_COLONNE &
+      FOR 1,9 &
+      POPUP FROM 15,16 TO 17,37
+
+FIELD EFCCALCOL OF GLEFI_COLONNE &
+      FOR 1,11 &
+      POPUP FROM 15,27 TO 17,51
+
+FIELD EFCIMPCOL OF GLEFI_COLONNE
+
+CLUSTER
+
+ALIGN(2)(4)
+
+SUBSCREEN gl011a ID 90 HIDDEN &
+            PASSING T_CIECLEMNU, &
+                    T_CIENOM   , &
+                    T_FLGMNU   , &
+                    T_CBIDSCTYP, &
+                    GLETAT_FINANCIER MODE SAME AUTO
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès pour l'écran par son code.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Popup de consultation des types d'états financiers
+;
+PROCEDURE INPUT EFITYP
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_EFITYP = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_EFITYP, T_EFITYP
+    LET FIELDTEXT = TRUNC(T_EFITYP)
+  END
+END
+
+PROCEDURE PROCESS EFITYP
+BEGIN
+  LET T_CBIDSCTYP = CBIDSC OF VCBI_DSC_EFITYP
+END
+
+;-------------------------------------------------------------------------------
+;
+; Traitement du flag OUI/NON pour l'impression de l'état financier
+;
+;
+PROCEDURE EDIT EFIFLGIMP
+BEGIN
+  USE usflginp NOLIST
+END
+
+PROCEDURE OUTPUT EFIFLGIMP
+BEGIN
+  USE usflgout NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Popup de consultation des formats de haut/bas de page
+;
+PROCEDURE INPUT EFFCLE
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_EFFCIECLE = EFFCIECLE OF GLETAT_FINANCIER
+    LET T_EFFCLE    = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gl110 MODE F PASSING T_EFFCIECLE,T_EFFCLE
+    LET FIELDTEXT = TRUNC(T_EFFCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Consultation des options disponibles pour les infos supplémentaires dans
+; la description du compte.
+;
+;
+PROCEDURE INPUT EFIIMPINFSUP
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_EFIIMPINFSUP = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_EFIIMPINFSUP, T_EFIIMPINFSUP
+    LET FIELDTEXT = TRUNC(T_EFIIMPINFSUP)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Centre la Cie de l'etat financier.
+;
+;
+PROCEDURE OUTPUT EFITITCIE
+BEGIN
+  LET FIELDTEXT = CENTER( FIELDTEXT[1:SIZE(EFITITCIE)] )
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Centre le titre de l'état financier. Par défaut, le titre utilisé est
+; celui correspondant au code bilingue du type de l'état financier.
+;
+
+PROCEDURE OUTPUT EFITITEF
+BEGIN
+  IF 0 = SIZE(TRUNC(EFITITEF OF GLETAT_FINANCIER))
+  THEN LET FIELDTEXT = CENTER(T_CBIDSCTYP[1:SIZE(EFITITEF OF GLETAT_FINANCIER)])
+  ELSE LET FIELDTEXT = CENTER( FIELDTEXT[1:SIZE(EFITITEF OF GLETAT_FINANCIER)] )
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Centre la périodicitée de l'etat financier.
+;
+PROCEDURE OUTPUT EFITITPER
+BEGIN
+  LET FIELDTEXT = CENTER( FIELDTEXT[1:SIZE(EFITITPER OF GLETAT_FINANCIER)] )
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Centre le commentaire associé à l'etat financier.
+;
+PROCEDURE OUTPUT EFITITCOM
+BEGIN
+  LET FIELDTEXT = CENTER( FIELDTEXT[1:SIZE(EFITITCOM OF GLETAT_FINANCIER)] )
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Affiche les lettres de A à P pour les colonnes.
+;
+;
+PROCEDURE OUTPUT T_NOMCOL
+BEGIN
+  ;
+  ; Le code ASCII pour la lettre A est 65, c'est pour cette raison que je
+  ; part avec le code ascii 64.
+  ;
+  LET T_CODASC = 64 + EFCNUMCOL OF GLEFI_COLONNE
+  LET FIELDTEXT = CHAR(T_CODASC)
+END
+
+;-------------------------------------------------------------------------------
+;
+; Traitement dy type de colonne :
+;
+
+;
+; Popup de consultation des types de colonnes
+;
+
+PROCEDURE INPUT EFCTYPCOL
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_EFCTYPCOL = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_EFCTYPCOL, T_EFCTYPCOL
+    LET FIELDTEXT = TRUNC(T_EFCTYPCOL)
+  END
+END
+
+;
+; Le type de colonne est optionel.
+;
+
+PROCEDURE EDIT EFCTYPCOL
+BEGIN
+  IF 0 <> SIZE(TRUNC(FIELDTEXT))
+  THEN BEGIN
+    GET VCBI_DSC_EFCTYPCOL &
+        VIA   XELNOM, CBICLE &
+        USING D_EFCTYPCOL, EFCTYPCOL OF GLEFI_COLONNE OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 270 ; Ce type de colonne est invalide.
+  END
+END
+
+;
+; Efface les champs qui dépende du type de colonne et assigne la valeur
+; par défaut pour la largeur de la colonne.
+;
+
+PROCEDURE PROCESS EFCTYPCOL
+BEGIN
+  IF 0 = SIZE(TRUNC(FIELDTEXT))
+  THEN BEGIN
+    LET EFCANNCOL OF GLEFI_COLONNE = " "
+    LET EFCLARCOL OF GLEFI_COLONNE = 0
+    LET EFCENTCOL OF GLEFI_COLONNE = " "
+    LET EFCCALCOL OF GLEFI_COLONNE = " "
+    LET EFCIMPCOL OF GLEFI_COLONNE = " "
+    DISPLAY EFCANNCOL OF GLEFI_COLONNE
+    DISPLAY EFCLARCOL OF GLEFI_COLONNE
+    DISPLAY EFCENTCOL OF GLEFI_COLONNE
+    DISPLAY EFCCALCOL OF GLEFI_COLONNE
+    DISPLAY EFCIMPCOL OF GLEFI_COLONNE
+  END
+  ELSE BEGIN
+    LET EFCIMPCOL OF GLEFI_COLONNE = "1"
+    DISPLAY EFCIMPCOL OF GLEFI_COLONNE
+    ;
+    ; Valeur par défaut de la largeur d'une colonne.
+    ;
+    IF EFCLARCOL OF GLEFI_COLONNE = 0
+    THEN BEGIN
+      LET EFCANNCOL OF GLEFI_COLONNE = "C"
+      LET EFCLARCOL OF GLEFI_COLONNE = 12
+      DISPLAY EFCANNCOL OF GLEFI_COLONNE
+      DISPLAY EFCLARCOL OF GLEFI_COLONNE
+    END
+
+    IF   "CALC" = EFCTYPCOL OF GLEFI_COLONNE &
+      OR "RAT"  = EFCTYPCOL OF GLEFI_COLONNE[1:3] &
+      OR "COM"  = EFCTYPCOL OF GLEFI_COLONNE[1:3]
+    THEN BEGIN
+      LET EFCANNCOL OF GLEFI_COLONNE = " "
+      DISPLAY EFCANNCOL OF GLEFI_COLONNE
+    END
+
+    IF "CALC" <> EFCTYPCOL OF GLEFI_COLONNE
+    THEN BEGIN
+      LET EFCCALCOL OF GLEFI_COLONNE = " "
+      DISPLAY EFCCALCOL OF GLEFI_COLONNE
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Popup de consultation sur le code bilingue de l'année demandée.
+;
+PROCEDURE INPUT EFCANNCOL
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_EFCANNCOL = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_EFCANNCOL, T_EFCANNCOL
+    LET FIELDTEXT = TRUNC(T_EFCANNCOL)
+  END
+  IF    0 = SIZE(TRUNC(FIELDTEXT)) &
+    AND EFCTYPCOL <> "  " &
+    AND 0 = SIZE(TRUNC(EFCANNCOL))
+  THEN LET FIELDTEXT = " "
+END
+
+;-------------------------------------------------------------------------------
+;
+; Traitement de l'entête de colonne.
+;
+;
+
+;
+; On force l'exécution de la procédure EDIT
+;
+PROCEDURE INPUT EFCENTCOL
+BEGIN
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNC(EFCENTCOL OF GLEFI_COLONNE))
+  THEN LET FIELDTEXT = EFCENTCOL OF GLEFI_COLONNE
+END
+
+;
+;
+; Valide si l'en-tête de colonne dépasse la largeur de la colonne définie
+; par l'usager. Dans l'entête le caractère "^" fait office de séparateur
+; de ligne (comme dans les header de quiz).
+; Exemple : si l'entête contient "Période 01^Année courante^-----------"
+;           alors dans la colonne on va afficher :
+;
+;                             Période 01
+;                           Année courante
+;                             -----------
+;
+;           Chaque ligne est centrée par rapport à la largeur de la colonne.
+;
+; Note : Ici, la limite du nombre de lignes est de 3. Mais pour modifier
+;        cette limite, il suffit de modifier ce programme. En effet, le
+;        générateur de rapport est dynamique et n'a pas de limite dans le
+;        nombre de lignes d'entête.
+;
+;
+
+PROCEDURE EDIT EFCENTCOL
+BEGIN
+;
+; On recherche le premier segment et on vérifie sa taille par rapport à
+; la largeur de la colonne.
+;
+  LET T_IND1 = INDEX(EFCENTCOL OF GLEFI_COLONNE,"^")
+  IF    (       T_IND1 = 0 &
+          AND   EFCLARCOL OF GLEFI_COLONNE &
+              < SIZE(TRUNCATE(EFCENTCOL OF GLEFI_COLONNE)) ) &
+     OR ( EFCLARCOL OF GLEFI_COLONNE < T_IND1 - 1)
+  THEN ERROR 323 ; La première ligne est plus grande que la largeur de la colonne
+
+  IF T_IND1 <> 0
+  THEN BEGIN
+;
+; S'il y a une séparation de ligne alors on vérifie la taille de ce deuxiemme
+; segment
+;
+    LET T_IND2 = INDEX(EFCENTCOL OF GLEFI_COLONNE[T_IND1 + 1:62],"^")
+
+    IF    (       T_IND2 = 0 &
+            AND   EFCLARCOL OF GLEFI_COLONNE &
+                < SIZE(TRUNCATE(EFCENTCOL OF GLEFI_COLONNE[T_IND1+1:62])) ) &
+       OR ( EFCLARCOL OF GLEFI_COLONNE < T_IND2 - 1)
+    THEN ERROR 324 ; La deuxiemme ligne est plus grande que la largeur de la colonne
+
+    IF T_IND2 <> 0
+    THEN BEGIN
+;
+; S'il y a un troisiemme segment, on s'assure qu'il n'y en a pas de quatriemme
+; et on vérifie sa taille
+;
+      IF 0 <> INDEX(EFCENTCOL OF GLEFI_COLONNE[T_IND1+T_IND2+1:62],"^")
+      THEN ERROR 326 ; L'entête ne peut pas contenir plus de trois lignes
+      IF EFCLARCOL OF GLEFI_COLONNE < SIZE(TRUNCATE(EFCENTCOL OF GLEFI_COLONNE[T_IND1+T_IND2+1:62]))
+      THEN ERROR 325 ; La troisiemme ligne est plus grande que la largeur de la colonne
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Traitement de la formule de calcul
+;
+
+;
+; Force l'éxécution de la procédure EDIT du champ.
+;
+PROCEDURE INPUT EFCCALCOL
+BEGIN
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT)
+  THEN LET FIELDTEXT = EFCCALCOL OF GLEFI_COLONNE
+END
+
+;
+; Valide l'équation pour le type CALCUL.
+;
+PROCEDURE EDIT EFCCALCOL
+BEGIN
+  LET FIELDTEXT = TRUNCATE(LJ(FIELDTEXT))
+
+  IF "CALC" = EFCTYPCOL OF GLEFI_COLONNE
+  THEN BEGIN
+    IF NOT MATCHPATTERN(FIELDTEXT, &
+"(!()*(A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|(-<#>)|(-<#>.#>))((!(|!))*(+|-|/|!*)(!(|!))*(A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|(-<#>)|(-<#>.#>)))*(!(|!))*")
+    THEN ERROR 274 ; Équation invalide.
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Traitement du flag OUI/NON pour L'impression de la colonne
+;
+PROCEDURE EDIT EFCIMPCOL
+BEGIN
+  USE usflginp NOLIST
+END
+
+PROCEDURE OUTPUT EFCIMPCOL
+BEGIN
+  USE usflgout NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Traitement de l'entrée de données
+;
+PROCEDURE ENTRY
+BEGIN
+  ;
+  ; Assigne et affiche le numéro de colonne, de 1(A) à 16(P).
+  ;
+  FOR GLEFI_COLONNE
+  BEGIN
+    LET EFCNUMCOL OF GLEFI_COLONNE = OCCURRENCE
+    DISPLAY T_NOMCOL
+  END
+  ACCEPT EFICLE       OF GLETAT_FINANCIER
+  ACCEPT EFITYP       OF GLETAT_FINANCIER
+  DISPLAY CBIDSC      OF VCBI_DSC_EFITYP
+  ACCEPT EFIUSRCRE    OF GLETAT_FINANCIER
+  ACCEPT EFIFLGIMP    OF GLETAT_FINANCIER
+  ACCEPT EFFCLE       OF GLETAT_FINANCIER
+  ACCEPT EFIIMPINFSUP OF GLETAT_FINANCIER
+  DISPLAY CBIDSC      OF VCBI_DSC_EFIIMPINFSUP
+  ACCEPT EFITITCIE    OF GLETAT_FINANCIER
+  ACCEPT EFITITEF     OF GLETAT_FINANCIER
+  ACCEPT EFITITPER    OF GLETAT_FINANCIER
+  ACCEPT EFITITCOM    OF GLETAT_FINANCIER
+
+  IF EFITYP OF GLETAT_FINANCIER <> "N"
+  THEN BEGIN
+    FOR GLEFI_COLONNE
+    BEGIN
+      ACCEPT EFCTYPCOL OF GLEFI_COLONNE
+      IF 0 <> SIZE(TRUNC(EFCTYPCOL OF GLEFI_COLONNE))
+      THEN BEGIN
+        IF      "CALC" <> EFCTYPCOL OF GLEFI_COLONNE &
+            AND "RAT"  <> EFCTYPCOL OF GLEFI_COLONNE[1:3] &
+            AND "COM"  <> EFCTYPCOL OF GLEFI_COLONNE[1:3]
+        THEN ACCEPT EFCANNCOL OF GLEFI_COLONNE
+
+        ACCEPT EFCLARCOL OF GLEFI_COLONNE
+        ACCEPT EFCENTCOL OF GLEFI_COLONNE
+
+        IF "CALC" = EFCTYPCOL OF GLEFI_COLONNE
+        THEN ACCEPT EFCCALCOL OF GLEFI_COLONNE
+
+        ACCEPT EFCIMPCOL OF GLEFI_COLONNE
+      END
+    END
+  END
+  ;
+  ; *** BUG POWERHOUSE ***
+  ; Les vecteurs ne sont pas supportés alors il faut fait la mise à jour
+  ; avant d'aller au sous-écran, car le fichier SECONDAIRE est déclaré
+  ; OCCURS et cela cause des problèmes dans le sous-écran.
+  ;
+  PUT GLETAT_FINANCIER
+  FOR GLEFI_COLONNE
+    PUT GLEFI_COLONNE
+
+  RUN SCREEN gl011a &
+             PASSING T_CIECLEMNU, &
+                     T_CIENOM   , &
+                     T_FLGMNU   , &
+                     T_CBIDSCTYP, &
+                     GLETAT_FINANCIER MODE E
+END
+
+
+PROCEDURE DESIGNER 5
+BEGIN
+  ACCEPT EFITYP OF GLETAT_FINANCIER
+  DISPLAY CBIDSC OF VCBI_DSC_EFITYP
+  IF EFITYP OF GLETAT_FINANCIER = "N"
+  THEN BEGIN
+    FOR GLEFI_COLONNE
+    BEGIN
+      LET EFCTYPCOL OF GLEFI_COLONNE = ""
+      LET EFCANNCOL OF GLEFI_COLONNE = ""
+      LET EFCLARCOL OF GLEFI_COLONNE = 0
+      LET EFCENTCOL OF GLEFI_COLONNE = ""
+      LET EFCCALCOL OF GLEFI_COLONNE = ""
+      LET EFCIMPCOL OF GLEFI_COLONNE = ""
+
+      DISPLAY EFCTYPCOL OF GLEFI_COLONNE
+      DISPLAY EFCANNCOL OF GLEFI_COLONNE
+      DISPLAY EFCLARCOL OF GLEFI_COLONNE
+      DISPLAY EFCENTCOL OF GLEFI_COLONNE
+      DISPLAY EFCCALCOL OF GLEFI_COLONNE
+      DISPLAY EFCIMPCOL OF GLEFI_COLONNE
+    END
+  END
+END
+;-------------------------------------------------------------------------------
+;
+; Fait le même traitement que la procédure ENTRY lors de la modification
+; des champs à l'écran.
+;
+PROCEDURE DESIGNER 35
+BEGIN
+  IF EFITYP OF GLETAT_FINANCIER <> "N"
+  THEN BEGIN
+    ACCEPT EFCTYPCOL OF GLEFI_COLONNE
+    IF 0 <> SIZE(TRUNC(EFCTYPCOL OF GLEFI_COLONNE))
+    THEN BEGIN
+      IF      "CALC" <> EFCTYPCOL OF GLEFI_COLONNE &
+          AND "RAT"  <> EFCTYPCOL OF GLEFI_COLONNE[1:3] &
+          AND "COM"  <> EFCTYPCOL OF GLEFI_COLONNE[1:3]
+      THEN ACCEPT EFCANNCOL OF GLEFI_COLONNE
+
+      ACCEPT EFCLARCOL OF GLEFI_COLONNE
+      ACCEPT EFCENTCOL OF GLEFI_COLONNE
+
+      IF "CALC" = EFCTYPCOL OF GLEFI_COLONNE
+      THEN ACCEPT EFCCALCOL OF GLEFI_COLONNE
+
+      ACCEPT EFCIMPCOL OF GLEFI_COLONNE
+    END
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Oblige de faire une mise à jour avant d'aller au sous-écran. Voir
+; dans la procédure entry ***BUG POWERHOUSE ***
+;
+;
+PROCEDURE DESIGNER 90
+BEGIN
+  FOR GLEFI_COLONNE
+    IF ALTEREDRECORD OF GLEFI_COLONNE
+    THEN ERROR 272 ; Faire une maj avant d'aller au sous-écran.
+
+  RUN SCREEN gl011a &
+             PASSING T_CIECLEMNU, &
+                     T_CIENOM   , &
+                     T_FLGMNU   , &
+                     T_CBIDSCTYP, &
+                     GLETAT_FINANCIER MODE F
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Oblige de faire une mise à jour avant d'aller au sous-écran. Voir
+; dans la procédure entry ***BUG POWERHOUSE ***
+;
+;
+PROCEDURE DESIGNER D002
+BEGIN
+  FOR GLEFI_COLONNE
+  BEGIN
+    IF ALTEREDRECORD OF GLEFI_COLONNE
+    THEN ERROR 272 ; Faire une maj avant d'aller au sous-écran.
+  END
+
+  RUN SCREEN gl011d &
+             PASSING T_CIECLEMNU, &
+                     T_CIENOM   , &
+                     T_FLGMNU   , &
+                     T_CBIDSCTYP, &
+                     GLETAT_FINANCIER &
+             MODE F
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Oblige de faire une mise à jour avant d'aller au sous-écran. Voir
+; dans la procédure entry ***BUG POWERHOUSE ***
+;
+;
+PROCEDURE DESIGNER D003
+BEGIN
+  FOR GLEFI_COLONNE
+  BEGIN
+    IF ALTEREDRECORD OF GLEFI_COLONNE
+    THEN ERROR 272 ; Faire une maj avant d'aller au sous-écran.
+  END
+
+  RUN SCREEN gl011e &
+             PASSING T_CIECLEMNU, &
+                     T_CIENOM   , &
+                     T_FLGMNU   , &
+                     T_CBIDSCTYP, &
+                     GLETAT_FINANCIER &
+             MODE F
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Oblige de faire une mise à jour avant d'aller au sous-écran. Voir
+; dans la procédure entry ***BUG POWERHOUSE ***
+;
+;
+PROCEDURE DESIGNER D004
+BEGIN
+  FOR GLEFI_COLONNE
+  BEGIN
+    IF ALTEREDRECORD OF GLEFI_COLONNE
+    THEN ERROR 272 ; Faire une maj avant d'aller au sous-écran.
+  END
+
+  RUN SCREEN gl011f &
+             PASSING T_CIECLEMNU, &
+                     T_CIENOM   , &
+                     T_FLGMNU   , &
+                     T_CBIDSCTYP, &
+                     GLETAT_FINANCIER &
+             MODE F
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Récupération du type d'état financier pour les sous-écrans
+;
+PROCEDURE POSTFIND
+BEGIN
+  LET T_CBIDSCTYP = CBIDSC OF VCBI_DSC_EFITYP
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF GLETAT_FINANCIER &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF    ALTEREDRECORD     OF GLETAT_FINANCIER &
+    AND NOT NEWRECORD     OF GLETAT_FINANCIER &
+    AND NOT DELETEDRECORD OF GLETAT_FINANCIER &
+    AND TZ_SECMOD = "0"
+  THEN ERROR 2
+  ;
+  ; Destruction d'un état financier.
+  ;
+  IF DELETEDRECORD OF GLETAT_FINANCIER
+  THEN BEGIN
+    ;
+    ; On initialise le flag de retour pour savoir si le sous-écran a
+    ; bien fonctionné.
+    ;
+    LET T_FLGDEL = ""
+    ;
+    ; Appel du sous-écran qui valide si la catégorie est référée.
+    ;
+    RUN SCREEN gl011x MODE SAME &
+                      PASSING GLETAT_FINANCIER , &
+                              T_FLGDEL
+    ;
+    ; Si la valeur de retour égale 1, cela indique que le sous-écran
+    ; n'a trouvé aucune référence pour l'identifiant demandé.
+    ;
+    IF T_FLGDEL = ""
+    THEN ERROR " "
+  END
+END
+
+BUILD
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+******************************** Etat financier ********************************
+* Code E/F......: xxxx            Type E/F......: x  xxxxxxxxxxxxxxxxxxxxxxxxx *
+*                                                                              *
+* Concepteur....: xxxxxxxxxxxx    Imp. de l'E/F.: x                            *
+* Format........: xxxx            Imp. inf. comp: x  xxxxxxxxxxxxxxxxxxxxxxxxx *
+*******************************En-tête spécifique*******************************
+* Nom de la cie.: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+* Titre - E/F...:      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                          *
+* Périodicité...:      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                          *
+* Commentaire...: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+********************************************************************************
+*   Type An Lc En-tête    Calcul     Nt*   Type An Lc En-tête    Calcul     Nt *
+* x xxxx  x xx xxxxxxxxx  xxxxxxxxxxx x* x xxxx  x xx xxxxxxxxx  xxxxxxxxxxx x *
+* x xxxx  x xx xxxxxxxxx  xxxxxxxxxxx x* x xxxx  x xx xxxxxxxxx  xxxxxxxxxxx x *
+* x xxxx  x xx xxxxxxxxx  xxxxxxxxxxx x* x xxxx  x xx xxxxxxxxx  xxxxxxxxxxx x *
+* x xxxx  x xx xxxxxxxxx  xxxxxxxxxxx x* x xxxx  x xx xxxxxxxxx  xxxxxxxxxxx x *
+* x xxxx  x xx xxxxxxxxx  xxxxxxxxxxx x* x xxxx  x xx xxxxxxxxx  xxxxxxxxxxx x *
+* x xxxx  x xx xxxxxxxxx  xxxxxxxxxxx x* x xxxx  x xx xxxxxxxxx  xxxxxxxxxxx x *
+* x xxxx  x xx xxxxxxxxx  xxxxxxxxxxx x* x xxxx  x xx xxxxxxxxx  xxxxxxxxxxx x *
+* x xxxx  x xx xxxxxxxxx  xxxxxxxxxxx x* x xxxx  x xx xxxxxxxxx  xxxxxxxxxxx x *
+********************************************************************************
+@ENDIF
+
+

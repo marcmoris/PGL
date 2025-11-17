@@ -1,0 +1,679 @@
+;/T/ Gestion des paiements à effectuer - détail des documents sélectionnés
+;
+;/P/ Programmeur..: Thomas BRENNEUR
+;    Date Création: 21 Juin 1993
+;
+;    Description..: Consultation de la liste des paiements sélectionnés
+;                   par la sélection des documents. L'usager peut
+;                   ajouter,modifier, supprimer les pièces sélectionnés.
+;
+;-------------------------------------------------------------------------------
+;
+;/M/ Date modif...: 09-Mars-1994
+;
+;    Programmeur..: Guy Chabot
+;
+;    Description..: Ajout de CAPCIECLE dans l'appel du popup CP105 pour ne
+;                   référer que les pièces de la même compagnie.
+;
+;-------------------------------------------------------------------------------
+;/V/ 3.00.02 Guy Chabot 12-mai-1994 (197)
+;
+;
+;/M/ Modifié par..: Guy Chabot le 12 octobre 1994
+;
+;    Description..: Introduction du P.N.A. aux payables sur le même principe
+;                   ou presque des recevables.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cp007b   ACTIONBAR &
+                MODE LABEL "" AT 2,80 &
+                NOACTION FIELDMARK RETAIN STARTUP &
+                FROM 8,1 TO 23,80 &
+                MESSAGE ON 24 &
+                HELP POPUP FROM 4,9 TO 20,72 &
+                RECEIVING   T_CIECLEMNU, &
+                            T_FOUCIECLE, &
+                            T_EMPCIECLE, &
+                            CPLOT
+
+USE ustrasse NOLIST
+
+USE cp007b.hlp NOLIST
+
+USE ussectmp NOLIST
+    "CP007B"
+
+USE usactecr NOLIST
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Compagnie du menu
+TEMPORARY T_FOUCIECLE CHARACTER SIZE 4  ; Compagnie du fournisseur
+TEMPORARY T_EMPCIECLE CHARACTER SIZE 4  ; Compagnie de l'employé
+
+;-------------------------------------------------------------------------------
+
+FILE CPLOT            MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Pièces sélectionnées
+;
+;
+FILE CPSEL_CAP  PRIMARY &
+                OCCURS 11 &
+                NOITEMS
+
+  ACCESS  VIA     CIECLE, &
+                  PECCLE, &
+                  LCPCLE  &
+          USING   CIECLE OF CPLOT, &
+                  PECCLE OF CPLOT, &
+                  LCPCLE OF CPLOT  &
+          ORDERBY CIECLE   , &
+                  PECCLE   , &
+                  LCPCLE   , &
+                  FOUCIECLE, &
+                  FOUCLE   , &
+                  CAPCLE   , &
+                  CPCCLELIG
+
+
+  ITEM CIECLE    OF CPSEL_CAP INITIAL CIECLE OF CPLOT
+  ITEM PECCLE    OF CPSEL_CAP INITIAL PECCLE    OF CPLOT
+  ITEM LCPCLE    OF CPSEL_CAP INITIAL LCPCLE    OF CPLOT
+  ITEM FOUCIECLE OF CPSEL_CAP INITIAL T_FOUCIECLE IF LCPREFTYP OF CPLOT = "F" &
+                                 ELSE T_CIECLEMNU
+  ITEM SLCMNTPYE OF CPSEL_CAP FINAL   SLCMNT    OF CPSEL_CAP - &
+                                      SLCMNTESC OF CPSEL_CAP
+
+
+;-------------------------------------------------------------------------------
+;
+; Référence du fournisseur ou de l'employé
+;
+;
+TEMPORARY T_REFCLENUM CHARACTER SIZE 6 OCCURS WITH CPSEL_CAP
+
+FILE VRAD_01          DESIGNER &
+                      OCCURS WITH CPSEL_CAP
+
+;-------------------------------------------------------------------------------
+;
+; Pièce d'origine de la cédule
+;
+;
+FILE CPCPT_A_PAYER  REFERENCE &
+                    OCCURS WITH CPSEL_CAP &
+                    NOITEM
+
+  ACCESS  VIA   FOUCIECLE, &
+                FOUCLE   , &
+                CAPCLE   , &
+                CAPCIECLE  &
+          USING FOUCIECLE OF CPSEL_CAP , &
+                FOUCLE    OF CPSEL_CAP , &
+                CAPCLE    OF CPSEL_CAP , &
+                CIECLE    OF CPSEL_CAP
+
+;-------------------------------------------------------------------------------
+;
+; Cédule de paiement de la pièce référée
+;
+;
+FILE VCPC_SLD   REFERENCE &
+                OCCURS WITH CPSEL_CAP &
+                NOITEM
+
+  ACCESS  VIA     FOUCIECLE, &
+                  FOUCLE   , &
+                  CAPCLE   , &
+                  CPCCLELIG  &
+          USING   FOUCIECLE OF CPSEL_CAP, &
+                  FOUCLE    OF CPSEL_CAP, &
+                  CAPCLE    OF CPSEL_CAP, &
+                  CPCCLELIG OF CPSEL_CAP
+
+;-------------------------------------------------------------------------------
+;
+; Termes de paiament pour calculer l'escompte
+;
+FILE CPTERME DESIGNER OPEN READ
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLE    CHARACTER SIZE 4
+TEMPORARY T_FOUCLE    CHARACTER SIZE 6
+TEMPORARY T_CAPCIECLE CHARACTER SIZE 4
+TEMPORARY T_REFCIECLE CHARACTER SIZE 4
+TEMPORARY T_REFCLETYP CHARACTER SIZE 1
+TEMPORARY T_REFSTUPAT CHARACTER SIZE 5 INITIAL "A"
+TEMPORARY T_TYPECRPAT CHARACTER SIZE 30
+TEMPORARY T_FLGSLD    CHARACTER SIZE 1
+TEMPORARY T_CAPCLE    CHARACTER SIZE 15
+TEMPORARY T_FLGSEL    CHARACTER SIZE 4
+TEMPORARY T_SILENT    CHARACTER SIZE 1 OCCURS WITH CPSEL_CAP
+
+
+;-------------------------------------------------------------------------------
+
+USE ushilite NOLIST     ; Hilite pour tout les écrans
+
+DRAW  2, 1 TO  2,79
+DRAW  2, 1 TO 16, 1
+DRAW  3,80 TO 16,80
+DRAW 16, 1 TO 16,80
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+      " Sélection des documents " &
+@ELSE
+      " Document Selection " &
+@ENDIF
+      CENTERED AT ,1
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      "Origine du                   Numéro du              Montant du     Escompte " &
+@ELSE
+      "%%%%%%% %%                   %%%%%% %%              %%%%%%% %%     %%%%%%%% " &
+@ENDIF
+      AT ,3
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      "document                     document     Ligne       paiement      proposé " &
+@ELSE
+      "%%%%%%%%                     %%%%%%%%     %%%%%       %%%%%%%%      %%%%%%% " &
+@ENDIF
+      AT ,3
+
+SKIP
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+ALIGN (2,2,3) (,,10) (,,32) (,,47) (,,52) (,,68)
+
+CLUSTER OCCURS WITH CPSEL_CAP ID BASE 05
+
+FIELD T_REFCLENUM &
+      HIDDEN &
+      LABEL " " &
+      REQUIRED &
+      UPSHIFT  &
+      LOOKUP ON VRAD_01 &
+        VIA REFCIECLE , &
+            REFCLETYP , &
+            REFCLENUM , &
+            RADCLE      &
+        USING FOUCIECLE OF CPSEL_CAP , &
+              LCPREFTYP OF CPLOT     , &
+              T_REFCLENUM            , &
+              1                        &
+      MESSAGE 500 ; Ce numéro n'existe pas.
+
+FIELD RADNOMABR OF VRAD_01 &
+      DISPLAY
+
+FIELD CAPCLE OF CPSEL_CAP &
+      REQUIRED &
+      SIZE 12  &
+      LOOKUP ON CPCPT_A_PAYER &
+      MESSAGE 500 ; Ce numéro n'existe pas.
+
+FIELD CPCCLELIG OF CPSEL_CAP &
+      REQUIRED
+
+FIELD T_SILENT &
+      SILENT   &
+      ; La cédule ne doit pas déja exister dans cette sélection
+      LOOKUP NOTON CPSEL_CAP &
+          VIA   CIECLE, &
+                LCPCLE   , &
+                PECCLE   , &
+                FOUCIECLE, &
+                FOUCLE   , &
+                CAPCLE   , &
+                CPCCLELIG  &
+          USING CIECLE OF CPSEL_CAP, &
+                LCPCLE OF CPSEL_CAP   , &
+                PECCLE OF CPSEL_CAP   , &
+                FOUCIECLE OF CPSEL_CAP, &
+                FOUCLE OF CPSEL_CAP   , &
+                CAPCLE OF CPSEL_CAP   , &
+                CPCCLELIG OF CPSEL_CAP  &
+          MESSAGE 510, & ; Cette ligne de cédule a déjà été sélectionée.
+         ; Et elle doit exister dans les cédules de paiement.
+       ON VCPC_SLD &
+          MESSAGE 508 ; Cette ligne de cédule n'existe pas.
+
+FIELD SLCMNT OF CPSEL_CAP
+
+FIELD SLCMNTESC OF CPSEL_CAP &
+      PICTURE "^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5
+
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès pour l'écran par son code.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION & VALIDATION DE LA REFERENCE (= FOURNISSEUR OU EMPLOYÉ)
+;
+;
+PROCEDURE INPUT T_REFCLENUM
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    IF LCPREFTYP OF CPLOT = "E"
+    THEN LET T_REFCIECLE = T_EMPCIECLE
+    ELSE LET T_REFCIECLE = T_FOUCIECLE
+    LET T_REFCLETYP = LCPREFTYP OF CPLOT
+    LET T_FOUCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc112 MODE F &
+          PASSING T_REFCIECLE, T_REFCLETYP, T_FOUCLE, T_REFSTUPAT
+    LET FIELDTEXT = TRUNCATE(T_FOUCLE)
+  END
+
+END
+
+;
+; Validation du fournisseur ou de l'employe
+;
+PROCEDURE EDIT T_REFCLENUM
+BEGIN
+  IF FIELDTEXT <> ""
+  THEN BEGIN
+
+    IF REFSTU OF VRAD_01 = "I" AND LCPREFTYP OF CPLOT = "F"
+    THEN ERROR 446 ; Le fournisseur est inactif.
+
+    IF REFSTU OF VRAD_01 = "I" AND LCPREFTYP OF CPLOT = "E"
+    THEN ERROR 504 ; L'employé est inactif.
+
+    IF REFFOURTU OF VRAD_01 = "1" AND LCPREFTYP OF CPLOT = "F"
+    THEN WARNING 447 ; Le fournisseur est présentement retenu.
+  END
+  ;
+  ; On indique que le champs a été modifié, sert a éxecuter le champs silent
+  ; seulement lorsque la ligne est modifié.
+  ;
+  IF FIELDTEXT <> OLDVALUE( T_REFCLENUM )
+  THEN LET T_SILENT = " "
+END
+
+PROCEDURE PROCESS T_REFCLENUM
+BEGIN
+  IF REFCLETYP OF VRAD_01 = "F"
+  THEN LET FOUCLE OF CPSEL_CAP = T_REFCLENUM
+  ELSE LET FOUCLE OF CPSEL_CAP = " "
+END
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION & VALIDATION DES DOCUMENTS
+;
+;
+PROCEDURE INPUT CAPCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    IF LCPREFTYP OF CPLOT = "F"
+    THEN LET T_TYPECRPAT = "FA|CR|PA|NA"
+    ELSE LET T_TYPECRPAT = "RD"
+    LET T_CIECLE = FOUCIECLE OF CPSEL_CAP
+    LET T_FOUCLE = FOUCLE    OF CPSEL_CAP
+    LET T_CAPCIECLE = CIECLE OF CPSEL_CAP
+    LET T_FLGSLD = "1" ;on affiche que les facture ayant un solde à payer
+    LET T_CAPCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+
+    RUN SCREEN cp105 MODE F PASSING T_CIECLE, T_FOUCLE, T_TYPECRPAT, &
+                                    T_FLGSLD, T_CAPCLE, T_REFCLENUM, &
+                                    T_CAPCIECLE
+    LET FIELDTEXT = TRUNCATE(T_CAPCLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE EDIT CAPCLE
+BEGIN
+  ;
+  ; On indique que le champs a été modifié, sert a éxecuter le champs silent
+  ; seulement lorsque la ligne est modifié.
+  ;
+  IF FIELDTEXT <> OLDVALUE( CAPCLE OF CPSEL_CAP )
+  THEN LET T_SILENT = " "
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE EDIT CPCCLELIG
+BEGIN
+  ;
+  ; On indique que le champs a été modifié, sert a éxecuter le champs silent
+  ; seulement lorsque la ligne est modifié.
+  ;
+  IF FIELDVALUE <> OLDVALUE( CPCCLELIG OF CPSEL_CAP )
+  THEN LET T_SILENT = " "
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Si l'usager saisi une sélection manuellement, on calcul alors les escompte
+; automatiquement seulement dans le cas ou il n'y a encore rien de payé sur
+; la facture et il y a une date de paiement d'inscrite dans le lot.
+;
+;
+PROCEDURE EDIT T_SILENT
+BEGIN
+
+  IF CAPRTU OF CPCPT_A_PAYER <> "0"
+  THEN ERROR 502 ; Ce document est présentement retenu...
+
+  IF CAPDATJOU OF CPCPT_A_PAYER = 0
+  THEN ERROR 524 ; Ce document n'est pas journalisée...
+
+  IF REFCLENUM OF CPCPT_A_PAYER <> T_REFCLENUM
+  THEN ERROR 538 ; Ce document n'appartient pas a cet employé.
+
+  IF (LCPREFTYP OF CPLOT         =  "E" AND &
+      CAPTYPECR OF CPCPT_A_PAYER <> "RD") OR &
+     (LCPREFTYP OF CPLOT         =  "F" AND &
+      CAPTYPECR OF CPCPT_A_PAYER <> "PA" AND &
+      CAPTYPECR OF CPCPT_A_PAYER <> "CR" AND &
+      CAPTYPECR OF CPCPT_A_PAYER <> "NA" AND &
+      CAPTYPECR OF CPCPT_A_PAYER <> "FA")
+  THEN ERROR 526 ; Cette association de document est invalide
+
+  IF CPCFLGSEL OF VCPC_SLD = "1"
+  THEN ERROR 510; Cette ligne de cédule a déjà été sélèctionnée...
+END
+
+
+PROCEDURE PROCESS T_SILENT
+BEGIN
+  IF T_SILENT = " "
+  THEN BEGIN
+    ;
+    ; On relit le fichier d'adresse selon les coordonnés de la facture.
+    ;
+    GET VRAD_01 &
+          VIA REFCIECLE , &
+              REFCLETYP , &
+              REFCLENUM , &
+              RADCLE      &
+          USING REFCIECLE OF CPCPT_A_PAYER , &
+                REFCLETYP OF CPCPT_A_PAYER , &
+                REFCLENUM OF CPCPT_A_PAYER , &
+                RADCLE    OF CPCPT_A_PAYER   &
+          OPTIONAL
+    DISPLAY RADNOMABR OF VRAD_01
+    ;
+    ; On diminue les cumulatifs du lot.
+    ;
+    LET LCPCUMESC OF CPLOT = LCPCUMESC OF CPLOT - SLCMNTESC OF CPSEL_CAP
+    LET LCPCUMMNT OF CPLOT = LCPCUMMNT OF CPLOT - &
+                             ( SLCMNT OF CPSEL_CAP - SLCMNTESC OF CPSEL_CAP )
+    LET SLCMNT    OF CPSEL_CAP = 0
+    LET SLCMNTESC OF CPSEL_CAP = 0
+
+    ;
+    ; Calcul du montant d'escompte.
+    ;
+    IF     V_CPCMNTPYE OF VCPC_SLD      =  0  &
+       AND CAPFLGCED   OF CPCPT_A_PAYER = "0" &
+       AND LCPDATPAM   OF CPLOT         <> 0
+    THEN BEGIN
+      IF LCPDATPAM OF CPLOT < = CAPDATESC1 OF CPCPT_A_PAYER
+      THEN BEGIN
+        GET CPTERME &
+          VIA       TERCLE &
+          USING     CAPTERESC1 OF CPCPT_A_PAYER &
+          OPTIONAL
+        IF ACCESSOK
+        THEN LET SLCMNTESC OF CPSEL_CAP &
+                 = ROUND ( CAPMNTNET OF CPCPT_A_PAYER * TERPCT OF CPTERME )
+      END
+      ELSE BEGIN
+        IF LCPDATPAM OF CPLOT < = CAPDATESC2 OF CPCPT_A_PAYER
+        THEN BEGIN
+          GET CPTERME &
+            VIA       TERCLE &
+            USING     CAPTERESC2 OF CPCPT_A_PAYER &
+            OPTIONAL
+          IF ACCESSOK
+          THEN LET SLCMNTESC OF CPSEL_CAP &
+                   = ROUND ( CAPMNTNET OF CPCPT_A_PAYER * TERPCT OF CPTERME )
+        END
+      END
+    END
+    LET SLCMNT    OF CPSEL_CAP = V_CPCSLD OF VCPC_SLD
+    ;
+    ; On diminue les cumulatifs du lot.
+    ;
+    LET LCPCUMESC OF CPLOT = LCPCUMESC OF CPLOT + SLCMNTESC OF CPSEL_CAP
+    LET LCPCUMMNT OF CPLOT = LCPCUMMNT OF CPLOT + &
+                             ( SLCMNT OF CPSEL_CAP - SLCMNTESC OF CPSEL_CAP )
+
+    ;
+    ; On indique que le champ silent a été traité.
+    ;
+    LET T_SILENT = "1"
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation du montant saisi et calcul du montant du chèque, avec mise
+; à jour du cumul dans le lot
+;
+;
+PROCEDURE EDIT SLCMNT
+BEGIN
+  ;
+  ; Validation du nombre de décimales saisies
+  ;
+  USE usvaldec NOLIST
+
+  IF SLCMNT OF CPSEL_CAP > V_CPCSLD OF VCPC_SLD
+  THEN ERROR 507 ; Le montant que vous payez (incluant escompte) est supérieur au solde à payer
+
+  LET LCPCUMMNT OF CPLOT = LCPCUMMNT OF CPLOT &
+                           - OLDVALUE( SLCMNT OF CPSEL_CAP ) &
+                           + FIELDVALUE
+END
+
+;-------------------------------------------------------------------------------
+;
+; Validation du montant saisi et mise à jour du montant du chèque en fonction
+; du montant payé
+;
+;
+PROCEDURE EDIT SLCMNTESC
+BEGIN
+  ;
+  ; Validation du nombre de décimales saisies
+  ;
+  USE usvaldec NOLIST
+
+  IF 0 > ABSOLUTE(SLCMNT OF CPSEL_CAP) - ABSOLUTE(SLCMNTESC OF CPSEL_CAP)
+  THEN ERROR 509 ; On ne peut saisir un montant d'escompte supérieur au montant a payer.
+
+  LET LCPCUMESC OF CPLOT  = LCPCUMESC OF CPLOT &
+                          - OLDVALUE(SLCMNTESC OF CPSEL_CAP) &
+                          + SLCMNTESC OF CPSEL_CAP
+  ;
+  ; Le cumul suivant représente le montant net.
+  ;
+  LET LCPCUMMNT OF CPLOT = LCPCUMMNT OF CPLOT &
+                           + OLDVALUE( SLCMNTESC OF CPSEL_CAP ) &
+                           - FIELDVALUE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE APPEND
+BEGIN
+  ;
+  USE ussecent NOLIST
+  ;
+  ACCEPT T_REFCLENUM
+  DISPLAY RADNOMABR OF VRAD_01
+  ACCEPT CAPCLE OF CPSEL_CAP
+
+  IF CAPFLGCED OF CPCPT_A_PAYER = "0"
+  THEN BEGIN
+    LET CPCCLELIG OF CPSEL_CAP = 1
+    DISPLAY CPCCLELIG OF CPSEL_CAP
+  END
+  ELSE ACCEPT CPCCLELIG OF CPSEL_CAP
+  EDIT T_SILENT
+  DISPLAY SLCMNT
+  DISPLAY SLCMNTESC
+  ACCEPT SLCMNT OF CPSEL_CAP
+  IF     REFCLETYP OF CPCPT_A_PAYER = "F" &
+     AND CAPTYPECR OF CPCPT_A_PAYER <> "PA"
+  THEN ACCEPT SLCMNTESC OF CPSEL_CAP
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  FOR CPSEL_CAP
+  BEGIN
+    PERFORM APPEND
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE DESIGNER 05
+BEGIN
+  ACCEPT SLCMNT OF CPSEL_CAP
+  IF     REFCLETYP OF CPCPT_A_PAYER = "F" &
+     AND CAPTYPECR OF CPCPT_A_PAYER <> "PA"
+  THEN ACCEPT SLCMNTESC OF CPSEL_CAP
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR CPSEL_CAP
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF CPSEL_CAP &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF CPSEL_CAP &
+       AND NOT NEWRECORD     OF CPSEL_CAP &
+       AND NOT DELETEDRECORD OF CPSEL_CAP &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; On va rechercher la référence de l'employé pour les rapports de dépenses
+;
+PROCEDURE POSTFIND
+BEGIN
+  FOR CPSEL_CAP
+  BEGIN
+    GET VRAD_01 &
+          VIA REFCIECLE , &
+              REFCLETYP , &
+              REFCLENUM , &
+              RADCLE      &
+        USING REFCIECLE OF CPCPT_A_PAYER , &
+              REFCLETYP OF CPCPT_A_PAYER , &
+              REFCLENUM OF CPCPT_A_PAYER , &
+              RADCLE    OF CPCPT_A_PAYER   &
+          OPTIONAL
+    LET T_REFCLENUM = REFCLENUM OF CPCPT_A_PAYER
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Mise à jour des montants du lot si on supprime une sélection
+;
+;
+PROCEDURE DELETE
+BEGIN
+  IF NOT DELETEDRECORD OF CPSEL_CAP
+  THEN BEGIN
+    LET LCPCUMMNT OF CPLOT = LCPCUMMNT OF CPLOT - &
+                             ( SLCMNT OF CPSEL_CAP - SLCMNTESC OF CPSEL_CAP )
+    LET LCPCUMESC OF CPLOT = LCPCUMESC OF CPLOT - SLCMNTESC OF CPSEL_CAP
+    DELETE CPSEL_CAP
+  END
+END
+
+BUILD
+@IF FORMAT
+
+
+*************************** Sélection des documents ***************************x
+* Origine du                   Numéro du              Montant du     Escompte  *
+* document                     document     Ligne       paiement      proposé  *
+* xxxxxx xxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxx   xx   xxxxxxxxxxxxxx  xxxxxxxxxxx *
+* xxxxxx xxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxx   xx   xxxxxxxxxxxxxx  xxxxxxxxxxx *
+* xxxxxx xxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxx   xx   xxxxxxxxxxxxxx  xxxxxxxxxxx *
+* xxxxxx xxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxx   xx   xxxxxxxxxxxxxx  xxxxxxxxxxx *
+* xxxxxx xxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxx   xx   xxxxxxxxxxxxxx  xxxxxxxxxxx *
+* xxxxxx xxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxx   xx   xxxxxxxxxxxxxx  xxxxxxxxxxx *
+* xxxxxx xxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxx   xx   xxxxxxxxxxxxxx  xxxxxxxxxxx *
+* xxxxxx xxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxx   xx   xxxxxxxxxxxxxx  xxxxxxxxxxx *
+* xxxxxx xxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxx   xx   xxxxxxxxxxxxxx  xxxxxxxxxxx *
+* xxxxxx xxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxx   xx   xxxxxxxxxxxxxx  xxxxxxxxxxx *
+* xxxxxx xxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxx   xx   xxxxxxxxxxxxxx  xxxxxxxxxxx *
+********************************************************************************
+@ENDIF

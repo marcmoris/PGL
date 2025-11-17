@@ -1,0 +1,225 @@
+;/T/ Facturation
+;
+;/P/ Programmeur..: Steeve Duguay
+;    Date Création: 29 mars 1995
+;
+;    Description..: Génération des périodes de roulement.
+;
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN fa001a NOMODE NOACTION FIELDMARK STARTUP &
+              FROM 2,1 TO 9,80 &
+              MESSAGE ON 24 &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU, &
+                        T_CIENOM
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie du menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; Compagnie du menu
+
+USE ustrasse NOLIST ; Transaction QUERY pour les sous-écrans
+
+USE ussectmp NOLIST     ; Variable pour la securite
+    "FA001A"            ; Nom de l'écran
+
+USE fa001a.hlp NOLIST   ; Use servant à la documentation de l'écran
+
+
+;------------------------------------
+; Fichier d'unité de travail
+;------------------------------------
+FILE FAPERIODE              DESIGNER
+
+
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_ANNEE      INTEGER UNSIGNED SIZE 2
+TEMPORARY T_DATDEB     DATE
+TEMPORARY T_DATFIN     DATE
+TEMPORARY T_MESSAGE    CHARACTER SIZE 26
+TEMPORARY T_REPONSE    CHARACTER SIZE 1
+TEMPORARY T_PERIODE      INTEGER SIZE 2
+TEMPORARY T_MAJ        CHARACTER SIZE 1
+TEMPORARY T_DATDEBCAL  DATE
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+SKIP
+USE ushilite NOLIST     ; Hilite pour tout les écrans
+
+DRAW FROM  1,1 TO 8,80
+
+TITLE &
+@IF FRANCAIS
+      " Génération des périodes de roulement " &
+@ELSE
+      " %%% " &
+@ENDIF
+      CENTERED AT 1,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP 1
+
+
+ALIGN (3,3,30)
+FIELD T_ANNEE         LABEL "Année de roulement.......:" &
+                      HIDDEN                             &
+                      PICTURE "^^"                       &
+                      REQUIRED
+
+FIELD T_DATDEB       FORMAT YYYYMMDD PATTERN "####/##/##"&
+                      LABEL "Date   début 1ère période:" &
+                      HIDDEN                             &
+                      REQUIRED
+
+FIELD T_DATFIN        FORMAT YYYYMMDD PATTERN "####/##/##"&
+                      LABEL "Date   de fin............:" &
+                      HIDDEN                             &
+                      REQUIRED
+
+HILITE DATA OFF
+
+ALIGN (,,3) (,,30)
+FIELD T_MESSAGE       DISPLAY NOENTRY NOID
+FIELD T_REPONSE       NOENTRY UPSHIFT NOID
+
+
+
+PROCEDURE EDIT T_DATFIN
+BEGIN
+   IF FIELDVALUE < T_DATDEB
+   THEN ERROR 2726 ; La date de fin doit être supérieure à la date de début
+
+   IF 98 < ((DAYS(FIELDVALUE) - DAYS(T_DATDEB)) / 7)
+   THEN ERROR 2727 ; La borne de date de début et de fin est trop grande
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+PROCEDURE INTERNAL MAJ_PERIODE
+BEGIN
+   LET CIECLE    OF FAPERIODE = T_CIECLEMNU
+   LET PERANN    OF FAPERIODE = T_ANNEE
+   LET PERCLE    OF FAPERIODE = ASCII(T_ANNEE,2) + ASCII(T_PERIODE,2)
+   LET PERDATDEB OF FAPERIODE = T_DATDEBCAL
+   LET PERDATFIN OF FAPERIODE = DATE(DAYS(T_DATDEBCAL) + 6)
+   LET PERSEM    OF FAPERIODE = T_PERIODE
+
+   PUT FAPERIODE RESET
+
+   LET T_PERIODE   = T_PERIODE + 1
+   LET T_DATDEBCAL = DATE(DAYS(T_DATDEBCAL) + 7)
+
+   IF T_DATDEBCAL <= T_DATFIN
+   THEN DO MAJ_PERIODE
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF FAPERIODE           &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF FAPERIODE           &
+     AND NOT NEWRECORD     OF FAPERIODE           &
+     AND NOT DELETEDRECORD OF FAPERIODE           &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  LET T_MAJ = "O"
+  GET FAPERIODE &
+       VIA    CIECLE, &
+              PERANN  &
+       USING  T_CIECLEMNU, &
+              T_ANNEE OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+       LET T_MESSAGE = "Écraser l'année (O/N)....:"
+       LET T_REPONSE = " "
+       DISPLAY T_MESSAGE
+       ACCEPT  T_REPONSE
+       IF T_REPONSE = "O"
+       THEN BEGIN
+            LET T_MAJ = "O"
+            WHILE RETRIEVING FAPERIODE &
+                  VIA   CIECLE,        &
+                        PERANN         &
+                  USING T_CIECLEMNU,   &
+                        T_ANNEE
+            BEGIN
+               DELETE FAPERIODE
+               PUT    FAPERIODE
+            END
+       END
+       ELSE LET T_MAJ = "N"
+       LET T_MESSAGE = " "
+       LET T_REPONSE = " "
+       DISPLAY T_MESSAGE
+       DISPLAY T_REPONSE
+  END
+
+  IF T_MAJ = "O"
+  THEN BEGIN
+       LET T_PERIODE   = 1
+       LET T_DATDEBCAL = T_DATDEB
+       DO MAJ_PERIODE
+  END
+  RETURN
+END
+
+PROCEDURE DELETE
+  DISABLE
+
+PROCEDURE FIND
+  DISABLE
+
+
+BUILD LIST DETAIL
+@IF FORMAT
+********************* Génération des périodes de roulement *********************
+*                                                                              *
+* Année de roulement.......: xxxx                                              *
+* Date début 1ère période..: xxxxxxxx                                          *
+* Date de fin..............: xxxxxxxx                                          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxx x                                                 *
+*                                                                              *
+********************************************************************************
+@ENDIF
+

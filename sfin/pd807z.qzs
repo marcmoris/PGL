@@ -1,0 +1,779 @@
+;/T/ Calcul des commissions d'agents.
+;
+;/R/ Réalisé par: Marc Poulin.
+;    Date.......: 2000-05-22.
+;
+;    Description: Calcul des montants de commissions destinés aux agents en fonction des ventes et des encaissements.
+;
+;    Paramètres : Indicateur de commandes hors balance                                                         - fourni par l'usager  ;
+;                 Indicateur de commandes en balance mais pour lesquelles des commissions à payer sont à venir - fourni par l'usager  ;
+;                 Nom de la compagnie (cienom)                                                                 - fourni par le système.
+;
+;    ----------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin     
+;    Date..............: 16 juin 2000
+;    Description.......: Ajuster le traitement afin de considérer les cas d'exceptions suivants: 
+;
+;                              - la numérotation des factures qui peut différer en le module de
+;                                Production et celui des Comptes à recevoir ;
+;                              - considérer le solde à ventiler lorsque la facture a été transférée
+;                                du module de Production vers celui des Comptes à recevoir.
+;
+;    Référence.........: Demande de changement 000068.
+;
+;    Signet............: MP-00-06-16_D68.
+;
+;    ----------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin     
+;    Date..............: 18 février 2002
+;    Référence.........: Demande de changement D200215 - Demandeur (Josée Robitaille & Anik Lupien).
+;
+;    Signet............: MP-02-02-18_D200215.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+use ussetqzs nolist ; Déclaration standard pour quiz.
+set noblanks        ; Désactiver l'impression des lignes blanches.
+;
+; Accès au fichier d'impression et aux fichiers de cumuls.
+;
+ACCESS *wpd807c link ciecle      of wpd807c , & ; Fichier des montants de commissions par facture et des encaissements.
+                     foucle      of wpd807c , &
+                     comdev      of wpd807c , &
+                     comnumcom   of wpd807c   &
+                  to ciecle                 , &             
+                     foucle                 , &
+                     comdev                 , &
+                     comnumcom   of *wpd807b  & ; Fichier des montants facturés et de commissions payés par commande (projet).
+
+                link ciecle      of wpd807c , &                                                              
+                     foucle      of wpd807c   &
+                  to t_ciecle               , &             
+                     t_agentsrap of *wpd807d    ; Fichier indexé du nombre de pages par agent.
+;
+; Variables de travail associées à l'indicateur de commandes hors balance et à l'indicateur de commandes en balance mais
+; pour lesquelles des comissions à payer sont à venir.
+;
+; (Valeurs fournies en paramètres).
+;
+define d_flghrsbal character size 01 = parm
+define d_flgbalres character size 01 = parm
+;
+; Sélections selon les paramètres.
+;
+SELECT if (d_flghrsbal = "0" or (d_flghrsbal = "1" and t_flghrsbal of wpd807b <> 0)) and &
+          (d_flgbalres = "0" or (d_flgbalres = "1" and t_flgbalres of wpd807b <> 0)) 
+;
+; Variables obligatoires pour les entêtes standards.
+;
+define dz_cienom   character size 40 = parm                         ; Identification de la compagnie
+define dz_nomrap1  character size 60 = "REPORT ON COMMISSIONS"      ; Titre du rapport.
+define dz_nomrap2  character size 60 = "Per agent and per project"  ; Sous-titre du rapport.
+define dz_numrap   character size 07 = "pd807za"                    ; Code identifiant le rapport.
+;
+; Tri des informations.
+;
+SORTED on ciecle    of wpd807c            & ; Code de compagnie.
+       on foucle    of wpd807c reset page & ; Code d'agent.
+       on comdev    of wpd807c            & ; Code de devise dans lequel les montants sont transigés.
+       on comnumcom of wpd807c            & ; Code de commande.
+       on ftrnumfac of wpd807c            & ; Numéro de facture.
+       on crhdat    of wpd807c              ; Date de l'encaissement.
+;
+; Variables de travail associées aux montants de granit et de facturation totale.
+;
+define d_mntgrafac float size 08 = t_mntgrafac of wpd807c + t_mntdepfac of wpd807c
+define d_mntautfac float size 08 = t_mntautfac of wpd807c + t_mnttpsfac of wpd807c + t_mnttvpfac of wpd807c + t_mntsldven of wpd807c ; MP-00-06-16_D68.
+define d_mnttotfac float size 08 = t_mnttotfac of wpd807c + t_mnttpsfac of wpd807c + t_mnttvpfac of wpd807c + t_mntsldven of wpd807c ; MP-00-06-16_D68.
+;
+; Variables de travail associées à la l'impression.
+;
+define d_27        integer           = 27
+define d_esc       character size 01 = characters(d_27) [2:1]
+define d_medium    character size 05 = (d_esc + "(s0B")  ; gris normal
+define d_set_g     character size 25 = d_esc+"*c1895a38B"+d_esc+"*c1P"+d_esc+"*c20G"
+define d_descend   character size 10 = d_esc + "*p+99y+1X"
+define d_remonte   character size 10 = d_esc + "*p-99y+1X"
+define d_virgule   character size 01 = "," if crhdat of wpd807c <> 0 
+
+define d_mm_ang_1  character size 03 = "Jan" if 01 = dateextract(ftrdatfac of wpd807c,month) else &
+                                       "Feb" if 02 = dateextract(ftrdatfac of wpd807c,month) else &
+                                       "Mar" if 03 = dateextract(ftrdatfac of wpd807c,month) else &
+                                       "Apr" if 04 = dateextract(ftrdatfac of wpd807c,month) else &
+                                       "May" if 05 = dateextract(ftrdatfac of wpd807c,month) else &
+                                       "Jun" if 06 = dateextract(ftrdatfac of wpd807c,month) else &
+                                       "Jul" if 07 = dateextract(ftrdatfac of wpd807c,month) else &
+                                       "Aug" if 08 = dateextract(ftrdatfac of wpd807c,month) else &
+                                       "Sep" if 09 = dateextract(ftrdatfac of wpd807c,month) else &
+                                       "Oct" if 10 = dateextract(ftrdatfac of wpd807c,month) else &
+                                       "Nov" if 11 = dateextract(ftrdatfac of wpd807c,month) else &
+                                       "Dec" if 12 = dateextract(ftrdatfac of wpd807c,month)
+define d_mm_ang_2  character size 03 = "Jan" if 01 = dateextract(crhdat    of wpd807c,month) else &
+                                       "Feb" if 02 = dateextract(crhdat    of wpd807c,month) else &
+                                       "Mar" if 03 = dateextract(crhdat    of wpd807c,month) else &
+                                       "Apr" if 04 = dateextract(crhdat    of wpd807c,month) else &
+                                       "May" if 05 = dateextract(crhdat    of wpd807c,month) else &
+                                       "Jun" if 06 = dateextract(crhdat    of wpd807c,month) else &
+                                       "Jul" if 07 = dateextract(crhdat    of wpd807c,month) else &
+                                       "Aug" if 08 = dateextract(crhdat    of wpd807c,month) else &
+                                       "Sep" if 09 = dateextract(crhdat    of wpd807c,month) else &
+                                       "Oct" if 10 = dateextract(crhdat    of wpd807c,month) else &
+                                       "Nov" if 11 = dateextract(crhdat    of wpd807c,month) else &
+                                       "Dec" if 12 = dateextract(crhdat    of wpd807c,month)
+;
+; Entête du rapport.
+;
+USE ustitcom NOLIST                            ; Librairie de déclarations statndard pour quiz associé à ce rapport.
+ skip 02 tab 001 "Agent:"                   &
+         tab 008 foucle of wpd807c          &  ; Code de l'agent
+         tab 016 founom of wpd807c          &  ; Nom de l'agent
+         tab 100 d_set_g                    &  ; Activation des modes d'impression.
+ skip 02 
+;
+; Détail du rapport
+;
+REPORT                                      &
+         tab 001 "                                                            ______________Invoice______________ _________________________Invoice value_________________________ ____Payment from client____ __________________Commission___________________" &
+                 print at comdev            &
+ skip 01 tab 001 "Currency                      Project                        Number      Date    Bill of lading     Granite         Other          Commission        Total          Amount         Date          Due             Paid           Balance    " &
+                 print at comdev            &
+ skip 01 tab 001 "-------- -------------------------------------------------- -------- ----------- -------------- --------------- --------------- --------------- --------------- --------------- ----------- --------------- --------------- ---------------" &
+                 print at comdev            &
+ skip 01 tab 003 comdev      of wpd807c     & ; Code de devise dans lequel les montants sont transigés.
+                 print at comdev            &
+         tab 010 comnumcom   of wpd807c     & ; Code de commande.
+                 print at comnumcom         &
+         tab 020 comnom      of wpd807c     & ; Nom (description) associé au code de commande.
+                 print at comnumcom         &
+         tab 061 ftrnumfac   of wpd807c     & ; Numéro de facture.
+                 print at ftrnumfac         &
+         tab 070 ftrdatfac   of wpd807c     & ; Date de facturation.
+                 print at ftrnumfac         &
+                 format mmmddyyyy           &
+                 separator " "              &
+         tab 070 d_mm_ang_1                 & ; Mois de facturation (traduction anglaise).
+                 print at ftrnumfac         &
+         tab 073 ","                        & ; Séparateur de mois-jour.
+                 print at ftrnumfac         &
+         tab 083 expnumexp   of wpd807c     & ; Numéro d'expédition.
+                 print at ftrnumfac         &
+         tab 092 "-"                        & ; Séparateur expédition-livraison.
+                 print at ftrnumfac         &
+         tab 093 blinumbli   of wpd807c     & ; Numéro du bon de livraison associé à l'expédition.
+                 print at ftrnumfac         &
+         tab 097 d_mntgrafac                & ; Montant de granit (moins les dépenses de commissions).
+                 print at ftrnumfac         &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 113 d_mntautfac                & ; Montant autres (taxes, transports, etc.) que granit et commissions.
+                 print at ftrnumfac         &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 129 t_mntcomfac of wpd807c     & ; Montant de commissions.
+                 print at ftrnumfac         &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 145 d_mnttotfac                & ; Montant total par facture.
+                 print at ftrnumfac         &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 161 crhmntrec   of wpd807c     & ; Montant de l'encaissement.
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 177 crhdat      of wpd807c     & ; Date de l'encaissement.
+                 format mmmddyyyy           &
+                 separator " "              &
+         tab 177 d_mm_ang_2                 & ; Mois d'encaissement (traduction anglaise).
+         tab 180 d_virgule                  & ; Séparateur de mois-jour.
+         tab 189 t_mntcomdue of wpd807c     & ; Montant de commissions dû en fonction du montant de l'encaissement.
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 205 t_mntcompay of wpd807c     & ; Montant de commissions payé en fonction du montant de l'encaissement.
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 221 t_mntbalpay of wpd807c     & ; Montant de commissions restant (balance).
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         reserve 7 lines                    
+;
+; Sous-totaux par code de commande.
+;
+FOOTING AT comnumcom of wpd807c             &
+ skip 01 tab 097 "--------------- --------------- --------------- --------------- ---------------             --------------- --------------- ---------------" &
+ skip 01 tab 063 "Total for project ("      &
+         tab 082 comnumcom   of wpd807c     & ; Code de commande.
+         tab 091 ") -->"                    &
+         tab 097 d_mntgrafac                & ; Montant de granit (moins les dépenses de commissions).
+                 subtotal at ftrnumfac      &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 113 d_mntautfac                & ; Montant autres (taxes, transports, etc.) que granit et commissions.
+                 subtotal at ftrnumfac      &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 129 t_mntcomfac of wpd807c     & ; Montant de commissions.
+                 subtotal at ftrnumfac      &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 145 d_mnttotfac                & ; Montant total par facture.
+                 subtotal at ftrnumfac      &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 161 crhmntrec   of wpd807c     & ; Montant de l'encaissement.
+                 subtotal                   &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 189 t_mntcomdue of wpd807c     & ; Montant de commissions dû en fonction du montant de l'encaissement.
+                 subtotal                   &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 205 t_mntcompay of wpd807c     & ; Montant de commissions payé en fonction du montant de l'encaissement.
+                 subtotal                   &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 221 t_mntbalpay of wpd807c     & ; Montant de commissions restant (balance).
+                 subtotal                   &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+ skip 03
+;
+; Totaux par code de devise.
+;
+FOOTING AT comdev of wpd807c                &
+ skip 01 tab 097 "=============== =============== =============== =============== ===============             =============== =============== ===============" &
+ skip 01 tab 069 "Total in currency ("      &
+         tab 088 comdev      of wpd807c     & ; Code de devise.
+         tab 091 ") -->"                    &
+         tab 097 d_mntgrafac                & ; Montant de granit (moins les dépenses de commissions).
+                 subtotal at ftrnumfac      &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 113 d_mntautfac                & ; Montant autres (taxes, transports, etc.) que granit et commissions.
+                 subtotal at ftrnumfac      &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 129 t_mntcomfac of wpd807c     & ; Montant de commissions.
+                 subtotal at ftrnumfac      &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 145 d_mnttotfac                & ; Montant total par facture.
+                 subtotal at ftrnumfac      &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 161 crhmntrec   of wpd807c     & ; Montant de l'encaissement.
+                 subtotal                   &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 189 t_mntcomdue of wpd807c     & ; Montant de commissions dû en fonction du montant de l'encaissement.
+                 subtotal                   &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 205 t_mntcompay of wpd807c     & ; Montant de commissions payé en fonction du montant de l'encaissement.
+                 subtotal                   &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 221 t_mntbalpay of wpd807c     & ; Montant de commissions restant (balance).
+                 subtotal                   &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+ skip 05
+;
+; Saute de page par agent.
+;
+FOOTING AT foucle of wpd807c                &
+ skip page
+;
+; Base de page.
+;
+PAGE FOOTING                                &
+ skip 01 tab 005 d_descend                  & ; Descend le point d'impression de 99 positions.
+         tab 015 "GRANICOR INC."            &
+         tab 029 d_remonte                    ; Remonte le point d'impression de 99 positions.
+
+
+
+BUILD pd807za
+
+
+@if format
+                                                                                                   1         1         1         1         1         1         1         1         1         1         2         2         2         2
+         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8         9         0         1         2         3
+1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678
+
+AAAAAAA                                                                                       BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB                                                                            PAGE: CCC of CCCC
+DDDDDDDD                                                                            EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE                                                                  DATE: FFF,FF FFFF  FF:FF
+                                                                                    EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE
+                                                                                                                                                                                                                                   
+Agent: GGGGGG HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH                                                                                                                                                                               
+                                                                                                                                                                                                                                   
+                                                            ______________Invoice______________ _________________________Invoice value_________________________ ____Payment from client____ __________________Commission___________________
+Currency                      Project                        Number      Date    Bill of lading     Granite         Other         Commissions        Total          Amount         Date          Due             Paid           Balance   
+-------- -------------------------------------------------- -------- ----------- -------------- --------------- --------------- --------------- --------------- --------------- ----------- --------------- --------------- ---------------
+  III    JJ-KK-LLL MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM NNNNNNN  OOO,OO OOOO  PPPPPPPPP-QQ  RRR,RRR,RRR,RR- SSS,SSS,SSS.SS- TTT,TTT,TTT.TT- UUU,UUU,UUU.UU- VVV,VVV,VVV.VV- WWW,WW WWWW XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                            NNNNNNN  OOO,OO OOOO  PPPPPPPPP-QQ  RRR,RRR,RRR,RR- SSS,SSS,SSS.SS- TTT,TTT,TTT.TT- UUU,UUU,UUU.UU- VVV,VVV,VVV.VV- WWW,WW WWWW XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                                                                                                                                VVV,VVV,VVV.VV- WWW,WW WWWW XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                                                                                                                                VVV,VVV,VVV.VV- WWW,WW WWWW XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                            NNNNNNN  OOO,OO OOOO  PPPPPPPPP-QQ  RRR,RRR,RRR,RR- SSS,SSS,SSS.SS- TTT,TTT,TTT.TT- UUU,UUU,UUU.UU- VVV,VVV,VVV.VV- WWW,WW WWWW XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                                                                                                                                VVV,VVV,VVV.VV- WWW,WW WWWW XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                            NNNNNNN  OOO,OO OOOO  PPPPPPPPP-QQ  RRR,RRR,RRR,RR- SSS,SSS,SSS.SS- TTT,TTT,TTT.TT- UUU,UUU,UUU.UU- VVV,VVV,VVV.VV- WWW,WW WWWW XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                                                                --------------- --------------- --------------- --------------- ---------------             --------------- --------------- ---------------
+                                                              Total for project (JJ-KK-LLL) --> RRR,RRR,RRR,RR- SSS,SSS,SSS.SS- TTT,TTT,TTT.TT- UUU,UUU,UUU.UU- VVV,VVV,VVV.VV-             XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                                                                                                                                                                                                   
+                                                                                                                                                                                                                                   
+  III    JJ-KK-LLL MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM NNNNNNN  OOO,OO OOOO  PPPPPPPPP-QQ  RRR,RRR,RRR,RR- SSS,SSS,SSS.SS- TTT,TTT,TTT.TT- UUU,UUU,UUU.UU- VVV,VVV,VVV.VV- WWW,WW WWWW XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                            NNNNNNN  OOO,OO OOOO  PPPPPPPPP-QQ  RRR,RRR,RRR,RR- SSS,SSS,SSS.SS- TTT,TTT,TTT.TT- UUU,UUU,UUU.UU- VVV,VVV,VVV.VV- WWW,WW WWWW XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                            NNNNNNN  OOO,OO OOOO  PPPPPPPPP-QQ  RRR,RRR,RRR,RR- SSS,SSS,SSS.SS- TTT,TTT,TTT.TT- UUU,UUU,UUU.UU- VVV,VVV,VVV.VV- WWW,WW WWWW XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                                                                                                                                VVV,VVV,VVV.VV- WWW,WW WWWW XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                            NNNNNNN  OOO,OO OOOO  PPPPPPPPP-QQ  RRR,RRR,RRR,RR- SSS,SSS,SSS.SS- TTT,TTT,TTT.TT- UUU,UUU,UUU.UU- VVV,VVV,VVV.VV- WWW,WW WWWW XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                            NNNNNNN  OOO,OO OOOO  PPPPPPPPP-QQ  RRR,RRR,RRR,RR- SSS,SSS,SSS.SS- TTT,TTT,TTT.TT- UUU,UUU,UUU.UU- VVV,VVV,VVV.VV- WWW,WW WWWW XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                                                                                                                                VVV,VVV,VVV.VV- WWW,WW WWWW XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                            NNNNNNN  OOO,OO OOOO  PPPPPPPPP-QQ  RRR,RRR,RRR,RR- SSS,SSS,SSS.SS- TTT,TTT,TTT.TT- UUU,UUU,UUU.UU- VVV,VVV,VVV.VV- WWW,WW WWWW XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                            NNNNNNN  OOO,OO OOOO  PPPPPPPPP-QQ  RRR,RRR,RRR,RR- SSS,SSS,SSS.SS- TTT,TTT,TTT.TT- UUU,UUU,UUU.UU- VVV,VVV,VVV.VV- WWW,WW WWWW XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                                                                --------------- --------------- --------------- --------------- ---------------             --------------- --------------- ---------------
+                                                              Total for project (JJ-KK-LLL) --> RRR,RRR,RRR,RR- SSS,SSS,SSS.SS- TTT,TTT,TTT.TT- UUU,UUU,UUU.UU- VVV,VVV,VVV.VV-             XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                                                                                                                                                                                                   
+                                                                                                =============== =============== =============== =============== ===============             =============== =============== ===============
+                                                                    Total in currency (III) --> RRR,RRR,RRR,RR- SSS,SSS,SSS.SS- TTT,TTT,TTT.TT- UUU,UUU,UUU.UU- VVV,VVV,VVV.VV-             XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                                                                                                                                                                                                    
+                                                                                                                                                                                                                                    
+                                                                                                                                                                                                                                    
+                                                            ______________Invoice______________ _________________________Invoice value_________________________ ____Payment from client____ _________________ Commission __________________
+Currency                      Project                        Number      Date    Bill of lading     Granite         Other         Commissions        Total          Amount         Date          Due             Paid           Balance   
+-------- -------------------------------------------------- -------- ----------- -------------- --------------- --------------- --------------- --------------- --------------- ----------- --------------- --------------- ---------------
+  III    JJ-KK-LLL MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM NNNNNNN  OOO,OO OOOO  PPPPPPPPP-QQ  RRR,RRR,RRR,RR- SSS,SSS,SSS.SS- TTT,TTT,TTT.TT- UUU,UUU,UUU.UU- VVV,VVV,VVV.VV- WWW,WW WWWW XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                            NNNNNNN  OOO,OO OOOO  PPPPPPPPP-QQ  RRR,RRR,RRR,RR- SSS,SSS,SSS.SS- TTT,TTT,TTT.TT- UUU,UUU,UUU.UU- VVV,VVV,VVV.VV- WWW,WW WWWW XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                            NNNNNNN  OOO,OO OOOO  PPPPPPPPP-QQ  RRR,RRR,RRR,RR- SSS,SSS,SSS.SS- TTT,TTT,TTT.TT- UUU,UUU,UUU.UU- VVV,VVV,VVV.VV- WWW,WW WWWW XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                                                                                                                                VVV,VVV,VVV.VV- WWW,WW WWWW XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                            NNNNNNN  OOO,OO OOOO  PPPPPPPPP-QQ  RRR,RRR,RRR,RR- SSS,SSS,SSS.SS- TTT,TTT,TTT.TT- UUU,UUU,UUU.UU- VVV,VVV,VVV.VV- WWW,WW WWWW XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                            NNNNNNN  OOO,OO OOOO  PPPPPPPPP-QQ  RRR,RRR,RRR,RR- SSS,SSS,SSS.SS- TTT,TTT,TTT.TT- UUU,UUU,UUU.UU- VVV,VVV,VVV.VV- WWW,WW WWWW XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                            NNNNNNN  OOO,OO OOOO  PPPPPPPPP-QQ  RRR,RRR,RRR,RR- SSS,SSS,SSS.SS- TTT,TTT,TTT.TT- UUU,UUU,UUU.UU- VVV,VVV,VVV.VV- WWW,WW WWWW XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                            NNNNNNN  OOO,OO OOOO  PPPPPPPPP-QQ  RRR,RRR,RRR,RR- SSS,SSS,SSS.SS- TTT,TTT,TTT.TT- UUU,UUU,UUU.UU- VVV,VVV,VVV.VV- WWW,WW WWWW XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                                                                --------------- --------------- --------------- --------------- ---------------             --------------- --------------- ---------------
+                                                              Total for project (JJ-KK-LLL) --> RRR,RRR,RRR,RR- SSS,SSS,SSS.SS- TTT,TTT,TTT.TT- UUU,UUU,UUU.UU- VVV,VVV,VVV.VV-             XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+                                                                                                                                                                                                                                   
+                                                                                                =============== =============== =============== =============== ===============             =============== =============== ===============
+                                                                    Total in currency (III) --> RRR,RRR,RRR,RR- SSS,SSS,SSS.SS- TTT,TTT,TTT.TT- UUU,UUU,UUU.UU- VVV,VVV,VVV.VV-             XXX,XXX,XXX.XX- YYY,YYY,YYY.YY- ZZZ,ZZZ,ZZZ.ZZ-
+ 
+ 
+ 
+ 
+ 
+ 
+GRANICOR INC.
+@endif
+
+;---------------------------------------------------------------------------------------------------------------------------------
+;/T/ Calcul des commissions d'agents (Non-impression afin de déterminer le nombre exact de pages par agent).
+;
+;/R/ Réalisé par: Marc Poulin.
+;    Date.......: 2000-05-22.
+;
+;    Description: Calcul des montants de commissions destinés aux agents en fonction des ventes et des encaissements.
+;
+;    Paramètres : Indicateur de commandes hors balance                                                         - fourni par l'usager  ;
+;                 Indicateur de commandes en balance mais pour lesquelles des commissions à payer sont à venir - fourni par l'usager  ;
+;                 Nom de la compagnie (cienom)                                                                 - fourni par le système.
+;
+;    ----------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin     
+;    Date..............: 16 juin 2000
+;    Description.......: Ajuster le traitement afin de considérer les cas d'exceptions suivants: 
+;
+;                              - la numérotation des factures qui peut différer en le module de
+;                                Production et celui des Comptes à recevoir ;
+;                              - considérer le solde à ventiler lorsque la facture a été transférée
+;                                du module de Production vers celui des Comptes à recevoir.
+;
+;    Référence.........: Demande de changement 000068.
+;
+;    Signet............: MP-00-06-16_D68.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+SET DEFAULT
+
+SET REPORT DEVICE DISC NAME pd807 NOLIMIT
+
+set noblanks        ; Désactiver l'impression des lignes blanches.
+;
+; Accès au fichier d'impression et aux fichiers de cumuls.
+;
+ACCESS *wpd807c link ciecle    of wpd807c , & ; Fichier des montants de commissions par facture et des encaissements.
+                     foucle    of wpd807c , &
+                     comdev    of wpd807c , &
+                     comnumcom of wpd807c   &
+                  to ciecle               , &             
+                     foucle               , &
+                     comdev               , &
+                     comnumcom of *wpd807b    ; Fichier des montants facturés et de commissions payés par commande (projet).
+;
+; Variables de travail associées à l'indicateur de commandes hors balance et à l'indicateur de commandes en balance mais
+; pour lesquelles des comissions à payer sont à venir.
+;
+; (Valeurs fournies en paramètres).
+;
+define d_flghrsbal character size 01 = parm
+define d_flgbalres character size 01 = parm
+;
+; Sélections selon les paramètres.
+;
+SELECT if (d_flghrsbal = "0" or (d_flghrsbal = "1" and t_flghrsbal of wpd807b <> 0)) and &
+          (d_flgbalres = "0" or (d_flgbalres = "1" and t_flgbalres of wpd807b <> 0)) 
+;
+; Variables obligatoires pour les entêtes standards.
+;
+define dz_cienom   character size 40 = parm                         ; Identification de la compagnie
+define dz_nomrap1  character size 60 = "REPORT ON COMMISSIONS"      ; Titre du rapport.
+define dz_nomrap2  character size 60 = "Per agent and per project"  ; Sous-titre du rapport.
+define dz_numrap   character size 07 = "pd807zb"                    ; Code identifiant le rapport.
+;
+; Tri des informations.
+;
+SORTED on ciecle    of wpd807c            & ; Code de compagnie.
+       on foucle    of wpd807c reset page & ; Code d'agent.
+       on comdev    of wpd807c            & ; Code de devise dans lequel les montants sont transigés.
+       on comnumcom of wpd807c            & ; Code de commande.
+       on ftrnumfac of wpd807c            & ; Numéro de facture.
+       on crhdat    of wpd807c              ; Date de l'encaissement.
+;
+; Variables de travail associées aux montants de granit et de facturation totale.
+;
+define d_mntgrafac float size 08 = t_mntgrafac of wpd807c + t_mntdepfac of wpd807c
+define d_mntautfac float size 08 = t_mntautfac of wpd807c + t_mnttpsfac of wpd807c + t_mnttvpfac of wpd807c + t_mntsldven of wpd807c ; MP-00-06-16_D68.
+define d_mnttotfac float size 08 = t_mnttotfac of wpd807c + t_mnttpsfac of wpd807c + t_mnttvpfac of wpd807c + t_mntsldven of wpd807c ; MP-00-06-16_D68.
+;
+; Variables de travail associées à la l'impression.
+;
+define d_27        integer           = 27
+define d_esc       character size 01 = characters(d_27) [2:1]
+define d_medium    character size 05 = (d_esc + "(s0B")  ; gris normal
+define d_set_g     character size 25 = d_esc+"*c1895a38B"+d_esc+"*c1P"+d_esc+"*c20G"
+define d_descend   character size 10 = d_esc + "*p+99y+1X"
+define d_remonte   character size 10 = d_esc + "*p-99y+1X"
+define d_virgule   character size 01 = "," if crhdat of wpd807c <> 0 
+
+define d_mm_ang_1  character size 03 = "Jan" if 01 = dateextract(ftrdatfac of wpd807c,month) else &
+                                       "Feb" if 02 = dateextract(ftrdatfac of wpd807c,month) else &
+                                       "Mar" if 03 = dateextract(ftrdatfac of wpd807c,month) else &
+                                       "Apr" if 04 = dateextract(ftrdatfac of wpd807c,month) else &
+                                       "May" if 05 = dateextract(ftrdatfac of wpd807c,month) else &
+                                       "Jun" if 06 = dateextract(ftrdatfac of wpd807c,month) else &
+                                       "Jul" if 07 = dateextract(ftrdatfac of wpd807c,month) else &
+                                       "Aug" if 08 = dateextract(ftrdatfac of wpd807c,month) else &
+                                       "Sep" if 09 = dateextract(ftrdatfac of wpd807c,month) else &
+                                       "Oct" if 10 = dateextract(ftrdatfac of wpd807c,month) else &
+                                       "Nov" if 11 = dateextract(ftrdatfac of wpd807c,month) else &
+                                       "Dec" if 12 = dateextract(ftrdatfac of wpd807c,month)
+define d_mm_ang_2  character size 03 = "Jan" if 01 = dateextract(crhdat    of wpd807c,month) else &
+                                       "Feb" if 02 = dateextract(crhdat    of wpd807c,month) else &
+                                       "Mar" if 03 = dateextract(crhdat    of wpd807c,month) else &
+                                       "Apr" if 04 = dateextract(crhdat    of wpd807c,month) else &
+                                       "May" if 05 = dateextract(crhdat    of wpd807c,month) else &
+                                       "Jun" if 06 = dateextract(crhdat    of wpd807c,month) else &
+                                       "Jul" if 07 = dateextract(crhdat    of wpd807c,month) else &
+                                       "Aug" if 08 = dateextract(crhdat    of wpd807c,month) else &
+                                       "Sep" if 09 = dateextract(crhdat    of wpd807c,month) else &
+                                       "Oct" if 10 = dateextract(crhdat    of wpd807c,month) else &
+                                       "Nov" if 11 = dateextract(crhdat    of wpd807c,month) else &
+                                       "Dec" if 12 = dateextract(crhdat    of wpd807c,month)
+;
+; Entête du rapport.
+;
+USE ustitcom2 NOLIST                           ; Librairie de déclarations statndard pour quiz associé à ce rapport.
+ skip 02 tab 001 "Agent:"                   &
+         tab 008 foucle of wpd807c          &  ; Code de l'agent
+         tab 016 founom of wpd807c          &  ; Nom de l'agent
+         tab 100 d_set_g                    &  ; Activation des modes d'impression.
+ skip 02 
+;
+; Détail du rapport
+;
+REPORT                                      &
+         tab 001 "                                                            ______________Invoice______________ _________________________Invoice value_________________________ ____Payment from client____ __________________Commission___________________" &
+                 print at comdev            &
+ skip 01 tab 001 "Currency                      Project                        Number      Date    Bill of lading     Granite         Other          Commission        Total          Amount         Date          Due             Paid           Balance    " &
+                 print at comdev            &
+ skip 01 tab 001 "-------- -------------------------------------------------- -------- ----------- -------------- --------------- --------------- --------------- --------------- --------------- ----------- --------------- --------------- ---------------" &
+                 print at comdev            &
+ skip 01 tab 003 comdev      of wpd807c     & ; Code de devise dans lequel les montants sont transigés.
+                 print at comdev            &
+         tab 010 comnumcom   of wpd807c     & ; Code de commande.
+                 print at comnumcom         &
+         tab 020 comnom      of wpd807c     & ; Nom (description) associé au code de commande.
+                 print at comnumcom         &
+         tab 061 ftrnumfac   of wpd807c     & ; Numéro de facture.
+                 print at ftrnumfac         &
+         tab 070 ftrdatfac   of wpd807c     & ; Date de facturation.
+                 print at ftrnumfac         &
+                 format mmmddyyyy           &
+                 separator " "              &
+         tab 070 d_mm_ang_1                 & ; Mois de facturation (traduction anglaise).
+                 print at ftrnumfac         &
+         tab 073 ","                        & ; Séparateur de mois-jour.
+                 print at ftrnumfac         &
+         tab 083 expnumexp   of wpd807c     & ; Numéro d'expédition.
+                 print at ftrnumfac         &
+         tab 092 "-"                        & ; Séparateur expédition-livraison.
+                 print at ftrnumfac         &
+         tab 093 blinumbli   of wpd807c     & ; Numéro du bon de livraison associé à l'expédition.
+                 print at ftrnumfac         &
+         tab 097 d_mntgrafac                & ; Montant de granit (moins les dépenses de commissions).
+                 print at ftrnumfac         &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 113 d_mntautfac                & ; Montant autres (taxes, transports, etc.) que granit et commissions.
+                 print at ftrnumfac         &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 129 t_mntcomfac of wpd807c     & ; Montant de commissions.
+                 print at ftrnumfac         &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 145 d_mnttotfac                & ; Montant total par facture.
+                 print at ftrnumfac         &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 161 crhmntrec   of wpd807c     & ; Montant de l'encaissement.
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 177 crhdat      of wpd807c     & ; Date de l'encaissement.
+                 format mmmddyyyy           &
+                 separator " "              &
+         tab 177 d_mm_ang_2                 & ; Mois d'encaissement (traduction anglaise).
+         tab 180 d_virgule                  & ; Séparateur de mois-jour.
+         tab 189 t_mntcomdue of wpd807c     & ; Montant de commissions dû en fonction du montant de l'encaissement.
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 205 t_mntcompay of wpd807c     & ; Montant de commissions payé en fonction du montant de l'encaissement.
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 221 t_mntbalpay of wpd807c     & ; Montant de commissions restant (balance).
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         reserve 7 lines                    
+;
+; Sous-totaux par code de commande.
+;
+FOOTING AT comnumcom of wpd807c             &
+ skip 01 tab 097 "--------------- --------------- --------------- --------------- ---------------             --------------- --------------- ---------------" &
+ skip 01 tab 063 "Total for project ("      &
+         tab 082 comnumcom   of wpd807c     & ; Code de commande.
+         tab 091 ") -->"                    &
+         tab 097 d_mntgrafac                & ; Montant de granit (moins les dépenses de commissions).
+                 subtotal at ftrnumfac      &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 113 d_mntautfac                & ; Montant autres (taxes, transports, etc.) que granit et commissions.
+                 subtotal at ftrnumfac      &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 129 t_mntcomfac of wpd807c     & ; Montant de commissions.
+                 subtotal at ftrnumfac      &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 145 d_mnttotfac                & ; Montant total par facture.
+                 subtotal at ftrnumfac      &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 161 crhmntrec   of wpd807c     & ; Montant de l'encaissement.
+                 subtotal                   &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 189 t_mntcomdue of wpd807c     & ; Montant de commissions dû en fonction du montant de l'encaissement.
+                 subtotal                   &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 205 t_mntcompay of wpd807c     & ; Montant de commissions payé en fonction du montant de l'encaissement.
+                 subtotal                   &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 221 t_mntbalpay of wpd807c     & ; Montant de commissions restant (balance).
+                 subtotal                   &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+ skip 03
+;
+; Totaux par code de devise.
+;
+FOOTING AT comdev of wpd807c                &
+ skip 01 tab 097 "=============== =============== =============== =============== ===============             =============== =============== ===============" &
+ skip 01 tab 069 "Total in currency ("      &
+         tab 088 comdev      of wpd807c     & ; Code de devise.
+         tab 091 ") -->"                    &
+         tab 097 d_mntgrafac                & ; Montant de granit (moins les dépenses de commissions).
+                 subtotal at ftrnumfac      &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 113 d_mntautfac                & ; Montant autres (taxes, transports, etc.) que granit et commissions.
+                 subtotal at ftrnumfac      &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 129 t_mntcomfac of wpd807c     & ; Montant de commissions.
+                 subtotal at ftrnumfac      &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 145 d_mnttotfac                & ; Montant total par facture.
+                 subtotal at ftrnumfac      &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 161 crhmntrec   of wpd807c     & ; Montant de l'encaissement.
+                 subtotal                   &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 189 t_mntcomdue of wpd807c     & ; Montant de commissions dû en fonction du montant de l'encaissement.
+                 subtotal                   &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 205 t_mntcompay of wpd807c     & ; Montant de commissions payé en fonction du montant de l'encaissement.
+                 subtotal                   &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+         tab 221 t_mntbalpay of wpd807c     & ; Montant de commissions restant (balance).
+                 subtotal                   &
+                 picture "^^^,^^^,^^^.^^ "  &
+                 trailing sign "-"          &
+                 significance 5             &
+ skip 05
+;
+; Saute de page par agent.
+;
+FOOTING AT foucle of wpd807c                &
+ skip page
+;
+; Base de page.
+;
+PAGE FOOTING                                &
+ skip 01 tab 005 d_descend                  & ; Descend le point d'impression de 99 positions.
+         tab 015 "GRANICOR INC."            &
+         tab 029 d_remonte                    ; Remonte le point d'impression de 99 positions.
+
+
+BUILD pd807zb
+
+; ********************************************************************************************************************
+; ********************************************************************************************************************
+; ********************************************************************************************************************
+
+;/T/ Calcul des commissions d'agents - Vérification des fournisseurs (unité-compte).
+;
+;/R/ Réalisé par: Marc Poulin.
+;    Date.......: 2002-02-18.
+;
+;    Référence.........: Demande de changement 000068.
+;
+;    Signet............: MP-02-02-18_D200215.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+use ussetqzs nolist ; Déclaration standard pour quiz.
+;
+; Accès au fichier d'impression et aux fichiers de cumuls.
+;
+ACCESS *wpd807c link ciecle      of wpd807c , & ; Fichier des montants de commissions par facture et des encaissements.
+                     foucle      of wpd807c , &
+                     comdev      of wpd807c , &
+                     comnumcom   of wpd807c   &
+                  to ciecle                 , &             
+                     foucle                 , &
+                     comdev                 , &
+                     comnumcom   of *wpd807b  & ; Fichier des montants facturés et de commissions payés par commande (projet).
+
+                link ciecle      of wpd807c , &                                                              
+                     foucle      of wpd807c   &
+                  to t_ciecle               , &             
+                     t_agentsrap of *wpd807d  & ; Fichier indexé du nombre de pages par agent.
+
+                link foucle      of wpd807c   &
+                  to foucle      of *yfou       ; Fichier indexé associé à la table des fournisseurs (agents).
+;
+; Sélections selon les paramètres.
+;
+; Vérifier s'il tous les fournisseurs (agents) ont bel et bien été associés à un numéro d'unité-compte administratif.
+;
+SELECT if unacle of yfou = "" or cptcle of yfou = "" 
+;
+; Variables obligatoires pour les entêtes standards.
+;
+define dz_cienom   character size 40 = parm                                               ; Identification de la compagnie
+define dz_nomrap1  character size 60 = "Rapport sur les commissions"                      ; Titre du rapport.
+define dz_nomrap2  character size 60 = "Liste des agents non associés à une unité-compte" ; Sous-titre du rapport.
+define dz_numrap   character size 07 = "pd807zc"                                          ; Code identifiant le rapport.
+;
+; Tri des informations.
+;
+SORTED on ciecle    of wpd807c & ; Code de compagnie.
+       on foucle    of wpd807c   ; Code d'agent.
+
+; Entête du rapport.
+;
+USE ustit180nr NOLIST                         ; Librairie de déclarations statndard pour quiz.
+ skip 02 tab 001 " Code    Nom                                          Unité    Compte" &
+ skip 01 tab 001 "------   ----------------------------------------   --------   ------" &
+ skip 01 
+;
+; Détail du rapport
+;
+FOOTING AT foucle                             &
+         tab 001 foucle of yfou               &
+         tab 010 founom of yfou               &
+         tab 054 unacle of yfou               &
+         tab 064 cptcle of yfou               
+;
+; Saute de page par agent.
+;
+FINAL FOOTING                                 &
+ skip 03 tab 001 "Nombre d'agents:"           &
+         tab 018 count at foucle pic "^^ ^^^"                 
+
+
+BUILD pd807zc

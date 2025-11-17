@@ -1,0 +1,309 @@
+;/T/ Paiements automatiques - Talon du paiement
+;
+;/P/ Programmeur..: Alain Côté / Adapté pour PGL par Thomas BRENNEUR
+;    Date Création: 18 Juin 1993
+;
+;    Description..: Saisie du talon du paiement pour le paiement automatique.
+;                   Le talon de chèque est composé d'un nombre de lignes fixe,
+;                   c-a-d. UNE PAGE D'ÉCRAN. En mode ENTRY ou FIND il modifie
+;                   les mêmes lignes.
+;
+;/M/ François Déry, 30 avril 1999
+;       Modifier l'accèss au fichier de séquence des paiements auto. car il a
+;       été converti en format interbase au lieu d'indexé.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cp006b ACTIONBAR &
+              MODE LABEL "" AT 2,80 &
+              NOACTION FIELDMARK &
+              FROM 8,1 TO 23,80 &
+              MESSAGE ON 24 &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING CPCPT_A_PAYER
+
+USE ustrasse NOLIST
+
+USE ussectmp NOLIST
+    "CP006B"
+
+USE cp006b.hlp NOLIST
+
+USE usactecr NOLIST
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE CPPAIE_AUTO_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+
+;-------------------------------------------------------------------------------
+
+FILE CPCPT_A_PAYER    MASTER
+
+;-------------------------------------------------------------------------------
+
+FILE CPCAP_TALON      PRIMARY &
+                      OCCURS 10 &
+                      NOITEMS
+
+  ITEM FOUCIECLE OF CPCAP_TALON INITIAL FOUCIECLE OF CPCPT_A_PAYER
+  ITEM FOUCLE    OF CPCAP_TALON INITIAL FOUCLE    OF CPCPT_A_PAYER
+  ITEM CAPCLE    OF CPCAP_TALON INITIAL CAPCLE    OF CPCPT_A_PAYER
+
+FILE CPCAP_TALON      ALIAS CTA_EXISTE &
+                      DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+; Paramètres des comptes à payer permettant de retrouver l'identifiant des
+; paiements automatiques
+;
+FILE CPPARAMETRE REFERENCE
+
+  ACCESS  VIA   CIENMC &
+          USING "1"
+
+;-------------------------------------------------------------------------------
+;
+; Numérotation du numéro de paiement
+;
+FILE CPPAIE_AUTO_SEQ DESIGNER &
+                     TRANSACTION GEN_NUM_SEQ
+
+  ACCESS VIA    CIECLE &
+         USING  CAPCIECLE OF CPCPT_A_PAYER
+
+  ITEM CIECLE OF CPPAIE_AUTO_SEQ INITIAL CAPCIECLE OF CPCPT_A_PAYER
+
+;-------------------------------------------------------------------------------
+
+USE ushilite NOLIST     ; Hilite pour tout les écrans
+
+DRAW FROM  2, 1 TO  2,79
+DRAW FROM  2, 1 TO 16, 1
+DRAW FROM  3,80 TO 16,80
+DRAW FROM 16, 1 TO 16,80
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+      " Talon du paiement " &
+@ELSE
+      " Payment Stub " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+   "No ligne   Description du talon" &
+@ELSE
+   "Line No.   Description of stub" &
+@ENDIF
+     AT ,3
+
+SKIP
+
+ALIGN (6,5,6) (,,14)
+
+CLUSTER OCCURS WITH CPCAP_TALON
+
+FIELD CTACLELIG OF CPCAP_TALON &
+      ID 01 HIDDEN &
+      LABEL " " &
+      DISPLAY &
+      SIGNIFICANCE 2
+
+FIELD CTADSC OF CPCAP_TALON
+
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès pour l'écran par son code.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  ;
+  ; S'il y a déjà des records il faut les lire.
+  ;
+  GET CTA_EXISTE &
+      VIA     FOUCIECLE, &
+              FOUCLE   , &
+              CAPCLE     &
+      USING   FOUCIECLE OF CPCPT_A_PAYER, &
+              FOUCLE    OF CPCPT_A_PAYER, &
+              CAPCLE    OF CPCPT_A_PAYER  &
+      OPTIONAL
+
+  IF ACCESSOK
+  THEN BEGIN
+    FOR CPCAP_TALON
+    BEGIN
+      GET CPCAP_TALON &
+        VIA     FOUCIECLE, &
+                FOUCLE   , &
+                CAPCLE   , &
+                CTACLELIG  &
+        USING   FOUCIECLE OF CPCPT_A_PAYER, &
+                FOUCLE    OF CPCPT_A_PAYER, &
+                CAPCLE    OF CPCPT_A_PAYER, &
+                OCCURRENCE                  &
+        UNIQUE
+    END
+  END
+  ;
+  ; Affiche le numéro de ligne et la description déjà existante.
+  ;
+  FOR CPCAP_TALON
+  BEGIN
+    LET CTACLELIG OF CPCAP_TALON = OCCURRENCE
+    DISPLAY CTACLELIG OF CPCAP_TALON
+    DISPLAY CTADSC    OF CPCAP_TALON
+  END
+  ;
+  ; Demande chaque ligne.
+  ;
+  FOR CPCAP_TALON
+  BEGIN
+    ACCEPT CTADSC OF CPCAP_TALON
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; La recherche se fait selon le numéro d'occurence(ligne).
+;
+;
+PROCEDURE FIND
+BEGIN
+  FOR CPCAP_TALON
+  BEGIN
+    ;
+    ; L'option UNIQUE force la ré-évaluation de la clef à chaque occurrence.
+    ;
+    GET CPCAP_TALON &
+      VIA     FOUCIECLE, &
+              FOUCLE   , &
+              CAPCLE   , &
+              CTACLELIG  &
+      USING   FOUCIECLE OF CPCPT_A_PAYER, &
+              FOUCLE    OF CPCPT_A_PAYER, &
+              CAPCLE    OF CPCPT_A_PAYER, &
+              OCCURRENCE                  &
+      UNIQUE
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR CPCAP_TALON
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF CPCAP_TALON &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF CPCAP_TALON &
+       AND NOT NEWRECORD     OF CPCAP_TALON &
+       AND NOT DELETEDRECORD OF CPCAP_TALON &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+    ;
+    ; Mise à jour du timbre de modification si l'usager change le talon
+    ;
+    IF    NOT NEWRECORD OF CPCPT_A_PAYER &
+      AND ALTEREDRECORD OF CPCAP_TALON
+    THEN BEGIN
+      LET CAPDATMOD OF CPCPT_A_PAYER = SYSDATE
+      LET CAPHREMOD OF CPCPT_A_PAYER = SYSTIME / 10000
+      LET CAPUSRMOD OF CPCPT_A_PAYER = LOGONID
+    END
+  END
+
+  ;
+  ; Numérotation du numéro de paiement.
+  ;
+  IF 0 = SIZE(TRUNC(CAPCLE OF CPCPT_A_PAYER))
+  THEN BEGIN
+    GET CPPARAMETRE OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 541 ; Mise à jour impossible, les paramètres des C.A.P. n'ont pas étés définis.
+    IF 0 = SIZE(TRUNCATE(CPPCODPAU OF CPPARAMETRE))
+    THEN ERROR 539 ; Mise à jour impossible, le code de paiement automatique n'est pas défini.
+
+    START TRANSACTION GEN_NUM_SEQ
+    GET CPPAIE_AUTO_SEQ OPTIONAL
+    LET CPANUMSEQ OF CPPAIE_AUTO_SEQ  = CPANUMSEQ OF CPPAIE_AUTO_SEQ + 1
+    LET CAPCLE    OF CPCPT_A_PAYER    = CPPCODPAU OF CPPARAMETRE &
+                                      + ASCII(CPANUMSEQ OF CPPAIE_AUTO_SEQ,6)
+    PUT CPPAIE_AUTO_SEQ
+    COMMIT TRANSACTION GEN_NUM_SEQ
+  END
+
+END
+
+;-------------------------------------------------------------------------------
+;
+; L'usager ne peut pas détruire une ligne mais il peut la mettre à blanc.
+;
+;
+PROCEDURE DELETE
+BEGIN
+  LET CTADSC OF CPCAP_TALON = " "
+  DISPLAY CTADSC OF CPCAP_TALON
+END
+
+BUILD
+;
+;****************************** Talon du paiement ******************************x
+;*                                                                              *
+;* No ligne   Description du talon                                              *
+;*    xx      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      *
+;*    xx      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      *
+;*    xx      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      *
+;*    xx      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      *
+;*    xx      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      *
+;*    xx      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      *
+;*    xx      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      *
+;*    xx      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      *
+;*    xx      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      *
+;*    xx      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      *
+;*                                                                              *
+;********************************************************************************

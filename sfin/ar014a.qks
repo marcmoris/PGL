@@ -1,0 +1,1197 @@
+;/T/ Mouvement de marchandises - Détail
+;
+;/P/ Programmeur..: Nancy Marceau
+;    Date Création: 16 mai 1994
+;
+;    Description..: Cet écran permet de faire la gestion du détail du mouvement
+;                   de marchandises. Seuls les produits inventoriés sont
+;                   disponibles. L'entrepôt de destination est utilisé lors
+;                   des mouvements de type transfert. Un seul type d'ajustement
+;                   est permis sur chacune des lignes soit un ajustement de
+;                   quantité ou du dernier coûtant.
+;
+;/M/ Modification.: Pierre Routhier
+;                   02 Mai 1997
+;
+;                   Si notion de projet (HLDNTNPRO OF MCHOLDING) = Oui et
+;                   que le compte (CPTCLE) inscrit est un compte de nature
+;                   revenu (NACCLE = 4) ou dépense (NACCLE = 5) de la table
+;                   mcnature_ctb :
+;                      - On demande les projets et ce, de façon obligatoire.
+;
+;                   Si notion de projet (HLDNTNPRO OF MCHOLDING) = Non ou
+;                   que le compte (CPTCLE) inscrit est un compte de bilan
+;                   (actif, passif ou capital - NACCLE = 1 ou 2 ou 3) de la
+;                   table mcnature_ctb:
+;                      - On ne les demande pas du tout.
+;-------------------------------------------------------------------------------
+;/M/ Pascal Tremblay, 98-01-26
+;
+;    Ajustement pour le changement de siècle
+;
+;/V/ Écran vérifier pour le passage à l'an 2000
+;
+;-------------------------------------------------------------------------------
+;/M/ Programmeur.......: Sylvie Chouinard
+;    Debut modification: 26 mai 1998
+;    Fin   modification: 26 mai 1998
+;    Etat..............: Termine
+;    Description.......: Changer le OR pour un AND dans la condition de
+;                        reinitialisation du projet/sous-projet de la
+;                        procdure process cptcle.
+;                        (SOS 159)
+;
+;/M/ Programmeur.......: Francois Richard
+;    Date modification : 19 juillet 1999
+;    Description.......: Aid\351 la saisie de prdcle
+;
+;
+;/M/ Programmeur.......: Patrick Langlois
+;    Date modification : 1 Août 1999
+;    Description.......: Mettre l'écran à 132 colonnes et mettre 2 occurence à l'écran
+;-------------------------------------------------------------------------------
+
+
+SCREEN ar014a ACTIONBAR &
+             MODE LABEL "" AT 2,132 &
+             FROM 1,1 TO 23,132 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU, &
+                       T_CIENOM,    &
+                       T_MOUSTUOLD, &
+                       ARMOUVEMENT, &
+                       VCBI_DSC
+
+TEMPORARY T_CCUPECDEBI_MCCHARTE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CCUPECDEBA_MCCHARTE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_PECCLE_ARM CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CPTPECDEBI_VCPT CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CPTPECDEBA_VCPT CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_PECCLE_ARMOUVEMENT CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+USE ustrasse NOLIST ; Transaction QUERY pour les sous-écrans
+
+USE ussectmp NOLIST     ; Variable pour la sécurité
+    "AR014A"             ; Nom de l'écran
+
+USE ar014a.hlp NOLIST ; Use servant à la documentation de l'écran
+
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-écrans
+
+
+;-------------------------------------------------------------------------------
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de la compagnie
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie
+TEMPORARY T_MOUSTUOLD CHARACTER SIZE 1  ; Ancien statut du mouvement.
+;-------------------------------------------------------------------------------
+
+
+FILE ARMOUVEMENT   MASTER
+FILE VCBI_DSC      MASTER
+
+FILE ARMOU_DETAIL  PRIMARY NOITEM OCCURS 2
+  ACCESS VIA   CIECLE,                &
+               MOUCLE,                &
+               PRDCLE                 &
+         USING CIECLE OF ARMOUVEMENT,  &
+               MOUCLE OF ARMOUVEMENT,  &
+               PRDCLE OF ARMOU_DETAIL &
+         REQUEST PRDCLE    &
+         ORDERBY CIECLE,   &
+                 MOUCLE,   &
+                 PRDCLE
+
+  ACCESS VIA   CIECLE,                &
+               MOUCLE                 &
+         USING CIECLE OF ARMOUVEMENT, &
+               MOUCLE OF ARMOUVEMENT  &
+         ORDERBY CIECLE,   &
+                 MOUCLE,   &
+                 PRDCLE
+
+
+  ITEM CIECLE       OF ARMOU_DETAIL INITIAL CIECLE OF ARMOUVEMENT
+  ITEM MOUCLE       OF ARMOU_DETAIL INITIAL MOUCLE OF ARMOUVEMENT
+  ITEM MODTIMSTP    OF ARMOU_DETAIL INITIAL SYSDATE * 1000000 + &
+                                            ROUND(SYSTIME / 100)
+
+;-------------------------------------------------------------------------------
+; Pour le poste de l'entrepot source.
+;
+FILE ARENTREPOT  REFERENCE &
+                ALIAS A_ENT_SOURCE
+  ACCESS VIA   CIECLE, &
+               ENTCLE  &
+         USING T_CIECLEMNU, &
+               ENTCLE OF ARMOUVEMENT
+
+;-------------------------------------------------------------------------------
+; Pour valider que l'entrepôt existe
+;
+FILE ARENTREPOT  REFERENCE OCCURS WITH ARMOU_DETAIL
+  ACCESS VIA   CIECLE, &
+               ENTCLE  &
+         USING T_CIECLEMNU, &
+               ENTCLE OF ARMOU_DETAIL
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation du projet et affichage de sa description.
+;
+FILE GPPROJETS          REFERENCE OCCURS WITH ARMOU_DETAIL
+
+  ACCESS VIA CIECLE, &
+             PRJCLE  &
+         USING T_CIECLEMNU, &
+               PRJCLE OF ARMOU_DETAIL
+
+;-------------------------------------------------------------------------------
+;
+; Validation de l'activité et affichage de sa description.
+;
+FILE GPPRO_ACTIVITE        REFERENCE OCCURS WITH ARMOU_DETAIL
+
+  ACCESS VIA CIECLE, &
+             PRJCLE, &
+             PRACLE  &
+         USING T_CIECLEMNU, &
+               PRJCLE OF ARMOU_DETAIL, &
+               PRACLE OF ARMOU_DETAIL
+
+;-------------------------------------------------------------------------------
+;
+; Validation de la charte de compte.
+;
+FILE MCCHARTE_UNA      REFERENCE OCCURS WITH ARMOU_DETAIL
+
+  ACCESS  VIA   CPTCLE, &
+                CIECLE, &
+                UNACLE &
+          USING CPTCLE OF ARMOU_DETAIL, &
+                T_CIECLEMNU               , &
+                UNACLE OF ARMOU_DETAIL
+
+;-------------------------------------------------------------------------------
+; Pour valider le compte et afficher la description lors de la
+; saisie.
+;
+
+FILE VCPT_DSC  REFERENCE OCCURS WITH ARMOU_DETAIL
+  ACCESS VIA   CPTCLE    &
+         USING CPTCLE OF ARMOU_DETAIL
+
+
+;-------------------------------------------------------------------------------
+; Pour valider l'unité administrative et afficher la description lors de la
+; saisie.
+;
+
+FILE MCUNITE_ADM  REFERENCE OCCURS WITH ARMOU_DETAIL
+  ACCESS VIA   CIECLE, &
+               UNACLE  &
+         USING CIECLE OF ARMOU_DETAIL, &
+               UNACLE OF ARMOU_DETAIL
+
+
+;-------------------------------------------------------------------------------
+FILE VPRE_PRD  REFERENCE OCCURS WITH ARMOU_DETAIL
+  ACCESS VIA   CIECLE, &
+               PRDCLE, &
+               ENTCLE  &
+         USING T_CIECLEMNU,            &
+               PRDCLE OF ARMOU_DETAIL, &
+               ENTCLE OF ARMOUVEMENT
+
+;-------------------------------------------------------------------------------
+; Fichier pour valider l'existence du produit dans l'entrepôt de destination.
+;
+FILE VPRE_PRD  REFERENCE ALIAS A_PRE_DESTINATION OCCURS WITH ARMOU_DETAIL
+  ACCESS VIA   CIECLE, &
+               PRDCLE, &
+               ENTCLE  &
+         USING T_CIECLEMNU,            &
+               PRDCLE OF ARMOU_DETAIL, &
+               ENTCLE OF ARMOU_DETAIL
+
+;
+; Paramètres pour la compagnie consolidée(holding)
+;
+FILE MCHOLDING  REFERENCE OCCURS WITH ARMOU_DETAIL
+  ACCESS VIA CIENMC USING "1"
+
+FILE MCCOMPTE            REFERENCE OCCURS WITH ARMOU_DETAIL
+  ACCESS VIA   CPTCLE &
+         USING CPTCLE OF ARMOU_DETAIL
+
+FILE MCNATURE_CTB        REFERENCE OCCURS WITH ARMOU_DETAIL
+  ACCESS VIA   NACCLE &
+         USING NACCLE OF MCCOMPTE
+
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_ENTCLE    CHARACTER SIZE 4  ; Entrepôt pour écran dépisteur.
+TEMPORARY T_PRDCLE    CHARACTER SIZE 12 ; Produit pour écran dépisteur.
+
+
+TEMPORARY T_CPTCLE    CHARACTER SIZE 6 ; Popup sur les comptes.
+TEMPORARY T_PECCLE    CHARACTER SIZE 4 ; Popup sur les comptes.
+TEMPORARY T_CPTTYPPAT CHARACTER SIZE 1 ; Popup sur les comptes.
+TEMPORARY T_CPTCATPAT CHARACTER SIZE 8 ; Popup sur les comptes.
+
+TEMPORARY T_UNACLE    CHARACTER SIZE 8 ; Popup sur unités administratives.
+
+TEMPORARY T_PRJCLE    CHARACTER SIZE 8 ; Popup sur les projets.
+TEMPORARY T_PRJSTUPAT CHARACTER SIZE 8 ; Popup sur les projets.
+
+TEMPORARY T_PRACLE    CHARACTER SIZE 3 ; Popup sur les activités.
+TEMPORARY T_PRASTUPAT CHARACTER SIZE 5 ; Popup sur les activités.
+TEMPORARY T_FLAG_ALT  CHARACTER SIZE 1 OCCURS WITH ARMOU_DETAIL ; Flag pour un record en modification
+TEMPORARY T_FLAG_ENT  CHARACTER SIZE 1 OCCURS WITH ARMOU_DETAIL  ; Flag pour un record en entrée
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4  = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM)
+
+USE usvarprd NOLIST ; Use servant à la saisie de prdcle
+
+;-------------------------------------------------------------------------------
+;
+
+;-------------------------------------------------------------------------------
+;
+USE usdrw132 NOLIST     ; Draw pour les écrans
+USE ustitstd132 NOLIST     ; En-tête pour les écrans
+USE ushilite NOLIST     ; Hilite pour tous les écrans
+
+DRAW THIN 5,1 TO 5,132
+DRAW THIN 14,1 TO 14,132
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Détail du mouvement " &
+@ELSE
+      " %%%Détail de commande  " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+;-------------------------------------------------------------------------------
+
+SKIP
+
+ALIGN (,3,19) (,40,56) (,,58)
+
+FIELD MOUCLE OF ARMOU_DETAIL &
+        DISPLAY PREDISPLAY   &
+        FIXED
+
+FIELD MOUTYP OF ARMOUVEMENT  &
+        DISPLAY PREDISPLAY   &
+        FIXED
+
+FIELD CBIDSC OF VCBI_DSC     &
+        DISPLAY PREDISPLAY   &
+        SIZE 15
+
+SKIP 1
+
+ALIGN (2,3,19)(,,32)(,87,103)(,,108)
+
+
+CLUSTER OCCURS WITH ARMOU_DETAIL ID BASE 5
+
+
+FIELD PRDCLE OF ARMOU_DETAIL &
+        HIDDEN ID 5 &
+        REQUIRED NOCHANGE      &
+        LOOKUP ON VPRE_PRD &
+          MESSAGE 1447 ; Ce produit n'existe pas pour l'entrepôt du mouvement.
+
+FIELD PRDDSC1 OF VPRE_PRD &
+        DISPLAY
+
+
+FIELD ENTCLE OF ARMOU_DETAIL &
+        REQUIRED IF MOUTYP OF ARMOUVEMENT = "T" &
+        LOOKUP ON ARENTREPOT &
+          MESSAGE 1337, &        ; Ce code d'entrepôt n'existe pas.
+        ON A_PRE_DESTINATION &
+          MESSAGE 1459; Ce produit n'existe pas dans l'entrepôt de destination.
+
+FIELD ENTNOM OF ARENTREPOT &
+        SIZE 23 &
+        DISPLAY
+
+SKIP 1
+
+ALIGN (,3,19)(,58,74)(,87,103)
+FIELD MODCOUMYN OF ARMOU_DETAIL &
+        HIDDEN ID 12 &
+        DISPLAY
+
+FIELD MODQTE OF ARMOU_DETAIL &
+        PICTURE "^^,^^^.^^^ " TRAILING "-"
+
+FIELD MODPRIUNI OF ARMOU_DETAIL &
+        REQUIRED IF    MOUTYP OF ARMOUVEMENT <> "T" &
+                   AND MOUTYP OF ARMOUVEMENT <> "S"
+
+SKIP 1
+
+ALIGN (,3,19)(,,28)(,58,74)(,,87)
+
+FIELD CPTCLE OF ARMOU_DETAIL &
+        HIDDEN ID 20 &
+        REQUIRED &
+        LOOKUP ON VCPT_DSC &
+          MESSAGE 1313 ; Ce compte n'existe pas.
+
+FIELD CPTDSCABR OF VCPT_DSC &
+        DISPLAY
+
+FIELD UNACLE OF ARMOU_DETAIL &
+        REQUIRED &
+        LOOKUP ON MCUNITE_ADM &
+          MESSAGE 1317 ; Cette unité administrative n'existe pas
+
+FIELD UNANOMABR OF MCUNITE_ADM &
+        DISPLAY
+
+ALIGN (,3,19)(,,28)(,58,74)(,,87)
+
+
+FIELD PRJCLE OF ARMOU_DETAIL &
+        HIDDEN ID 30
+
+FIELD PRJDSC1 OF GPPROJETS &
+        DISPLAY SIZE 28
+
+FIELD PRACLE OF ARMOU_DETAIL
+
+FIELD PRADSC1 OF GPPRO_ACTIVITE &
+        DISPLAY SIZE 40
+
+SKIP 1
+ALIGN (,3,19)
+
+FIELD MODMNTNET OF ARMOU_DETAIL &
+        DISPLAY
+
+
+SKIP 1
+
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de calculer le montant total de variation selon les
+; quantités saisies.
+;
+PROCEDURE INTERNAL CALCUL_VARIATION
+BEGIN
+  LET MOUMNTNET OF ARMOUVEMENT  = MOUMNTNET OF ARMOUVEMENT - &
+                                  MODMNTNET OF ARMOU_DETAIL
+
+    ;
+    ; Ajustement de montant.
+    ;
+  IF    MOUTYP OF ARMOUVEMENT  = "A" &
+    AND MODQTE OF ARMOU_DETAIL = 0
+  THEN LET MODMNTNET OF ARMOU_DETAIL = MODPRIUNI OF ARMOU_DETAIL / 100
+  ELSE BEGIN
+       ;
+       ; Entrée de produit au prix saisi par l'utilisateur
+       ;
+    IF MOUTYP OF ARMOUVEMENT = "E"
+    THEN LET MODMNTNET OF ARMOU_DETAIL = &
+           ROUND (MODQTE OF ARMOU_DETAIL * MODPRIUNI OF ARMOU_DETAIL/100000)
+       ;
+       ; Ajustement de quantité, inventaire physique, transfert et sortie.
+       ;
+    ELSE LET MODMNTNET OF ARMOU_DETAIL = &
+           ROUND (MODQTE OF ARMOU_DETAIL * PRECOUMYN OF VPRE_PRD/100000)
+  END
+
+  LET MOUMNTNET OF ARMOUVEMENT  = MOUMNTNET OF ARMOUVEMENT + &
+                                  MODMNTNET OF ARMOU_DETAIL
+
+  DISPLAY MODMNTNET OF ARMOU_DETAIL
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie et écran dépisteur du produit.
+;
+;
+PROCEDURE INPUT PRDCLE
+BEGIN
+  USE ussecent NOLIST
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_ENTCLE = ENTCLE OF ARMOUVEMENT
+    LET T_PRDCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN ar103 MODE F PASSING T_CIECLEMNU, T_ENTCLE, T_PRDCLE  &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_PRDCLE)
+  END
+  ELSE BEGIN
+    USE usinpprd NOLIST
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de valider que le statut du produit est actif et que le
+; produit est de type Inventorié.
+;
+PROCEDURE EDIT PRDCLE
+BEGIN
+  IF PRDSTU OF VPRE_PRD = "I"
+  THEN ERROR 1374 ; Ce produit est inactif.
+
+  IF PRDTYP OF VPRE_PRD <> "I"
+  THEN ERROR 1449 ; Seuls les produits inventoriés sont permis dans les mouvements.
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de calculer le montant de variation de la ligne de
+; mouvement.
+;
+PROCEDURE PROCESS PRDCLE
+BEGIN
+  LET MODCOUMYN OF ARMOU_DETAIL = PRECOUMYN OF VPRE_PRD
+  DISPLAY MODCOUMYN OF ARMOU_DETAIL
+  DO INTERNAL CALCUL_VARIATION
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de valider que pour un type 'A'ajustement un seul
+; ajustement est accepté soit quantité ou variation montant. Valider que la
+; quantité soit obligatoire pour les types de mouvement autres que Ajustement.
+;
+;
+PROCEDURE EDIT MODQTE
+BEGIN
+
+  IF    0 = SIZE (TRUNCATE(FIELDTEXT)) &
+    AND 0 = FIELDVALUE                 &
+    AND MOUTYP OF ARMOUVEMENT <> "A"
+  THEN ERROR 1453 ; Vous devez obligatoirement saisir ce champ.
+
+  IF    FIELDVALUE < 0 &
+    AND MOUTYP OF ARMOUVEMENT <> "A" &
+    AND MOUTYP OF ARMOUVEMENT <> "I"
+  THEN ERROR 1455 ; Les quantités négatives ne sont acceptées que pour les
+                  ; ajustements.
+
+  IF    0 > PREQTEPHY OF VPRE_PRD - FIELDVALUE &
+    AND PREFLGAUTNEG OF VPRE_PRD = "0"  &
+    AND (   MOUTYP OF ARMOUVEMENT = "S" &
+         OR MOUTYP OF ARMOUVEMENT = "T" &
+        )
+  THEN ERROR 1457 ; Quantité physique négative non autorisée pour ce produit.
+
+    ;
+    ; Pour les ajustements on ne saisit pas de quantité s'il y a une
+    ; variation saisie.
+    ;
+  IF    MOUTYP    OF ARMOUVEMENT = "A" &
+    AND MODPRIUNI OF ARMOU_DETAIL <> 0
+  THEN ERROR 1451 ; Un seul ajustement est permis avec ce type de mouvement.
+
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de calculer le montant de variation de la ligne de
+; mouvement.
+;
+PROCEDURE PROCESS MODQTE
+BEGIN
+  DO INTERNAL CALCUL_VARIATION
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de faire un écran dépisteur pour l'entrepôt
+;
+PROCEDURE INPUT ENTCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_ENTCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN ar100 MODE F PASSING T_CIECLEMNU, T_ENTCLE
+    LET FIELDTEXT = TRUNCATE(T_ENTCLE)
+  END
+END
+
+;------------------------------------------------------------------------------
+; Cette procédure permet de valider que l'entrepôt de destination n'est pas
+; le même que celui du mouvement.
+;
+PROCEDURE EDIT ENTCLE
+BEGIN
+  IF ENTCLE OF ARMOUVEMENT = ENTCLE OF ARMOU_DETAIL
+  THEN ERROR 1460 ; L'entrepôt de destination doit être différent de celui du
+                  ; mouvement
+END
+
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de rendre obligatoire la saisie de la variation.
+;
+PROCEDURE INPUT MODPRIUNI
+BEGIN
+  LET FIELDTEXT = TRUNCATE( FIELDTEXT )
+END
+
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de calculer le montant de variation de la ligne de
+; mouvement.
+;
+PROCEDURE PROCESS MODPRIUNI
+BEGIN
+  DO INTERNAL CALCUL_VARIATION
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de valider que le montant de variation saisie n'est
+; pas négatif sauf pour les ajustements.
+;
+PROCEDURE EDIT MODPRIUNI
+BEGIN
+  IF    FIELDVALUE < 0 &
+    AND MOUTYP OF ARMOUVEMENT <> "A"
+  THEN ERROR 1461 ; Les montants négatifs ne sont acceptés que pour les
+                  ; ajustements.
+
+END
+
+
+;-------------------------------------------------------------------------------
+; Procédure pour le dépisteur du numéro de compte.
+;
+PROCEDURE INPUT CPTCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_PECCLE    = " "
+    LET T_CPTTYPPAT = "@"
+    LET T_CPTCATPAT = "@"
+    RUN SCREEN mc103 MODE F PASSING T_CPTCLE   , &
+                                    T_CPTTYPPAT, &
+                                    T_CPTCATPAT, &
+                                    T_PECCLE     &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_CPTCLE)
+  END
+  ;
+  ; Poste par défaut selon la transaction.
+  ;
+  IF "A" = MOUTYP OF ARMOUVEMENT OR &
+     "I" = MOUTYP OF ARMOUVEMENT
+  THEN BEGIN
+    IF     0  = SIZE(FIELDTEXT) &
+       AND 0  = SIZE(TRUNCATE(CPTCLE OF ARMOU_DETAIL)) &
+       AND 0 <> SIZE(TRUNCATE(ENTCPTAJT OF A_ENT_SOURCE))
+    THEN LET FIELDTEXT = ENTCPTAJT OF A_ENT_SOURCE
+  END
+  IF "E" = MOUTYP OF ARMOUVEMENT
+  THEN BEGIN
+    IF     0  = SIZE(FIELDTEXT) &
+       AND 0  = SIZE(TRUNCATE(CPTCLE OF ARMOU_DETAIL)) &
+       AND 0 <> SIZE(TRUNCATE(ENTCPTENT OF A_ENT_SOURCE))
+    THEN LET FIELDTEXT = ENTCPTENT OF A_ENT_SOURCE
+  END
+  IF "S" = MOUTYP OF ARMOUVEMENT
+  THEN BEGIN
+    IF     0  = SIZE(FIELDTEXT) &
+       AND 0  = SIZE(TRUNCATE(CPTCLE OF ARMOU_DETAIL)) &
+       AND 0 <> SIZE(TRUNCATE(ENTCPTSOR OF A_ENT_SOURCE))
+    THEN LET FIELDTEXT = ENTCPTSOR OF A_ENT_SOURCE
+  END
+
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation si le compte est actif.
+;
+;
+PROCEDURE EDIT CPTCLE
+BEGIN
+  ;
+  ; Note: La période de fin, est la première période d'inactivité.
+  ;
+  ; Ajustement pour le changement de siècle
+  IF PECCLE OF ARMOUVEMENT[1:1] < "8"
+  THEN LET T_PECCLE_ARMOUVEMENT = "1" + PECCLE OF ARMOUVEMENT
+  ELSE LET T_PECCLE_ARMOUVEMENT = "0" + PECCLE OF ARMOUVEMENT
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBA OF VCPT_DSC[1:1] < "8"
+  THEN LET T_CPTPECDEBA_VCPT = "1" + CPTPECDEBA OF VCPT_DSC
+  ELSE LET T_CPTPECDEBA_VCPT = "0" + CPTPECDEBA OF VCPT_DSC
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBI OF VCPT_DSC[1:1] < "8"
+  THEN LET T_CPTPECDEBI_VCPT = "1" + CPTPECDEBI OF VCPT_DSC
+  ELSE LET T_CPTPECDEBI_VCPT = "0" + CPTPECDEBI OF VCPT_DSC
+
+  IF T_PECCLE_ARMOUVEMENT >= T_CPTPECDEBA_VCPT AND &
+     ( &
+       T_PECCLE_ARMOUVEMENT < T_CPTPECDEBI_VCPT OR &
+       CPTPECDEBI OF VCPT_DSC = "" &
+     )
+  THEN NULL
+  ELSE ERROR 1380 ; Ce compte est inactif.
+
+  IF CPTTYP OF VCPT_DSC <> "R"
+  THEN ERROR 1417 ; On ne peut pas utiliser ce compte dans une réception.
+
+
+END
+
+PROCEDURE PROCESS CPTCLE
+BEGIN
+  IF NACCLE OF MCNATURE_CTB <> 4 AND &
+     NACCLE OF MCNATURE_CTB <> 5
+  THEN BEGIN
+    LET PRJCLE OF ARMOU_DETAIL = ""
+    LET PRACLE OF ARMOU_DETAIL = ""
+    DISPLAY PRJCLE  OF ARMOU_DETAIL
+    DISPLAY PRJDSC1 OF GPPROJETS
+    DISPLAY PRACLE  OF ARMOU_DETAIL
+    DISPLAY PRADSC1 OF GPPRO_ACTIVITE
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT UNACLE
+BEGIN
+  ;
+  ; Popup sur les unités administratives.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE = CPTCLE OF ARMOU_DETAIL
+    LET T_PECCLE = PECCLE OF ARMOUVEMENT
+    LET T_UNACLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    ;
+    ; Il y a trois popup possible:
+    ;  1) sur les unités administrative par compagnie(MCUNITE_ADM).
+    ;  2) sur les unités administrative d'une charte de compte(MCCHARTE_UNA).
+    ;  3) sur les unités administrative qui ne sont pas définis dans la charte
+    ;     de compte(MCUNITE_ADM, MCCHARTE_UNA).
+    ;
+    IF HLDCHTCPT OF MCHOLDING = "0"
+    THEN RUN SCREEN mc104 MODE F PASSING T_CIECLEMNU, T_UNACLE
+    ELSE BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN RUN SCREEN mc115 MODE F PASSING T_CIECLEMNU, T_CPTCLE, T_UNACLE, &
+                                           T_PECCLE
+      ELSE RUN SCREEN mc116 MODE F PASSING T_CIECLEMNU, T_CPTCLE, T_UNACLE, &
+                                           T_PECCLE
+    END
+    LET FIELDTEXT = TRUNCATE(T_UNACLE)
+  END
+  ;
+  ; Unité par défaut selon la transaction.
+  ;
+  IF "A" = MOUTYP OF ARMOUVEMENT OR &
+     "I" = MOUTYP OF ARMOUVEMENT
+  THEN BEGIN
+    IF     0  = SIZE(FIELDTEXT) &
+       AND 0  = SIZE(TRUNCATE(UNACLE OF ARMOU_DETAIL)) &
+       AND 0 <> SIZE(TRUNCATE(ENTUNAAJT OF A_ENT_SOURCE))
+    THEN LET FIELDTEXT = ENTUNAAJT OF A_ENT_SOURCE
+  END
+  IF "E" = MOUTYP OF ARMOUVEMENT
+  THEN BEGIN
+    IF     0  = SIZE(FIELDTEXT) &
+       AND 0  = SIZE(TRUNCATE(UNACLE OF ARMOU_DETAIL)) &
+       AND 0 <> SIZE(TRUNCATE(ENTUNAENT OF A_ENT_SOURCE))
+    THEN LET FIELDTEXT = ENTUNAENT OF A_ENT_SOURCE
+  END
+  IF "S" = MOUTYP OF ARMOUVEMENT
+  THEN BEGIN
+    IF     0  = SIZE(FIELDTEXT) &
+       AND 0  = SIZE(TRUNCATE(UNACLE OF ARMOU_DETAIL)) &
+       AND 0 <> SIZE(TRUNCATE(ENTUNASOR OF A_ENT_SOURCE))
+    THEN LET FIELDTEXT = ENTUNASOR OF A_ENT_SOURCE
+  END
+  ;
+  ; Force le lookup de l'unité pour la charte.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(UNACLE OF ARMOU_DETAIL))
+  THEN LET FIELDTEXT = UNACLE OF ARMOU_DETAIL
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation si l'unité administrative est active.
+;
+PROCEDURE EDIT UNACLE
+BEGIN
+  IF HLDCHTCPT OF MCHOLDING = "1"
+  THEN BEGIN
+    GET MCCHARTE_UNA OPTIONAL
+    ;
+    ; Si la charte est incluse, le lien est obligatoire.
+    ;
+    IF NOT ACCESSOK
+    THEN BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN ERROR 1314 ; La combinaison compte/unité administrative n'existe pas.
+    END
+    ELSE BEGIN
+      ;
+      ; Si la charte est Exclusive et que la période fait partie de
+      ; l'intervalle de périodes de la charte alors c'est une erreur.
+      ;
+      ; Si la charte est inclusive et que la période ne fait pas partie de
+      ; l'intervalle de périodes de la charte alors c'est une erreur.
+      ;
+      ; Ajustement pour le changement de siècle
+      IF PECCLE OF ARMOUVEMENT[1:1] < "8"
+      THEN LET T_PECCLE_ARM = "1" + PECCLE OF ARMOUVEMENT
+      ELSE LET T_PECCLE_ARM = "0" + PECCLE OF ARMOUVEMENT
+
+      ; Ajustement pour le changement de siècle
+      IF CCUPECDEBA OF MCCHARTE_UNA[1:1] < "8"
+      THEN LET T_CCUPECDEBA_MCCHARTE = "1" + CCUPECDEBA OF MCCHARTE_UNA
+      ELSE LET T_CCUPECDEBA_MCCHARTE = "0" + CCUPECDEBA OF MCCHARTE_UNA
+
+      ; Ajustement pour le changement de siècle
+      IF CCUPECDEBI OF MCCHARTE_UNA[1:1] < "8"
+      THEN LET T_CCUPECDEBI_MCCHARTE = "1" + CCUPECDEBI OF MCCHARTE_UNA
+      ELSE LET T_CCUPECDEBI_MCCHARTE = "0" + CCUPECDEBI OF MCCHARTE_UNA
+
+      IF ( &
+           T_PECCLE_ARM >= T_CCUPECDEBA_MCCHARTE AND &
+           ( &
+             T_PECCLE_ARM < T_CCUPECDEBI_MCCHARTE OR &
+             CCUPECDEBI OF MCCHARTE_UNA = " " &
+           ) &
+         )
+      THEN BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "E"
+        THEN ERROR 1384 ; La combinaison compte/unité administrative est inactive.
+      END
+      ELSE BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "I"
+        THEN ERROR 1384 ; La combinaison compte/unité administrative est inactive.
+      END
+    END
+  END
+
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les projets.
+;
+;
+PROCEDURE INPUT PRJCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PRJSTUPAT = "A"
+    LET T_PRJCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gp104 MODE F PASSING T_CIECLEMNU, &
+                                    T_PRJCLE   , &
+                                    T_PRJSTUPAT WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_PRJCLE)
+  END
+
+   ;
+   ; Pour forcer la procédure EDIT
+   ;
+  IF      NOT FINDMODE &
+    AND 0  = SIZE (TRUNCATE(FIELDTEXT)) &
+    AND "" <> TRUNCATE (PRJCLE OF ARMOU_DETAIL)
+  THEN LET FIELDTEXT = PRJCLE OF ARMOU_DETAIL
+
+  IF (HLDNTNPRO OF MCHOLDING    = "1" AND &
+      NACCLE    OF MCNATURE_CTB = 4   AND &
+      FIELDTEXT                 = "" ) OR &
+     (HLDNTNPRO OF MCHOLDING    = "1" AND &
+      NACCLE    OF MCNATURE_CTB = 5   AND &
+      FIELDTEXT                 = "" )
+  THEN ERROR 889
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du projet, le projet est optionel dans la ligne de mouvement.
+;
+;
+PROCEDURE EDIT PRJCLE
+BEGIN
+  GET GPPROJETS  OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 1385 ; Ce projet n'existe pas.
+
+  IF PRJSTU OF GPPROJETS <> "A"
+  THEN ERROR 1386 ; Ce projet n'est pas actif.
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT PRACLE
+BEGIN
+  IF PRJCLE OF ARMOU_DETAIL = ""
+  THEN ERROR 889
+   ;
+  ; Popup sur les activités.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PRJCLE    = PRJCLE OF ARMOU_DETAIL
+    LET T_PRASTUPAT = "A"
+    LET T_PRACLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gp108 MODE F PASSING T_CIECLEMNU, &
+                                    T_PRJCLE   , &
+                                    T_PRACLE   , &
+                                    T_PRASTUPAT WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_PRACLE)
+  END
+
+  ;
+  ; Force la validation de l'activité, car l'usager peut modifier le numéro de
+  ; compagnie ou le numéro de projet sur le ligne.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE( PRJCLE OF ARMOU_DETAIL ))
+  THEN LET FIELDTEXT = PRACLE OF ARMOU_DETAIL
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation de l'activité, l'activité est obligatoire dans la ligne du mouvement.
+;
+;
+PROCEDURE EDIT PRACLE
+BEGIN
+  GET GPPRO_ACTIVITE  OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 1387 ; Cette activité n'existe pas.
+
+  IF PRASTU OF GPPRO_ACTIVITE <> "A"
+  THEN ERROR 1388 ; Cette activité est inactive.
+END
+
+
+PROCEDURE ENTRY
+BEGIN
+  FOR ARMOU_DETAIL
+  BEGIN
+    PERFORM APPEND
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Cette procédure est codée car on affiche les informations du compte, de
+; l'unité, du projet, de l'activité etc...Egalement, des conditions de
+; saisie sont mises en oeuvre.
+;
+PROCEDURE APPEND
+BEGIN
+  ACCEPT PRDCLE     OF ARMOU_DETAIL
+  DISPLAY PRDDSC1   OF VPRE_PRD
+  ;
+  ; Pour un type de transfert, on saisit l'entrepôt de destination.
+  ;
+  IF MOUTYP OF ARMOUVEMENT = "T"
+  THEN BEGIN
+    ACCEPT  ENTCLE OF ARMOU_DETAIL
+  END
+  DISPLAY ENTNOM OF ARENTREPOT
+
+  ACCEPT  MODQTE OF ARMOU_DETAIL
+  ;
+  ; Pour un type transfert ou inventaire, on ne saisit pas de variation. Pour les
+  ; ajustements on ne saisit pas de variation s'il y a une quantité saisie.
+  ;
+  IF    MOUTYP OF ARMOUVEMENT <> "T" &
+    AND MOUTYP OF ARMOUVEMENT <> "S" &
+    AND MOUTYP OF ARMOUVEMENT <> "I"
+  THEN BEGIN
+    IF    MOUTYP OF ARMOUVEMENT = "A" &
+      AND MODQTE OF ARMOU_DETAIL <> 0
+    THEN DISPLAY MODPRIUNI OF ARMOU_DETAIL
+    ELSE ACCEPT  MODPRIUNI OF ARMOU_DETAIL
+  END
+  ELSE DISPLAY MODPRIUNI OF ARMOU_DETAIL
+
+  IF "T" <> MOUTYP OF ARMOUVEMENT
+  THEN BEGIN
+    ACCEPT CPTCLE OF ARMOU_DETAIL
+    DISPLAY CPTDSCABR OF VCPT_DSC
+
+    ACCEPT UNACLE OF ARMOU_DETAIL
+    DISPLAY UNANOMABR OF MCUNITE_ADM
+    ;
+    ; Si notion de projet.
+    ;
+    IF (HLDNTNPRO OF MCHOLDING = "1" AND NACCLE OF MCNATURE_CTB = 4) OR &
+       (HLDNTNPRO OF MCHOLDING = "1" AND NACCLE OF MCNATURE_CTB = 5)
+    THEN BEGIN
+      ACCEPT  PRJCLE OF ARMOU_DETAIL
+      DISPLAY PRJDSC1 OF GPPROJETS
+      IF 0 <> SIZE(TRUNCATE(PRJCLE OF ARMOU_DETAIL))
+      THEN BEGIN
+        INFORMATION = PRJDSC1 OF GPPROJETS
+        ACCEPT  PRACLE OF ARMOU_DETAIL
+        DISPLAY PRADSC1 OF GPPRO_ACTIVITE
+        INFORMATION = PRADSC1 OF GPPRO_ACTIVITE
+        LET T_FLAG_ENT = "1"
+      END
+    END
+    ELSE BEGIN
+      LET PRJCLE OF ARMOU_DETAIL = " "
+      LET PRACLE OF ARMOU_DETAIL = " "
+    END
+  END
+  DISPLAY MODMNTNET OF ARMOU_DETAIL
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+PROCEDURE DESIGNER 5
+BEGIN
+   ;
+   ; Pour un type de transfert, on saisit l'entrepôt de destination.
+   ;
+  IF MOUTYP OF ARMOUVEMENT = "T"
+  THEN ACCEPT  ENTCLE OF ARMOU_DETAIL
+  DISPLAY ENTNOM OF ARENTREPOT
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+PROCEDURE DESIGNER 12
+BEGIN
+  ACCEPT  MODQTE OF ARMOU_DETAIL
+  ;
+  ; Pour un type transfert ou inventaire, on ne saisit pas de variation. Pour les
+  ; ajustements on ne saisit pas de variation s'il y a une quantité saisie.
+  ;
+  IF    MOUTYP OF ARMOUVEMENT <> "T" &
+    AND MOUTYP OF ARMOUVEMENT <> "S" &
+    AND MOUTYP OF ARMOUVEMENT <> "I"
+  THEN BEGIN
+    IF    MOUTYP OF ARMOUVEMENT = "A" &
+      AND MODQTE OF ARMOU_DETAIL <> 0
+    THEN DISPLAY MODPRIUNI OF ARMOU_DETAIL
+    ELSE ACCEPT  MODPRIUNI OF ARMOU_DETAIL
+  END
+  ELSE DISPLAY MODPRIUNI OF ARMOU_DETAIL
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+PROCEDURE DESIGNER 20
+BEGIN
+  IF "T" <> MOUTYP OF ARMOUVEMENT
+  THEN BEGIN
+    ACCEPT  CPTCLE    OF ARMOU_DETAIL
+    DISPLAY CPTDSCABR OF VCPT_DSC
+    ACCEPT  UNACLE    OF ARMOU_DETAIL
+    DISPLAY UNANOMABR OF MCUNITE_ADM
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+PROCEDURE DESIGNER 30
+BEGIN
+  IF "T" <> MOUTYP OF ARMOUVEMENT
+  THEN BEGIN
+    ;
+    ; Si notion de projet.
+    ;
+    IF (HLDNTNPRO OF MCHOLDING = "1" AND NACCLE OF MCNATURE_CTB = 4) OR &
+       (HLDNTNPRO OF MCHOLDING = "1" AND NACCLE OF MCNATURE_CTB = 5)
+    THEN BEGIN
+      ACCEPT  PRJCLE OF ARMOU_DETAIL
+      DISPLAY PRJDSC1 OF GPPROJETS
+      IF 0 <> SIZE(TRUNCATE(PRJCLE OF ARMOU_DETAIL))
+      THEN BEGIN
+        INFORMATION = PRJDSC1 OF GPPROJETS
+        ACCEPT  PRACLE OF ARMOU_DETAIL
+        DISPLAY PRADSC1 OF GPPRO_ACTIVITE
+        INFORMATION = PRADSC1 OF GPPRO_ACTIVITE
+        LET T_FLAG_ALT = "1"
+      END
+      IF T_FLAG_ALT <> "1"
+      THEN BEGIN
+        ACCEPT  PRJCLE OF ARMOU_DETAIL
+        DISPLAY PRJDSC1 OF GPPROJETS
+        IF 0 <> SIZE(TRUNCATE(PRJCLE OF ARMOU_DETAIL))
+        THEN BEGIN
+          INFORMATION = PRJDSC1 OF GPPROJETS
+          ACCEPT  PRACLE OF ARMOU_DETAIL
+          DISPLAY PRADSC1 OF GPPRO_ACTIVITE
+          INFORMATION = PRADSC1 OF GPPRO_ACTIVITE
+        END
+      END
+    END
+  END
+END
+
+
+PROCEDURE DELETE
+BEGIN
+  LET MOUMNTNET OF ARMOUVEMENT  = MOUMNTNET OF ARMOUVEMENT - &
+                                  MODMNTNET OF ARMOU_DETAIL
+  DELETE ARMOU_DETAIL
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR ARMOU_DETAIL
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF ARMOU_DETAIL &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF ARMOU_DETAIL &
+       AND NOT NEWRECORD     OF ARMOU_DETAIL &
+       AND NOT DELETEDRECORD OF ARMOU_DETAIL &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+
+  IF (HLDNTNPRO OF MCHOLDING = "1" AND (NACCLE OF MCNATURE_CTB = 4  OR &
+                                        NACCLE OF MCNATURE_CTB = 5) AND &
+      PRJCLE OF ARMOU_DETAIL = "")
+  THEN ERROR 889
+
+    ;
+    ; Mise à jour du timbre de modification si l'usager change le mouvement.
+    ;
+    IF    NOT NEWRECORD OF ARMOUVEMENT &
+      AND ALTEREDRECORD OF ARMOU_DETAIL
+    THEN BEGIN
+      LET MOUDATMOD OF ARMOUVEMENT = SYSDATE
+      LET MOUHREMOD OF ARMOUVEMENT = SYSTIME / 10000
+      LET MOUUSRMOD OF ARMOUVEMENT = TZ_LOGONID
+    END
+
+    ; Enlever le droit de modification si le mouvement n'est plus préliminaire.
+    ; Cependant, on permet la mise à jour si le statut vient juste d'être changer
+    ; pour "A".
+    ;
+    IF ((    ALTEREDRECORD OF ARMOUVEMENT &
+         AND NOT NEWRECORD OF ARMOUVEMENT)  &
+         OR DELETEDRECORD OF ARMOUVEMENT)   &
+      AND T_MOUSTUOLD  <> "P"
+    THEN ERROR 1443 ; Seule la modification d'un mouvement préliminaire est
+                    ; permise.
+
+
+    ; Mise à jour du nombre d'items du mouvement.
+    ;
+    ;
+    IF         NEWRECORD     OF ARMOU_DETAIL &
+       AND NOT DELETEDRECORD OF ARMOU_DETAIL
+    THEN LET MOUNBRITE OF ARMOUVEMENT = MOUNBRITE OF ARMOUVEMENT + 1
+    ELSE BEGIN
+      IF        DELETEDRECORD OF ARMOU_DETAIL &
+        AND NOT NEWRECORD     OF ARMOU_DETAIL
+      THEN LET MOUNBRITE OF ARMOUVEMENT = MOUNBRITE OF ARMOUVEMENT - 1
+    END
+  END
+END
+
+
+BUILD list detail
+
+
+@IF FORMAT
+******************************************************* Détail du mouvement ********************************************************
+* # Mouvement...: xxxxxxxxx                                                                                                        *
+************************************************************************************************************************************
+* Code produit..: xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx               Entrepôt......: xxxx xxxxxxxxxxxxxxxxxxxxxxx *
+*                                                                                                                                  *
+* Coût moyen....: xxxxxxxxxxxxxxx                        Qté mouvement.: xxxxxxxxxxx  Prix unitaire.: xxxxxxxxxxxxxxx              *
+*                                                                                                                                  *
+* Compte........: xxxxxx   xxxxxxxxxxxxxxxxxxxx          Unité adm.....: xxxxxxxx     xxxxxxxxxxxxxxxxxxxx                         *
+* Projet........: xxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxx  Sous-projet...: xxx          xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     *
+*                                                                                                                                  *
+* Montant net...: xxxxxxxxxxxxxxx                                                                                                  *
+************************************************************************************************************************************
+* Code produit..: xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx               Entrepôt......: xxxx xxxxxxxxxxxxxxxxxxxxxxx *
+*                                                                                                                                  *
+* Coût moyen....: xxxxxxxxxxxxxxx                        Qté mouvement.: xxxxxxxxxxx  Prix unitaire.: xxxxxxxxxxxxxxx              *
+*                                                                                                                                  *
+* Compte........: xxxxxx   xxxxxxxxxxxxxxxxxxxx          Unité adm.....: xxxxxxxx     xxxxxxxxxxxxxxxxxxxx                         *
+* Projet........: xxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxx  Sous-projet...: xxx          xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     *
+*                                                                                                                                  *
+* Montant net...: xxxxxxxxxxxxxxx                                                                                                  *
+************************************************************************************************************************************
+@ENDIF

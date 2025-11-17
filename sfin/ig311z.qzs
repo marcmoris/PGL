@@ -1,0 +1,445 @@
+;/T/ Impression de la liste d'erreur de l'inventaire physique
+;    des tranches .
+;
+;/P/ Programmeur..: René Bonneau
+;    Date Création: 1996-04-02
+;
+;    Description..: Le but de cette unité de traitement est d'imprimer
+;                   la liste d'erreur des tranches de l'inventaire physique
+;                   de tranches de Granicor.
+;
+;    Paramètres....: Compagnie
+;
+;-------------------------------------------------------------------------------
+;
+; initialisation des paramètres globales de QUIZ.
+;
+CANCEL CLEAR
+
+USE ussetqzs NOLIST
+SET NOBLANK
+
+;
+; 1) NUMERO DE TRANCHE EN DOUBLE
+;
+ACCESS INTRANCHE
+
+CHOOSE CIECLE PARM
+
+DEFINE D-COMPTEUR INTEGER SIZE 4 = 1
+
+SELECT IF TRANUMTRA002 <> "9999999"
+
+SORT ON TRANUMTRA002
+
+DEFINE D-NBRE-TRANCHE INTEGER SIZE 2 = 1
+
+SET SUBFILE NAME WIG311Z1
+
+REPORT SUMMARY &
+  CIECLE        OF INTRANCHE &
+  ITRNUMPGE     OF INTRANCHE &
+  ITRNUMLOC     OF INTRANCHE &
+  TRANUMTRA002  OF INTRANCHE &
+  D-NBRE-TRANCHE SUBTOTAL RESET AT TRANUMTRA002 &
+  D-COMPTEUR     SUBTOTAL NORESET
+
+BUILD ig311z1
+
+;=============================================================================
+;
+; CREATION DU SOUS-FICHIER WIG311Z2 SI LA TRANCHE EST EN DOUBLE
+;
+ACCESS *WIG311Z1 &
+  LINK TO RECORD(D-COMPTEUR+1) OF *WIG311Z1 ALIAS WIG311Z1A OPTIONAL &
+  LINK TRANUMTRA002     OF WIG311Z1A,   &
+       CIECLE           OF WIG311Z1A    &
+    TO TRANUMTRA002,                    &
+       CIECLE           OF INTRANCHE
+
+SELECT IF D-NBRE-TRANCHE OF WIG311Z1A > 1
+
+DEFINE D-ERREUR      CHAR SIZE 50 = &
+        "NUMERO DE TRANCHE EN DOUBLE" IF D-NBRE-TRANCHE OF WIG311Z1A = 2
+
+DEFINE D-INSTRUCTION CHAR SIZE 50 = &
+        "VOIR LOC:" + ITRNUMLOC OF WIG311Z1 + &
+        "PAGE:" + ASCII(ITRNUMPGE OF WIG311Z1) &
+         IF D-NBRE-TRANCHE OF WIG311Z1A = 2
+
+SET SUBFILE NAME WIG311Z2
+
+REPORT SUMMARY &
+  CIECLE        OF WIG311Z1A    &
+  TRANUMTRA002  OF INTRANCHE    &
+  ITRNUMPGE     OF INTRANCHE    &
+  ITRNUMLOC     OF INTRANCHE    &
+  ITRDATINV     OF INTRANCHE    &
+  ITRHREINV     OF INTRANCHE    &
+  ITRDESC       OF INTRANCHE    &
+  D-ERREUR                      &
+  D-INSTRUCTION
+
+BUILD ig311z2
+
+;==============================================================================
+;
+; VERIFICATION DES TYPES DE FINI, AJOUT DANS WIG311Z2
+;
+ACCESS INTRANCHE                        &
+   LINK TRANUMTRA002    OF INTRANCHE,   &
+        CIECLE          OF INTRANCHE    &
+     TO TRANUMTRA002,                   &
+        CIECLE          OF PDTRANCHE
+
+CHOOSE CIECLE PARM
+
+SELECT IF TRANUMTRA002  OF INTRANCHE <> "9999999" AND &
+          TYFCODFIN     OF INTRANCHE <> "" AND &
+          TYFCODFIN     OF PDTRANCHE <> TYFCODFIN       OF INTRANCHE
+
+DEFINE D-ERREUR         CHARACTER SIZE 50 = &
+                        "FINI INFO(" + TYFCODFIN OF PDTRANCHE + &
+                        ") <> FINI INV (" + TYFCODFIN OF INTRANCHE + ")"
+
+DEFINE D-INSTRUCTION    CHARACTER SIZE 50 = &
+                        "VEUILLEZ VERIFIER LE FINI DE SURFACE"
+
+SET SUBFILE NAME WIG311Z2 APPEND
+
+REPORT SUMMARY &
+  CIECLE        OF INTRANCHE    &
+  TRANUMTRA002  OF INTRANCHE    &
+  ITRNUMPGE     OF INTRANCHE    &
+  ITRNUMLOC     OF INTRANCHE    &
+  ITRDATINV     OF INTRANCHE    &
+  ITRHREINV     OF INTRANCHE    &
+  ITRDESC       OF INTRANCHE    &
+  D-ERREUR                      &
+  D-INSTRUCTION
+
+BUILD ig311z3
+
+;==============================================================================
+;
+; NUMERO DE TRANCHE INVALIDE, AJOUT DANS WIG311Z2
+;
+ACCESS INTRANCHE                        &
+   LINK TRANUMTRA002    OF INTRANCHE,   &
+        CIECLE          OF INTRANCHE    &
+     TO TRANUMTRA002,                   &
+        CIECLE          OF PDTRANCHE OPTIONAL
+
+CHOOSE CIECLE PARM
+
+SELECT IF TRANUMTRA002 OF INTRANCHE <> "9999999" AND &
+          NOT RECORD PDTRANCHE EXIST
+
+DEFINE D-ERREUR         CHARACTER SIZE 50 = &
+                        "NUMERO DE TRANCHE INVALIDE"
+
+DEFINE D-INSTRUCTION    CHARACTER SIZE 50 = &
+                        "VERIFIER LE NUMERO DE TRANCHE"
+
+SET SUBFILE NAME WIG311Z2 APPEND
+
+REPORT SUMMARY &
+  CIECLE        OF INTRANCHE    &
+  TRANUMTRA002  OF INTRANCHE    &
+  ITRNUMPGE     OF INTRANCHE    &
+  ITRNUMLOC     OF INTRANCHE    &
+  ITRDATINV     OF INTRANCHE    &
+  ITRHREINV     OF INTRANCHE    &
+  ITRDESC       OF INTRANCHE    &
+  D-ERREUR                      &
+  D-INSTRUCTION
+
+BUILD ig311z4
+
+;===============================================================================
+;
+; VERIFICATION DU STATUT
+;
+ACCESS INTRANCHE                                &
+   LINK TRANUMTRA002    OF INTRANCHE,           &
+        CIECLE          OF INTRANCHE            &
+     TO TRANUMTRA002,                           &
+        CIECLE          OF PDTRANCHE            &
+   LINK TRANUMTRA002    OF PDTRANCHE,           &
+        CIECLE          OF PDTRANCHE            &
+     TO TRANUMTRA002,                           &
+        CIECLE          OF PDEMBAL_TRANCHE OPT      &
+   LINK CAINUMCAI       OF PDEMBAL_TRANCHE,     &
+        CIECLE          OF PDEMBAL_TRANCHE      &
+     TO CAINUMCAI,                              &
+        CIECLE          OF PDCAISSON OPTIONAL
+
+CHOOSE CIECLE PARM
+
+SELECT IF TRASTU OF PDTRANCHE <> "I"
+
+DEFINE D-ERREUR         CHARACTER SIZE 50 = &
+                        "STATUT TRANCHE (" + TRASTU +") " + CAINUMCAI OF PDCAISSON
+
+DEFINE D-INSTRUCTION    CHARACTER SIZE 50 = &
+                        "VERIFIER NO TRANCHE SI BON PRENDRE CARACTERISTIQUES"
+
+SET SUBFILE NAME WIG311Z2 APPEND
+
+REPORT SUMMARY &
+  CIECLE        OF INTRANCHE    &
+  TRANUMTRA002  OF INTRANCHE    &
+  ITRNUMPGE     OF INTRANCHE    &
+  ITRNUMLOC     OF INTRANCHE    &
+  ITRDATINV     OF INTRANCHE    &
+  ITRHREINV     OF INTRANCHE    &
+  ITRDESC       OF INTRANCHE    &
+  D-ERREUR                      &
+  D-INSTRUCTION
+
+BUILD ig311z5
+
+;=============================================================================
+;
+; TRANCHE SANS ETIQUETTE
+;
+ACCESS INTRANCHE
+
+CHOOSE CIECLE PARM , TRANUMTRA002  "9999999"
+
+DEFINE D-ERREUR      CHAR SIZE 50 = "TRANCHE SANS ETIQUETTE"
+
+DEFINE D-INSTRUCTION    CHARACTER SIZE 50 = &
+                        "PRENDRE CARACTERISTIQUES ET POSER 'TAG'"
+
+SET SUBFILE NAME WIG311Z2 APPEND
+
+REPORT SUMMARY &
+  CIECLE        OF INTRANCHE    &
+  TRANUMTRA002  OF INTRANCHE    &
+  ITRNUMPGE     OF INTRANCHE    &
+  ITRNUMLOC     OF INTRANCHE    &
+  ITRDATINV     OF INTRANCHE    &
+  ITRHREINV     OF INTRANCHE    &
+  ITRDESC       OF INTRANCHE    &
+  D-ERREUR                      &
+  D-INSTRUCTION
+
+BUILD ig311z6
+
+;==============================================================================
+;
+; PLACE UN MESSAGE D'D-ERREUR A BLANC POUR TOUT LES TRANCHES (AVEC ETIQUETTE)
+;
+ACCESS INTRANCHE
+
+CHOOSE CIECLE PARM
+
+SELECT IF TRANUMTRA002 <> "9999999"
+
+DEFINE D-ERREUR      CHAR SIZE 50 = ""
+
+DEFINE D-INSTRUCTION CHAR SIZE 50 = ""
+
+SET SUBFILE NAME WIG311Z2 APPEND
+
+REPORT SUMMARY &
+  CIECLE        OF INTRANCHE    &
+  TRANUMTRA002  OF INTRANCHE    &
+  ITRNUMPGE     OF INTRANCHE    &
+  ITRNUMLOC     OF INTRANCHE    &
+  ITRDATINV     OF INTRANCHE    &
+  ITRHREINV     OF INTRANCHE    &
+  ITRDESC       OF INTRANCHE    &
+  D-ERREUR                      &
+  D-INSTRUCTION
+
+BUILD ig311z7
+
+;============================================================================
+;
+; PREND LE SUBFILE ET PLACE UN ET UN SEUL ENREGISTREMENT POUR CHAQUE TRANCHE
+; EX :  (  231123   NUMERO DE TRANCHE INVALIDE)
+;       (  231123                             )
+; DONNE (  231123   NUMERO DE TRANCHE INVALIDE)
+;
+ACCESS *WIG311Z2
+
+SELECT IF TRANUMTRA002 <> "9999999"
+
+DEF D-TRIE CHAR SIZE 22 = " "
+
+SORT ON ITRNUMPGE       OF WIG311Z2 &
+     ON ITRNUMLOC       OF WIG311Z2 &
+     ON TRANUMTRA002    OF WIG311Z2
+
+SET SUBFILE NAME WIG311Z3 AT TRANUMTRA002
+
+REPORT SUMMARY &
+  CIECLE        OF WIG311Z2     &
+  TRANUMTRA002  OF WIG311Z2     &
+  ITRNUMPGE     OF WIG311Z2     &
+  ITRNUMLOC     OF WIG311Z2     &
+  ITRDATINV     OF WIG311Z2     &
+  ITRHREINV     OF WIG311Z2     &
+  D-TRIE                        &
+  ITRDESC       OF WIG311Z2     &
+  D-ERREUR      OF WIG311Z2 MAX &
+  D-INSTRUCTION OF WIG311Z2 MAX
+
+BUILD ig311z8
+
+;==============================================================================
+;
+; AJOUT DE TOUT LES TRANCHES SANS ETIQUETTES
+;
+ACCESS *WIG311Z2
+
+SELECT IF TRANUMTRA002 = "9999999"
+
+DEF D-TRIE CHAR SIZE 22 = ASCII(ITRDATINV OF WIG311Z2) + &
+                          ASCII(ITRHREINV OF WIG311Z2)
+
+SET SUBFILE NAME WIG311Z3 APPEND
+
+REPORT SUMMARY &
+  CIECLE        OF WIG311Z2     &
+  TRANUMTRA002  OF WIG311Z2     &
+  ITRNUMPGE     OF WIG311Z2     &
+  ITRNUMLOC     OF WIG311Z2     &
+  ITRDATINV     OF WIG311Z2     &
+  ITRHREINV     OF WIG311Z2     &
+  D-TRIE                        &
+  ITRDESC       OF WIG311Z2     &
+  D-ERREUR      OF WIG311Z2     &
+  D-INSTRUCTION OF WIG311Z2
+
+
+BUILD ig311z9
+
+;==============================================================================
+
+ACCESS *WIG311Z3
+
+SORT ON ITRNUMPGE &
+     ON D-ERREUR D
+
+DEFINE D-ERR    INTEGER SIZE 2 = 1 &
+                IF 0 <> SIZE(TRUNCATE(D-ERREUR OF WIG311Z3)) &
+                ELSE 0
+
+SET SUBFILE NAME WIG311Z4
+
+REPORT SUMMARY &
+  CIECLE        OF WIG311Z3     &
+  TRANUMTRA002  OF WIG311Z3     &
+  ITRNUMPGE     OF WIG311Z3     &
+  ITRNUMLOC     OF WIG311Z3     &
+  ITRDATINV     OF WIG311Z3     &
+  ITRHREINV     OF WIG311Z3     &
+  D-TRIE        OF WIG311Z3     &
+  ITRDESC       OF WIG311Z3     &
+  D-ERREUR      OF WIG311Z3     &
+  D-INSTRUCTION OF WIG311Z3     &
+  D-ERR SUBTOTAL RESET AT ITRNUMPGE OF WIG311Z3
+
+BUILD ig311z10
+
+;==============================================================================
+;
+; IMPRESSION DU RAPPORT
+;
+ACCESS *WIG311Z4 link tranumtra002 of WIG311Z4         , &
+                      ciecle       of WIG311Z4           &
+                   to tranumtra002                     , &
+                      ciecle       of pdtranche     opt  &
+                                                   
+                 link tgrcodgra    of pdtranche        , &
+                      ciecle       of pdtranche          &
+                   to tgrcodgra                        , &
+                      ciecle       of pdtype_granit opt
+
+;-------------------------------------------------------------------------------
+; Variables obligatoires pour les en-têtes standards.
+;
+DEFINE DZ_NOMRAP1       CHARACTER SIZE 60 = PARM
+DEFINE DZ_NOMRAP2       CHARACTER SIZE 60 = ""
+
+;-------------------------------------------------------------------------------
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP        CHARACTER SIZE  7 = "IG311"
+
+;-------------------------------------------------------------------------------
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM        CHARACTER SIZE 40 = PARM
+
+
+SELECT IF D-ERR OF WIG311Z4 <> 0
+
+DEFINE D-ITRNUMLOC      CHARACTER SIZE 4 = RJ(ITRNUMLOC OF WIG311Z4)
+
+SORT ON ITRNUMPGE       OF WIG311Z4     &
+     ON D-ITRNUMLOC                     &
+     ON ITRDATINV       OF WIG311Z4     &
+     ON ITRHREINV       OF WIG311Z4     &
+     ON TRANUMTRA002    OF WIG311Z4     &
+     ON D-TRIE          OF WIG311Z4
+
+DEFINE D-LIGNE          CHARACTER SIZE 85 = &
+    "|__________|_______|_____|_____|_____|" + &
+    "_____|___________________" &
+    IF D-ERREUR OF WIG311Z4 <> "" ELSE ""
+
+DEFINE D-TITRE-CENTRE CHARACTER SIZE 80 = &
+        CENTRE ("LISTE DE L'INVENTAIRE PHYSIQUE DE TRANCHES ET ERREURS                           ")
+DEFINE D-TITRE-CENTRE-TEMP CHARACTER SIZE 80 = &
+        "DONNEES DE LA PAGE: " + ASCII(ITRNUMPGE)
+DEFINE D-TITRE-CENTRE1 CHARACTER SIZE 80 = &
+        CENTRE (D-TITRE-CENTRE-TEMP)
+
+define d_err_gra character size 60 = d-erreur     of WIG311Z4               &
+                                  if 0 <> size(trunc(d-erreur of WIG311Z4)) &
+                                else "Type de granit:"                      &
+                                   + tgrcodgra    of pdtranche + " "        &
+                                   + tgrdscfra001 of pdtype_granit
+
+USE ustitstd52 NOLIST
+
+SKIP 3 &
+  TAB 025 D-TITRE-CENTRE &
+SKIP 1 &
+  TAB 025 D-TITRE-CENTRE1 &
+SKIP 3 TAB 3   "NO" &
+       TAB 9   "NO" &
+SKIP   TAB 2   "LOC." &
+       TAB 8   "TRAN." &
+       TAB 16  "DESCRIPTION DE GRANIT OU D'ERREUR / D-INSTRUCTION" &
+       TAB 71  "TRANCHE"  &
+       TAB 82  "TYPE"     &
+       TAB 88  "FINI"     &
+       TAB 94  "EPAI."    &
+       TAB 100 "LONG"     &
+       TAB 107 "HAUT"     &
+       TAB 117 "REMARQUE" &
+SKIP   TAB 2   "__________________________________________________" &
+       TAB 52  "__________________________________________________" &
+       TAB 101 "______________________________" &
+       SKIP 2
+
+HEAD AT ITRNUMPGE SKIP PAGE
+
+FOOTING AT D-TRIE                               &
+       TAB 002 D-ITRNUMLOC                      &
+       TAB 007 TRANUMTRA002     OF WIG311Z4     &
+       TAB 016 d_err_gra                        &
+SKIP 1 TAB 016 D-INSTRUCTION    OF WIG311Z4     &
+       TAB 068 D-LIGNE                          &
+SKIP 1 TAB 020 ITRDESC          OF WIG311Z4     &
+SKIP 2
+
+FOOTING AT ITRNUMPGE SKIP 2 &
+    "NOMBRE D'ENTREES POUR CETTE PAGE..............:" COUNT
+
+BUILD ig311z11

@@ -1,0 +1,880 @@
+;/T/ Encaissements - Imputation
+;
+;//M/GRA01/Francois Richard/1999-06-18
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur..: Alain Côté
+;    Date Création: 23 juin 1993
+;
+;    Description..: Saisie de l'imputation pour un encaissement.
+;
+;
+;/M/ François Déry, 30 avril 1999
+;       Modifier l'accèss au fichier de séquence car il a
+;       été converti en format interbase au lieu d'indexé.
+;
+;/M/ Adatation....: Marc Morissette 22 Octobre 1993
+;
+;    Description..: Ajout du flg Facturable Oui/non et du numéro de client
+;                   Ajout du code d'équipement
+;                   Modification de l'ordre de saisie des champs
+;
+;-------------------------------------------------------------------------------
+;/V/ 3.00.02    Guy Chabot 12-mai-1994 (197).
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cr007a ACTIONBAR &
+              MODE LABEL "" AT 2,80 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        D_LCRATRJOU, &
+                        D_DEVCLE   , &
+                        D_DPONOM   , &
+                        CRDEPOT
+
+TEMPORARY T_CPTPECDEBI_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CPTPECDEBA_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_PECCLE_SIE3 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CCUPECDEBI_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CCUPECDEBA_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_PECCLE_SIE1 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+USE ussectmp   NOLIST
+    "CR007A"
+
+USE cr007a.hlp NOLIST
+
+USE usactecr   NOLIST
+
+;
+; Ouverture d'une transaction QUERY indépendante de l'écran maitre.
+;
+USE ustrasse   NOLIST
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE CRDPO_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+
+;-------------------------------------------------------------------------------
+;
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de compagnie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie du menu.
+DEFINE    D_LCRATRJOU CHARACTER SIZE 1  ; Si le lot est autorisé.
+DEFINE    D_DPONOM    CHARACTER SIZE 40 ; Nom identifiant le dépôt.
+DEFINE    D_DEVCLE    CHARACTER SIZE 3  ; Devise de la référence.
+
+;-------------------------------------------------------------------------------
+;
+
+FILE CRDEPOT          MASTER
+
+FILE CRDPO_IMPUTATION PRIMARY &
+                      OCCURS 14 &
+                      NOITEMS
+  ACCESS VIA CIECLE, &
+             DPOCLE  &
+         USING CIECLE OF CRDEPOT, &
+               DPOCLE OF CRDEPOT  &
+         ORDERBY CIECLE, &
+                 DPOCLE, &
+                 DPITIMSTP
+
+  ITEM CIECLE    OF CRDPO_IMPUTATION INITIAL CIECLE OF CRDEPOT
+  ITEM DPOCLE    OF CRDPO_IMPUTATION FINAL   DPOCLE OF CRDEPOT
+  ITEM DPITIMSTP OF CRDPO_IMPUTATION INITIAL SYSDATE * 1000000 + &
+                                             ROUND(SYSTIME / 100)
+  ITEM DPICODDC  OF CRDPO_IMPUTATION INITIAL "C"
+
+;
+; Notion de charte de compte et pour avoir la devise du G/L.
+;
+FILE MCHOLDING        REFERENCE
+  ACCESS VIA CIENMC &
+         USING "1"
+
+;
+; Validation de la charte de compte.
+;
+FILE MCCHARTE_UNA     REFERENCE
+  ACCESS VIA CPTCLE, &
+             CIECLE, &
+             UNACLE &
+         USING CPTCLE OF CRDPO_IMPUTATION, &
+               CIECLE OF CRDPO_IMPUTATION, &
+               UNACLE OF CRDPO_IMPUTATION
+
+;
+; Validation de l'unité administrative.
+;
+FILE MCUNITE_ADM      REFERENCE &
+                      OCCURS WITH CRDPO_IMPUTATION
+  ACCESS VIA CIECLE, &
+             UNACLE &
+         USING CIECLE OF CRDPO_IMPUTATION, &
+               UNACLE OF CRDPO_IMPUTATION
+
+
+;
+; Validation du compte comptable.
+;
+FILE VCPT_DSC         REFERENCE &
+                      OCCURS WITH CRDPO_IMPUTATION
+  ACCESS VIA CPTCLE &
+         USING CPTCLE OF CRDPO_IMPUTATION
+
+;
+; Validation du projet.
+;
+FILE GPPROJETS         REFERENCE &
+                      OCCURS WITH CRDPO_IMPUTATION
+
+  ACCESS VIA CIECLE, &
+             PRJCLE  &
+         USING CIECLE OF CRDPO_IMPUTATION, &
+               PRJCLE OF CRDPO_IMPUTATION
+
+;
+; Validation de l'activité.
+;
+FILE GPPRO_ACTIVITE       REFERENCE
+  ACCESS VIA CIECLE, &
+             PRJCLE, &
+             PRACLE  &
+         USING CIECLE OF CRDPO_IMPUTATION, &
+               PRJCLE OF CRDPO_IMPUTATION, &
+               PRACLE OF CRDPO_IMPUTATION
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide l'immobilisation et affiche la description.
+;
+TEMPORARY T_IMMCLE CHARACTER SIZE 12 ; Popup sur les immobilisations.
+
+FILE IMIMMOBILISATION REFERENCE
+
+  ACCESS  VIA   CIECLE, &
+                IMMCLE &
+          USING CIECLE OF CRDPO_IMPUTATION , &
+                IMMCLE OF CRDPO_IMPUTATION
+
+  SELECT IF IMMSTU OF IMIMMOBILISATION = "A"
+
+
+
+;
+; Numéro de séquence des encaissements.
+;
+FILE CRDPO_SEQ        DESIGNER &
+                      TRANSACTION GEN_NUM_SEQ
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul de l'écart.Pour déterminer l'écart, il faut prendre le montant reçu
+; moin la sommation de la ventilation factures et moin la sommation de
+; l'imputation.
+;
+DEFINE D_BALDPO FLOAT SIZE 8 = DPOMNTPAM OF CRDEPOT - DPOMNTFAC OF CRDEPOT
+
+DEFINE D_ECART  FLOAT SIZE 8 = D_BALDPO - DPOCUMMNT OF CRDEPOT
+
+TEMPORARY T_CPTCLE    CHARACTER SIZE 6 ; Popup sur les comptes
+TEMPORARY T_PECCLE    CHARACTER SIZE 4 ; Popup sur les comptes et unité adm.
+TEMPORARY T_CPTTYPPAT CHARACTER SIZE 1 ; Popup sur les comptes
+TEMPORARY T_CPTCATPAT CHARACTER SIZE 8 ; Popup sur les comptes
+
+TEMPORARY T_UNACLE    CHARACTER SIZE 8 ; Popup sur les unités adm.
+
+TEMPORARY T_PRJCLE    CHARACTER SIZE 8 ; Popup sur les projets.
+TEMPORARY T_PRJSTUPAT CHARACTER SIZE 8 ; Popup sur les projets.
+
+TEMPORARY T_PRACLE    CHARACTER SIZE 3 ; Popup sur les activités.
+TEMPORARY T_PRASTUPAT CHARACTER SIZE 5 ; Popup sur les activités.
+
+
+
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Imputation " &
+@ELSE
+      " Charge " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST
+
+SKIP
+
+ALIGN(3,3,19) (,,21) (,,28)
+
+FIELD REFCLETYP OF CRDEPOT &
+@IF FRANCAIS
+        LABEL "Client/employé:" &
+@ELSE
+        LABEL "Client/employe:" &
+@ENDIF
+        FIXED
+
+FIELD REFCLENUM OF CRDEPOT &
+        FIXED
+
+FIELD D_DPONOM &
+        FIXED
+
+
+ALIGN(,3,19) (,50,66)
+
+FIELD DPOMNTPAM OF CRDEPOT &
+LABEL "Montant reçu..:"&
+        FIXED
+
+FIELD D_BALDPO &
+        FIXED &
+        PICTURE "^^,^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5 &
+@IF FRANCAIS
+        LABEL "Balance dépôt.:"
+@ELSE
+        LABEL "Deposit balanc:"
+@ENDIF
+
+
+FIELD DPOMNTENC OF CRDEPOT &
+LABEL "Mnt encaissé..:"&
+        FIXED
+
+FIELD D_ECART &
+        DISPLAY &
+        PREDISPLAY &
+        PICTURE "^^,^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5 &
+@IF FRANCAIS
+        LABEL "Solde à vent..:"
+@ELSE
+        LABEL "Balance.......:"
+@ENDIF
+
+
+SKIP
+
+DRAW ,1 TO ,80
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+ "Projet SSpro Immobilis.   Unité    Compte Description        Montant      " &
+@ENDIF
+  AT ,3
+
+ALIGN (3,2,3) (,,12) (,,16) (,,29) (,,38) (,,45) (,,64)
+
+; Projet SSpro Immobilis.   Unité    Compte Description        Montant
+; xxxxxxxx xxx xxxxxxxxxxxx xxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxx
+
+CLUSTER OCCURS WITH CRDPO_IMPUTATION ID BASE 05
+
+FIELD PRJCLE       OF CRDPO_IMPUTATION  &
+      HIDDEN LABEL " " &
+      REQUIRED
+
+FIELD PRACLE       OF CRDPO_IMPUTATION REQUIRED
+
+FIELD IMMCLE       OF CRDPO_IMPUTATION &
+      REQUIRED  &
+        LOOKUP ON IMIMMOBILISATION &
+            MESSAGE 491 ; Cette immobilisation n'existe pas ou est inactive.
+
+
+FIELD UNACLE       OF CRDPO_IMPUTATION &
+        REQUIRED &
+        DUPLICATE &
+        LOOKUP ON MCUNITE_ADM &
+          MESSAGE 666 ; Ce numéro d'unité adm. n'existe pas.
+
+FIELD CPTCLE       OF CRDPO_IMPUTATION &
+        REQUIRED &
+        LOOKUP ON VCPT_DSC  &
+          MESSAGE 665 ; Ce numéro de compte n'existe pas.
+
+FIELD CPTDSCABR OF VCPT_DSC DISPLAY SIZE 18
+
+FIELD DPIMNT       OF CRDPO_IMPUTATION &
+  DEFAULT D_ECART
+
+
+CLUSTER
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Averti l'usager si l'écriture ne balance pas.
+;
+;
+PROCEDURE EXIT
+BEGIN
+  IF D_ECART <> 0
+  THEN WARNING 649 ; L'imputation ne balance pas.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les comptes.
+;
+;
+PROCEDURE INPUT CPTCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_CPTTYPPAT = "R"
+    LET T_CPTCATPAT = "@"
+    LET T_PECCLE    = PECCLE OF CRDEPOT
+    RUN SCREEN mc103 MODE F PASSING T_CPTCLE, &
+                                    T_CPTTYPPAT, &
+                                    T_CPTCATPAT, &
+                                    T_PECCLE &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_CPTCLE)
+  END
+  ;
+  ; Force l'éxécution du LOOKUP.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(CPTCLE OF CRDPO_IMPUTATION))
+  THEN LET FIELDTEXT = CPTCLE OF CRDPO_IMPUTATION
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation si le compte est actif.
+;
+;
+PROCEDURE EDIT CPTCLE
+BEGIN
+  ;
+  ; Note: La période de fin, est la première période d'inactivité.
+  ;
+
+  ; Ajustement pour le changement de siècle
+  IF PECCLE OF CRDEPOT[1:1] < "8"
+  THEN LET T_PECCLE_SIE3 = "1" + PECCLE OF CRDEPOT
+  ELSE LET T_PECCLE_SIE3 = "0" + PECCLE OF CRDEPOT
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBA OF VCPT_DSC[1:1] < "8"
+  THEN LET T_CPTPECDEBA_SIE = "1" + CPTPECDEBA OF VCPT_DSC
+  ELSE LET T_CPTPECDEBA_SIE = "0" + CPTPECDEBA OF VCPT_DSC
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBI OF VCPT_DSC[1:1] < "8"
+  THEN LET T_CPTPECDEBI_SIE = "1" + CPTPECDEBI OF VCPT_DSC
+  ELSE LET T_CPTPECDEBI_SIE = "0" + CPTPECDEBI OF VCPT_DSC
+
+  IF T_PECCLE_SIE3 >= T_CPTPECDEBA_SIE AND &
+     ( &
+       T_PECCLE_SIE3 < T_CPTPECDEBI_SIE OR &
+       CPTPECDEBI OF VCPT_DSC = "" &
+     )
+  THEN NULL
+  ELSE ERROR 667 ; Ce compte est inactif.
+
+  IF CPTTYP OF VCPT_DSC <> "R"
+  THEN ERROR 668 ; On ne peut pas utliser ce compte dans une imputation.
+
+  IF     DEVCLE OF VCPT_DSC <> D_DEVCLE            &
+     AND DEVCLE OF VCPT_DSC <> DEVCLE OF MCHOLDING
+  THEN ERROR 726 ; Compte interdit due à la devise du compte.
+
+  IF HLDCHTCPT OF MCHOLDING = "1"
+  THEN BEGIN
+    GET MCCHARTE_UNA OPTIONAL
+    ;
+    ; Si la charte est incluse, le lien est obligatoire.
+    ;
+    IF NOT ACCESSOK
+    THEN BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN ERROR 669 ; La combinaison compte/unité adm n'existe pas.
+    END
+    ELSE BEGIN
+      ;
+      ; Si la charte est Exclusive et que la période fait partie de
+      ; l'intervalle de période de la charte alors c'est une erreur.
+      ;
+      ; Si la charte est inclusive et que la période ne fait pas partie de
+      ; l'intervalle de période de la charte alors c'est une erreur.
+      ;
+
+      ; Ajustement pour le changement de siècle
+      IF PECCLE OF CRDEPOT[1:1] < "8"
+      THEN LET T_PECCLE_SIE1 = "1" + PECCLE OF CRDEPOT
+      ELSE LET T_PECCLE_SIE1 = "0" + PECCLE OF CRDEPOT
+
+      ; Ajustement pour le changement de siècle
+      IF CCUPECDEBA OF MCCHARTE_UNA[1:1] < "8"
+      THEN LET T_CCUPECDEBA_SIE = "1" + CCUPECDEBA OF MCCHARTE_UNA
+      ELSE LET T_CCUPECDEBA_SIE = "0" + CCUPECDEBA OF MCCHARTE_UNA
+
+      ; Ajustement pour le changement de siècle
+      IF CCUPECDEBI OF MCCHARTE_UNA[1:1] < "8"
+      THEN LET T_CCUPECDEBI_SIE = "1" + CCUPECDEBI OF MCCHARTE_UNA
+      ELSE LET T_CCUPECDEBI_SIE = "0" + CCUPECDEBI OF MCCHARTE_UNA
+
+      IF ( &
+           T_PECCLE_SIE1 >= T_CCUPECDEBA_SIE AND &
+           ( &
+             T_PECCLE_SIE1 < T_CCUPECDEBI_SIE OR &
+             CCUPECDEBI OF MCCHARTE_UNA = " " &
+           ) &
+         )
+      THEN BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "E"
+        THEN ERROR 670 ; La combinaison compte/unité adm. est inactif.
+      END
+      ELSE BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "I"
+        THEN ERROR 670 ; La combinaison compte/unité adm. est inactif.
+      END
+    END
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT UNACLE
+BEGIN
+  ;
+  ; Popup sur les unités administrative selon la charte d'unité.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE = CPTCLE OF CRDPO_IMPUTATION
+    LET T_PECCLE = PECCLE OF CRDEPOT
+    LET T_UNACLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc104 MODE F PASSING T_CIECLEMNU, T_UNACLE &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNCATE(T_UNACLE)
+  END
+  ;
+  ; Force l'éxécution du LOOKUP.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(UNACLE OF CRDPO_IMPUTATION))
+  THEN LET FIELDTEXT = UNACLE OF CRDPO_IMPUTATION
+END
+
+;-------------------------------------------------------------------------------
+;
+; Permet d'avoir comme valeur par défaut le solde à ventiler et de calculer
+; le restant à ventiler. Force l'exécution de la procédure EDIT
+;
+PROCEDURE INPUT DPIMNT
+BEGIN
+  IF 0 = SIZE(TRUNCATE(FIELDTEXT)) AND DPIMNT = 0
+  THEN LET FIELDTEXT = ASCII(D_ECART,10)[1:8] + "." + ASCII(D_ECART,10)[9:10]
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Mise à jour du cumulatif de l'imputation.
+;
+;
+PROCEDURE EDIT DPIMNT
+BEGIN
+  ;
+  ; Valide la partie décimale.
+  ;
+  USE usvaldec NOLIST
+
+  LET DPOCUMMNT OF CRDEPOT = DPOCUMMNT OF CRDEPOT - &
+                             OLDVALUE(DPIMNT OF CRDPO_IMPUTATION) + &
+                             FIELDVALUE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Affiche l'écart.
+;
+;
+PROCEDURE PROCESS DPIMNT
+BEGIN
+  DISPLAY D_ECART
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les projets.
+;
+;
+PROCEDURE INPUT PRJCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PRJSTUPAT = "A"
+    LET T_PRJCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gp104 MODE F PASSING T_CIECLEMNU, &
+                                    T_PRJCLE   , &
+                                    T_PRJSTUPAT &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNCATE(T_PRJCLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du projet, le projet est optionel dans l'imputation.
+;
+;
+PROCEDURE EDIT PRJCLE
+BEGIN
+  GET GPPROJETS OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 686 ; Ce projet n'existe pas.
+
+  IF PRJSTU OF GPPROJETS <> "A"
+  THEN ERROR 698 ; Ce projet n'est pas actif.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT PRACLE
+BEGIN
+  ;
+  ; Popup sur les activités.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PRJCLE    = PRJCLE OF CRDPO_IMPUTATION
+    LET T_PRASTUPAT = "A"
+    LET T_PRACLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gp108 MODE F PASSING T_CIECLEMNU, &
+                                    T_PRJCLE   , &
+                                    T_PRACLE   , &
+                                    T_PRASTUPAT  &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNCATE(T_PRACLE)
+  END
+  ;
+  ; Force la validation de l'activité, car l'usager peut modifier le numéro de
+  ; compagnie ou le numéro de projet sur le ligne.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(PRACLE OF CRDPO_IMPUTATION))
+  THEN LET FIELDTEXT = PRACLE OF CRDPO_IMPUTATION
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation de l'activité, l'activité est optionel dans l'imputation.
+;
+;
+PROCEDURE EDIT PRACLE
+BEGIN
+  GET GPPRO_ACTIVITE OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 704 ; Cette activité n'existe pas.
+
+  IF PRASTU OF GPPRO_ACTIVITE <> "A"
+  THEN ERROR 708 ; Cette activité n'est pas active.
+END
+
+
+PROCEDURE INPUT IMMCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_IMMCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN im102 MODE F &
+                     PASSING T_CIECLEMNU, &
+                             T_IMMCLE  WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE( T_IMMCLE )
+  END
+END
+
+
+PROCEDURE EDIT IMMCLE
+BEGIN
+   IF IMMTYP OF IMIMMOBILISATION <> "E"
+   THEN ERROR 1503
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE APPEND
+BEGIN
+
+  USE ussecent NOLIST
+
+  ;
+  ; Si notion de projet.
+  ;
+  IF HLDNTNPRO OF MCHOLDING = "1"
+  THEN BEGIN
+      ACCEPT PRJCLE    OF CRDPO_IMPUTATION
+      INFORMATION = PRJDSC1 OF GPPROJETS
+      ACCEPT PRACLE    OF CRDPO_IMPUTATION
+      INFORMATION = PRADSC1 OF GPPRO_ACTIVITE
+      ACCEPT IMMCLE    OF CRDPO_IMPUTATION
+      INFORMATION = IMMDSC  OF IMIMMOBILISATION
+  END
+  ELSE BEGIN
+    LET PRJCLE OF CRDPO_IMPUTATION = " "
+    LET PRACLE OF CRDPO_IMPUTATION = " "
+    LET IMMCLE OF CRDPO_IMPUTATION = " "
+  END
+
+  ACCEPT UNACLE OF CRDPO_IMPUTATION
+  INFORMATION = UNANOM OF MCUNITE_ADM
+  EDIT UNACLE OF CRDPO_IMPUTATION
+
+  ACCEPT CPTCLE OF CRDPO_IMPUTATION
+  DISPLAY CPTDSCABR OF VCPT_DSC
+
+  ACCEPT DPIMNT OF CRDPO_IMPUTATION
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; La procédure entry est généré car la procédure append est généré.
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  FOR CRDPO_IMPUTATION
+  BEGIN
+    PERFORM APPEND
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Cette procédure est idem à la procédure APPEND.
+;
+;
+PROCEDURE DESIGNER 05
+BEGIN
+  ;
+  ; Si notion de projet.
+  ;
+  IF HLDNTNPRO OF MCHOLDING = "1"
+  THEN BEGIN
+      ACCEPT PRJCLE    OF CRDPO_IMPUTATION
+      INFORMATION = PRJDSC1 OF GPPROJETS
+      ACCEPT PRACLE    OF CRDPO_IMPUTATION
+      INFORMATION = PRADSC1 OF GPPRO_ACTIVITE
+      ACCEPT IMMCLE    OF CRDPO_IMPUTATION
+      INFORMATION = IMMDSC  OF IMIMMOBILISATION
+  END
+  ELSE BEGIN
+    LET PRJCLE OF CRDPO_IMPUTATION = " "
+    LET PRACLE OF CRDPO_IMPUTATION = " "
+    LET IMMCLE OF CRDPO_IMPUTATION = " "
+  END
+
+  ACCEPT UNACLE    OF CRDPO_IMPUTATION
+  INFORMATION = UNANOM OF MCUNITE_ADM
+  EDIT UNACLE OF CRDPO_IMPUTATION
+
+  ACCEPT CPTCLE     OF CRDPO_IMPUTATION
+  DISPLAY CPTDSCABR OF VCPT_DSC
+
+  ACCEPT DPIMNT       OF CRDPO_IMPUTATION
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR CRDPO_IMPUTATION
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF CRDPO_IMPUTATION &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF CRDPO_IMPUTATION &
+       AND NOT NEWRECORD     OF CRDPO_IMPUTATION &
+       AND NOT DELETEDRECORD OF CRDPO_IMPUTATION &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+    ;
+    ; L'imputation est non modifiable aprés journalisation.
+    ;
+    IF (    NEWRECORD     OF CRDPO_IMPUTATION &
+         OR ALTEREDRECORD OF CRDPO_IMPUTATION &
+         OR DELETEDRECORD OF CRDPO_IMPUTATION &
+       ) &
+       AND DPODATJOU OF CRDEPOT <> 0
+    THEN ERROR 614 ; Impossible de mettre à jour la transaction est journalisée.
+    ;
+    ; Le timbre de modification est mis à jour si l'usager modifie
+    ; la table CRDPO_IMPUTATION.
+    ;
+    IF        NEWRECORD OF CRDPO_IMPUTATION &
+       OR ALTEREDRECORD OF CRDPO_IMPUTATION &
+       OR DELETEDRECORD OF CRDPO_IMPUTATION
+    THEN BEGIN
+      LET DPODATMOD OF CRDEPOT = SYSDATE
+      LET DPOHREMOD OF CRDEPOT = SYSTIME / 10000
+      LET DPOUSRMOD OF CRDEPOT = LOGONID
+    END
+  END
+  ;
+  ; L'imputation est non modifiable Si le lot est autorisé.
+  ;
+  IF     D_LCRATRJOU = "1" &
+     AND DPODATJOU OF CRDEPOT = 0
+  THEN ERROR 713 ; Impossible de mettre à jour la transaction est autorisé.
+  ;
+  ; On incrémente le numéro d'encaissment.
+  ;
+  IF DPOCLE OF CRDEPOT = ""
+  THEN BEGIN
+    START TRANSACTION GEN_NUM_SEQ
+    GET CRDPO_SEQ VIA CIECLE, &
+                      PECCLE, &
+                      LCRCLE  &
+                  USING CIECLE OF CRDEPOT, &
+                        PECCLE OF CRDEPOT, &
+                        LCRCLE OF CRDEPOT  &
+                  OPTIONAL
+    LET CIECLE    OF CRDPO_SEQ = CIECLE    OF CRDEPOT
+    LET PECCLE    OF CRDPO_SEQ = PECCLE    OF CRDEPOT
+    LET LCRCLE    OF CRDPO_SEQ = LCRCLE    OF CRDEPOT
+    ;LET DPSNUMSEQ OF CRDPO_SEQ = DPSNUMSEQ OF CRDPO_SEQ + 1
+;an 2000
+    if newrecord of crdpo_seq
+    then LET DPSNUMSEQ OF CRDPO_SEQ = 0
+    LET DPSNUMSEQ OF CRDPO_SEQ = DPSNUMSEQ OF CRDPO_SEQ + 1
+
+    LET DPOCLE    OF CRDEPOT   = PECCLE    OF CRDEPOT + &
+                                 LCRCLE    OF CRDEPOT + &
+                            ASCII(DPSNUMSEQ OF CRDPO_SEQ,DPSLONNUM OF CRDPO_SEQ - 2)
+    PUT CRDPO_SEQ
+    COMMIT TRANSACTION GEN_NUM_SEQ
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Met à jour les cumulatifs de l'imputation dans l'encaissement.
+;
+;
+PROCEDURE DELETE
+BEGIN
+  IF NOT DELETEDRECORD OF CRDPO_IMPUTATION
+  THEN BEGIN
+    LET DPOCUMMNT OF CRDEPOT = DPOCUMMNT OF CRDEPOT - &
+                               DPIMNT OF CRDPO_IMPUTATION
+    DELETE CRDPO_IMPUTATION
+    DISPLAY D_ECART
+  END
+END
+
+BUILD
+@IF FORMAT
+
+;
+;xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+;********************************** Imputation **********************************
+;* Client/employé: x xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            *
+;* Montant reçu..: xxxxxxxxxxxxxx                 Balance dépôt.: xxxxxxxxxxxxxx*
+;* Mnt encaissé..: xxxxxxxxxxxxxx                 Ecart.........: xxxxxxxxxxxxxx*
+;********************************************************************************
+;* Compte Description           Unité            Montant    Projet  Activité    *
+;* xxxxxx xxxxxxxx   xxxxxxxxxxxxxx   xxxxxxxx xxxxxx      *
+;* xxxxxx xxxxxxxx   xxxxxxxxxxxxxx   xxxxx   xxxxxx      *
+;* xxxxxx xxxxxxxx   xxxxxxxxxxxxxx   xxxxx   xxxxxx      *
+;* xxxxxx xxxxxxxx   xxxxxxxxxxxxxx   xxxxx   xxxxxx      *
+;* xxxxxx xxxxxxxx   xxxxxxxxxxxxxx   xxxxx   xxxxxx      *
+@ENDIF

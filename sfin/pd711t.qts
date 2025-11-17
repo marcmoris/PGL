@@ -1,0 +1,543 @@
+;/T/ 2.4.3 Enregistrer les opérations de surface - PROCÉDURE DE TRANSFERT
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1994-03-30
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   les opérations de surface.
+;
+;/M/ Programmeur..: Claudie Doyon
+;    Date ........: 1999-05-19
+;    État.........: Terminer
+;    Description..: Ajouter le total des m2 sur le rapport
+;                   référence no.demande 630
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST   ; set process nolimit
+
+
+
+RUN pd711t
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les lignes de détail du rapport d'opération de surface
+;
+
+REQUEST VALIDE_DETAIL_RAPPORT
+
+
+ACCESS PDOPERATION_SURF                      &
+
+  LINK CIECLE           OF PDOPERATION_SURF, &
+       OSUNUMRAP        OF PDOPERATION_SURF  &
+    TO CIECLE,                               &
+       OSUNUMRAP        OF PDDET_OPER_SURF   &
+  LINK CIECLE           OF PDOPERATION_SURF, &
+       TRANUMTRA002     OF PDDET_OPER_SURF   &
+    TO CIECLE,                               &
+       TRANUMTRA002     OF PDTRANCHE         OPTIONAL
+
+
+CHOOSE CIECLE PARM , OSUNUMRAP PARM
+
+
+TEMPORARY T_MESSAGE CHARACTER SIZE 90
+TEMPORARY TOT_M2 FLOAT SIZE 8
+TEMPORARY TOT_M2_TOT FLOAT SIZE 8
+
+
+ITEM T_MESSAGE = T_MESSAGE IF 0 <> SIZE(TRUNCATE(T_MESSAGE)) &
+                           ELSE "Il y a des lignes de détail qui n'ont pas été valider." &
+                                 IF DOSSTU OF PDDET_OPER_SURF = "E" &
+                           ELSE "Il y a des lignes de détail qui ont été modifiées depuis la validation. " &
+                                 + ASCII(DOSNUMLIG OF PDDET_OPER_SURF,3) &
+                                 IF DOSSTU OF PDDET_OPER_SURF = "E" &
+                                    AND &
+                                    RECORD PDTRANCHE EXISTS &
+                                    AND &
+                                    OSUSTU OF PDOPERATION_SURF <> "C" &
+                                    AND &
+                                    (TRAEPA OF PDTRANCHE <> DOSEPA OF PDDET_OPER_SURF &
+                                     OR &
+                                     TYFCODFIN OF PDTRANCHE <> DOSCODFIN001 OF PDDET_OPER_SURF) &
+                           ELSE "Le rapport n'a pas été validé" &
+                                 IF OSUSTU OF PDOPERATION_SURF <> "V" AND OSUSTU OF PDOPERATION_SURF <> "C" &
+                           ELSE ""
+
+
+
+ITEM TOT_M2 = ((DOSLON/1000) * (DOSHAU/1000) ) IF DOSQTE = 0 &
+              ELSE ((DOSLON/1000) * (DOSHAU/1000) *DOSQTE)
+
+
+ITEM TOT_M2_TOT SUBTOTAL TOT_M2
+
+SORT ON OSUNUMRAP OF PDOPERATION_SURF
+
+
+SUBFILE W-PD711-PARAMETRE KEEP AT OSUNUMRAP &
+  INCLUDE CIECLE    OF PDOPERATION_SURF, &
+          OSUNUMRAP OF PDOPERATION_SURF, &
+          T_MESSAGE, &
+          TOT_M2_TOT
+
+;-------------------------------------------------------------------------------
+;
+; Mise à jour de la date d'oération surface lors de la destruction d'une ligne
+; de détail du rapport
+;
+
+REQUEST MAJ_TRANCHE_DEL
+
+
+ACCESS *W-PD711-PARAMETRE                     &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       OSUNUMRAP        OF W-PD711-PARAMETRE  &
+    TO CIECLE,                                &
+       OSUNUMRAP        OF PDOPERATION_SURF   &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       OSUNUMRAP        OF PDOPERATION_SURF   &
+    TO CIECLE,                                &
+       OSUNUMRAP        OF PDDET_OPER_SURF    &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       TRANUMTRA002     OF PDDET_OPER_SURF    &
+    TO CIECLE,                                &
+       TRANUMTRA002     OF PDTRANCHE          &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       TRANUMTRA002     OF PDDET_OPER_SURF    &
+    TO CIECLE,                                &
+       TRANUMTRA002     OF PDDET_OPER_SURF    ALIAS DOS_AUTRE OPTIONAL &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       OSUNUMRAP        OF DOS_AUTRE          &
+    TO CIECLE,                                &
+       OSUNUMRAP        OF PDOPERATION_SURF   ALIAS OSU_AUTRE OPTIONAL
+
+
+SELECT IF T_MESSAGE OF W-PD711-PARAMETRE = "" &
+          AND &
+          TPDTYPPRD OF PDDET_OPER_SURF = "TR" &
+          AND &
+          DOSSTU OF PDDET_OPER_SURF = "D"
+
+
+SORT ON TRANUMTRA002 OF PDDET_OPER_SURF &
+     ON OSUDATPRD OF OSU_AUTRE
+
+
+OUTPUT PDTRANCHE UPDATE AT TRANUMTRA002
+  ITEM OSUDATPRD OF PDTRANCHE FINAL OSUDATPRD OF OSU_AUTRE IF RECORD DOS_AUTRE EXISTS ELSE 0
+
+;
+; Destruction de la ligne de correction
+;
+
+;OUTPUT PDDET_OPER_SURF DELETE ALIAS DOS_DEL IF DOSSTU OF PDDET_OPER_SURF = "D"
+OUTPUT PDDET_OPER_SURF delete IF DOSSTU OF PDDET_OPER_SURF = "D"
+
+
+;-------------------------------------------------------------------------------
+;
+; Mise à jour de fini de la tranche si modification
+;
+
+REQUEST MAJ_TRANCHE_MOD
+
+
+ACCESS *W-PD711-PARAMETRE                     &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       OSUNUMRAP        OF W-PD711-PARAMETRE  &
+    TO CIECLE,                                &
+       OSUNUMRAP        OF PDOPERATION_SURF   &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       OSUNUMRAP        OF PDOPERATION_SURF   &
+    TO CIECLE,                                &
+       OSUNUMRAP        OF PDDET_OPER_SURF    &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       TRANUMTRA002     OF PDDET_OPER_SURF    &
+    TO CIECLE,                                &
+       TRANUMTRA002     OF PDTRANCHE
+
+
+SELECT IF T_MESSAGE OF W-PD711-PARAMETRE = "" &
+          AND &
+          TPDTYPPRD OF PDDET_OPER_SURF = "TR" &
+          AND &
+          DOSSTU OF PDDET_OPER_SURF = "M"
+
+
+SORT ON TRANUMTRA002 OF PDDET_OPER_SURF &
+     ON DOSNUMLIG    OF PDDET_OPER_SURF A
+
+
+OUTPUT PDTRANCHE UPDATE AT TRANUMTRA002
+  ITEM TRAEPA    OF PDTRANCHE FINAL DOSEPARES    OF PDDET_OPER_SURF IF MOPCODMAC OF PDOPERATION_SURF = "NIV"
+  ITEM TYFCODFIN OF PDTRANCHE FINAL DOSCODFIN002 OF PDDET_OPER_SURF
+  ITEM OSUDATPRD OF PDTRANCHE FINAL OSUDATPRD    OF PDOPERATION_SURF
+
+
+;
+; Destruction de la ligne de correction
+;
+
+;OUTPUT PDDET_OPER_SURF DELETE ALIAS DOS_DEL IF DOSSTU OF PDDET_OPER_SURF = "M"
+OUTPUT PDDET_OPER_SURF DELETE IF DOSSTU OF PDDET_OPER_SURF = "M"
+
+
+;-------------------------------------------------------------------------------
+;
+; Mise à jour de fini de la tranche
+;
+
+REQUEST MAJ_TRANCHE
+
+
+ACCESS *W-PD711-PARAMETRE                     &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       OSUNUMRAP        OF W-PD711-PARAMETRE  &
+    TO CIECLE,                                &
+       OSUNUMRAP        OF PDOPERATION_SURF   &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       OSUNUMRAP        OF PDOPERATION_SURF   &
+    TO CIECLE,                                &
+       OSUNUMRAP        OF PDDET_OPER_SURF    &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       TRANUMTRA002     OF PDDET_OPER_SURF    &
+    TO CIECLE,                                &
+       TRANUMTRA002     OF PDTRANCHE
+
+
+SELECT IF T_MESSAGE OF W-PD711-PARAMETRE = "" &
+          AND &
+          TPDTYPPRD OF PDDET_OPER_SURF = "TR" &
+          AND &
+          DOSSTU OF PDDET_OPER_SURF = "V"
+
+
+
+SORT ON TRANUMTRA002 OF PDDET_OPER_SURF
+
+
+OUTPUT PDTRANCHE UPDATE AT TRANUMTRA002
+  ITEM TRAEPA    OF PDTRANCHE FINAL DOSEPARES    OF PDDET_OPER_SURF IF MOPCODMAC OF PDOPERATION_SURF = "NIV"
+  ITEM TYFCODFIN OF PDTRANCHE FINAL DOSCODFIN002 OF PDDET_OPER_SURF
+  ITEM OSUDATPRD OF PDTRANCHE FINAL OSUDATPRD    OF PDOPERATION_SURF
+
+
+;
+; Mise à jour de la ligne de détail
+;
+
+OUTPUT PDDET_OPER_SURF UPDATE ALIAS DOS_MAJ IF DOSSTU OF PDDET_OPER_SURF <> "M"
+  ITEM DOSSTU OF DOS_MAJ FINAL "T"
+
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Mise à jour de fini de la tranche
+;
+
+REQUEST MAJ_DEF_TRANCHE
+
+
+ACCESS *W-PD711-PARAMETRE                     &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       OSUNUMRAP        OF W-PD711-PARAMETRE  &
+    TO CIECLE,                                &
+       OSUNUMRAP        OF PDOPERATION_SURF   &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       OSUNUMRAP        OF PDOPERATION_SURF   &
+    TO CIECLE,                                &
+       OSUNUMRAP        OF PDDET_OPER_SURF    &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       TRANUMTRA002     OF PDDET_OPER_SURF    &
+    TO CIECLE,                                &
+       TRANUMTRA002     OF PDTRANCHE          &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       TRANUMTRA002     OF PDDET_OPER_SURF    &
+    TO CIECLE,                                &
+       TRANUMTRA002     OF PDTRANCHE_DEF      OPTIONAL &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       DTRCODDEF        OF PDTRANCHE_DEF      &
+    TO CIECLE,                                &
+       DTRCODDEF        OF PDDEF_DE_TRANCHE
+
+
+SELECT IF MOPCODMAC        OF PDOPERATION_SURF = "NIV" &
+          AND &
+          DTREFFNIV        OF PDDEF_DE_TRANCHE = "1"
+
+
+SORT ON TRANUMTRA002 OF PDDET_OPER_SURF   &
+     ON DTRCODDEF    OF PDDEF_DE_TRANCHE
+
+;
+; Détruit les défauts de tranches qui s'élimine si la tranche passe au niveleur
+;
+
+OUTPUT PDTRANCHE_DEF     DELETE AT DTRCODDEF
+
+
+;-------------------------------------------------------------------------------
+;
+; Mise à jour de fini de la tranche si modification
+;
+
+REQUEST MAJ_PROD_DIMEN_MOD
+
+
+ACCESS *W-PD711-PARAMETRE                     &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       OSUNUMRAP        OF W-PD711-PARAMETRE  &
+    TO CIECLE,                                &
+       OSUNUMRAP        OF PDOPERATION_SURF   &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       OSUNUMRAP        OF PDOPERATION_SURF   &
+    TO CIECLE,                                &
+       OSUNUMRAP        OF PDDET_OPER_SURF    &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       DOSLON           OF PDDET_OPER_SURF,   &
+       DOSHAU           OF PDDET_OPER_SURF,   &
+       DOSEPA           OF PDDET_OPER_SURF,   &
+       TGRCODGRA        OF PDDET_OPER_SURF,   &
+       DOSCODFIN001     OF PDDET_OPER_SURF    &
+    TO CIECLE,                                &
+       PDILON,                                &
+       PDIHAU,                                &
+       PDIEPA,                                &
+       TGRCODGRA,                             &
+       TYFCODFIN        OF PDPROD_DIMENSION
+
+
+SELECT IF T_MESSAGE OF W-PD711-PARAMETRE = "" &
+          AND &
+          TPDTYPPRD OF PDDET_OPER_SURF = "PD" &
+          AND &
+          DOSSTU OF PDDET_OPER_SURF = "M"
+
+
+SORT ON DOSLON           OF PDDET_OPER_SURF &
+     ON DOSHAU           OF PDDET_OPER_SURF &
+     ON DOSEPA           OF PDDET_OPER_SURF &
+     ON TGRCODGRA        OF PDDET_OPER_SURF &
+     ON DOSCODFIN001     OF PDDET_OPER_SURF
+
+
+OUTPUT PDPROD_DIMENSION UPDATE AT DOSCODFIN001
+  ITEM PDIQTE OF PDPROD_DIMENSION = PDIQTE OF PDPROD_DIMENSION - &
+                                    DOSQTE OF PDDET_OPER_SURF
+
+
+;
+; Destruction de la ligne de correction
+;
+
+;OUTPUT PDDET_OPER_SURF DELETE ALIAS DOS_DEL IF DOSSTU OF PDDET_OPER_SURF = "M"
+OUTPUT PDDET_OPER_SURF DELETE IF DOSSTU OF PDDET_OPER_SURF = "M"
+
+
+;-------------------------------------------------------------------------------
+;
+; Mise à jour du produit de dimension si destruction d'une ligne de détail du
+; rapport .
+;
+
+REQUEST MAJ_PROD_DIMEN_DEL
+
+
+ACCESS *W-PD711-PARAMETRE                     &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       OSUNUMRAP        OF W-PD711-PARAMETRE  &
+    TO CIECLE,                                &
+       OSUNUMRAP        OF PDOPERATION_SURF   &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       OSUNUMRAP        OF PDOPERATION_SURF   &
+    TO CIECLE,                                &
+       OSUNUMRAP        OF PDDET_OPER_SURF    &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       DOSLON           OF PDDET_OPER_SURF,   &
+       DOSHAU           OF PDDET_OPER_SURF,   &
+       DOSEPA           OF PDDET_OPER_SURF,   &
+       TGRCODGRA        OF PDDET_OPER_SURF,   &
+       DOSCODFIN001     OF PDDET_OPER_SURF    &
+    TO CIECLE,                                &
+       PDILON,                                &
+       PDIHAU,                                &
+       PDIEPA,                                &
+       TGRCODGRA,                             &
+       TYFCODFIN        OF PDPROD_DIMENSION   &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       DOSLON           OF PDDET_OPER_SURF,   &
+       DOSHAU           OF PDDET_OPER_SURF,   &
+       DOSEPA           OF PDDET_OPER_SURF,   &
+       TGRCODGRA        OF PDDET_OPER_SURF,   &
+       DOSCODFIN001     OF PDDET_OPER_SURF    &
+    TO CIECLE,                                &
+       DOSLON,                                &
+       DOSHAU,                                &
+       DOSEPA,                                &
+       TGRCODGRA,                             &
+       DOSCODFIN001     OF PDDET_OPER_SURF    ALIAS DOS_AUTRE OPTIONAL &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       OSUNUMRAP        OF DOS_AUTRE          &
+    TO CIECLE,                                &
+       OSUNUMRAP        OF PDOPERATION_SURF   ALIAS OSU_AUTRE OPTIONAL
+
+
+SELECT IF T_MESSAGE OF W-PD711-PARAMETRE = "" &
+          AND &
+          TPDTYPPRD OF PDDET_OPER_SURF = "PD" &
+          AND &
+          DOSSTU OF PDDET_OPER_SURF = "D"
+
+
+SORT ON DOSLON           OF PDDET_OPER_SURF &
+     ON DOSHAU           OF PDDET_OPER_SURF &
+     ON DOSEPA           OF PDDET_OPER_SURF &
+     ON TGRCODGRA        OF PDDET_OPER_SURF &
+     ON DOSCODFIN001     OF PDDET_OPER_SURF &
+     ON OSUDATPRD        OF OSU_AUTRE
+
+
+OUTPUT PDPROD_DIMENSION UPDATE AT DOSCODFIN001
+  ITEM PDIQTE OF PDPROD_DIMENSION = PDIQTE OF PDPROD_DIMENSION - &
+                                    DOSQTE OF PDDET_OPER_SURF
+
+;
+; Destruction de la ligne de correction
+;
+
+;OUTPUT PDDET_OPER_SURF DELETE ALIAS DOS_DEL IF DOSSTU OF PDDET_OPER_SURF = "D"
+OUTPUT PDDET_OPER_SURF DELETE IF DOSSTU OF PDDET_OPER_SURF = "D"
+
+
+;-------------------------------------------------------------------------------
+;
+; Mise à jour de fini du produit de dimension
+;
+
+REQUEST MAJ_PROD_DIM
+
+
+ACCESS *W-PD711-PARAMETRE                     &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       OSUNUMRAP        OF W-PD711-PARAMETRE  &
+    TO CIECLE,                                &
+       OSUNUMRAP        OF PDOPERATION_SURF   &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       OSUNUMRAP        OF PDOPERATION_SURF   &
+    TO CIECLE,                                &
+       OSUNUMRAP        OF PDDET_OPER_SURF    &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       DOSLON           OF PDDET_OPER_SURF,   &
+       DOSHAU           OF PDDET_OPER_SURF,   &
+       DOSEPARES        OF PDDET_OPER_SURF,   &
+       TGRCODGRA        OF PDDET_OPER_SURF,   &
+       DOSCODFIN002     OF PDDET_OPER_SURF    &
+    TO CIECLE,                                &
+       PDILON,                                &
+       PDIHAU,                                &
+       PDIEPA,                                &
+       TGRCODGRA,                             &
+       TYFCODFIN        OF PDPROD_DIMENSION   OPTIONAL
+
+
+SELECT IF T_MESSAGE OF W-PD711-PARAMETRE = "" &
+          AND &
+          TPDTYPPRD OF PDDET_OPER_SURF = "PD" &
+          AND &
+          (DOSSTU OF PDDET_OPER_SURF = "V" &
+          OR &
+          DOSSTU OF PDDET_OPER_SURF = "M")
+
+
+USE uscalvol NOLIST
+
+
+DEFINE D_TRI      CHARACTER SIZE 18 = ASCII(DOSLON           OF PDDET_OPER_SURF,4) + &
+                                      ASCII(DOSHAU           OF PDDET_OPER_SURF,4) + &
+                                      ASCII(DOSEPARES        OF PDDET_OPER_SURF,4) + &
+                                      TGRCODGRA        OF PDDET_OPER_SURF + &
+                                      DOSCODFIN002     OF PDDET_OPER_SURF
+
+
+ITEM TZ_LARGEUR   = DOSLON       OF PDDET_OPER_SURF
+ITEM TZ_HAUTEUR   = DOSHAU       OF PDDET_OPER_SURF
+ITEM TZ_EPAISSEUR = DOSEPARES    OF PDDET_OPER_SURF
+
+
+SORT ON D_TRI
+
+
+OUTPUT PDPROD_DIMENSION ADD UPDATE AT D_TRI &
+                        VIA   CIECLE,          &
+                              PDILON,          &
+                              PDIHAU,          &
+                              PDIEPA,          &
+                              TGRCODGRA,       &
+                              TYFCODFIN        &
+                        USING CIECLE           OF PDDET_OPER_SURF,  &
+                              DOSLON           OF PDDET_OPER_SURF,  &
+                              DOSHAU           OF PDDET_OPER_SURF,  &
+                              DOSEPARES        OF PDDET_OPER_SURF,  &
+                              TGRCODGRA        OF PDDET_OPER_SURF,  &
+                              DOSCODFIN002     OF PDDET_OPER_SURF
+
+
+  ITEM CIECLE       OF PDPROD_DIMENSION = CIECLE       OF PDDET_OPER_SURF
+  ITEM PDILON       OF PDPROD_DIMENSION = DOSLON       OF PDDET_OPER_SURF
+  ITEM PDIHAU       OF PDPROD_DIMENSION = DOSHAU       OF PDDET_OPER_SURF
+  ITEM PDIEPA       OF PDPROD_DIMENSION = DOSEPARES    OF PDDET_OPER_SURF
+  ITEM TGRCODGRA    OF PDPROD_DIMENSION = TGRCODGRA    OF PDDET_OPER_SURF
+  ITEM TYFCODFIN    OF PDPROD_DIMENSION = DOSCODFIN002 OF PDDET_OPER_SURF
+  ITEM PDIQTE       OF PDPROD_DIMENSION = PDIQTE       OF PDPROD_DIMENSION + &
+                                          DOSQTE       OF PDDET_OPER_SURF
+  ITEM PDITYPPRD    OF PDPROD_DIMENSION = "PD"
+  ITEM PDIVOLMC3    OF PDPROD_DIMENSION = DZ_VOLUME
+  ITEM PDISURMC2    OF PDPROD_DIMENSION = DZ_SURFACE
+
+
+;
+; Destruction de la ligne de correction
+;
+
+;OUTPUT PDDET_OPER_SURF DELETE ALIAS DOS_DEL IF DOSSTU OF PDDET_OPER_SURF = "M"
+OUTPUT PDDET_OPER_SURF DELETE IF DOSSTU OF PDDET_OPER_SURF = "M"
+
+;
+; Mise à jour de la ligne de détail
+;
+
+OUTPUT PDDET_OPER_SURF UPDATE ALIAS DOS_MAJ IF DOSSTU OF PDDET_OPER_SURF <> "M"
+  ITEM DOSSTU OF DOS_MAJ FINAL "T"
+
+
+;-------------------------------------------------------------------------------
+;
+; Mise à jour du rapport d'opération de surface
+;
+
+REQUEST MAJ_RAPPORT_O_S
+
+
+ACCESS *W-PD711-PARAMETRE                     &
+  LINK CIECLE           OF W-PD711-PARAMETRE, &
+       OSUNUMRAP        OF W-PD711-PARAMETRE  &
+    TO CIECLE,                                 &
+       OSUNUMRAP        OF PDOPERATION_SURF
+
+
+SELECT IF T_MESSAGE OF W-PD711-PARAMETRE = ""
+
+
+SORT ON OSUNUMRAP OF W-PD711-PARAMETRE
+
+
+OUTPUT PDOPERATION_SURF UPDATE
+  ITEM OSUSTU OF PDOPERATION_SURF FINAL "T"
+
+
+BUILD pd711t

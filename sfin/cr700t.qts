@@ -1,0 +1,740 @@
+;/T/ Journalisation des recevables - Factures - Note de cr dit - Ajustements
+;
+;/M/ Martin Perron / Modifier la MAJ de T_HISCLE_ANN avec T_HISCLE_TMP
+;
+;    Date de modif..: 1 d\351cembre 1999
+;
+;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur...: Micheline B langer
+;    Date Cr ation.: 18-Aout-1992
+;
+;    Date de modif.: 10 juin 1993 par Alain C t
+;                    Adaptation du source pour le module PGL, le source
+;                    venait do projet FINANCE.
+;
+;    Description...: Programme de journalisation des lots de factures et
+;                    ajustements de comptes a recevoir.
+;
+;    Param tres....: Compagnie     1 fois  Compagnie du menu
+;                    Periode CTB   1 fois
+;                    No Lot        n fois
+;
+;    G n ral.......: Nous avons choisi de mettre a jour les fichiers au fur et
+;                    a mesure du traitement (exemple lot, transaction, etc...)
+;                    plutot que d'attendre d'avoir tout valider et d'ensuite
+;                    tout mettre a jour.
+;                    Ceci est possible d  a STARBASE et nous permet de
+;                    diminuer consid rablement les lectures/ecritures.
+;                    Si un 'TERMINATE REQUEST' est execut , alors un 'ROLLBACK'
+;                    de toutes les transactions sera effectu .
+;
+;    Particularit .: Une bonne partie du programme se retrouve dans un
+;                    use g r ral a toutes les journalisations(US900T.QTS).
+;
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST   ; permet de faire les SET PROCESS NOLIMIT....
+
+RUN cr700t
+
+;
+; Pour arr ter la proc dure en cas d'erreur
+;
+GLOBAL TEMPORARY G_ERREUR       CHARACTER SIZE 5
+;
+; Pour toujours avoir la p riode   journaliser.
+;
+GLOBAL TEMPORARY G_PECCLE       CHARACTER SIZE 4
+;
+; Pour garder la date et l'heure du jour tout le long du traitement.
+;
+GLOBAL TEMPORARY G_DATJOU       DATE
+GLOBAL TEMPORARY G_HREJOU       INTEGER SIZE 4
+;
+; Pour avoir l'annee selon date du jour
+;
+GLOBAL TEMPORARY G_ANN          CHARACTER SIZE 2
+;
+; Identifie le module.
+;
+GLOBAL TEMPORARY G_CODMOD       CHARACTER SIZE 2
+;
+; Parametres de holding pour relation de compte.
+;
+GLOBAL TEMPORARY G_HLDCHTCPTRLT CHARACTER SIZE 1
+;
+; Param tres du holding, si notion de projet Oui/Non.
+;
+GLOBAL TEMPORARY G_HLDNTNPRO    CHARACTER SIZE 1
+;
+; Pour savoir s'il y a eu une convertion de montant.
+;
+GLOBAL TEMPORARY G_FLGDEV       CHARACTER SIZE 1
+;
+; On conserve la devise du Holding
+;
+GLOBAL TEMPORARY G_DEVCLE       CHARACTER SIZE 3
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Affectation des variables globales selon les param tres du holding.
+;
+;
+REQUEST TRAITE_GENERAL
+
+ACCESS MCHOLDING
+
+SELECT IF CIENMC OF MCHOLDING = "1"
+
+ITEM G_CODMOD       = "CR"
+ITEM G_HLDCHTCPTRLT = HLDCHTCPTRLT OF MCHOLDING
+ITEM G_HLDNTNPRO    = HLDNTNPRO    OF MCHOLDING
+ITEM G_FLGDEV       = "0"
+ITEM G_DEVCLE       = DEVCLE       OF MCHOLDING
+
+ITEM G_DATJOU RESET AT INITIAL TO SYSDATE
+ITEM G_HREJOU RESET AT INITIAL TO SYSTIME / 10000
+ITEM G_ANN    RESET AT INITIAL TO ASCII(MOD(FLOOR(G_DATJOU / 10000), 100),2)
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; S lection des lots selon les parametres saisies par l'usager.
+;
+; On s lectionne que les lots autoris s   la journalisation
+; et pas encore journalis s.
+;
+; On met a jour la date et l'heure de journalisation dans le lot.
+;
+;
+REQUEST SELECTION_ET_MAJ_DU_LOT
+
+ACCESS CRLOT
+
+CHOOSE CIECLE PARM , &
+       PECCLE PARM , &
+       LCRCLE PARM
+
+SELECT CRLOT IF  LCRDATJOU OF CRLOT = 0   & ; ne doit pas etre journalis
+             AND LCRATRJOU OF CRLOT = "1" & ; doit  tre autoris  a journalis
+             AND LCRTYPECR OF CRLOT = "FA"
+
+;
+; Affectation de la p riode trait e.
+;
+ITEM G_PECCLE = PECCLE OF CRLOT
+
+;
+; On conserve les lots   traiter.
+;
+SUBFILE WCR700LO &
+  INCLUDE CIECLE    OF CRLOT , &
+          PECCLE    OF CRLOT , &
+          LCRCLE    OF CRLOT , &
+          LCRTYPECR OF CRLOT , &
+          LCRDSC    OF CRLOT
+
+;
+; Mise   jour du lot.
+;
+OUTPUT CRLOT UPDATE
+  ITEM LCRDATJOU OF CRLOT FINAL G_DATJOU
+  ITEM LCRHREJOU OF CRLOT FINAL G_HREJOU
+  ITEM LCRUSRJOU OF CRLOT FINAL LOGONID
+
+
+
+;
+;
+; S lection et mise   jour des  critures.
+;
+; On valide que les transactions balancent.
+;
+; On g n re un num ro d'historique pour chaque  criture de journal.
+;
+; On met   jour la date de journalisation, l'heure de journalisation et le
+; num ro d'historique dans l' criture de journal.
+;
+;
+REQUEST SELECTION_ET_MAJ_DES_FACTURES
+
+ACCESS *WCR700LO &
+  LINK CIECLE OF WCR700LO, &
+       PECCLE OF WCR700LO, &
+       LCRCLE OF WCR700LO  &
+    TO CIECLE, &
+       PECCLE, &
+       LCRCLE    OF CRCPT_A_REC &
+
+  LINK REFCIECLE OF CRCPT_A_REC, &
+       REFCLENUM OF CRCPT_A_REC, &
+       CIECLE    OF CRCPT_A_REC  &
+    TO CLICIECLE, &
+       CLICLE   , &
+       CIECLE    OF VCLC_CLI OPTIONAL &
+
+  LINK REFCIECLE OF CRCPT_A_REC, &
+       REFCLETYP OF CRCPT_A_REC, &
+       REFCLENUM OF CRCPT_A_REC, &
+       RADCLE    OF CRCPT_A_REC  &
+    TO REFCIECLE, &
+       REFCLETYP, &
+       REFCLENUM, &
+       RADCLE    OF MCREF_ADRESSE OPTIONAL &
+
+  LINK CIECLE OF CRCPT_A_REC, &
+       CARCLE OF CRCPT_A_REC  &
+    TO CIECLE, &
+       CARCLE    OF CRCAR_IMPUTATION OPTIONAL &
+
+  LINK "1", &
+       G_ANN &
+    TO CIENMC, &
+       HSSCLEANN OF  MCHIS_SEQ OPTIONAL
+
+
+TEMPORARY T_MESERR CHARACTER SIZE 80 ; Pour les erreurs.
+TEMPORARY T_CPTCAR CHARACTER SIZE 06 ; pour le compte a recevoir
+;
+; pour le g n ration des num ro d'historique
+;
+TEMPORARY T_HISCLE INTEGER UNSIGNED SIZE 4
+TEMPORARY T_HISCLE_SIE INTEGER UNSIGNED SIZE 4
+TEMPORARY T_NUMSEQ INTEGER UNSIGNED SIZE 4
+TEMPORARY T_HISCLE_TMP CHARACTER SIZE 09
+
+TEMPORARY T_HECCIEINT  CHARACTER SIZE 4  ; Pour compagnie d'inter
+TEMPORARY T_HECNUMDOC2 CHARACTER SIZE 6  ; Pour num ro de document-2(= BLANC)
+TEMPORARY T_HECFLGINT  CHARACTER SIZE 1  ; Pour flag d'inter compagnie
+TEMPORARY T_HISDSCGEN  CHARACTER SIZE 40 ; Description g n rale
+TEMPORARY T_HISCLE1    CHARACTER SIZE 4  ; Cl  d'acc s 1, de l'histo.
+TEMPORARY T_HISCLE2    CHARACTER SIZE 15 ; Cl  d'acc s 2, de l'histo.
+TEMPORARY T_HISCLE3    CHARACTER SIZE 15 ; Cl  d'acc s 3, de l'histo(= blanc)
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE CHARACTER SIZE 5 = "1" + PECCLE OF CRCPT_A_REC &
+         IF PECCLE OF CRCPT_A_REC[1:1] < "8" &
+         ELSE "0" + PECCLE OF CRCPT_A_REC
+
+SORT   ON CIECLE    OF CRCPT_A_REC &
+       ON D_PECCLE_SIE &
+       ON LCRCLE    OF CRCPT_A_REC &
+       ON CARCLE    OF CRCPT_A_REC
+
+;
+; On v rifie que le compte   recevoir balance avec l'imputation.
+;
+ITEM T_MESERR = &
+@IF FRANCAIS
+  "Ventilation hors balance; lot: " + LCRCLE OF CRCPT_A_REC + &
+                                "(" + LCRTYPECR OF WCR700LO + ")" + &
+                     " ,document: " + CARCLE OF CRCPT_A_REC + &
+                    " ,r f rence: " + REFCLENUM OF CRCPT_A_REC &
+@ELSE
+  "Breakdown out of balance; Batch: " + LCRCLE OF CRCPT_A_REC + &
+                                "(" + LCRTYPECR OF WCR700LO + ")" + &
+                     " ,document: " + CARCLE OF CRCPT_A_REC + &
+                    " ,reference: " + REFCLENUM OF CRCPT_A_REC &
+@ENDIF
+  IF CARCUMMNT OF CRCPT_A_REC <> CARMNT OF CRCPT_A_REC AT CARCLE &
+     RESET AT CARCLE
+
+ITEM G_ERREUR = "ARRET" IF T_MESERR <> "" AT CARCLE
+
+;
+; affectation du num ro d'historique
+;
+; Ajustement pour le changement de siècle
+ITEM T_NUMSEQ INITIAL 0 & ; NCONVERT( G_ANN ) * 10000000 &
+                        IF NOT RECORD MCHIS_SEQ EXIST &
+                 ELSE HSSNUMSEQ OF MCHIS_SEQ
+
+ITEM T_HISCLE RESET AT INITIAL TO (T_NUMSEQ + 1)
+
+;
+; On incr mente le num ro d'historique   chaque transaction(facture).
+;
+ITEM T_HISCLE COUNT AT CARCLE
+
+ITEM T_HISCLE_TMP = ASCII(T_HISCLE,9)
+ITEM T_HISCLE_SIE = NCONVERT((G_ANN + T_HISCLE_TMP[3:7]))
+
+; Ajustement pour le changement de siècle
+;ITEM T_HISCLE_SIE = NCONVERT(G_ANN + ASCII(T_HISCLE,7))
+
+;
+; Compte   recevoir du client, le compte est initialis  dans la
+; relation CRCPT_A_REC lors de la saisie( cran). Si c'est un ajustement ou
+; une note de cr dit le compte vient de la pi ce r f r e.
+;
+ITEM T_CPTCAR = CARCPTCAR OF CRCPT_A_REC
+;
+; Compagnie d'inter, si c'est un client d'inter, on prend la compagnie d fini
+; dans le client, sinon on prend la compagnie de la transaction.
+;
+ITEM T_HECCIEINT = CIECLE OF CRCPT_A_REC IF CLITYP OF VCLC_CLI <> "I" &
+              ELSE CLICIEINT OF VCLC_CLI
+;
+; Identifie si c'est une transaction d'inter.
+;
+ITEM T_HECFLGINT = "0" IF CLITYP OF VCLC_CLI <> "I" &
+              ELSE "1"
+
+;
+; Description g n ral, on prend le nom dans l'adresse de la pi ce si c'est
+; un client divers, sinon on la laisse   blanc.
+;
+ITEM T_HISDSCGEN = " " IF CLITYP OF VCLC_CLI <> "D" &
+              ELSE RADNOM OF MCREF_ADRESSE
+
+;
+; On assigne la cl  du compte   recevoir   l'historique, le compte   recevoir
+; seulement deux segments dans sa cl , donc le troisi me segement est laisser
+; vide.
+;
+ITEM T_HISCLE1 = CIECLE OF CRCPT_A_REC
+ITEM T_HISCLE2 = CARCLE OF CRCPT_A_REC
+
+
+;
+; Sous-fichier des erreurs
+;
+SUBFILE WUS900ER KEEP &
+                 AT CARCLE &
+                 IF T_MESERR <> "" &
+  INCLUDE CIECLE OF WCR700LO ALIAS CIECLE, &
+          G_PECCLE           ALIAS PECCLE, &
+          T_MESERR
+
+
+;
+;
+; Sous fichier commun   toutes les journalisations, sert   mettre   jour la
+; table MCHISTO.
+;
+;
+SUBFILE WUS900H AT CARCLE &
+  INCLUDE T_HISCLE_SIE               ALIAS HISCLE    , &
+          CIECLE    OF CRCPT_A_REC   ALIAS HISCIECLE , &
+          REFCIECLE OF CRCPT_A_REC                   , &
+          REFCLETYP OF CRCPT_A_REC                   , &
+          REFCLENUM OF CRCPT_A_REC                   , &
+          CARCLE    OF CRCPT_A_REC   ALIAS HISNUMDOC , &
+          PECCLE    OF CRCPT_A_REC                   , &
+          LCRCLE    OF CRCPT_A_REC   ALIAS HISNUMLOT , &
+          CARDAT    OF CRCPT_A_REC   ALIAS HISDAT    , &
+          G_DATJOU                   ALIAS HISDATJOU , &
+          CARTYPECR OF CRCPT_A_REC   ALIAS HISTYPECR , &
+          T_HISDSCGEN                ALIAS HISDSCGEN , &
+          CARDSC1   OF CRCPT_A_REC   ALIAS HISDSCSAI , &
+          CARDSC2   OF CRCPT_A_REC   ALIAS HISDSCSAI2, &
+          CARUSRCRE OF CRCPT_A_REC   ALIAS HISUSRCRE , &
+          DEVCLE    OF VCLC_CLI                      , &
+          T_HISCLE1                  ALIAS HISCLE1   , &
+          T_HISCLE2                  ALIAS HISCLE2   , &
+          T_HISCLE3                  ALIAS HISCLE3
+
+
+;
+; Sous-fichier des imputation comptables  utilis  tout au long du traitement
+; servant a generer les ventilations comptables completes.
+;
+SUBFILE WCR700VE KEEP &
+  INCLUDE CIECLE       OF CRCPT_A_REC, &
+          CARCLE       OF CRCPT_A_REC, &
+          CARTYPECR    OF CRCPT_A_REC, &
+          PECCLE       OF CRCPT_A_REC, &
+          LCRCLE       OF CRCPT_A_REC, &
+          REFCIECLE    OF CRCPT_A_REC, &
+          REFCLETYP    OF CRCPT_A_REC, &
+          REFCLENUM    OF CRCPT_A_REC, &
+          CARDAT       OF CRCPT_A_REC, &
+          DEVCLE       OF VCLC_CLI   , &
+          CARDSC1      OF CRCPT_A_REC, &
+          CARDSC2      OF CRCPT_A_REC, &
+          T_HISCLE_SIE ALIAS T_HISCLE     , &
+          PRJCLE       OF CRCAR_IMPUTATION, &
+          PRACLE       OF CRCAR_IMPUTATION, &
+          IMMCLE       OF CRCAR_IMPUTATION, &
+          CPTCLE       OF CRCAR_IMPUTATION, &
+          UNACLE       OF CRCAR_IMPUTATION, &
+          CRICODDC     OF CRCAR_IMPUTATION, &
+          CRIMNT       OF CRCAR_IMPUTATION, &
+          CRITAXTYPTPS OF CRCAR_IMPUTATION, &
+          CRITAXCODTPS OF CRCAR_IMPUTATION, &
+          CRITAXTYPTVP OF CRCAR_IMPUTATION, &
+          CRITAXCODTVP OF CRCAR_IMPUTATION, &
+          CRIMNTTPS    OF CRCAR_IMPUTATION, &
+          CRIMNTTVP    OF CRCAR_IMPUTATION, &
+          T_HECCIEINT                     , &
+          T_HECNUMDOC2                    , &
+          T_HECFLGINT                     , &
+          T_CPTCAR
+
+
+;
+; Mise   jour de la facture, date de journalisation, num ro d'historique
+; et cumulatif de la c dule.
+;
+OUTPUT CRCPT_A_REC UPDATE AT CARCLE
+  ITEM CARDATJOU OF CRCPT_A_REC FINAL G_DATJOU
+  ITEM CARHREJOU OF CRCPT_A_REC FINAL G_HREJOU
+  ITEM HISCLE    OF CRCPT_A_REC FINAL T_HISCLE_SIE
+  ;
+  ; Le cumulatif de la c dule pour les factures et les cr dits est  gale
+  ; au montant de la pi ce si la c dule n'a pas  t  modifi  par l'usager.
+  ;
+  ITEM CARCUMCED OF CRCPT_A_REC FINAL CARMNT OF CRCPT_A_REC &
+                                   IF     CARFLGCED OF CRCPT_A_REC = "0" &
+                                      AND (    CARTYPECR OF CRCPT_A_REC = "FA" &
+                                            OR CARTYPECR OF CRCPT_A_REC = "CR" )
+
+
+
+;
+; Ajout de la ligne de c dule pour les factures et les cr dits dont la
+; c dule n'a pas  t  modifi  par l'usager.
+;
+OUTPUT CRCAR_CEDULE ADD AT CARCLE IF     CARFLGCED OF CRCPT_A_REC = "0" &
+                                     AND (    CARTYPECR OF CRCPT_A_REC = "FA" &
+                                           OR CARTYPECR OF CRCPT_A_REC = "CR" )
+  ITEM CIECLE    OF CRCAR_CEDULE FINAL CIECLE    OF CRCPT_A_REC
+  ITEM CARCLE    OF CRCAR_CEDULE FINAL CARCLE    OF CRCPT_A_REC
+  ITEM CCDCLELIG OF CRCAR_CEDULE FINAL 1
+  ITEM CCDDATDUE OF CRCAR_CEDULE FINAL CARDATNET OF CRCPT_A_REC
+  ITEM CCDMNT    OF CRCAR_CEDULE FINAL CARMNT    OF CRCPT_A_REC
+
+
+;
+; Mise   jour des ventes total par p riode par client.
+;
+OUTPUT CRCLI_STAT ADD UPDATE &
+                  AT CARCLE  &
+                  VIA CLICIECLE, &
+                      CLICLE   , &
+                      CIECLE   , &
+                      CLSANN     &
+                  USING REFCIECLE OF CRCPT_A_REC, &
+                        REFCLENUM OF CRCPT_A_REC, &
+                        CIECLE    OF CRCPT_A_REC, &
+                        PECCLE    OF CRCPT_A_REC[1:2]
+  ITEM CLICIECLE   OF CRCLI_STAT INITIAL REFCIECLE OF CRCPT_A_REC
+  ITEM CLICLE      OF CRCLI_STAT INITIAL REFCLENUM OF CRCPT_A_REC
+  ITEM CIECLE      OF CRCLI_STAT INITIAL CIECLE    OF CRCPT_A_REC
+  ITEM CLSANN      OF CRCLI_STAT INITIAL PECCLE    OF CRCPT_A_REC[1:2]
+
+  ITEM CLSCUMFAC01 OF CRCLI_STAT    =    CLSCUMFAC01 OF CRCLI_STAT + &
+                                         ( CARMNT OF CRCPT_A_REC &
+                                           - CARMNTTPS OF CRCPT_A_REC &
+                                           - CARMNTTVP OF CRCPT_A_REC ) &
+                                         IF "01" = PECCLE OF CRCPT_A_REC[3:2] &
+                                    AT CARCLE
+
+  ITEM CLSCUMFAC02 OF CRCLI_STAT    =    CLSCUMFAC02 OF CRCLI_STAT + &
+                                         ( CARMNT OF CRCPT_A_REC &
+                                           - CARMNTTPS OF CRCPT_A_REC &
+                                           - CARMNTTVP OF CRCPT_A_REC ) &
+                                         IF "02" = PECCLE OF CRCPT_A_REC[3:2] &
+                                    AT CARCLE
+
+  ITEM CLSCUMFAC03 OF CRCLI_STAT    =    CLSCUMFAC03 OF CRCLI_STAT + &
+                                         ( CARMNT OF CRCPT_A_REC &
+                                           - CARMNTTPS OF CRCPT_A_REC &
+                                           - CARMNTTVP OF CRCPT_A_REC ) &
+                                         IF "03" = PECCLE OF CRCPT_A_REC[3:2] &
+                                    AT CARCLE
+
+  ITEM CLSCUMFAC04 OF CRCLI_STAT    =    CLSCUMFAC04 OF CRCLI_STAT + &
+                                         ( CARMNT OF CRCPT_A_REC &
+                                           - CARMNTTPS OF CRCPT_A_REC &
+                                           - CARMNTTVP OF CRCPT_A_REC ) &
+                                         IF "04" = PECCLE OF CRCPT_A_REC[3:2] &
+                                    AT CARCLE
+
+  ITEM CLSCUMFAC05 OF CRCLI_STAT    =    CLSCUMFAC05 OF CRCLI_STAT + &
+                                         ( CARMNT OF CRCPT_A_REC &
+                                           - CARMNTTPS OF CRCPT_A_REC &
+                                           - CARMNTTVP OF CRCPT_A_REC ) &
+                                         IF "05" = PECCLE OF CRCPT_A_REC[3:2] &
+                                    AT CARCLE
+
+  ITEM CLSCUMFAC06 OF CRCLI_STAT    =    CLSCUMFAC06 OF CRCLI_STAT + &
+                                         ( CARMNT OF CRCPT_A_REC &
+                                           - CARMNTTPS OF CRCPT_A_REC &
+                                           - CARMNTTVP OF CRCPT_A_REC ) &
+                                         IF "06" = PECCLE OF CRCPT_A_REC[3:2] &
+                                    AT CARCLE
+
+  ITEM CLSCUMFAC07 OF CRCLI_STAT    =    CLSCUMFAC07 OF CRCLI_STAT + &
+                                         ( CARMNT OF CRCPT_A_REC &
+                                           - CARMNTTPS OF CRCPT_A_REC &
+                                           - CARMNTTVP OF CRCPT_A_REC ) &
+                                         IF "07" = PECCLE OF CRCPT_A_REC[3:2] &
+                                    AT CARCLE
+
+  ITEM CLSCUMFAC08 OF CRCLI_STAT    =    CLSCUMFAC08 OF CRCLI_STAT + &
+                                         ( CARMNT OF CRCPT_A_REC &
+                                           - CARMNTTPS OF CRCPT_A_REC &
+                                           - CARMNTTVP OF CRCPT_A_REC ) &
+                                         IF "08" = PECCLE OF CRCPT_A_REC[3:2] &
+                                    AT CARCLE
+
+  ITEM CLSCUMFAC09 OF CRCLI_STAT    =    CLSCUMFAC09 OF CRCLI_STAT + &
+                                         ( CARMNT OF CRCPT_A_REC &
+                                           - CARMNTTPS OF CRCPT_A_REC &
+                                           - CARMNTTVP OF CRCPT_A_REC ) &
+                                         IF "09" = PECCLE OF CRCPT_A_REC[3:2] &
+                                    AT CARCLE
+
+  ITEM CLSCUMFAC10 OF CRCLI_STAT    =    CLSCUMFAC10 OF CRCLI_STAT + &
+                                         ( CARMNT OF CRCPT_A_REC &
+                                           - CARMNTTPS OF CRCPT_A_REC &
+                                           - CARMNTTVP OF CRCPT_A_REC ) &
+                                         IF "10" = PECCLE OF CRCPT_A_REC[3:2] &
+                                    AT CARCLE
+
+  ITEM CLSCUMFAC11 OF CRCLI_STAT    =    CLSCUMFAC11 OF CRCLI_STAT + &
+                                         ( CARMNT OF CRCPT_A_REC &
+                                           - CARMNTTPS OF CRCPT_A_REC &
+                                           - CARMNTTVP OF CRCPT_A_REC ) &
+                                         IF "11" = PECCLE OF CRCPT_A_REC[3:2] &
+                                    AT CARCLE
+
+  ITEM CLSCUMFAC12 OF CRCLI_STAT    =    CLSCUMFAC12 OF CRCLI_STAT + &
+                                         ( CARMNT OF CRCPT_A_REC &
+                                           - CARMNTTPS OF CRCPT_A_REC &
+                                           - CARMNTTVP OF CRCPT_A_REC ) &
+                                         IF "12" = PECCLE OF CRCPT_A_REC[3:2] &
+                                    AT CARCLE
+
+  ITEM CLSCUMFAC13 OF CRCLI_STAT    =    CLSCUMFAC13 OF CRCLI_STAT + &
+                                         ( CARMNT OF CRCPT_A_REC &
+                                           - CARMNTTPS OF CRCPT_A_REC &
+                                           - CARMNTTVP OF CRCPT_A_REC ) &
+                                         IF "13" = PECCLE OF CRCPT_A_REC[3:2] &
+                                    AT CARCLE
+
+;
+; mise a jour du fichier des num ro d'historique
+;
+OUTPUT MCHIS_SEQ ADD UPDATE AT FINAL
+  ITEM CIENMC    OF MCHIS_SEQ INITIAL "1"
+  ITEM HSSCLEANN OF MCHIS_SEQ INITIAL G_ANN
+  ITEM HSSNUMSEQ OF MCHIS_SEQ FINAL   ( T_HISCLE  - 1 )
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Mise   jour de la date de journalisation dans l'historique de la pi ce
+; r f r e pour les ajustements et les notes de cr dits.
+;
+;
+REQUEST MAJ_CAR_HISTO
+
+ACCESS *WUS900H &
+  LINK HISCIECLE OF WUS900H, &
+       HISNUMDOC OF WUS900H, &
+       HISTYPECR OF WUS900H  &
+    TO CRHCLE1  , &
+       CRHCLE2  , &
+       CRHTYPECR  OF CRCAR_HISTO
+
+SELECT WUS900H IF   HISTYPECR OF WUS900H = "AJ" &
+                 OR HISTYPECR OF WUS900H = "NC"
+
+OUTPUT CRCAR_HISTO UPDATE
+  ITEM CRHDATJOU OF CRCAR_HISTO FINAL HISDATJOU OF WUS900H
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Pour chaque ligne d'imputation au fait le traitemenent suivant:
+;
+;   - le compte   recevoir au d bit(vient du client)
+;   - la tps   recevoir au cr dit, le compte vient du code de taxe.
+;   - la tvp a recevoir au cr dit, le compte vient du code de taxe.
+;   - le compte de revenu au cr dit, le compte vient de l'imputation.
+;
+; . De plus, on met a jour l'unit  administrative d'inter puisqu'il  tait
+;   impossible de le mettre a jour dans la requete pr c dente.
+;
+REQUEST ECLATEMENT_IMPUTATION     TERMINATE IF G_ERREUR = "ARRET"
+
+ACCESS *WCR700VE &
+  LINK CRITAXTYPTPS OF WCR700VE, &
+       CRITAXCODTPS OF WCR700VE &
+    TO TAXCLETYP, &
+       TAXCLECOD OF MCTAXE ALIAS A_TAX_TPS OPTIONAL &
+
+  LINK CRITAXTYPTVP OF WCR700VE, &
+       CRITAXCODTVP OF WCR700VE &
+    TO TAXCLETYP, &
+       TAXCLECOD OF MCTAXE ALIAS A_TAX_TVP OPTIONAL &
+
+  LINK CIECLE OF WCR700VE, &
+       UNACLE OF WCR700VE &
+    TO CIECLE, &
+       UNACLE OF MCUNITE_ADM OPTIONAL &
+
+  LINK CIECLE OF WCR700VE &
+    TO CIECLE OF MCCOMPAGNIE &
+
+  LINK T_HECCIEINT OF WCR700VE &
+    TO CIECLE OF MCCOMPAGNIE  ALIAS A_MCCIE_INTER
+
+
+TEMPORARY T_CRIMNT    FLOAT     SIZE 8  ; Calcul du montant brut de l'imputation
+TEMPORARY T_MNTREV    FLOAT     SIZE 8  ; pour les montants de revenu
+TEMPORARY T_MNTTPS    FLOAT     SIZE 8  ; Pour les montants de tps
+TEMPORARY T_MNTTVP    FLOAT     SIZE 8  ; pour les montants de tvp
+TEMPORARY T_MNTCAR    FLOAT     SIZE 8  ; pour les montants recevables
+TEMPORARY T_CODDCD    CHARACTER SIZE 1  ; pour le code d bit pour le C.A.R.
+TEMPORARY T_PRJCLE    CHARACTER SIZE 8  ; Projet de l'imputation.
+TEMPORARY T_PRACLE    CHARACTER SIZE 3  ; Activit  de l'imputation.
+TEMPORARY T_IMMCLE    CHARACTER SIZE 12
+
+;
+; Calcul du montant avec taxe pour le compte   recevoir
+;
+ITEM T_MNTCAR = CRIMNT OF WCR700VE
+ITEM T_MNTCAR = T_MNTCAR + CRIMNTTPS OF WCR700VE IF TAXMOD OF A_TAX_TPS = "S"
+ITEM T_MNTCAR = T_MNTCAR + CRIMNTTVP OF WCR700VE IF TAXMOD OF A_TAX_TVP = "S"
+;
+; Le compte de revenu est comptabilis  sans les taxes.
+;
+ITEM T_MNTREV    = T_MNTCAR - CRIMNTTPS OF WCR700VE &
+                            - CRIMNTTVP OF WCR700VE
+
+ITEM T_CODDCD    RESET AT INITIAL TO "D"
+
+
+;
+; sous fichier utilis  dans le traitement g n ral des journalisations
+; et servant a mettre a jour GLHIS_ECR.
+;
+; Ajout du COMPTE A RECEVOIR.
+;
+SUBFILE WUS900HE KEEP IF T_MNTCAR <> 0 &
+  INCLUDE T_HISCLE     OF WCR700VE      ALIAS HISCLE    , &
+          CIECLE       OF WCR700VE      ALIAS HISCIECLE , &
+          T_CPTCAR     OF WCR700VE      ALIAS CPTCLE    , &
+          T_HECCIEINT  OF WCR700VE      ALIAS HECCIEINT , &
+          CIEUNABIL    OF A_MCCIE_INTER ALIAS HECUNAINT , &
+          CIECLE       OF WCR700VE                      , &
+          CIEUNABIL    OF MCCOMPAGNIE   ALIAS UNACLE    , &
+          T_PRJCLE                      ALIAS PRJCLE    , &
+          T_PRACLE                      ALIAS PRACLE    , &
+          T_IMMCLE                      ALIAS IMMCLE    , &
+          PECCLE       OF WCR700VE                      , &
+          T_HECNUMDOC2 OF WCR700VE      ALIAS HECNUMDOC2, &
+          T_CODDCD                      ALIAS T_CODDC   , &
+          T_MNTCAR                      ALIAS T_MNTGL   , &
+          T_MNTCAR                      ALIAS T_MNTORI  , &
+          T_HECFLGINT  OF WCR700VE      ALIAS HECFLGINT , &
+          DEVCLE       OF WCR700VE                      , &
+          G_CODMOD                      ALIAS HISCODMOD , &
+          CARTYPECR    OF WCR700VE      ALIAS HISTYPECR , &
+          LCRCLE       OF WCR700VE      ALIAS HISNUMLOT
+
+
+;
+; Ajout du montant de TPS   recevoir.
+;
+OUTPUT *WUS900HE ALIAS A_WUS900HE_TPS ADD IF CRIMNTTPS OF WCR700VE <> 0
+  ITEM HISCLE     OF A_WUS900HE_TPS FINAL T_HISCLE     OF WCR700VE
+  ITEM HISCIECLE  OF A_WUS900HE_TPS FINAL CIECLE       OF WCR700VE
+  ITEM CPTCLE     OF A_WUS900HE_TPS FINAL TAXCPTCAR    OF A_TAX_TPS
+  ITEM HECCIEINT  OF A_WUS900HE_TPS FINAL T_HECCIEINT  OF WCR700VE
+  ITEM HECUNAINT  OF A_WUS900HE_TPS FINAL CIEUNABIL    OF A_MCCIE_INTER
+  ITEM CIECLE     OF A_WUS900HE_TPS FINAL CIECLE       OF WCR700VE
+  ITEM UNACLE     OF A_WUS900HE_TPS FINAL CIEUNABIL    OF MCCOMPAGNIE
+  ITEM PRJCLE     OF A_WUS900HE_TPS FINAL " "
+  ITEM PRACLE     OF A_WUS900HE_TPS FINAL " "
+  ITEM IMMCLE     OF A_WUS900HE_TPS FINAL " "
+  ITEM PECCLE     OF A_WUS900HE_TPS FINAL PECCLE       OF WCR700VE
+  ITEM HECNUMDOC2 OF A_WUS900HE_TPS FINAL T_HECNUMDOC2 OF WCR700VE
+  ITEM T_CODDC    OF A_WUS900HE_TPS FINAL "C"
+  ITEM T_MNTGL    OF A_WUS900HE_TPS FINAL CRIMNTTPS    OF WCR700VE
+  ITEM T_MNTORI   OF A_WUS900HE_TPS FINAL CRIMNTTPS    OF WCR700VE
+  ITEM HECFLGINT  OF A_WUS900HE_TPS FINAL T_HECFLGINT  OF WCR700VE
+  ITEM DEVCLE     OF A_WUS900HE_TPS FINAL DEVCLE       OF WCR700VE
+  ITEM HISCODMOD  OF A_WUS900HE_TPS FINAL G_CODMOD
+  ITEM HISTYPECR  OF A_WUS900HE_TPS FINAL CARTYPECR    OF WCR700VE
+  ITEM HISNUMLOT  OF A_WUS900HE_TPS FINAL LCRCLE       OF WCR700VE
+
+
+;
+; Ajout du montant de TVP   recevoir.
+;
+OUTPUT *WUS900HE ALIAS A_WUS900HE_TVP ADD IF CRIMNTTVP OF WCR700VE <> 0
+  ITEM HISCLE     OF A_WUS900HE_TVP FINAL T_HISCLE     OF WCR700VE
+  ITEM HISCIECLE  OF A_WUS900HE_TVP FINAL CIECLE       OF WCR700VE
+  ITEM CPTCLE     OF A_WUS900HE_TVP FINAL TAXCPTCAR    OF A_TAX_TVP
+  ITEM HECCIEINT  OF A_WUS900HE_TVP FINAL T_HECCIEINT  OF WCR700VE
+  ITEM HECUNAINT  OF A_WUS900HE_TVP FINAL CIEUNABIL    OF A_MCCIE_INTER
+  ITEM CIECLE     OF A_WUS900HE_TVP FINAL CIECLE       OF WCR700VE
+  ITEM UNACLE     OF A_WUS900HE_TVP FINAL CIEUNABIL    OF MCCOMPAGNIE
+  ITEM PRJCLE     OF A_WUS900HE_TVP FINAL " "
+  ITEM PRACLE     OF A_WUS900HE_TVP FINAL " "
+  ITEM IMMCLE     OF A_WUS900HE_TVP FINAL " "
+  ITEM PECCLE     OF A_WUS900HE_TVP FINAL PECCLE       OF WCR700VE
+  ITEM HECNUMDOC2 OF A_WUS900HE_TVP FINAL T_HECNUMDOC2 OF WCR700VE
+  ITEM T_CODDC    OF A_WUS900HE_TVP FINAL "C"
+  ITEM T_MNTGL    OF A_WUS900HE_TVP FINAL CRIMNTTVP    OF WCR700VE
+  ITEM T_MNTORI   OF A_WUS900HE_TVP FINAL CRIMNTTVP    OF WCR700VE
+  ITEM HECFLGINT  OF A_WUS900HE_TVP FINAL T_HECFLGINT  OF WCR700VE
+  ITEM DEVCLE     OF A_WUS900HE_TVP FINAL DEVCLE       OF WCR700VE
+  ITEM HISCODMOD  OF A_WUS900HE_TVP FINAL G_CODMOD
+  ITEM HISTYPECR  OF A_WUS900HE_TVP FINAL CARTYPECR    OF WCR700VE
+  ITEM HISNUMLOT  OF A_WUS900HE_TVP FINAL LCRCLE       OF WCR700VE
+
+
+;
+; Ajout du compte de REVENU.
+;
+OUTPUT *WUS900HE ALIAS A_WUS900HE_REV ADD IF T_MNTREV <> 0
+  ITEM HISCLE     OF A_WUS900HE_REV FINAL T_HISCLE     OF WCR700VE
+  ITEM HISCIECLE  OF A_WUS900HE_REV FINAL CIECLE       OF WCR700VE
+  ITEM CPTCLE     OF A_WUS900HE_REV FINAL CPTCLE       OF WCR700VE
+  ITEM HECCIEINT  OF A_WUS900HE_REV FINAL T_HECCIEINT  OF WCR700VE
+  ITEM HECUNAINT  OF A_WUS900HE_REV FINAL CIEUNABIL    OF A_MCCIE_INTER
+  ITEM CIECLE     OF A_WUS900HE_REV FINAL CIECLE       OF WCR700VE
+  ITEM UNACLE     OF A_WUS900HE_REV FINAL UNACLE       OF WCR700VE
+  ITEM PRJCLE     OF A_WUS900HE_REV FINAL PRJCLE       OF WCR700VE
+  ITEM PRACLE     OF A_WUS900HE_REV FINAL PRACLE       OF WCR700VE
+  ITEM IMMCLE     OF A_WUS900HE_REV FINAL IMMCLE       OF WCR700VE
+  ITEM PECCLE     OF A_WUS900HE_REV FINAL PECCLE       OF WCR700VE
+  ITEM HECNUMDOC2 OF A_WUS900HE_REV FINAL T_HECNUMDOC2 OF WCR700VE
+  ITEM T_CODDC    OF A_WUS900HE_REV FINAL CRICODDC     OF WCR700VE
+  ITEM T_MNTGL    OF A_WUS900HE_REV FINAL T_MNTREV
+  ITEM T_MNTORI   OF A_WUS900HE_REV FINAL T_MNTREV
+  ITEM HECFLGINT  OF A_WUS900HE_REV FINAL T_HECFLGINT  OF WCR700VE
+  ITEM DEVCLE     OF A_WUS900HE_REV FINAL DEVCLE       OF WCR700VE
+  ITEM HISCODMOD  OF A_WUS900HE_REV FINAL G_CODMOD
+  ITEM HISTYPECR  OF A_WUS900HE_REV FINAL CARTYPECR    OF WCR700VE
+  ITEM HISNUMLOT  OF A_WUS900HE_REV FINAL LCRCLE       OF WCR700VE
+
+
+
+;-------------------------------------------------------------------------------
+;
+; TRAITEMENTS GENERAUX A TOUTES LES JOURNALISATION
+;
+
+USE us-900t NOLIST
+
+BUILD

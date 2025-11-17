@@ -1,0 +1,486 @@
+;/T/ Préparation des factures - Génération du détail de facture
+;
+;/P/ Programmeur..: Nancy Marceau
+;    Date Création: 19 avril 1994
+;
+;    Description..: Cet écran permet de générer le détail de la
+;                   facture à partir du détail de la réception de la commande
+;                   d'achat.  Ce traitement s'effectue de façon transparente
+;                   pour l'utilisateur puisque cet écran est appelé dans un mode
+;                   'Ghost screen'.
+;
+;
+;/M/ Programmeur.......: Patrick Langlois
+;    Date modification.: 09 Juin 1999
+;    Description.......: Migration Achat/Réception/Inventaire de l'environnement (BOC)
+;
+;/M/ Programmeur.......: Francois Richard
+;    Date modification.: 15 Juin 1999
+;    Description.......: Migration Achat/Réception/Inventaire de l'environnement
+;                        BOC
+;-------------------------------------------------------------------------------
+;
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN ar011d NOMODE ACTION LABEL "" &
+              FROM 23,70 TO 23,80 &
+              RECEIVING ARFAC_DETAIL, &
+                        ARFACTURE_REC
+
+
+;
+; La transaction UPDATE doit être celle de l'appelant.
+;
+TRANSACTION UPDATE INHERITED NOCOMMIT
+
+
+FILE ARFAC_DETAIL  MASTER NOITEM
+
+FILE ARFACTURE_REC  MASTER NOITEM
+
+;
+; Fichier du détail de la facture.
+;
+FILE ARDER_ITEM  DESIGNER NOITEM
+
+
+;
+; Fichier du détail de la réception de la commande d'achat.
+;
+FILE ARREC_DETAIL  DESIGNER  NOITEM
+  ACCESS VIA   CIECLE, &
+               RECCLE  &
+         USING FACCIECLE OF ARFAC_DETAIL, &
+               RECCLE    OF ARFAC_DETAIL
+
+    ; On ne sélectionne pas les lignes annulées (X) ou complètes (C).
+    ;
+  SELECT IF   REDSTU OF ARREC_DETAIL = "" &
+           OR REDSTU OF ARREC_DETAIL = "S"
+
+
+
+
+;-------------------------------------------------------------------------------
+; Validation du code de taxe fédéral.
+;
+FILE MCTAXE            REFERENCE &
+                      ALIAS A_TAX_TPS
+  ACCESS VIA   TAXCLETYP, &
+               TAXCLECOD &
+         USING DEITAXTYPTPS OF ARDER_ITEM, &
+               DEITAXCODTPS OF ARDER_ITEM
+
+;-------------------------------------------------------------------------------
+; Validation du code de taxe provincial.
+;
+FILE MCTAXE            REFERENCE &
+                      ALIAS A_TAX_TVP
+  ACCESS VIA   TAXCLETYP, &
+               TAXCLECOD &
+         USING DEITAXTYPTVQ OF ARDER_ITEM, &
+               DEITAXCODTVQ OF ARDER_ITEM
+
+
+;-------------------------------------------------------------------------------
+; Fichier du terme d'escompte d'achat du fournisseur.
+;
+FILE VTER_DSC  REFERENCE
+  ACCESS VIA    TERCLE  &
+         USING  DEITERESCACH OF ARDER_ITEM
+
+
+
+;-------------------------------------------------------------------------------
+; Pour le calcul des taxes.
+;
+;
+USE ustaxtmp NOLIST
+
+
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du CTI = remboursement de TPS.
+;
+PROCEDURE INTERNAL CALCUL_CTI
+BEGIN
+  ;
+  ; Il faut diminuer le cumulatif de taxe de la facture.
+  ;
+  LET FADMNTCTI OF ARFAC_DETAIL  = FADMNTCTI OF ARFAC_DETAIL - &
+                                   DEIMNTCTI OF ARDER_ITEM
+
+  LET FACMNTCTI OF ARFACTURE_REC = FACMNTCTI OF ARFACTURE_REC - &
+                                   DEIMNTCTI OF ARDER_ITEM
+  ;
+  LET DEIMNTCTI OF ARDER_ITEM = 0
+
+  ;
+  ; Calcul du remboursement fédéral.
+  ;
+  LET DEIMNTCTI OF ARDER_ITEM = &
+                ROUND( DEIMNTTPS OF ARDER_ITEM * TAXPCTCTI OF A_TAX_TPS )
+  ;
+  ; Il faut augmenter le cumulatif de taxe de la facture.
+  ;
+  LET FADMNTCTI OF ARFAC_DETAIL  = FADMNTCTI OF ARFAC_DETAIL + &
+                                   DEIMNTCTI OF ARDER_ITEM
+  LET FACMNTCTI OF ARFACTURE_REC = FACMNTCTI OF ARFACTURE_REC + &
+                                   DEIMNTCTI OF ARDER_ITEM
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du RTI = remboursement de TVQ.
+;
+PROCEDURE INTERNAL CALCUL_RTI
+BEGIN
+  ;
+  ; Il faut diminuer le cumulatif de taxe de la facture.
+  ;
+  LET FADMNTRTI OF ARFAC_DETAIL  = FADMNTRTI OF ARFAC_DETAIL - &
+                                   DEIMNTRTI OF ARDER_ITEM
+  LET FACMNTRTI OF ARFACTURE_REC = FACMNTRTI OF ARFACTURE_REC - &
+                                   DEIMNTRTI OF ARDER_ITEM
+
+  ;
+  LET DEIMNTRTI OF ARDER_ITEM = 0
+
+  ;
+  ; Calcul du remboursement fédéral.
+  ;
+  LET DEIMNTRTI OF ARDER_ITEM = &
+                ROUND( DEIMNTTVQ OF ARDER_ITEM * TAXPCTCTI OF A_TAX_TVP )
+  ;
+  ; Il faut augmenter le cumulatif de taxe de la facture.
+  ;
+  LET FADMNTRTI OF ARFAC_DETAIL  = FADMNTRTI OF ARFAC_DETAIL + &
+                                   DEIMNTRTI OF ARDER_ITEM
+  LET FACMNTRTI OF ARFACTURE_REC = FACMNTRTI OF ARFACTURE_REC + &
+                                   DEIMNTRTI OF ARDER_ITEM
+
+END
+
+
+
+;-------------------------------------------------------------------------------
+; Calcul des taxes (provinciale et fédérale)
+;
+PROCEDURE INTERNAL CALCUL_TAXES
+BEGIN
+  ;
+  ; Enlève les anciennes valeurs des totaux
+  ;
+  LET FADMNTTPS OF ARFAC_DETAIL = FADMNTTPS OF ARFAC_DETAIL - &
+                                  DEIMNTTPS OF ARDER_ITEM
+
+  LET FADMNTTVQ OF ARFAC_DETAIL = FADMNTTVQ OF ARFAC_DETAIL - &
+                                  DEIMNTTVQ OF ARDER_ITEM
+
+  LET FACMNTTPS OF ARFACTURE_REC = FACMNTTPS OF ARFACTURE_REC - &
+                                   DEIMNTTPS OF ARDER_ITEM
+
+  LET FACMNTTVQ OF ARFACTURE_REC = FACMNTTVQ OF ARFACTURE_REC - &
+                                   DEIMNTTVQ OF ARDER_ITEM
+
+  ;
+  LET DEIMNTTPS OF ARDER_ITEM = 0
+  LET DEIMNTTVQ OF ARDER_ITEM = 0
+  ;
+  ; On prend le montant brut de la ligne de facture pour le calcul des taxes.
+  ;
+  LET TZ_MNTTXB = DEIMNTTOT OF ARDER_ITEM
+  ;
+  ; Use standard pour le calcul des taxes
+  ;
+  USE ustaxcal NOLIST
+
+  LET DEIMNTTPS OF ARDER_ITEM = TZ_MNTTPS
+  LET DEIMNTTVQ OF ARDER_ITEM = TZ_MNTTVP
+
+  LET FADMNTTPS OF ARFAC_DETAIL = FADMNTTPS OF ARFAC_DETAIL + &
+                                  DEIMNTTPS OF ARDER_ITEM
+
+  LET FADMNTTVQ OF ARFAC_DETAIL = FADMNTTVQ OF ARFAC_DETAIL + &
+                                  DEIMNTTVQ OF ARDER_ITEM
+
+  LET FACMNTTPS OF ARFACTURE_REC = FACMNTTPS OF ARFACTURE_REC + &
+                                   DEIMNTTPS OF ARDER_ITEM
+
+  LET FACMNTTVQ OF ARFACTURE_REC = FACMNTTVQ OF ARFACTURE_REC + &
+                                   DEIMNTTVQ OF ARDER_ITEM
+
+  ;
+  ; Si le mode de taxation est "EN SUS", il faut mettre à jour le cumulatif brut
+  ; de la facture.
+  ;
+  IF TAXMOD OF A_TAX_TPS = "S"
+  THEN BEGIN
+    LET FADMNTTOT OF ARFAC_DETAIL = FADMNTTOT OF ARFAC_DETAIL + &
+                                    DEIMNTTPS OF ARDER_ITEM
+
+    LET FACMNTTOT OF ARFACTURE_REC = FACMNTTOT OF ARFACTURE_REC + &
+                                     DEIMNTTPS OF ARDER_ITEM
+
+    LET DEIMNTTOT OF ARDER_ITEM = DEIMNTTOT OF ARDER_ITEM + &
+                                  DEIMNTTPS OF ARDER_ITEM
+
+  END
+
+
+  IF TAXMOD OF A_TAX_TVP = "S"
+  THEN BEGIN
+     LET FADMNTTOT OF ARFAC_DETAIL = FADMNTTOT OF ARFAC_DETAIL + &
+                                     DEIMNTTVQ OF ARDER_ITEM
+
+     LET FACMNTTOT OF ARFACTURE_REC = FACMNTTOT OF ARFACTURE_REC + &
+                                      DEIMNTTVQ OF ARDER_ITEM
+
+
+     LET DEIMNTTOT OF ARDER_ITEM = DEIMNTTOT OF ARDER_ITEM + &
+                                   DEIMNTTVQ OF ARDER_ITEM
+
+  END
+
+  ;
+  ; Calcul des montants de taxe remboursables (CTI & RTI)
+  ;
+  DO INTERNAL CALCUL_CTI
+  DO INTERNAL CALCUL_RTI
+
+  LET DEIMNTNET    OF ARDER_ITEM =  DEIMNTTOT OF ARDER_ITEM - &
+                                    DEIMNTTPS OF ARDER_ITEM - &
+                                    DEIMNTTVQ OF ARDER_ITEM
+
+  LET FADMNTNET    OF ARFAC_DETAIL =  FADMNTTOT OF ARFAC_DETAIL - &
+                                      FADMNTTPS OF ARFAC_DETAIL - &
+                                      FADMNTTVQ OF ARFAC_DETAIL
+
+  LET FACMNTNET    OF ARFACTURE_REC =  FACMNTTOT OF ARFACTURE_REC - &
+                                       FACMNTTPS OF ARFACTURE_REC - &
+                                       FACMNTTVQ OF ARFACTURE_REC
+
+
+END
+
+
+;-------------------------------------------------------------------------------
+; Calcul de l'escompte si le terme du fournisseur est spécifié.
+;
+PROCEDURE INTERNAL CALCUL_ESCOMPTE
+BEGIN
+  LET FADMNTESC OF ARFAC_DETAIL = FADMNTESC OF ARFAC_DETAIL - &
+                                  DEIMNTESC OF ARDER_ITEM
+
+  LET FACMNTESC OF ARFACTURE_REC = FACMNTESC OF ARFACTURE_REC - &
+                                   DEIMNTESC OF ARDER_ITEM
+
+  LET DEIMNTESC OF ARDER_ITEM = 0
+
+
+  ; On calcule le montant d'escompte en utilisant le pourcentage d'escompte
+  ; du terme.
+
+  IF REDTERESCACH OF ARREC_DETAIL <> ""
+  THEN BEGIN
+    LET DEIMNTESC OF ARDER_ITEM = ROUND ( DEIMNTNET OF ARDER_ITEM * &
+                                          TERPCT    OF VTER_DSC )
+
+    LET FADMNTESC OF ARFAC_DETAIL = FADMNTESC OF ARFAC_DETAIL + &
+                                    DEIMNTESC OF ARDER_ITEM
+
+    LET FADMNTTOT OF ARFAC_DETAIL = FADMNTTOT OF ARFAC_DETAIL - &
+                                    DEIMNTESC OF ARDER_ITEM
+
+    LET FACMNTESC OF ARFACTURE_REC = FACMNTESC OF ARFACTURE_REC + &
+                                     DEIMNTESC OF ARDER_ITEM
+
+    LET FACMNTTOT OF ARFACTURE_REC = FACMNTTOT OF ARFACTURE_REC - &
+                                     DEIMNTESC OF ARDER_ITEM
+
+
+    LET DEIMNTTOT OF ARDER_ITEM = DEIMNTTOT OF ARDER_ITEM - &
+                                  DEIMNTESC OF ARDER_ITEM
+
+
+    IF TAXMOD OF A_TAX_TPS = "S"
+    THEN LET DEIMNTTOT OF ARDER_ITEM = DEIMNTTOT OF ARDER_ITEM - &
+                                       DEIMNTTPS OF ARDER_ITEM
+
+    IF TAXMOD OF A_TAX_TVP = "S"
+    THEN LET DEIMNTTOT OF ARDER_ITEM = DEIMNTTOT OF ARDER_ITEM - &
+                                       DEIMNTTVQ OF ARDER_ITEM
+
+    ; On recalcule les taxes pour tenir compte de l'escompte.
+    ;
+    IF 0 <> DEIMNTESC OF ARDER_ITEM
+    THEN BEGIN
+      IF TAXMOD OF A_TAX_TPS = "S"
+      THEN BEGIN
+        LET FADMNTTOT OF ARFAC_DETAIL  = FADMNTTOT OF ARFAC_DETAIL - &
+                                         DEIMNTTPS OF ARDER_ITEM
+        LET FACMNTTOT OF ARFACTURE_REC = FACMNTTOT OF ARFACTURE_REC - &
+                                         DEIMNTTPS OF ARDER_ITEM
+
+      END
+
+      IF TAXMOD OF A_TAX_TVP = "S"
+      THEN BEGIN
+        LET FADMNTTOT OF ARFAC_DETAIL  = FADMNTTOT OF ARFAC_DETAIL - &
+                                         DEIMNTTVQ OF ARDER_ITEM
+        LET FACMNTTOT OF ARFACTURE_REC = FACMNTTOT OF ARFACTURE_REC - &
+                                         DEIMNTTVQ OF ARDER_ITEM
+
+      END
+
+      DO INTERNAL CALCUL_TAXES
+    END
+  END
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul des montants et des taxes.
+;
+PROCEDURE INTERNAL CALCUL_MONTANT
+BEGIN
+  ;
+  ; Calcul du montant brut du produit
+  ;
+  LET FADMNTTOT OF ARFAC_DETAIL = FADMNTTOT OF ARFAC_DETAIL - &
+                                  DEIMNTTOT OF ARDER_ITEM
+
+  LET FACMNTTOT OF ARFACTURE_REC = FACMNTTOT OF ARFACTURE_REC - &
+                                   DEIMNTTOT OF ARDER_ITEM
+
+
+    ;
+    ; Montant maximal à enlever du RNF selon la réception.
+    ;
+  LET REDMNTFAC OF ARREC_DETAIL = (REDMNTTOT OF ARREC_DETAIL /   &
+                                   REDQTEREC OF ARREC_DETAIL ) * &
+                                   DEIQTEFAC OF ARDER_ITEM
+
+
+  ;
+  ; La division par 100000 représente les 3 chiffres après le point pour
+  ; les qtes et 2 chiffres pour les décimales 3 et 4 du prix unitaire.
+  ;
+  LET DEIMNTTOT OF ARDER_ITEM = &
+    ROUND ( DEIQTEFAC OF ARDER_ITEM * &
+            DEIPRIUNI  OF ARDER_ITEM /100000 )
+
+  LET FADMNTTOT OF ARFAC_DETAIL = FADMNTTOT OF ARFAC_DETAIL + &
+                                  DEIMNTTOT OF ARDER_ITEM
+
+
+  LET FACMNTTOT OF ARFACTURE_REC = FACMNTTOT OF ARFACTURE_REC + &
+                                   DEIMNTTOT OF ARDER_ITEM
+
+
+
+  ; Cette procédure calcule les montants de taxe ainsi que les montants de
+  ; CTI et RTI.
+
+  DO INTERNAL CALCUL_TAXES
+
+
+  ; On calcule l'escompte.
+  ;
+  DO INTERNAL CALCUL_ESCOMPTE
+
+
+END
+
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de mettre à jour les informations de chacune des
+; lignes de la réception de commande d'achat concernée.
+;
+PROCEDURE INTERNAL MAJ_DETAIL_RECEPTION
+BEGIN
+  LET REDQTEFAC OF ARREC_DETAIL = REDQTEFAC OF ARREC_DETAIL + &
+                                  ( REDQTEREC    OF ARREC_DETAIL - &
+                                    REDQTERET    OF ARREC_DETAIL - &
+                                    REDQTERECREJ OF ARREC_DETAIL - &
+                                    REDQTEFAC    OF ARREC_DETAIL)
+
+  LET REDSTU    OF ARREC_DETAIL = "C"
+
+  PUT ARREC_DETAIL RESET
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de générer les lignes de facture pour chacune des
+; lignes de la réception de commande d'achat concernée.
+;
+PROCEDURE INTERNAL CREER_DETAIL_FACTURE
+BEGIN
+  LET FOUCIECLE       OF ARDER_ITEM = FOUCIECLE    OF ARFAC_DETAIL
+  LET FOUCLE          OF ARDER_ITEM = FOUCLE       OF ARFAC_DETAIL
+  LET FACCLE          OF ARDER_ITEM = FACCLE       OF ARFAC_DETAIL
+  LET FACCIECLE       OF ARDER_ITEM = FACCIECLE    OF ARFAC_DETAIL
+  LET RECCLE          OF ARDER_ITEM = RECCLE       OF ARFAC_DETAIL
+  LET DEICLE          OF ARDER_ITEM = REDCLE       OF ARREC_DETAIL
+
+  LET DEIQTEFAC       OF ARDER_ITEM = REDQTEREC    OF ARREC_DETAIL - &
+                                      REDQTERET    OF ARREC_DETAIL - &
+                                      REDQTERECREJ OF ARREC_DETAIL - &
+                                      REDQTEFAC    OF ARREC_DETAIL
+  LET DEIPRIUNI       OF ARDER_ITEM = REDPRIUNI    OF ARREC_DETAIL
+
+
+  LET DEIFLGCOM       OF ARDER_ITEM = "1"
+
+  LET CPTCLE       OF ARDER_ITEM  = CPTCLE       OF ARREC_DETAIL
+  LET UNACLE       OF ARDER_ITEM  = UNACLE       OF ARREC_DETAIL
+  LET PRJCLE       OF ARDER_ITEM  = PRJCLE       OF ARREC_DETAIL
+  LET PRACLE       OF ARDER_ITEM  = PRACLE       OF ARREC_DETAIL
+  LET IMMCLE       OF ARDER_ITEM  = IMMCLE       OF ARREC_DETAIL
+
+  LET DEITAXTYPTPS OF ARDER_ITEM  = REDTAXTYPTPS OF ARREC_DETAIL
+  LET DEITAXCODTPS OF ARDER_ITEM  = REDTAXCODTPS OF ARREC_DETAIL
+  LET DEITAXTYPTVQ OF ARDER_ITEM  = REDTAXTYPTVQ OF ARREC_DETAIL
+  LET DEITAXCODTVQ OF ARDER_ITEM  = REDTAXCODTVQ OF ARREC_DETAIL
+  LET DEITERESCACH OF ARDER_ITEM  = REDTERESCACH OF ARREC_DETAIL
+
+
+   ; Calcul des montants, des taxes et de l'escompte selon quantité facturée.
+   ;
+  DO INTERNAL CALCUL_MONTANT
+
+  PUT ARDER_ITEM   RESET
+  PUT ARFAC_DETAIL
+  PUT ARFACTURE_REC
+
+END
+
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure est exécutée seulement en mode ENTRY.
+;
+PROCEDURE PREENTRY
+BEGIN
+  WHILE RETRIEVING ARREC_DETAIL
+  BEGIN
+    DO INTERNAL CREER_DETAIL_FACTURE
+    DO INTERNAL MAJ_DETAIL_RECEPTION
+  END
+
+
+  RETURN
+END
+
+BUILD

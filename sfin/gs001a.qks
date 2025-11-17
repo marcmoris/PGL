@@ -1,0 +1,299 @@
+;/T/ Gestion des Acces au menu de niveau I
+;
+;/P/ Programmeur..: Guy Chabot
+;    Date Création: 18-Feb-1992
+;
+;    Description..: Cet écran permet de donner accès au menu de niveau I
+;                   c'est-à-dire les premier écran de module (GLM01, CRM01... )
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN gs001a ACTIONBAR NOMODE NOACTION FIELDMARK RETAIN STARTUP &
+              FROM 8,1 TO 23,80 &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              TRANSACTION MODE DUAL &
+              RECEIVING T_COD, T_FLGHLDOK, GSUSAGER
+
+
+USE usactecr NOLIST
+
+TEMPORARY T_COD CHARACTER SIZE 1 RESET AT STARTUP ; Indique si c'est soit un
+                                                  ; M menu
+                                                  ; E ecran
+                                                  ; R ou P rapport procedure
+TEMPORARY T_FLGHLDOK CHARACTER SIZE 1 ; Si le Holding est présent.
+
+FILE GSUSAGER      MASTER NODELETE
+FILE GSUSAGER_PROG PRIMARY OCCURS 11 NOITEMS
+  ACCESS VIA USRCLE, XPRNOM REQUEST XPRNOM OF GSUSAGER_PROG &
+         USING USRCLE OF GSUSAGER, XPRNOM OF GSUSAGER_PROG
+  ACCESS VIA USRCLE USING USRCLE OF GSUSAGER
+  SELECT IF XPRGNR OF GSUSAGER_PROG = T_COD
+  ITEM USRCLE OF GSUSAGER_PROG INIT USRCLE OF GSUSAGER
+  ITEM XPRGNR OF GSUSAGER_PROG INIT T_COD
+
+FILE GSPROGRAMME   REFERENCE OCCURS WITH GSUSAGER_PROG
+  SELECT IF XPRGNR OF GSPROGRAMME = T_COD
+
+USE ussectmp NOLIST
+"GS001A"
+
+TEMPORARY T_XPRNOM CHARACTER SIZE 7 ; Nom du programme pour ecran de
+                                    ; consultation (permet de transporter le
+                                    ; choix d'un ecran a l'autre.
+
+@IF FRANCAIS
+DEFINE D_TITECR CHARACTER SIZE 36 = &
+       "   Accès au menu de premier niveau   " IF T_COD = "M" ELSE &
+       "  Restriction au niveau des écrans  " IF T_COD = "E" ELSE &
+       " Restriction au niveau des rapports " IF T_COD = "R" ELSE &
+       "Restriction au niveau des procédures"
+@ELSE
+DEFINE D_TITECR CHARACTER SIZE 28 = &
+       "   First level menu Access  " IF T_COD = "M" ELSE &
+       "  Screen restrictions  " IF T_COD = "E" ELSE &
+       " Report Restrictions "   IF T_COD = "R" ELSE &
+       " Function Restrictions "
+@ENDIF
+
+USE ushilite NOLIST
+
+DRAW 2,1 TO 16,80
+
+HILITE DISPLAY HALFTONE
+
+FIELD D_TITECR NOID NOLABEL DATA AT 2,22 DISPLAY PREDISPLAY FIXED
+
+HILITE DISPLAY HALFTONE UNDERLINE
+
+SKIP
+
+USE ustitoff NOLIST
+
+@IF FRANCAIS
+TITLE "Programme"   AT ,2
+TITLE "description" AT ,12
+TITLE "accès"       AT ,52
+TITLE "saisie"      AT ,58
+TITLE "destruc."    AT ,65
+TITLE "modif."      AT ,74
+@ELSE
+TITLE "Program "    AT ,2
+TITLE "Description" AT ,12
+TITLE "access"      AT ,52
+TITLE "input"       AT ,59
+TITLE "destroy"     AT ,65
+TITLE "mod."        AT ,74
+@ENDIF
+
+SKIP 1
+
+ALIGN(3,,3)(,,11)(,,54)(,,60)(,,68)(,,76)
+
+CLUSTER OCCURS WITH GSUSAGER_PROG
+
+FIELD XPRNOM    OF GSUSAGER_PROG REQUIRED &
+      LOOKUP ON GSPROGRAMME VIA XPRNOM USING XPRNOM OF GSUSAGER_PROG &
+      MESSAGE 4 , &
+          NOTON GSUSAGER_PROG VIA USRCLE, XPRNOM &
+          USING USRCLE OF GSUSAGER, XPRNOM OF GSUSAGER_PROG &
+      MESSAGE 5
+FIELD XPRDSCFRA OF GSPROGRAMME SIZE 40 DISPLAY
+FIELD USPFLGACS OF GSUSAGER_PROG
+FIELD USPFLGENT OF GSUSAGER_PROG
+FIELD USPFLGDEL OF GSUSAGER_PROG
+FIELD USPFLGMOD OF GSUSAGER_PROG
+
+CLUSTER
+
+PROCEDURE INITIALIZE
+BEGIN
+  IF T_FLGHLDOK = "1"
+  THEN BEGIN
+    USE ussececr NOLIST
+  END
+END
+
+PROCEDURE INPUT XPRNOM
+BEGIN
+ IF 0 <> IND(FIELDTEXT,"*")
+ THEN BEGIN
+   LET T_XPRNOM = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+   RUN SCREEN gs101 PASSING T_COD, T_XPRNOM MODE F
+   LET FIELDTEXT = TRUNC(T_XPRNOM)
+ END
+END
+
+;
+; Sécurité pour la saisie
+;
+PROCEDURE EDIT XPRNOM
+BEGIN
+  USE ussecent NOLIST
+END
+;
+; usager en anglais
+;
+@IF NOT FRANCAIS
+PROCEDURE OUTPUT XPRDSCFRA
+BEGIN
+  LET FIELDTEXT = XPRDSCANG OF GSPROGRAMME
+END
+@ENDIF
+
+PROCEDURE INPUT USPFLGACS
+BEGIN
+  USE usflginp NOLIST
+END
+
+PROCEDURE OUTPUT USPFLGACS
+BEGIN
+  USE usflgout NOLIST
+END
+
+PROCEDURE INPUT USPFLGENT
+BEGIN
+  USE usflginp NOLIST
+END
+
+PROCEDURE OUTPUT USPFLGENT
+BEGIN
+  USE usflgout NOLIST
+END
+
+PROCEDURE INPUT USPFLGDEL
+BEGIN
+  USE usflginp NOLIST
+END
+
+PROCEDURE OUTPUT USPFLGDEL
+BEGIN
+  USE usflgout NOLIST
+END
+
+PROCEDURE INPUT USPFLGMOD
+BEGIN
+  USE usflginp NOLIST
+END
+
+PROCEDURE OUTPUT USPFLGMOD
+BEGIN
+  USE usflgout NOLIST
+END
+
+PROCEDURE APPEND
+BEGIN
+  DISPLAY D_TITECR
+  ACCEPT XPRNOM OF GSUSAGER_PROG
+  DISPLAY XPRDSCFRA OF GSPROGRAMME
+  IF T_COD = "E"
+  ;
+  ; Si ce n'est pas un ecran de premier niveau on demande s'il a acces
+  ;
+  THEN BEGIN
+    ACCEPT USPFLGACS OF GSUSAGER_PROG
+    IF USPFLGACS OF GSUSAGER_PROG = "1"
+    THEN BEGIN
+      ACCEPT USPFLGENT OF GSUSAGER_PROG
+      ACCEPT USPFLGDEL OF GSUSAGER_PROG
+      ACCEPT USPFLGMOD OF GSUSAGER_PROG
+    END
+  END
+  ;
+  ; Si c'est un ecran de niveau un (c-a-d de T_COD = "M") alors on
+  ; place l'acces a "O" et si c'est un rapport on place l'accès à "N"
+  ;
+  ELSE BEGIN
+    IF T_COD = "M"
+    THEN BEGIN
+      LET USPFLGACS OF GSUSAGER_PROG = "1"
+      LET USPFLGENT OF GSUSAGER_PROG = "1"
+      LET USPFLGDEL OF GSUSAGER_PROG = "1"
+      LET USPFLGMOD OF GSUSAGER_PROG = "1"
+    END
+    ELSE BEGIN
+      LET USPFLGACS OF GSUSAGER_PROG = "0"
+      LET USPFLGENT OF GSUSAGER_PROG = "0"
+      LET USPFLGDEL OF GSUSAGER_PROG = "0"
+      LET USPFLGMOD OF GSUSAGER_PROG = "0"
+    END
+  END
+  DISPLAY USPFLGACS OF GSUSAGER_PROG
+  DISPLAY USPFLGENT OF GSUSAGER_PROG
+  DISPLAY USPFLGDEL OF GSUSAGER_PROG
+  DISPLAY USPFLGMOD OF GSUSAGER_PROG
+END
+
+PROCEDURE ENTRY
+BEGIN
+  DISPLAY D_TITECR
+  FOR GSUSAGER_PROG
+  BEGIN
+    PERFORM APPEND
+  END
+END
+
+PROCEDURE DESIGNER 1
+BEGIN
+  IF T_COD NE " ";= "E"
+  ;
+  ; Si ce n'est pas un ecran de premier niveau on demande s'il a acces
+  ;
+  THEN BEGIN
+    ACCEPT USPFLGACS OF GSUSAGER_PROG
+    IF USPFLGACS OF GSUSAGER_PROG = "1"
+    THEN BEGIN
+      ACCEPT USPFLGENT OF GSUSAGER_PROG
+      ACCEPT USPFLGDEL OF GSUSAGER_PROG
+      ACCEPT USPFLGMOD OF GSUSAGER_PROG
+    END
+  END
+  ;
+  ; Si c'est un ecran de niveau un (c-a-d de T_COD = "M") alors on
+  ; place l'acces a "O" si c'est un rapport on place l'accès à "N"
+  ;
+  ELSE BEGIN
+    IF T_COD = "M"
+    THEN BEGIN
+      LET USPFLGACS OF GSUSAGER_PROG = "1"
+      LET USPFLGENT OF GSUSAGER_PROG = "1"
+      LET USPFLGDEL OF GSUSAGER_PROG = "1"
+      LET USPFLGMOD OF GSUSAGER_PROG = "1"
+    END
+    ELSE BEGIN
+      ACCEPT USPFLGACS OF GSUSAGER_PROG; = "0"
+      ACCEPT USPFLGENT OF GSUSAGER_PROG; = "0"
+      ACCEPT USPFLGDEL OF GSUSAGER_PROG; = "0"
+      ACCEPT USPFLGMOD OF GSUSAGER_PROG; = "0"
+    END
+  END
+  DISPLAY USPFLGACS OF GSUSAGER_PROG
+  DISPLAY USPFLGENT OF GSUSAGER_PROG
+  DISPLAY USPFLGDEL OF GSUSAGER_PROG
+  DISPLAY USPFLGMOD OF GSUSAGER_PROG
+END
+
+PROCEDURE PREUPDATE
+BEGIN
+  FOR GSUSAGER_PROG
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF GSUSAGER_PROG &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD OF GSUSAGER_PROG &
+       AND NOT NEWRECORD OF GSUSAGER_PROG &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+  END
+END
+
+BUILD

@@ -1,0 +1,199 @@
+;/T/ Solde des engagements / Sommaire
+;
+;/P/ Programmeur...: Nancy Marceau
+;    Date Création.: 3 mai 1994
+;
+;    Description...: Ce rapport permet de consulter pour les commandes d'achat
+;                    les montants engagés et désengagés jusqu'à une période
+;                    déterminée.
+;
+;    Paramètres....: Compagnie
+;                    Numéro de commande (Borne début,<retour>=tous)
+;                    Numéro de commande (Borne fin)
+;                    Période comptable  (Obligatoire)
+;
+;/M/ Modifié par...: Steeve Duguay
+;            but...: Changer la notion d'engagement pour gestion projet.
+;
+;/M/ Pascal Tremblay, 98-01-20
+;
+;    Ajustement pour le changement de siècle
+;
+;/M/ Francois Richard, 99-07-09
+;
+;    Ajustement pour le changement de siècle
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST
+
+ACCESS MCHISTO_ENG   &
+
+  LINK HENCLE &
+    TO HENCLE OF MCHIS_ECR_ENG   &
+
+   ;
+   ; Pour avoir la description du compte.
+   ;
+  LINK CPTCLE OF MCHIS_ECR_ENG &
+    TO CPTCLE OF VCPT_DSC       &
+
+   ;
+   ; Pour avoir la description de l'unité.
+   ;
+  LINK CIECLE OF MCHIS_ECR_ENG, &
+       UNACLE OF MCHIS_ECR_ENG &
+    TO CIECLE,&
+       UNACLE OF MCUNITE_ADM  
+
+
+CHOOSE HENCLE1 PARM
+
+DEFINE D_CMDCLEDEB  CHARACTER SIZE 9 = PARM
+DEFINE D_CMDCLEFIN  CHARACTER SIZE 9 = PARM 
+
+DEFINE D_PECCLE     CHARACTER SIZE 4 = PARM  ; Période comptable
+
+; Ajustement pour le changement de si\350cle
+DEFINE D_CMDCLEDEB_SEL CHARACTER SIZE 10 = "1" + D_CMDCLEDEB &
+   IF D_CMDCLEDEB[1:1] < "8" &
+   ELSE "0" + D_CMDCLEDEB
+
+; Ajustement pour le changement de si\350cle
+DEFINE D_CMDCLEFIN_SEL CHARACTER SIZE 10 = "1" + D_CMDCLEFIN &
+   IF D_CMDCLEFIN[1:1] < "8" &
+   ELSE "0" + D_CMDCLEFIN
+
+; Ajustement pour le changement de si\350cle
+DEFINE D_HENCLE2_SEL CHARACTER SIZE 10 = "1" + HENCLE2 OF MCHISTO_ENG[1:9] &
+   IF HENCLE2 OF MCHISTO_ENG[1:1] < "8" &
+   ELSE "0" + HENCLE2 OF MCHISTO_ENG[1:9]
+
+SELECT MCHISTO_ENG IF &
+    (D_CMDCLEDEB_SEL <= D_HENCLE2_SEL OR D_CMDCLEDEB = " ") AND &
+    (D_CMDCLEFIN_SEL >= D_HENCLE2_SEL OR D_CMDCLEFIN = " ")
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_ENG CHARACTER SIZE 5 = "1" + PECCLE OF MCHIS_ECR_ENG &
+         IF PECCLE OF MCHIS_ECR_ENG[1:1] < "8" &
+         ELSE "0" + PECCLE OF MCHIS_ECR_ENG
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SEL CHARACTER SIZE 5 = "1" + D_PECCLE &
+         IF D_PECCLE[1:1] < "8" &
+         ELSE "0" + D_PECCLE
+
+SELECT MCHIS_ECR_ENG IF D_PECCLE_ENG <= D_PECCLE_SEL
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables obligatoires pour les en-têtes standards.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+       "Solde des engagements / Sommaire"
+@ELSE
+       "%%%Solde des engagements / Sommaire"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+       "à la période " + &
+       D_PECCLE[1:2] + "-" + &
+       D_PECCLE[3:4]
+@ELSE
+       "%%%à la période " + &
+       D_PECCLE[1:2] + "-" + &
+       D_PECCLE[3:4]
+@ENDIF
+
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE  7 = "AR332Z"
+;
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM
+
+  ;
+  ; Solde d'engagement
+  ;
+DEFINE D_SOLDE FLOAT SIZE 8 = HEEMNTDBT OF MCHIS_ECR_ENG - &
+                              HEEMNTCRT OF MCHIS_ECR_ENG
+
+
+SORT ON CPTCLE OF MCHIS_ECR_ENG &   ; Compte
+     ON UNACLE OF MCHIS_ECR_ENG    ; Unité
+
+
+USE ustitstd NOLIST 
+  SKIP 3 &
+@IF FRANCAIS
+TAB 001 "         Compte                      Unité administrative            Montant engagé    Montant désengagé               Solde " &
+@ELSE
+TAB 001 "%%%         Compte                      Unité administrative            Montant engagé    Montant désengagé               Solde " &
+@ENDIF
+
+  SKIP &
+TAB 001 "         --------------------------- -----------------------------   ---------------   -----------------      ---------------" &
+  SKIP 1
+
+
+FOOTING AT UNACLE &
+TAB 010 CPTCLE OF MCHIS_ECR_ENG PRINT AT CPTCLE &
+TAB 017 CPTDSC OF VCPT_DSC     PRINT AT CPTCLE  &
+TAB 038 UNACLE    OF MCHIS_ECR_ENG &
+TAB 047 UNANOMABR OF MCUNITE_ADM  &
+TAB 070 HEEMNTDBT OF MCHIS_ECR_ENG SUBTOTAL &
+TAB 090 HEEMNTCRT OF MCHIS_ECR_ENG SUBTOTAL &
+TAB 110 D_SOLDE  SUBTOTAL &
+  PICTURE "^^^,^^^,^^^.^^ " &
+  TRAILING SIGN "-"         &
+  SIGNIFICANCE 5            &
+  BWZ
+
+
+FINAL FOOTING &
+  SKIP 1 &
+TAB 070 "---------------   -----------------      ---------------" &
+  SKIP &
+TAB 070 HEEMNTDBT OF MCHIS_ECR_ENG SUBTOTAL &
+TAB 090 HEEMNTCRT OF MCHIS_ECR_ENG SUBTOTAL &
+TAB 110 D_SOLDE SUBTOTAL &
+  PICTURE "^^^,^^^,^^^.^^ " &
+  TRAILING SIGN "-"         &
+  SIGNIFICANCE 5            &
+  BWZ                       &
+  SKIP &
+TAB 070 "---------------   -----------------      ---------------" 
+
+
+
+BUILD ar332z
+
+
+@IF FORMAT
+         1         2         3         4         5         6         7         8         9        10        11        12        13        14        15        16        17        18        19        20
+12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+AR332                                        xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                              Page: 9999 
+99/99/99 HH:MM xxxxxxxxxxxx                      Solde des engagements / Sommaire                    
+                                                      à la période xx-xx
+
+
+         Compte                      Unité administrative            Montant engagé    Montant désengagé               Solde 
+         --------------------------- -----------------------------   ---------------   -----------------      ---------------
+         xxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxxxxxxx   999,999,999.99-     999,999,999.99-      999,999,999.99-
+         xxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxxxxxxx   999,999,999.99-     999,999,999.99-      999,999,999.99-
+         xxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxxxxxxx   999,999,999.99-     999,999,999.99-      999,999,999.99-
+         xxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxxxxxxx   999,999,999.99-     999,999,999.99-      999,999,999.99-
+         xxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxxxxxxx   999,999,999.99-     999,999,999.99-      999,999,999.99-
+         xxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxxxxxxx   999,999,999.99-     999,999,999.99-      999,999,999.99-
+         xxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxxxxxxx   999,999,999.99-     999,999,999.99-      999,999,999.99-
+                                                                     ---------------   -----------------      ---------------
+                                                                     999,999,999.99-     999,999,999.99-      999,999,999.99-
+                                                                     ---------------   -----------------      ---------------
+
+@ENDIF
+

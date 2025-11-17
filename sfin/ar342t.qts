@@ -1,0 +1,156 @@
+;/T/ Liste des produits / Détaillée
+;
+;/P/ Réalisé par.........: Marc Poulin
+;    Date modification...: 15 mai 2000
+;    Description.........: Impression détaillée des produits
+;
+;    Paramètres..........: Compagnie   (fourni par le système);
+;                          Produit     (Borne de début);
+;                          Produit     (Borne de fin);
+;                          Catégorie   (Une, plusieurs ou tous);
+;                          Type        (Une, plusieurs ou tous);
+;                          Statut      (A=actif,I=inactif,<retour>=tous);
+;                          Tri         (1=Numérique, 2=Alphabétique).
+;
+;    Référence...........: Demande de changement 000055.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+USE ussetqts NOLIST   ; set process nolimit
+SET LOCK RECORD UPDATE
+
+RUN ar342t
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+; Sélection des produit.
+
+REQUEST FOURNISSEUR_PRODUIT
+
+ACCESS VPRE_PRD LINK "PRDSTU"                                         , & ; Table (vue) des produits/entrepôts
+                      PRDSTU OF VPRE_PRD                                &
+                  TO  XELNOM                                          , &
+                      CBICLE OF VCBI_DSC   ALIAS A_CBI_PRDSTU OPTIONAL  & ; Table des descriptions (statut de produit)
+
+                LINK "PRDTYP"                                         , &
+                      PRDTYP OF VPRE_PRD                                &
+                  TO  XELNOM                                          , &
+                      CBICLE OF VCBI_DSC   ALIAS A_CBI_PRDTYP OPTIONAL  & ; Table des descriptions (type de produit)
+
+                LINK  CIECLE OF VPRE_PRD                              , &
+                      PRDCLE OF VPRE_PRD                                &
+                                                                       
+                  TO  CIECLE                                          , &
+                      PRDCLE OF ARPRD_FOU OPTIONAL                        ; Table des fournisseurs par produit
+
+CHOOSE CIECLE PARM      , & ; Compagnie du menu
+       ENTCLE PARM      , & ; Code d'entrepôt
+       PRDCLE PARM RANGE, & ; Code de produit
+       PRDCAT PARM          ; Catégorie de produit
+
+DEFINE D_PRDTYP_PARM CHARACTER SIZE 06 = PARM UPSHIFT ; Type de produit
+DEFINE D_PRDSTU_PARM CHARACTER SIZE 02 = PARM UPSHIFT ; Statut du produit
+
+SELECT VPRE_PRD IF (D_PRDTYP_PARM = " " OR D_PRDTYP_PARM = PRDTYP OF VPRE_PRD) AND &
+                   (D_PRDSTU_PARM = " " OR D_PRDSTU_PARM = PRDSTU OF VPRE_PRD) 
+
+SORT ON CIECLE       OF VPRE_PRD    &    ; Code de compagnie
+     ON PRDCLE       OF VPRE_PRD    &    ; Code de produit
+     ON PDFDATDERACH OF ARPRD_FOU D &    ; Date de dernier achat (ordre décroissant)
+     ON FOUCLE       OF ARPRD_FOU        ; Code de fournisseur
+
+TEMPORARY T_CBIDSC_PRDTYP      CHARACTER SIZE 10
+TEMPORARY T_CBIDSC_PRDSTU      CHARACTER SIZE 07
+TEMPORARY T_COUNT              INTEGER   SIZE 04
+TEMPORARY T_DERNIER_FOUCLE_01  CHARACTER SIZE 06
+TEMPORARY T_DERNIER_FOUCLE_02  CHARACTER SIZE 06
+TEMPORARY T_DERNIER_FOUCLE_03  CHARACTER SIZE 06
+
+ITEM T_CBIDSC_PRDTYP      = CBIDSC OF A_CBI_PRDTYP
+ITEM T_CBIDSC_PRDSTU      = CBIDSC OF A_CBI_PRDSTU
+ITEM T_COUNT                COUNT                              AT FOUCLE RESET AT PRDCLE
+ITEM T_DERNIER_FOUCLE_01  = FOUCLE OF ARPRD_FOU IF T_COUNT = 1 AT FOUCLE RESET AT PRDCLE
+ITEM T_DERNIER_FOUCLE_02  = FOUCLE OF ARPRD_FOU IF T_COUNT = 2 AT FOUCLE RESET AT PRDCLE
+ITEM T_DERNIER_FOUCLE_03  = FOUCLE OF ARPRD_FOU IF T_COUNT = 3 AT FOUCLE RESET AT PRDCLE
+
+SUBFILE WAR342A KEEP AT PRDCLE INCLUDE VPRE_PRD           , &
+                                       D_PRDTYP_PARM      , &
+                                       D_PRDSTU_PARM      , &
+                                       T_CBIDSC_PRDTYP    , &
+                                       T_CBIDSC_PRDSTU    , &
+                                       T_DERNIER_FOUCLE_01, &
+                                       T_DERNIER_FOUCLE_02, &
+                                       T_DERNIER_FOUCLE_03  &
+                                 INDEX WAR340A_IDX          &
+                               SEGMENT CIECLE             , &
+                                       PRDCLE             
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+; Génération d'enregistrement par description de produit
+
+REQUEST DESCRIPTIONS_PRODUIT
+
+ACCESS *WAR342A ; Table des produits
+
+SUBFILE WAR342B KEEP ALIAS A_1 IF PRDDSC1 OF WAR342A <> " " INCLUDE CIECLE  OF WAR342A, &
+                                                                    PRDCLE  OF WAR342A, &
+                                                                    PRDDSC1 OF WAR342A  ALIAS PRDDSC &
+                                                              INDEX WAR342B_IDX         &
+                                                            SEGMENT CIECLE            , &
+                                                                    PRDCLE            
+
+SUBFILE WAR342B KEEP ALIAS A_2 IF PRDDSC2 OF WAR342A <> " " INCLUDE CIECLE  OF WAR342A, &
+                                                                    PRDCLE  OF WAR342A, &
+                                                                    PRDDSC2 OF WAR342A  ALIAS PRDDSC &
+                                                              INDEX WAR342B_IDX         &
+                                                            SEGMENT CIECLE            , &
+                                                                    PRDCLE            
+
+SUBFILE WAR342B KEEP ALIAS A_3 IF PRDDSC3 OF WAR342A <> " " INCLUDE CIECLE  OF WAR342A, &
+                                                                    PRDCLE  OF WAR342A, &
+                                                                    PRDDSC3 OF WAR342A  ALIAS PRDDSC &
+                                                              INDEX WAR342B_IDX         &
+                                                            SEGMENT CIECLE            , &
+                                                                    PRDCLE            
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+; Déterminer les quantités sorties (utilisées) dans les 12 derniers mois.
+
+REQUEST SORTIES_PRODUIT
+
+ACCESS VPRE_PRD LINK CIECLE OF VPRE_PRD       , &
+                     PRDCLE OF VPRE_PRD       , &
+                     ENTCLE OF VPRE_PRD       , &
+                     "06"                       & ; Code associé à la sortie de produit
+                  TO CIECLE                   , &
+                     PRDCLE                   , &
+                     ENTCLE                   , &
+                     PRHTYP OF ARPRD_HISTO OPT    ; Table de l'historique de transactions par produit
+
+CHOOSE CIECLE PARM      , & ; Compagnie du menu
+       ENTCLE PARM      , & ; Code d'entrepôt
+       PRDCLE PARM RANGE, & ; Code de produit
+       PRDCAT PARM          ; Catégorie de produit
+
+DEFINE D_PRDTYP_PARM CHARACTER SIZE 06 = PARM UPSHIFT ; Type de produit
+DEFINE D_PRDSTU_PARM CHARACTER SIZE 02 = PARM UPSHIFT ; Statut du produit
+
+SELECT VPRE_PRD IF (D_PRDTYP_PARM = " " OR D_PRDTYP_PARM = PRDTYP OF VPRE_PRD) AND &
+                   (D_PRDSTU_PARM = " " OR D_PRDSTU_PARM = PRDSTU OF VPRE_PRD) 
+
+SELECT ARPRD_HISTO IF PRHDATREF OF ARPRD_HISTO >= SYSDATE - 10000 AND &  ; Sélection des sorties de la dernière année.
+                      PRHDATREF OF ARPRD_HISTO <= SYSDATE
+
+SORT ON CIECLE OF VPRE_PRD &
+     ON PRDCLE OF VPRE_PRD &
+     ON ENTCLE OF VPRE_PRD
+
+TEMPORARY T_PRHQTETRS FLOAT SIZE 08
+ITEM T_PRHQTETRS SUBTOTAL PRHQTETRS OF ARPRD_HISTO RESET AT ENTCLE
+
+SUBFILE WAR342C KEEP AT ENTCLE INCLUDE VPRE_PRD   , &
+                                       T_PRHQTETRS  &
+                                 INDEX WAR342C_IDX  &
+                               SEGMENT CIECLE     , &
+                                       PRDCLE     
+
+BUILD ar342t

@@ -1,0 +1,224 @@
+;/T/ Enregistrer les produits de dimensions.
+;
+;/P/ Programmeur..: René Bonneau
+;    Date Création: 1996-04-01
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   l'inventaire physique de produits de dimensions.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN ig005 ACTIONBAR                    &
+             MODE LABEL "" AT 2,80        &
+             NOACTION                     &
+             FIELDMARK RETAIN STARTUP     &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU ,      &
+                       T_CIENOM
+
+;-------------------------------------------------------------------------------
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "ig005"
+
+;-------------------------------------------------------------------------------
+; Documentation de l'écran.
+;
+USE ig005.hlp NOLIST
+
+;-------------------------------------------------------------------------------
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+;-------------------------------------------------------------------------------
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+;-------------------------------------------------------------------------------
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+; Fichier utiliser dans le dans l'écran
+;
+FILE INPROD_DIMENSION PRIMARY OCCURS 18
+
+    ITEM CIECLE     OF INPROD_DIMENSION INITIAL T_CIECLEMNU
+    ITEM IPRNUMPGE  OF INPROD_DIMENSION INIT FIRST(IPRNUMPGE OF INPROD_DIMENSION)
+    ITEM IPRDATINV  OF INPROD_DIMENSION INIT SYSDATE
+;    ITEM IPRHREINV  OF INPROD_DIMENSION INIT SYSTIME
+
+FILE INPROD_DIMENSION DESIGNER ALIAS INPROD_DIMEN_EXISTE
+;    SELECT IF CIECLE OF INPROD_DIMEN_EXISTE = T_CIECLEMNU
+
+FILE PDCAISSON            DESIGNER
+
+FILE INPROD_DIMENSION DESIGNER ALIAS INPROD_DIMENSION_BOUCLE
+
+;-------------------------------------------------------------------------------
+;Variables temporaires
+;
+TEMPORARY T_CAINUMCAI    CHARACTER SIZE 9
+
+TEMPORARY T_COMPTEUR        INT SIZE 2
+TEMPORARY T_COMPTEUR_BOUCLE INT SIZE 2
+
+TEMPORARY T_HEURE           CHAR SIZE 4
+TEMPORARY T_HEURE_BOUCLE    CHAR SIZE 4
+TEMPORARY T_TEMPS           CHAR SIZE 8
+TEMPORARY T_VARIABLE        CHAR SIZE 6
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " CAISSONS DE PRODUITS DE DIMENSIONS " &
+@ELSE
+      " %%%CAISSONS DE PRODUITS DE DIMENSIONS " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+DRAW 3,01 TO 23,9
+
+SKIP TO LINE 4
+TITLE "PAGE" AT ,3
+
+SKIP
+ALIGN (,,2)
+FIELD IPRNUMPGE OF INPROD_DIMENSION           &
+        REQUIRED
+
+SKIP TO LINE 4
+TITLE "LOCAL  CAISSON    COMMENTAIRE " AT ,14
+
+SKIP
+ALIGN(11,,14)(,,21)(,,32)
+CLUSTER OCCURS WITH INPROD_DIMENSION
+
+FIELD IPRNUMLOC OF INPROD_DIMENSION &
+              PATTERN "##^<"                     &
+              REQUIRED DUPLICATE
+
+FIELD CAINUMCAI OF INPROD_DIMENSION REQUIRED NUM SIGNIF 9 &
+              LOOKUP ON PDCAISSON &
+                 VIA   CAINUMCAI, &
+                       CIECLE     &
+                 USING CAINUMCAI, &
+                       T_CIECLEMNU OPTIONAL &
+                MESSAGE 1809 & ;"CE NUMERO DE CAISSON N'EXISTE PAS..."
+              ,NOTON INPROD_DIMEN_EXISTE &
+                 VIA   CAINUMCAI, &
+                       CIECLE     &
+                 USING CAINUMCAI, &
+                       T_CIECLEMNU OPTIONAL &
+                MESSAGE 1810 ; "CE NUMERO DE CAISSON FAIT DEJA PARTIE DE L'INVENTAIRE..."
+
+FIELD IPRDESC OF INPROD_DIMENSION &
+        FOR 1,45
+
+CLUSTER
+
+PROCEDURE INPUT IPRNUMLOC
+BEGIN
+  IF 0 <> SIZE(TRUNC(FIELDTEXT))
+  THEN BEGIN
+    IF MATCHPATTERN(FIELDTEXT,"#^<")
+    THEN LET FIELDTEXT = "0" + FIELDTEXT
+  END
+END
+
+;-------------------------------------------------------------------------------
+; Appel de dépisteur pour le champ
+;
+PROCEDURE INPUT CAINUMCAI
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CAINUMCAI = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd135 MODE F &
+                     PASSING T_CAINUMCAI, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_CAINUMCAI )
+  END
+END
+
+;------------------------------------------------------------------------------
+PROCEDURE PATH
+BEGIN
+  REQUEST IPRNUMPGE OF INPROD_DIMENSION
+  IF PROMPTOK
+  THEN LET PATH = 1
+  IF PATH = 0
+  THEN BEGIN
+    REQUEST CAINUMCAI OF INPROD_DIMENSION
+    IF PROMPTOK
+    THEN LET PATH = 2
+    ELSE ERROR "UNE CLE EST REQUISE"
+  END
+END
+
+;-------------------------------------------------------------------------------
+PROCEDURE FIND
+BEGIN
+  FOR INPROD_DIMENSION
+  BEGIN
+    IF PATH = 1
+    THEN GET INPROD_DIMENSION VIA     CIECLE,           &
+                                      IPRNUMPGE         &
+                              USING   T_CIECLEMNU,      &
+                                      IPRNUMPGE       OPTIONAL
+
+    ELSE GET INPROD_DIMENSION VIA     CIECLE,           &
+                                      CAINUMCAI         &
+                              USING   T_CIECLEMNU,      &
+                                      CAINUMCAI       OPTIONAL
+
+  END
+END
+
+PROCEDURE PREUPDATE
+BEGIN
+    LET T_COMPTEUR = 0
+    LET T_TEMPS    = ASCII(SYSTIME)
+    LET T_HEURE    = T_TEMPS[1:4]
+    LET T_COMPTEUR_BOUCLE = 0
+    WHILE RETRIEVING INPROD_DIMENSION_BOUCLE VIA CIECLE, IPRNUMPGE &
+                     USING CIECLE    OF INPROD_DIMENSION, &
+                           IPRNUMPGE OF INPROD_DIMENSION
+    BEGIN
+      LET T_HEURE_BOUCLE = ASCII(IPRHREINV OF INPROD_DIMENSION_BOUCLE)[1:4]
+      IF T_HEURE_BOUCLE = T_HEURE
+      THEN LET T_COMPTEUR_BOUCLE = &
+               NCONVERT(ASCII(IPRHREINV OF INPROD_DIMENSION_BOUCLE)[5:2]) + 25
+    END
+    LET T_COMPTEUR = T_COMPTEUR_BOUCLE
+    FOR INPROD_DIMENSION
+      BEGIN
+        IF NEWRECORD OF INPROD_DIMENSION
+        THEN BEGIN
+           LET T_COMPTEUR = T_COMPTEUR + 1
+           LET T_VARIABLE = T_HEURE + ASCII(T_COMPTEUR,2)
+           LET IPRHREINV  OF INPROD_DIMENSION = NCONVERT(T_VARIABLE) * 10000
+        END
+     END
+END
+
+BUILD

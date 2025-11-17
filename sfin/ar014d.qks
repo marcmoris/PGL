@@ -1,0 +1,288 @@
+;/T/ Mouvements de marchandises - Ecran de génération d'imputation comptable.
+;
+;/P/ Programmeur..: Nancy Marceau
+;    Date Création: 17 mai 1994
+;
+;    Description..: Cet écran permet la génération automatique de l'imputation
+;                   comptable du mouvement d'inventaire. Cet écran
+;                   est appelé de façon invisible à l'utilisateur lors de 
+;                   l'approbation du mouvement. 
+;  
+;                   Cet écran n'a pas besoin de notion de sécurité.
+;
+;
+;/M/ Programmeur.......: Patrick Langlois
+;    Date modification.: 09 Juin 1999
+;    Description.......: Migration Achat/Réception/Inventaire de l'environnement (BOC) 
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN ar014d NOMODE ACTION LABEL " " &
+              FROM 23,70 TO 23,80 &
+              RECEIVING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        ARMOUVEMENT
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de compagnie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie du menu.
+
+
+;
+; La transaction UPDATE doit être celle de l'appelant.
+;
+TRANSACTION UPDATE INHERITED NOCOMMIT
+  
+FILE ARMOUVEMENT  MASTER
+
+;-------------------------------------------------------------------------------
+;
+; Le sélect permet de lire que les lignes de détail qui contiennent un
+; montant imputable.
+;
+FILE ARMOU_DETAIL  DESIGNER OPEN READ
+  SELECT IF 0 <> MODMNTNET OF ARMOU_DETAIL
+
+;-------------------------------------------------------------------------------
+;
+; Fichier d'imputation pour l'écriture.
+;
+FILE ARMOU_IMPUTATION  DESIGNER
+
+FILE VCPT_DSC          DESIGNER OPEN READ
+FILE ARPRODUIT         DESIGNER OPEN READ
+FILE ARENTREPOT        DESIGNER OPEN READ
+
+;-------------------------------------------------------------------------------
+TEMPORARY T_MIMCODDC CHARACTER SIZE 1 ; Code de débit /crédit selon le type du
+                                      ; mouvement 
+
+TEMPORARY T_CPTCLE CHARACTER SIZE 6 ;
+TEMPORARY T_UNACLE CHARACTER SIZE 8 ;
+TEMPORARY T_PRJCLE CHARACTER SIZE 8 ;
+TEMPORARY T_PRACLE CHARACTER SIZE 3 ;
+
+;-----------------------------------------------------------------------------
+; Cette procédure permet de créer l'imputation.
+;
+;
+PROCEDURE INTERNAL CREATION_IMPUTATION
+BEGIN
+  GET ARMOU_IMPUTATION &
+    VIA   CIECLE, &
+          MOUCLE, &
+          CPTCLE, &
+          UNACLE, &
+          PRJCLE, &
+          PRACLE, &
+          MIMCODDC &
+    USING CIECLE OF ARMOU_DETAIL, &
+          MOUCLE OF ARMOU_DETAIL, &
+          T_CPTCLE, &
+          T_UNACLE, &
+          T_PRJCLE, &
+          T_PRACLE, &
+          T_MIMCODDC  OPTIONAL 
+    IF ACCESSOK
+    THEN BEGIN
+      LET MIMMNT    OF ARMOU_IMPUTATION = MIMMNT    OF ARMOU_IMPUTATION + &
+                                          MODMNTNET OF ARMOU_DETAIL
+
+    END
+      ;
+      ; L'imputation n'existe pas.
+      ; 
+    ELSE BEGIN
+      LET CIECLE       OF ARMOU_IMPUTATION = CIECLE    OF ARMOUVEMENT
+      LET MOUCLE       OF ARMOU_IMPUTATION = MOUCLE    OF ARMOUVEMENT
+      LET MIMTIMSTP    OF ARMOU_IMPUTATION = SYSDATE * 1000000 + &
+                                             ROUND(SYSTIME / 100)
+      LET PRJCLE       OF ARMOU_IMPUTATION = PRJCLE OF ARMOU_DETAIL
+      LET PRACLE       OF ARMOU_IMPUTATION = PRACLE OF ARMOU_DETAIL
+      LET CPTCLE       OF ARMOU_IMPUTATION = T_CPTCLE 
+      LET UNACLE       OF ARMOU_IMPUTATION = T_UNACLE 
+      LET MIMCODDC     OF ARMOU_IMPUTATION = T_MIMCODDC
+      LET MIMMNT       OF ARMOU_IMPUTATION = MODMNTNET OF ARMOU_DETAIL
+
+    END
+   
+  IF "D" = MIMCODDC OF ARMOU_IMPUTATION
+  THEN LET MOUMNTDBT OF ARMOUVEMENT = MOUMNTDBT OF ARMOUVEMENT + &
+                                      MODMNTNET OF ARMOU_DETAIL
+  ELSE LET MOUMNTCRT OF ARMOUVEMENT = MOUMNTCRT OF ARMOUVEMENT + &
+                                      MODMNTNET OF ARMOU_DETAIL
+
+  PUT ARMOU_IMPUTATION
+
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure qui génère le montant d'imputation et qui parcours l'ensemble du 
+; détail du mouvement.
+;
+PROCEDURE INTERNAL PARCOURIR_DETAIL_MOUVEMENT
+BEGIN
+  ;
+  ; On lit chacune des lignes du mouvement.
+  ;  
+  WHILE RETRIEVING ARMOU_DETAIL &
+    VIA   CIECLE, &
+          MOUCLE &
+    USING CIECLE OF ARMOUVEMENT, &
+          MOUCLE OF ARMOUVEMENT
+
+  BEGIN
+
+    IF "T" <> MOUTYP OF ARMOUVEMENT
+    THEN BEGIN
+
+      LET T_CPTCLE = CPTCLE OF ARMOU_DETAIL
+      LET T_UNACLE = UNACLE OF ARMOU_DETAIL
+      LET T_PRJCLE = PRJCLE OF ARMOU_DETAIL
+      LET T_PRACLE = PRACLE OF ARMOU_DETAIL
+
+      IF   MOUTYP OF ARMOUVEMENT = "A"  &    ; Ajustement.
+        OR MOUTYP OF ARMOUVEMENT = "I"  &    ; Inventaire physique.
+        OR MOUTYP OF ARMOUVEMENT = "E"       ; Entrée. 
+      THEN LET T_MIMCODDC = "C"
+
+      IF MOUTYP OF ARMOUVEMENT = "S" ; Sortie.
+      THEN LET T_MIMCODDC = "D"        
+        
+      DO INTERNAL CREATION_IMPUTATION
+
+      GET ARPRODUIT &
+          VIA   CIECLE, &
+                PRDCLE  &
+          USING CIECLE OF ARMOUVEMENT, &
+                PRDCLE OF ARMOU_DETAIL OPTIONAL
+      IF ACCESSOK
+      THEN BEGIN
+
+        GET ARENTREPOT &
+            VIA   CIECLE, &
+                  ENTCLE  &
+            USING CIECLE OF ARMOUVEMENT, &
+                  ENTCLE OF ARMOUVEMENT OPTIONAL
+        ;
+        ; On prend le poste d'imputation du produit
+        ;
+        IF 0 <> SIZE(TRUNCATE(PRDCPTINV OF ARPRODUIT))
+        THEN LET T_CPTCLE = PRDCPTINV OF ARPRODUIT
+        ELSE LET T_CPTCLE = ENTCPTINV OF ARENTREPOT
+
+        IF 0 <> SIZE(TRUNCATE(PRDUNAINV OF ARPRODUIT))
+        THEN LET T_UNACLE = PRDUNAINV OF ARPRODUIT
+        ELSE LET T_UNACLE = ENTUNAINV OF ARENTREPOT
+
+        IF "D" = T_MIMCODDC
+        THEN LET T_MIMCODDC = "C"
+        ELSE LET T_MIMCODDC = "D"
+
+        LET T_PRJCLE = ""
+        LET T_PRACLE = ""
+
+        IF 0 <> SIZE(TRUNCATE(T_CPTCLE)) AND &
+           0 <> SIZE(TRUNCATE(T_UNACLE))
+        THEN DO INTERNAL CREATION_IMPUTATION
+
+      END
+    END
+    ELSE BEGIN
+
+      GET ARPRODUIT &
+          VIA   CIECLE, &
+                PRDCLE  &
+          USING CIECLE OF ARMOUVEMENT, &
+                PRDCLE OF ARMOU_DETAIL OPTIONAL
+      IF ACCESSOK
+      THEN BEGIN
+
+        GET ARENTREPOT &
+            VIA   CIECLE, &
+                  ENTCLE  &
+            USING CIECLE OF ARMOUVEMENT, &
+                  ENTCLE OF ARMOUVEMENT OPTIONAL
+
+        LET T_MIMCODDC = "C"
+        ;
+        ; On prend le poste d'imputation du produit
+        ;
+        IF 0 <> SIZE(TRUNCATE(PRDCPTINV OF ARPRODUIT))
+        THEN LET T_CPTCLE = PRDCPTINV OF ARPRODUIT
+        ELSE LET T_CPTCLE = ENTCPTINV OF ARENTREPOT
+
+        LET T_UNACLE = ENTUNAIMP OF ARENTREPOT
+
+        LET T_PRJCLE = ""
+        LET T_PRACLE = ""
+
+        IF 0 <> SIZE(TRUNCATE(T_CPTCLE)) AND &
+           0 <> SIZE(TRUNCATE(T_UNACLE))
+        THEN DO INTERNAL CREATION_IMPUTATION
+
+        GET ARENTREPOT &
+            VIA   CIECLE, &
+                  ENTCLE  &
+            USING CIECLE OF ARMOUVEMENT, &
+                  ENTCLE OF ARMOU_DETAIL OPTIONAL
+
+        LET T_MIMCODDC = "D"
+        ;
+        ; On prend le poste d'imputation du produit
+        ;
+        IF 0 <> SIZE(TRUNCATE(PRDCPTINV OF ARPRODUIT))
+        THEN LET T_CPTCLE = PRDCPTINV OF ARPRODUIT
+        ELSE LET T_CPTCLE = ENTCPTINV OF ARENTREPOT
+
+        LET T_UNACLE = ENTUNAIMP OF ARENTREPOT
+
+        LET T_PRJCLE = ""
+        LET T_PRACLE = ""
+
+        IF 0 <> SIZE(TRUNCATE(T_CPTCLE)) AND &
+           0 <> SIZE(TRUNCATE(T_UNACLE))
+        THEN DO INTERNAL CREATION_IMPUTATION
+
+      END
+
+    END
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Cette procédure est exécutée que si le mouvement n'est pas journalisé.
+; 
+; Dans un premier temps nous détruisons la ventilation comptable qui
+; peut exister et nous la reproduisons.
+;
+PROCEDURE PREENTRY
+BEGIN
+  IF 0 = MOUDATJOU OF ARMOUVEMENT
+  THEN BEGIN
+    WHILE RETRIEVING ARMOU_IMPUTATION &
+      VIA   CIECLE, &
+            MOUCLE  &
+      USING CIECLE OF ARMOUVEMENT, &
+            MOUCLE OF ARMOUVEMENT
+    BEGIN
+      DELETE ARMOU_IMPUTATION
+      PUT ARMOU_IMPUTATION
+    END
+
+    LET MOUMNTDBT OF ARMOUVEMENT = 0
+    LET MOUMNTCRT OF ARMOUVEMENT = 0
+ 
+    DO INTERNAL PARCOURIR_DETAIL_MOUVEMENT
+    PUT ARMOUVEMENT
+  END
+  RETURN
+END
+
+BUILD

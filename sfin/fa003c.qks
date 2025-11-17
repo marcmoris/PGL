@@ -1,0 +1,281 @@
+;/T/ Historique des factures
+;
+;/P/ Programmeur..: Steeve Duguay
+;    Date Création: 25 mai 1995
+;
+;/M/ Marie-Josée Hamel, 96.02.09, changer format qté, ne pas sélectionner les factures annulées
+;/M/ Marie-Josée Hamel, 96.02.22, faire fonctionner l'histor. pour toutes les factures
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+;-------------------------------------------------------------------------------
+SCREEN fa003c ACTIONBAR &
+              MODE LABEL "" AT 2,80   &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU  , &
+                        T_CIENOM     , &
+                        FATRAJET_PRODUIT
+
+USE ussectmp NOLIST     ; Variable pour la sécurité
+    "FA003C"            ; Nom de l'écran
+
+USE fa003c.hlp  NOLIST  ; Use servant à la documentation de l'écran
+
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-écrans
+
+USE ustrasse NOLIST
+
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CLICIECLE CHARACTER SIZE 4  ; Compagnie du client.
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de compagnie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie du menu.
+TEMPORARY T_PECCLECOU CHARACTER SIZE 4  RESET AT STARTUP ; Période courante
+TEMPORARY T_PECCLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Période courante
+TEMPORARY T_FARCLEFND CHARACTER SIZE 9  RESET AT STARTUP
+
+;-------------------------------------------------------------------------------
+
+DEFINE    DZ_CIECLE   CHARACTER SIZE 04 = T_CIECLEMNU
+DEFINE    DZ_CIENOM   CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-----------------------------
+; Fichier trajet / produit
+;-----------------------------
+FILE FATRAJET_PRODUIT   MASTER
+
+
+;------------------------
+; Fichier des historiques
+;------------------------
+FILE FAFAR_HIST         PRIMARY &
+                        OCCURS 14 &
+                        NOITEM
+
+  ACCESS VIA    CIECLE,    &
+                FHITRPCLE, &
+                FHIETACLE  &
+         USING  T_CIECLEMNU,                   &
+                TRPCLE    OF FATRAJET_PRODUIT, &
+                FHIETACLE OF FAFAR_HIST        &
+        REQUEST FHIETACLE OF FAFAR_HIST        &
+        ORDERBY CIECLE   , &
+                FHIETACLE, &
+                FHIPERCLE, &
+                FHIDAT   , &
+                FHIFARCLE
+
+
+  ACCESS VIA    CIECLE,    &
+                FHITRPCLE, &
+                FHIPERCLE  &
+         USING  T_CIECLEMNU,                   &
+                TRPCLE    OF FATRAJET_PRODUIT, &
+                FHIPERCLE OF FAFAR_HIST        &
+        REQUEST FHIPERCLE OF FAFAR_HIST        &
+        ORDERBY CIECLE   , &
+                FHIPERCLE, &
+                FHIDAT   , &
+                FHIETACLE, &
+                FHIFARCLE
+
+
+  ACCESS VIA    CIECLE,    &
+                FHITRPCLE  &
+         USING  T_CIECLEMNU,                &
+                TRPCLE OF FATRAJET_PRODUIT  &
+        ORDERBY CIECLE   , &
+                FHIPERCLE, &
+                FHIDAT   , &
+                FHIETACLE, &
+                FHIFARCLE
+
+
+;------------------------
+; Fichier des factures - On ne sélectionne pas les factures annulées
+;------------------------
+FILE FACPT_A_REC      SECONDARY OCCURS WITH FAFAR_HIST
+  ACCESS VIA   CIECLE , &
+               FARCLE   &
+         USING CIECLE    OF FAFAR_HIST , &
+               FHIFARCLE OF FAFAR_HIST
+
+SELECT IF FARSTU OF FACPT_A_REC <> "X"
+
+
+DEFINE D_SOLDE    FLOAT SIZE 08 = FHIQTEFAC OF FAFAR_HIST * &
+                                  FHIPRIUNI OF FAFAR_HIST
+
+USE usdrwecr NOLIST     ; Draw pour les écrans 132 colonnes
+USE ustitstd NOLIST     ; En-tête pour les écrans 132 colonnes
+USE ushilite NOLIST     ; Hilite pour tous les écrans
+
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Historique des factures " &
+@ELSE
+      "%%%storique des factures "
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP 1
+
+ALIGN (,3,19) (,,24)
+FIELD TRPCLE OF FATRAJET_PRODUIT &
+label "No produit....:" &
+      DISPLAY
+
+FIELD TRPDSCFRA OF FATRAJET_PRODUIT &
+      DISPLAY
+
+SKIP 1
+
+TITLE &
+ "Pér.   Date      Facture     Élém Quantité     Prix unitaire   Montant total" &
+       AT ,3
+
+HILITE TITLE OFF
+
+;-------------------------------------------------------------------------------
+
+SKIP 1
+
+ALIGN (3,2,3) (,,8) (,,19) (,,32) (,,37) (,,50) (,,66)
+
+CLUSTER OCCURS WITH FAFAR_HIST
+
+FIELD FHIPERCLE OF FAFAR_HIST   &
+      HIDDEN &
+      LABEL " " &
+      DISPLAY
+
+FIELD FHIDAT OF FAFAR_HIST    FORMAT YYYYMMDD PATTERN "####/##/##"&
+      DISPLAY
+
+FIELD FHIFARCLE OF FAFAR_HIST &
+      DISPLAY
+
+FIELD FHIETACLE OF FAFAR_HIST &
+      DISPLAY
+
+FIELD FHIQTEFAC OF FAFAR_HIST &
+      DISPLAY SIZE 12
+
+FIELD FHIPRIUNI OF FAFAR_HIST &
+      DISPLAY SIZE 15
+
+FIELD D_SOLDE  &
+      DISPLAY  &
+      PICTURE "^^,^^^,^^^.^^ " TRAIL SIGN "-"
+
+CLUSTER
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+PROCEDURE DESIGNER 1
+BEGIN
+   LET T_FARCLEFND = FHIFARCLE OF FAFAR_HIST
+   RUN SCREEN fa004 MODE F &
+               PASSING T_CLICIECLE, &
+                       T_CIECLEMNU, &
+                       T_CIENOM   , &
+                       T_PECCLEMNU, &
+                       T_PECCLECOU, &
+                       T_FARCLEFND
+END
+
+
+PROCEDURE UPDATE
+ DISABLE
+
+PROCEDURE DELETE
+ DISABLE
+
+PROCEDURE ENTRY
+ DISABLE
+
+;
+; Les procédures PATH et FIND ont été générées pour ne pas sélectionner
+; les factures annulées
+;
+PROCEDURE PATH
+BEGIN
+  REQUEST FHIETACLE OF FAFAR_HIST
+  IF PROMPTOK
+    THEN LET PATH = 1
+  IF PATH = 0
+  THEN BEGIN
+    REQUEST FHIPERCLE OF FAFAR_HIST
+    IF PROMPTOK
+    THEN LET PATH = 2
+  END
+  IF PATH = 0
+  THEN BEGIN
+    LET PATH = 3
+  END
+END
+
+PROCEDURE FIND
+BEGIN
+  FOR MISSING FAFAR_HIST
+    BEGIN
+      IF PATH = 1
+        THEN GET FAFAR_HIST VIA CIECLE , FHITRPCLE , FHIETACLE &
+            ORDERBY CIECLE , FHIETACLE , FHIPERCLE , FHIDAT , &
+            FHIFARCLE USING T_CIECLEMNU , TRPCLE OF &
+            FATRAJET_PRODUIT , FHIETACLE OF FAFAR_HIST
+      IF PATH = 2
+        THEN GET FAFAR_HIST VIA CIECLE , FHITRPCLE , FHIPERCLE &
+            ORDERBY CIECLE , FHIPERCLE , FHIDAT , FHIETACLE , &
+            FHIFARCLE USING T_CIECLEMNU , TRPCLE OF &
+            FATRAJET_PRODUIT , FHIPERCLE OF FAFAR_HIST
+      IF PATH = 3
+        THEN GET FAFAR_HIST VIA CIECLE , FHITRPCLE ORDERBY CIECLE , &
+            FHIPERCLE , FHIDAT , FHIETACLE , FHIFARCLE USING &
+            T_CIECLEMNU , TRPCLE OF FATRAJET_PRODUIT
+      GET FACPT_A_REC
+  END
+END
+
+BUILD
+@IF FORMAT
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+*************************** Historique des factures ****************************
+*                                                                              *
+* No produit....: xxx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                *
+*                                                                              *
+* Pér.   Date      Facture   Élém   Quantité     Prix unitaire  Montant total  *
+*                                                                              *
+* xxxx xxxxxxxx xxxxxxxxxxxx xxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+* xxxx xxxxxxxx xxxxxxxxxxxx xxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+* xxxx xxxxxxxx xxxxxxxxxxxx xxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+* xxxx xxxxxxxx xxxxxxxxxxxx xxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+* xxxx xxxxxxxx xxxxxxxxxxxx xxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+* xxxx xxxxxxxx xxxxxxxxxxxx xxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+* xxxx xxxxxxxx xxxxxxxxxxxx xxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+* xxxx xxxxxXXxxx xxxxxxxxxxxx xxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+* xxxx xxxxxxxxxx xxxxxxxxxxxx xxxx xxxxxxxxxxxx xxxxxxxxxxxxxxx               *
+* xxxx xxxxxxxx xxxxxxxxxxxx xxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+* xxxx xxxxxxxx xxxxxxxxxxxx xxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+* xxxx xxxxxxxx xxxxxxxxxxxx xxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+* xxxx xxxxxxxx xxxxxxxxxxxx xxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+* xxxx xxxxxxxx xxxxxxxxxxxx xxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+* xxxx xxxxxxxx xxxxxxxxxxxx xxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+********************************************************************************
+@ENDIF

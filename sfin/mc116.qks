@@ -1,0 +1,205 @@
+;/T/ Cons. Unité adm. exclusive        CIECLE, CPTCLE, UNACLE, PECCLE
+;
+;/P/ Programmeur..: Guy Chabot
+;    Date Création: 02-Mar-1992
+;
+;    Description..: Permet de visionner et de choisir une unité adm.
+;
+;    Paramètres...: CIECLE    ==> - numéro de compagnie
+;                                 - segment de la clé de recherche
+;
+;                   CPTCLE    ==> - numéro de compte comptable
+;                                 - segment de la clé de recherche
+;
+;                   UNACLE    ==> - numéro d'unité administrative
+;                                 - segment de la clé de recherche, peut
+;                                   contenir un @
+;                                 - contient la valeur de retour
+;
+;                   PECCLE    ==> - numéro de période
+;                                 - critère de sélection.
+;                                 - peut être à blanc.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN mc116 NOMODE NOACTION FIELDMARK &
+             FROM 11,40 TO 23,80 &
+             ACTIVITIES FIND &
+             RECEIVING T_CIEUNA, &
+                       T_CPTCLE, &
+                       T_UNACLE, &
+                       T_PECCLE
+
+TEMPORARY T_CIEUNA CHARACTER SIZE 4
+TEMPORARY T_CPTCLE CHARACTER SIZE 6
+TEMPORARY T_UNACLE CHARACTER SIZE 8
+TEMPORARY T_PECCLE CHARACTER SIZE 4
+
+USE mc116.hlp NOLIST
+
+;-------------------------------------------------------------------------------
+;
+FILE MCUNITE_ADM      PRIMARY &
+                      OCCURS 11
+
+;
+; Il ne faut pas sélectionner les unités administratives qui sont définie
+; dans la charte.
+;
+FILE MCCHARTE_UNA     DESIGNER &
+                      OPEN READ
+  ;
+  ; Si la charte est Exclusive et que la période fait partie de
+  ; l'intervalle de période de la charte alors c'est une erreur.
+  ;
+
+;  SELECT IF &
+;   T_PECCLE >= CCUPECDEBA OF MCCHARTE_UNA     &
+;           AND ( T_PECCLE < CCUPECDEBI OF MCCHARTE_UNA OR &
+;                 CCUPECDEBI OF MCCHARTE_UNA = " " )
+
+; Ajustement pour le changement de siècle
+  SELECT IF   &
+ ( ( &
+     CCUPECDEBA OF MCCHARTE_UNA[1:1] <> "0" &
+     OR &
+     CCUPECDEBI OF MCCHARTE_UNA[1:1] <> "9" &
+   ) &
+   AND &
+   ( &
+     T_PECCLE[1:1] <> "9" &
+     OR &
+     CCUPECDEBA OF MCCHARTE_UNA[1:1] <> "0" &
+     OR &
+     0 <> SIZE(TRUNC(CCUPECDEBI OF MCCHARTE_UNA)) &
+   ) &
+   AND &
+   ( &
+      ( &
+        T_PECCLE >= CCUPECDEBA OF MCCHARTE_UNA     &
+        AND &
+        ( &
+          T_PECCLE < CCUPECDEBI OF MCCHARTE_UNA &
+          OR &
+          CCUPECDEBI OF MCCHARTE_UNA = " " &
+       )  &
+      ) &
+      OR &
+      ( &
+        T_PECCLE >= CCUPECDEBA OF MCCHARTE_UNA &
+        AND &
+        T_PECCLE[1:1] = "9" &
+        AND &
+        CCUPECDEBI OF MCCHARTE_UNA[1:1] = "0" &
+        AND &
+        CCUPECDEBA OF MCCHARTE_UNA[1:1] = "9" &
+      ) &
+      OR &
+      ( &
+        T_PECCLE < CCUPECDEBI OF MCCHARTE_UNA &
+        AND &
+        T_PECCLE[1:1] = "0" &
+        AND &
+        CCUPECDEBA OF MCCHARTE_UNA[1:1] = "9" &
+        AND &
+        CCUPECDEBI OF MCCHARTE_UNA[1:1] = "0" &
+      ) &
+      OR &
+      ( &
+        T_PECCLE[1:1] = "0" &
+        AND &
+        CCUPECDEBA OF MCCHARTE_UNA[1:1] = "9" &
+        AND &
+        0 = SIZE(TRUNC(CCUPECDEBI OF MCCHARTE_UNA)) &
+      ) &
+   ) ) &
+   OR T_PECCLE = ' '
+
+
+
+;
+; Pour forcer l'accès.
+;
+FILE MCHOLDING        DESIGNER &
+                      OPEN READ
+
+;-------------------------------------------------------------------------------
+;
+USE ushilite NOLIST
+USE usdrwfnd NOLIST
+
+USE ustitoff NOLIST
+
+SKIP TO 2
+
+ALIGN(3,3,6)(,,16)(,,37)
+
+CLUSTER OCCURS WITH MCUNITE_ADM
+
+FIELD UNACLE    OF MCUNITE_ADM HIDDEN LABEL ">>"
+FIELD UNANOMABR OF MCUNITE_ADM DISPLAY
+
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+PROCEDURE EXIT
+BEGIN
+  IF 0 <> IND(T_UNACLE, "@")
+  THEN LET T_UNACLE = ""
+END
+
+;-------------------------------------------------------------------------------
+;
+PROCEDURE DESIGNER 1
+BEGIN
+  LET T_UNACLE = UNACLE OF MCUNITE_ADM
+  RETURN
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE FIND
+BEGIN
+  FOR MCUNITE_ADM
+  BEGIN
+    GET MCUNITE_ADM VIA CIECLE, &
+                        UNACLE  &
+                    USING T_CIEUNA, &
+                          T_UNACLE  &
+                    ORDERBY UNACLE
+
+    GET MCCHARTE_UNA VIA CIECLE, &
+                         CPTCLE, &
+                         UNACLE  &
+                     USING CIECLE OF MCUNITE_ADM, &
+                           T_CPTCLE, &
+                           UNACLE OF MCUNITE_ADM &
+                     OPTIONAL
+    ;
+    ; Si l'unité adm. est dans la charte il faut rejeter le record, c'est pour
+    ; cette raison que je fais un lient bidon avec MCHOLDING.
+    ;
+    IF ACCESSOK
+    THEN GET MCHOLDING VIA CIENMC USING "0"
+  END
+END
+
+BUILD ;
+;                                       *****************************************
+;                                       * >> xxxxxxxx  xxxxxxxxxxxxxxxxxxxx     *
+;                                       * >> xxxxxxxx  xxxxxxxxxxxxxxxxxxxx     *
+;                                       * >> xxxxxxxx  xxxxxxxxxxxxxxxxxxxx     *
+;                                       * >> xxxxxxxx  xxxxxxxxxxxxxxxxxxxx     *
+;                                       * >> xxxxxxxx  xxxxxxxxxxxxxxxxxxxx     *
+;                                       * >> xxxxxxxx  xxxxxxxxxxxxxxxxxxxx     *
+;                                       * >> xxxxxxxx  xxxxxxxxxxxxxxxxxxxx     *
+;                                       * >> xxxxxxxx  xxxxxxxxxxxxxxxxxxxx     *
+;                                       * >> xxxxxxxx  xxxxxxxxxxxxxxxxxxxx     *
+;                                       * >> xxxxxxxx  xxxxxxxxxxxxxxxxxxxx     *
+;                                       * >> xxxxxxxx  xxxxxxxxxxxxxxxxxxxx     *
+;                                       *****************************************

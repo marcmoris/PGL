@@ -1,0 +1,501 @@
+;/T/ Préparation de factures - Réception facturée
+;
+;/P/ Programmeur..: Nancy Marceau
+;    Date Création: 19 avril 1994
+;
+;    Description..: Cet écran permet de facturer une ou plusieurs réceptions
+;                   pouvant provenir de différents entrepôts. Cependant,
+;                   le fournisseur des réceptions doit être le même que celui
+;                   de la facture.
+;
+;
+;/M/ Programmeur.......: Patrick Langlois
+;    Date modification.: 09 Juin 1999
+;    Description.......: Migration Achat/Réception/Inventaire de l'environnement (BOC)
+;
+;-------------------------------------------------------------------------------
+;/M/ Pascal Tremblay, 98-01-23
+;
+;    Ajustement pour le changement de siècle
+;
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN ar011a ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU, &
+                       T_CIENOM,    &
+                       ARFACTURE_REC, &
+                       MCREF_ADRESSE
+
+TEMPORARY T_PECCLE_ARFACT CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_PECCLE_AR CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+USE ustrasse NOLIST ; Transaction QUERY pour les sous-écrans
+
+USE ussectmp NOLIST     ; Variable pour la sécurité
+    "AR011A"            ; Nom de l'écran
+
+USE ar011a.hlp NOLIST   ; Use servant à la documentation de l'écran
+
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-écrans
+
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE MCRAD_SEQ IN DICT
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Détail de facture"    ACTION DESIGNER D001
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%Détail de facture" ACTION DESIGNER D001
+@ENDIF
+
+;-------------------------------------------------------------------------------
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de la compagnie
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie
+;-------------------------------------------------------------------------------
+
+
+FILE ARFACTURE_REC  MASTER
+
+FILE MCREF_ADRESSE  MASTER
+
+FILE ARFAC_DETAIL  PRIMARY NOITEM
+  ACCESS VIA   FOUCIECLE, &
+               FOUCLE,    &
+               FACCLE,    &
+               FACCIECLE, &
+               RECCLE     &
+         USING FOUCIECLE OF ARFACTURE_REC, &
+               FOUCLE    OF ARFACTURE_REC, &
+               FACCLE    OF ARFACTURE_REC, &
+               FACCIECLE OF ARFACTURE_REC, &
+               RECCLE    OF ARFAC_DETAIL   &
+         REQUEST RECCLE &
+         ORDERBY FOUCIECLE, &
+                 FOUCLE,    &
+                 FACCLE,    &
+                 FACCIECLE, &
+                 RECCLE
+
+  ACCESS VIA   FOUCIECLE, &
+               FOUCLE,    &
+               FACCLE,    &
+               FACCIECLE  &
+         USING FOUCIECLE OF ARFACTURE_REC, &
+               FOUCLE    OF ARFACTURE_REC, &
+               FACCLE    OF ARFACTURE_REC, &
+               FACCIECLE OF ARFACTURE_REC  &
+         ORDERBY FOUCIECLE, &
+                 FOUCLE,    &
+                 FACCLE,    &
+                 FACCIECLE, &
+                 RECCLE
+
+  ITEM FOUCIECLE OF ARFAC_DETAIL INITIAL FOUCIECLE OF ARFACTURE_REC
+  ITEM FOUCLE    OF ARFAC_DETAIL INITIAL FOUCLE    OF ARFACTURE_REC
+  ITEM FACCLE    OF ARFAC_DETAIL INITIAL FACCLE    OF ARFACTURE_REC
+  ITEM FACCIECLE OF ARFAC_DETAIL INITIAL FACCIECLE OF ARFACTURE_REC
+
+;
+; Fichier pour valider que le détail est détruit avant de détruire
+; la réception facturée.
+;
+FILE ARDER_ITEM  DESIGNER &
+                OPEN READ SHARE
+  ACCESS VIA   FOUCIECLE, &
+               FOUCLE,    &
+               FACCLE,    &
+               FACCIECLE, &
+               RECCLE     &
+         USING FOUCIECLE OF ARFAC_DETAIL, &
+               FOUCLE    OF ARFAC_DETAIL, &
+               FACCLE    OF ARFAC_DETAIL, &
+               FACCIECLE OF ARFAC_DETAIL, &
+               RECCLE    OF ARFAC_DETAIL
+
+
+;
+; Fichier pour valider que la réception existe et qu'elle soit approuvée ou
+; sélectionnée.
+;
+FILE ARRECEPTION  SECONDARY NOITEM NODELETE
+  ACCESS VIA   CIECLE, &
+               RECCLE  &
+         USING FACCIECLE OF ARFAC_DETAIL, &
+               RECCLE    OF ARFAC_DETAIL
+
+
+
+;
+; Fichier permettant d'afficher le nom de l'entrepôt.
+;
+FILE ARENTREPOT  REFERENCE
+  ACCESS VIA   CIECLE, &
+               ENTCLE  &
+         USING CIECLE OF ARRECEPTION, &
+               ENTCLE OF ARRECEPTION
+
+;
+; Numéro de séquence des adresses pour les clients divers.
+;
+FILE MCRAD_SEQ         DESIGNER TRANSACTION GEN_NUM_SEQ
+
+
+
+;
+; Paramètres pour la compagnie consolidée(holding)
+;
+FILE MCHOLDING  REFERENCE
+  ACCESS VIA CIENMC USING "1"
+
+;
+; Fichier pour retrouver devise du fournisseur
+;
+FILE VFOC_FOU  REFERENCE
+  ACCESS VIA   FOUCIECLE, &
+               FOUCLE,    &
+               FOCCIECLE  &
+         USING FOUCIECLE OF ARFACTURE_REC, &
+               FOUCLE    OF ARFACTURE_REC, &
+               FACCIECLE OF ARFACTURE_REC
+
+
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_CIECLE    CHARACTER SIZE 4  ; Compagnie écran dépisteur réception.
+TEMPORARY T_RECCLE    CHARACTER SIZE 12 ; Numéro de réception écran dépisteur.
+TEMPORARY T_FOUCLE    CHARACTER SIZE 6  ; Fournisseur réception écran dépisteur.
+TEMPORARY T_FOUCIECLE CHARACTER SIZE 4  ; Compagnie fournisseur écran dépisteur.
+
+DEFINE    D_DEVCLE CHARACTER SIZE 4 = " " IF DEVCLE OF VFOC_FOU = &
+                                             DEVCLE OF MCHOLDING &
+                                 ELSE "/" + DEVCLE OF VFOC_FOU
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4  = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+;
+
+DRAW FROM  3, 1 TO  3,80
+DRAW FROM  3, 1 TO  14,1
+DRAW FROM  3,80 TO  14,80
+DRAW FROM  14,1  TO 14,80
+
+USE ustitstd NOLIST     ; En-tête pour les écrans pleine page
+USE ushilite NOLIST     ; Hilite pour tous les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Réception facturée " &
+@ELSE
+      " %%%Réception facturée " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+;-------------------------------------------------------------------------------
+
+SKIP 1
+;ALIGN (3,3,19) (,55,71)
+ALIGN (3,3,19) (,53,69)
+
+FIELD RECCLE OF ARFAC_DETAIL &
+        HIDDEN ID 05 &
+        REQUIRED     &
+        LOOKUP ON ARRECEPTION &
+          MESSAGE 1393, & ; Cette réception n'existe pas.
+        NOTON ARFAC_DETAIL &
+          VIA   FOUCIECLE, &
+                FOUCLE,    &
+                FACCLE,    &
+                FACCIECLE, &
+                RECCLE     &
+          USING FOUCIECLE OF ARFACTURE_REC, &
+                FOUCLE    OF ARFACTURE_REC, &
+                FACCLE    OF ARFACTURE_REC, &
+                FACCIECLE OF ARFACTURE_REC, &
+                RECCLE    OF ARFAC_DETAIL   &
+          MESSAGE 1466 ; Cette réception a déjà été facturée par cette facture.
+
+FIELD RECDAT OF ARRECEPTION  FORMAT YYYYMMDD &
+        DISPLAY
+
+SKIP
+ALIGN (3,3,19) (,,24)
+
+FIELD ENTCLE OF ARRECEPTION &
+        HIDDEN ID 10  &
+        DISPLAY
+
+FIELD ENTNOM OF ARENTREPOT &
+        DISPLAY
+
+SKIP 1
+ALIGN (3,3,19) (,,34) (,43,59)
+
+FIELD FADMNTTOT OF ARFAC_DETAIL &
+         HIDDEN ID 20 &
+         DISPLAY PREDISPLAY &
+         REFRESH
+
+
+FIELD D_DEVCLE   DISPLAY PREDISPLAY
+
+FIELD FADMNTNET OF ARFAC_DETAIL &
+        DISPLAY PREDISPLAY &
+        REFRESH
+
+SKIP
+ALIGN (3,3,19) (,43,59)
+
+FIELD FADMNTTPS OF ARFAC_DETAIL &
+        HIDDEN ID 25 &
+        DISPLAY PREDISPLAY &
+        REFRESH
+
+FIELD FADMNTCTI OF ARFAC_DETAIL &
+        DISPLAY PREDISPLAY &
+        REFRESH
+
+SKIP
+ALIGN (3,3,19) (,43,59)
+
+FIELD FADMNTTVQ OF ARFAC_DETAIL &
+        HIDDEN ID 30 &
+        DISPLAY PREDISPLAY &
+        REFRESH
+
+FIELD FADMNTRTI OF ARFAC_DETAIL &
+        DISPLAY PREDISPLAY &
+        REFRESH
+
+SKIP
+ALIGN (3,3,19)
+
+FIELD FADMNTESC OF ARFAC_DETAIL &
+        HIDDEN ID 35 &
+        DISPLAY PREDISPLAY &
+        REFRESH
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+; Ecran dépisteur pour la réception.
+;
+PROCEDURE INPUT RECCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE    = T_CIECLEMNU
+    LET T_FOUCIECLE = FOUCIECLE OF ARFACTURE_REC
+    LET T_FOUCLE    = FOUCLE OF ARFACTURE_REC
+    LET T_RECCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN ar110 MODE F PASSING T_CIECLE, T_FOUCIECLE, T_FOUCLE, T_RECCLE
+    LET FIELDTEXT = TRUNCATE(T_RECCLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+; Procédure qui permet de valider que la réception est soit approuvée ou
+; sélectionnée et que le fournisseur de celle-ci est le même que celui spécifié
+; au niveau de la facture.
+;
+PROCEDURE EDIT RECCLE
+BEGIN
+  IF    RECSTU OF ARRECEPTION <> "A" &
+    AND RECSTU OF ARRECEPTION <> "S"
+  THEN ERROR 1394 ; Vous devez référer une réception approuvée ou sélectionnée.
+
+  IF RECDATJOU OF ARRECEPTION = 0
+  THEN ERROR 1474 ; On ne peut pas facturer une réception non journalisée.
+
+  IF FOUCLE OF ARRECEPTION <> FOUCLE OF ARFAC_DETAIL
+  THEN ERROR 1440 ; Le fournisseur de la réception doit être le même que celui
+                  ; de la facture.
+
+  ; Ajustement pour le changement de siècle
+  IF PECCLE OF ARRECEPTION[1:1] < "8"
+  THEN LET T_PECCLE_AR = "1" + PECCLE OF ARRECEPTION
+  ELSE LET T_PECCLE_AR = "0" + PECCLE OF ARRECEPTION
+
+  ; Ajustement pour le changement de siècle
+  IF PECCLE OF ARFACTURE_REC[1:1] < "8"
+  THEN LET T_PECCLE_ARFACT = "1" + PECCLE OF ARFACTURE_REC
+  ELSE LET T_PECCLE_ARFACT = "0" + PECCLE OF ARFACTURE_REC
+
+  IF T_PECCLE_AR > T_PECCLE_ARFACT
+  THEN ERROR 1487 ; La période de réception est plus grande que la période de facturation.
+
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+; La procédure ENTRY est codée afin d'appeler l'écran de génération du détail
+; de la facture ('Ghost Screen')
+;
+PROCEDURE ENTRY
+BEGIN
+  ACCEPT  RECCLE OF ARFAC_DETAIL
+  DISPLAY RECDAT OF ARRECEPTION
+
+  DISPLAY ENTCLE OF ARRECEPTION
+  DISPLAY ENTNOM OF ARENTREPOT
+  DISPLAY FADMNTTOT OF ARFAC_DETAIL
+  DISPLAY D_DEVCLE
+  DISPLAY FADMNTNET OF ARFAC_DETAIL
+  DISPLAY FADMNTTPS OF ARFAC_DETAIL
+  DISPLAY FADMNTCTI OF ARFAC_DETAIL
+  DISPLAY FADMNTTVQ OF ARFAC_DETAIL
+  DISPLAY FADMNTRTI OF ARFAC_DETAIL
+  DISPLAY FADMNTESC OF ARFAC_DETAIL
+
+  ; Cet écran permet de générer le détail de la facture automatiquement à
+  ; partir de la réception. (GHOST SCREEN)
+  ;
+  IF FACDATTRF OF ARFACTURE_REC = 0
+  THEN BEGIN
+    RUN SCREEN ar011d &
+          PASSING ARFAC_DETAIL,  &
+                  ARFACTURE_REC  &
+          MODE E
+    COMMIT
+    ; Appel de l'écran de consultation du détail de la réception en mode recherche.
+    ;
+    RUN SCREEN ar011b &
+          PASSING T_CIECLEMNU,  &
+                  T_CIENOM,     &
+                  ARFAC_DETAIL, &
+                  ARFACTURE_REC, &
+                  ARRECEPTION,   &
+                  MCREF_ADRESSE  &
+          MODE F
+  END
+
+END
+
+;-------------------------------------------------------------------------------
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF ARFAC_DETAIL &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+
+  IF DELETEDRECORD OF ARFAC_DETAIL
+  THEN BEGIN
+    GET ARDER_ITEM VIA   FOUCIECLE, &
+               FOUCLE,    &
+               FACCLE,    &
+               FACCIECLE, &
+               RECCLE     &
+         USING FOUCIECLE OF ARFAC_DETAIL, &
+               FOUCLE    OF ARFAC_DETAIL, &
+               FACCLE    OF ARFAC_DETAIL, &
+               FACCIECLE OF ARFAC_DETAIL, &
+               RECCLE    OF ARFAC_DETAIL  OPTIONAL
+    IF ACCESSOK
+    THEN ERROR 1468 ; Vous devez d'abord détruire les lignes de détail.
+  END
+
+  ;
+  ; On incrémente le numéro d'adresse pour les clients divers.
+  ;
+  IF     FOUTYP OF VFOC_FOU = "D" &
+     AND RADCLE OF ARFACTURE_REC = 0
+  THEN BEGIN
+    START TRANSACTION GEN_NUM_SEQ
+    GET MCRAD_SEQ VIA REFCIECLE, &
+                      REFCLETYP, &
+                      REFCLENUM  &
+                 USING FOUCIECLE OF ARFACTURE_REC, &
+                       REFCLETYP OF ARFACTURE_REC, &
+                       FOUCLE    OF ARFACTURE_REC &
+                  OPTIONAL
+    LET REFCIECLE OF MCRAD_SEQ = FOUCIECLE OF ARFACTURE_REC
+    LET REFCLETYP OF MCRAD_SEQ = REFCLETYP OF ARFACTURE_REC
+    LET REFCLENUM OF MCRAD_SEQ = FOUCLE    OF ARFACTURE_REC
+    LET RASNUMSEQ OF MCRAD_SEQ = RASNUMSEQ OF MCRAD_SEQ + 1
+    LET RADCLE    OF ARFACTURE_REC = RASNUMSEQ OF MCRAD_SEQ
+    PUT MCRAD_SEQ
+    COMMIT TRANSACTION GEN_NUM_SEQ
+  END
+
+
+
+  IF FACDATTRF OF ARFACTURE_REC <> 0
+  THEN ERROR 1452 ; Impossible de modifier la facture, elle est transférée.
+END
+
+;-------------------------------------------------------------------------------
+; Procédure permettant de faire l'appel du détail de la facture.
+;
+PROCEDURE DESIGNER D001
+BEGIN
+  RUN SCREEN ar011b &
+        PASSING T_CIECLEMNU,  &
+                T_CIENOM,     &
+                ARFAC_DETAIL, &
+                ARFACTURE_REC, &
+                ARRECEPTION,   &
+                MCREF_ADRESSE  &
+        MODE F
+
+END
+
+
+BUILD
+@IF FORMAT
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+****************************** Réception facturée ******************************
+*                                                                              *
+* Réception.....: xxxxxxxxxxxx                        Date réception: xxxxxxxx *
+* Entrepôt......: xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                *
+*                                                                              *
+* Complet.......: xxx                                                          *
+*                                                                              *
+* Montant brut..: xxxxxxxxxxxxxxxxxxx     Montant net...: xxxxxxxxxxxxxxx      *
+* Montant TPS...: xxxxxxxxxxxxxxx         Montant CTI...: xxxxxxxxxxxxxxx      *
+* Montant TVQ...: xxxxxxxxxxxxxxx         Montant RTI...: xxxxxxxxxxxxxxx      *
+* Montant esc...: xxxxxxxxxxxxxxx                                              *
+********************************************************************************
+@ENDIF

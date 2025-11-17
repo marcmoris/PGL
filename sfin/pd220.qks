@@ -1,0 +1,785 @@
+;/T/ 2.3.4 Assignation de tranches
+;
+;/P/ Programmeur..: Denis Pouliot
+;    Date Création: 1995-05-26
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   les assignations des tranches de granit de Granicor.
+;                   Les tranches sont assignés par commande interne.
+;
+;    *** NOTE ***
+;       La procédure PREUPDATE traite la modification du statut de tranches
+;       dans les cas d'ajout ou d'annulation d'assignation et le suivi
+;       sur l'historique de tranches.
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd220 ACTIONBAR                    &
+             MODE LABEL "" AT 2,80        &
+             NOACTION                     &
+             FIELDMARK RETAIN STARTUP     &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU ,      &
+                       T_CIENOM
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+
+USE ussectmp  NOLIST
+    "PD220"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+USE pd220.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+
+;-------------------------------------------------------------------------------
+;
+;  Variables utilisées lors de l'appel du popup sur les tranches à assigner
+;  dans la procedure INPUT TRANUMTRA002
+;
+
+TEMPORARY T_TRANUMTRA002     CHARACTER SIZE 07
+TEMPORARY T_COD              INTEGER UNSIGNED SIZE 02
+
+
+;-------------------------------------------------------------------------------
+;
+;  Variable pour effectuer le traitement des validations d'assignation
+;  dans la procédure EDIT T_SILENT
+
+TEMPORARY T_SILENT   CHARACTER SIZE 1
+
+; Les variables suivantes prennent les valeurs "0" si FAUX, "1" si VRAI
+TEMPORARY T_CASERR   CHARACTER SIZE 1
+TEMPORARY T_EPAIS    CHARACTER SIZE 1
+TEMPORARY T_GRANIT   CHARACTER SIZE 1
+TEMPORARY T_POSSIBLE CHARACTER SIZE 1 ; Ne répond pas à l'épaisseur
+TEMPORARY T_TROUVE   CHARACTER SIZE 1 ; Répond à l'épaisseur
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Commande interne
+;
+
+FILE PDCOMMAN_INTERNE PRIMARY  &
+              NOITEM   &
+              NODELETE &
+              NOAPPEND
+
+
+  ACCESS VIA     CIECLE,          &
+                 PJTABR,          &
+                 COMNUMCOMINT     &
+         USING   T_CIECLEMNU,                          &
+                 PJTABR           OF PDCOMMAN_INTERNE, &
+                 COMNUMCOMINT     OF PDCOMMAN_INTERNE  &
+         REQUEST PJTABR           OF PDCOMMAN_INTERNE, &
+                 COMNUMCOMINT     OF PDCOMMAN_INTERNE  &
+         ORDERBY CIECLE,          &
+                 PJTABR,          &
+                 PJTANN,          &
+                 COMNUMCOMINT
+
+
+  ACCESS VIA     CIECLE,          &
+                 PJTABR           &
+         USING   T_CIECLEMNU,                          &
+                 PJTABR           OF PDCOMMAN_INTERNE  &
+         REQUEST PJTABR           OF PDCOMMAN_INTERNE  &
+         ORDERBY CIECLE,          &
+                 PJTABR,          &
+                 PJTANN,          &
+                 COMNUMCOMINT
+
+
+  ACCESS VIA     CIECLE           &
+         USING   T_CIECLEMNU      &
+         ORDERBY CIECLE,          &
+                 PJTABR,          &
+                 PJTANN,          &
+                 COMNUMCOMINT
+
+  ITEM CIECLE OF PDCOMMAN_INTERNE INITIAL T_CIECLEMNU
+
+;-------------------------------------------------------------------------------
+;
+; Détail de l'assignation
+;
+
+FILE PDCOMMAN_ASSIGN DETAIL   &
+                     NOITEM   &
+                     OCCURS 10
+
+
+  ACCESS VIA     CIECLE,       &
+                 PJTABR,       &
+                 PJTANN,       &
+                 COMNUMCOMINT  &
+         USING   T_CIECLEMNU,                       &
+                 PJTABR        OF PDCOMMAN_INTERNE, &
+                 PJTANN        OF PDCOMMAN_INTERNE, &
+                 COMNUMCOMINT  OF PDCOMMAN_INTERNE  &
+         ORDERBY CIECLE,       &
+                 PJTABR,       &
+                 PJTANN,       &
+                 COMNUMCOMINT, &
+                 TRANUMTRA002
+
+
+SELECT IF TPDTYPPRD OF PDCOMMAN_ASSIGN = "TR"
+
+    ITEM TPDTYPPRD    OF PDCOMMAN_ASSIGN INITIAL "TR"
+    ITEM PJTABR       OF PDCOMMAN_ASSIGN INITIAL PJTABR       OF PDCOMMAN_INTERNE
+    ITEM PJTANN       OF PDCOMMAN_ASSIGN INITIAL PJTANN       OF PDCOMMAN_INTERNE
+    ITEM COMNUMCOMINT OF PDCOMMAN_ASSIGN INITIAL COMNUMCOMINT OF PDCOMMAN_INTERNE
+    ITEM COMNUMCOM    OF PDCOMMAN_ASSIGN INITIAL PJTABR       OF PDCOMMAN_INTERNE + &
+                                                 PJTANN       OF PDCOMMAN_INTERNE + &
+                                                 COMNUMCOMINT OF PDCOMMAN_INTERNE
+
+
+;-------------------------------------------------------------------------------
+; Variable pour retracer les tranches en erreur refusées
+; et effacé dans PDCOMMAN_ASSIGN.
+;
+TEMPORARY T_FLG_DEL  CHARACTER SIZE 1 OCCURS WITH PDCOMMAN_ASSIGN
+
+
+;-------------------------------------------------------------------------------
+;
+; Projet
+;
+
+FILE PDPROJET REFERENCE
+
+  ACCESS VIA     CIECLE,       &
+                 PJTABR        &
+         USING   T_CIECLEMNU,  &
+                 PJTABR        OF PDCOMMAN_INTERNE
+
+
+;-------------------------------------------------------------------------------
+;
+; Référence au dossier client pour récuperer le nom du client
+;
+
+FILE VCLC_CLI REFERENCE
+
+  ACCESS VIA    CLICLE &
+         USING  CLICLE OF PDCOMMAN_INTERNE
+
+
+;-------------------------------------------------------------------------------
+;
+; Référence au fichier des tranches
+;
+
+FILE PDTRANCHE REFERENCE OCCURS WITH PDCOMMAN_ASSIGN
+
+  ACCESS VIA   CIECLE,          &
+               TRANUMTRA002     &
+         USING T_CIECLEMNU,     &
+               TRANUMTRA002 OF PDCOMMAN_ASSIGN
+
+
+;-------------------------------------------------------------------------------
+;
+; Pour permettre la mise à jour du fichier PDTRANCHE
+;
+
+FILE PDTRANCHE DESIGNER ALIAS A_TRA_TRANCHE
+
+  ACCESS        VIA     CIECLE,          &
+                        TRANUMTRA002     &
+                USING   T_CIECLEMNU,     &
+                        TRANUMTRA002 OF PDCOMMAN_ASSIGN
+
+
+;-------------------------------------------------------------------------------
+;
+; Lignes de détails d'une commande interne.
+;
+; Validation des dimensions et du type de granit.
+; Sélectionne une ligne de détail seulement si l'épaisseur commandé est
+; inférieure à celle de la tranche assigné moins l'épaisseur en moins permise.
+
+FILE PDDETAIL_C_I DESIGNER
+
+   SELECT IF TRAEPA OF PDTRANCHE >=  DCIEPA OF PDDETAIL_C_I &
+                                   - COMEPAMOI OF PDCOMMAN_INTERNE
+
+;------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Assignation " &
+@ELSE
+      " %%%Assignation " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP TO LINE 04
+
+ALIGN (2,3,19) (,21,22) (,24,25) (,,30)
+
+
+FIELD PJTABR           OF PDCOMMAN_INTERNE &
+        HIDDEN ID 05                       &
+        REQUIRED                           &
+        NOCHANGE                           &
+        LABEL "Num. projet :"              &
+        LOOKUP ON PDPROJET                 &
+          MESSAGE 3074 ; Le code de projet n'existe pas
+
+
+FIELD PJTANN           OF PDCOMMAN_INTERNE         &
+        HIDDEN ID SAME                     &
+        LABEL "-"                          &
+        DISPLAY
+
+
+FIELD COMNUMCOMINT OF PDCOMMAN_INTERNE     &
+        HIDDEN ID 06                       &
+        LABEL "-"                          &
+        REQUIRED                           &
+        NOCHANGE                           &
+        NUMERIC                            &
+        LOOKUP ON PDCOMMAN_INTERNE         &
+          VIA   CIECLE,                    &
+                PJTABR,                    &
+                PJTANN,                    &
+                COMNUMCOMINT               &
+          USING T_CIECLEMNU,                      &
+                PJTABR       OF PDCOMMAN_INTERNE, &
+                PJTANN       OF PDCOMMAN_INTERNE, &
+                COMNUMCOMINT OF PDCOMMAN_INTERNE  &
+          MESSAGE 3008 ; Cette commande interne n'existe pas
+
+
+FIELD COMNOM           OF PDCOMMAN_INTERNE &
+        HIDDEN ID SAME                     &
+        DISPLAY
+
+
+SKIP
+
+
+ALIGN (2,3,19) (,,26)
+
+
+FIELD PJTABR OF PDPROJET                   &
+        HIDDEN                             &
+        LABEL "Projet.........:"           &
+        DISPLAY
+
+
+FIELD PJTNOM           OF PDPROJET         &
+        HIDDEN                             &
+        DISPLAY
+
+
+SKIP
+
+
+FIELD CLICLE           OF PDCOMMAN_INTERNE &
+        HIDDEN                             &
+        LABEL "Client........:"            &
+        DISPLAY
+
+
+FIELD CLINOM           OF VCLC_CLI         &
+        HIDDEN                             &
+        DISPLAY
+
+
+DRAW 08,2 TO 08,79
+
+
+SKIP TO LINE 08
+
+
+TITLE &
+@IF FRANCAIS
+      " Tranches " &
+@ELSE
+      "%%% Tranches " &
+@ENDIF
+      AT ,36
+
+
+SKIP TO LINE 09
+
+
+TITLE &
+@IF FRANCAIS
+  "No                      Code                                         Erreur" &
+@ELSE
+  "%%%No                     Code                                         Erreur" &
+@ENDIF
+      AT ,4
+
+
+SKIP
+
+
+TITLE &
+@IF FRANCAIS
+  "tranche  No bloc        granit Fini     Surface  Long.  Haut. Épais.  O/N" &
+@ELSE
+  "%%%tranche  No bloc        granit Fini     Surface  Long.  Haut. Épais.  O/N" &
+@ENDIF
+      AT ,4
+
+
+ALIGN (02,02,04)(,,13)(,,29)(,,36)(,,42)(,,54)(,,61)(,,68)(,,75)
+
+
+CLUSTER OCCURS WITH PDCOMMAN_ASSIGN ID BASE 20
+
+
+FIELD TRANUMTRA002 OF PDCOMMAN_ASSIGN &
+        HIDDEN               &
+        REQUIRED             &
+        NOCORRECT            &
+        NOCHANGE             &
+        NUMERIC              &
+        LABEL " "            &
+        LOOKUP ON PDTRANCHE  &
+          VIA   CIECLE,      &
+                TRANUMTRA002 &
+          USING T_CIECLEMNU,                    &
+                TRANUMTRA002 OF PDCOMMAN_ASSIGN &
+          MESSAGE 2940, &       ; Ce numéro de tranche n'existe pas
+               NOTON PDCOMMAN_ASSIGN &
+          VIA CIECLE,        &
+              TRANUMTRA002   &
+          USING T_CIECLEMNU,                    &
+                TRANUMTRA002 OF PDCOMMAN_ASSIGN &
+          MESSAGE 3164        ; Ce numéro de tranche est déjà assigné
+
+
+FIELD T_SILENT &
+      SILENT
+
+
+FIELD BLONUMBLOAPR OF PDTRANCHE &
+        DISPLAY
+
+
+FIELD TGRCODGRA OF PDTRANCHE &
+        DISPLAY
+
+
+FIELD TYFCODFIN OF PDTRANCHE &
+        DISPLAY
+
+
+FIELD TRASURMC2 OF PDTRANCHE &
+        DISPLAY
+
+
+FIELD TRALON OF PDTRANCHE &
+        DISPLAY
+
+
+FIELD TRAHAU OF PDTRANCHE &
+        DISPLAY
+
+
+FIELD TRAEPA OF PDTRANCHE &
+        DISPLAY
+
+
+FIELD CASACCERR OF PDCOMMAN_ASSIGN &
+        HIDDEN  &
+        NOCHANGE
+
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Permet d'afficher les champs se rapportant à PJTABR
+;
+
+PROCEDURE PROCESS PJTABR OF PDCOMMAN_INTERNE
+BEGIN
+  LET PJTANN     OF PDCOMMAN_INTERNE = PJTANN OF PDPROJET
+  DISPLAY PJTANN OF PDCOMMAN_INTERNE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur (pop-up) pour le champ.
+;    Paramètres...: T_TRANUMTRA002  ==> Numéro de tranche
+;                   T_COD           ==> 0 = Tous   ,   1 = (I ou R)
+;                                                      Inventaire ou Réservé
+
+PROCEDURE INPUT TRANUMTRA002 OF PDCOMMAN_ASSIGN
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_COD          = 1 ; Inventaire ou Réservé
+    LET T_TRANUMTRA002 = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd122 MODE F &
+                     PASSING T_TRANUMTRA002, &
+                             T_COD, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_TRANUMTRA002 )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valider les dimensions selon les tolérances permises et le type de granit.
+;
+
+PROCEDURE EDIT T_SILENT
+BEGIN
+IF NOT DELETEDRECORD OF PDCOMMAN_ASSIGN
+THEN BEGIN
+  ;
+  ; Vérifier si une ligne de la commande interne
+  ; répond aux valeurs de la tranche assignée
+  ; selon le SELECT sur le fichier DESIGNER.
+  ; Les variables suivantes prennent les valeurs "0" si FAUX, "1" si VRAI
+  ;
+  LET T_CASERR   = "0"
+  LET T_EPAIS    = "1"
+  LET T_GRANIT   = "1"
+  LET T_POSSIBLE = "0"
+  LET T_TROUVE   = "0"
+
+  WHILE RETRIEVING PDDETAIL_C_I &
+     VIA   CIECLE,       &
+           PJTABR,       &
+           COMNUMCOMINT  &
+     USING T_CIECLEMNU,                      &
+           PJTABR        OF PDCOMMAN_ASSIGN, &
+           COMNUMCOMINT  OF PDCOMMAN_ASSIGN
+  BEGIN
+     ;
+     ; Des tranches ayant une épaisseur utilisable ont été trouvées
+     ;
+     IF     T_TROUVE = "0" &
+       OR &
+          ( T_TROUVE = "1" AND T_GRANIT = "0" )
+     THEN BEGIN
+        ;
+        ; Vérifier si entre les bornes permises
+        ;
+        IF  TRAEPA OF PDTRANCHE <=   DCIEPA OF PDDETAIL_C_I &
+                                   + COMEPAPLU OF PDCOMMAN_INTERNE &
+          AND &
+            TRAEPA OF PDTRANCHE >=   DCIEPA OF PDDETAIL_C_I &
+                                  - COMEPAMOI OF PDCOMMAN_INTERNE
+        THEN BEGIN
+           LET T_TROUVE = "1"
+           ;
+           ; Vérifier si une possibilité trop épaisse a déjà été trouvée
+           ;
+           IF T_POSSIBLE = "1"
+           THEN BEGIN
+              LET T_CASERR   = "0"
+              LET T_EPAIS    = "1"
+              LET T_GRANIT   = "1"
+              LET T_POSSIBLE = "0"
+           END
+
+           ;
+           ; Vérifier le code de granit
+           ;
+           IF TGRCODGRA OF PDTRANCHE = TGRCODGRA OF PDDETAIL_C_I
+           THEN BEGIN
+              LET T_GRANIT = "1"
+              BREAK
+           END
+           ELSE BEGIN ; Code de granit différent
+              LET T_CASERR = "1"
+              LET T_GRANIT = "0"
+           END ; Fin du if code granit
+        END
+        ELSE BEGIN ; Trop épais
+           ;
+           ; Évaluer si une possibilité meilleur est possible
+           ;
+           IF   T_POSSIBLE = "0" &
+             OR &
+                (T_POSSIBLE = "1" AND T_GRANIT = "0")
+           THEN BEGIN
+              LET T_CASERR   = "1"
+              LET T_EPAIS    = "0"
+              LET T_POSSIBLE = "1"
+              ;
+              ; Vérifier le code de granit
+              ;
+              IF TGRCODGRA OF PDTRANCHE = TGRCODGRA OF PDDETAIL_C_I
+              THEN BEGIN ; Seul l'épaisseur est en erreur
+                 LET T_GRANIT   = "1"
+              END
+              ELSE BEGIN ; Utilisation possible avec erreurs
+                 LET T_GRANIT   = "0"
+              END ; Fin du if code granit POSSIBLE
+           END ; Fin du if possible
+        END ; Fin du if épaisseur
+     END ; Fin du IF TROUVE
+  END  ; Fin du WHILE RETRIEVING
+
+  ;
+  ; Évaluation pour l'affichage des messages d'erreurs.
+  ;
+  IF T_TROUVE = "1"
+  THEN BEGIN
+    IF T_GRANIT = "0"
+    THEN BEGIN
+       WARNING 3121 NOW RESPONSE ;"Le type de granit ne correspond pas à celui commandé."
+    END
+  END
+  ELSE BEGIN
+    IF T_POSSIBLE = "1"
+    THEN BEGIN
+       WARNING 3166 NOW RESPONSE ;"L'épaisseur est supérieure aux valeurs acceptables."
+
+       IF T_GRANIT = "0"
+       THEN BEGIN
+          WARNING 3121 NOW RESPONSE ; "Le type de granit ne correspond pas à celui commandé."
+       END
+    END
+    ELSE BEGIN
+       ERROR 3165 ; "L'épaisseur est inférieure aux valeurs acceptables."
+    END
+  END ; Fin du if TROUVE
+END ; Fin du if not deletedrecord
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour convertir OUI,NON en 1,0
+;       OUI, YES = 1
+;       NON      = 0
+;
+
+PROCEDURE INPUT CASACCERR OF PDCOMMAN_ASSIGN
+BEGIN
+  ;
+  ; Pour forcer l'utilisation du EDIT du champ
+  ;
+  IF CASACCERR OF PDCOMMAN_ASSIGN = "0"  ; Valeur par défaut
+  THEN BEGIN
+    IF FIELDTEXT = ""
+    THEN BEGIN
+      LET FIELDTEXT = "0"
+    END
+  END
+
+  USE usflginp NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation des erreurs de tranches
+;
+PROCEDURE EDIT CASACCERR OF PDCOMMAN_ASSIGN
+BEGIN
+  IF T_CASERR = "1"
+  THEN BEGIN
+    IF NOT DELETEDRECORD OF PDCOMMAN_ASSIGN
+    THEN BEGIN
+      IF FIELDTEXT = "0"
+      THEN BEGIN
+        LET T_FLG_DEL = "1"
+        DELETE PDCOMMAN_ASSIGN
+        WARNING 3167 ; Cette tranche en erreur n'a pas été acceptée.
+      END
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour convertir 1,0 en OUI,NON
+;
+PROCEDURE OUTPUT CASACCERR OF PDCOMMAN_ASSIGN
+BEGIN
+  USE usflgout NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+; Met le statut de bloc à "A" (assignation) à la création
+; et à "I" lors de la destruction d'une assignation
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Modification dans PDCOMMAN_ASSIGN et A_TRA_TRANCHE
+  ;
+  FOR PDCOMMAN_ASSIGN
+  BEGIN
+    IF T_FLG_DEL = ""
+    THEN BEGIN
+      ;
+      ; Validation de la destruction
+      ;
+      IF     DELETEDRECORD OF PDCOMMAN_ASSIGN &
+         AND TZ_SECDEL = "0"
+      THEN ERROR 1
+      ;
+      ; Validation de la modification.
+      ;
+      IF     ALTEREDRECORD     OF PDCOMMAN_ASSIGN &
+         AND NOT NEWRECORD     OF PDCOMMAN_ASSIGN &
+         AND NOT DELETEDRECORD OF PDCOMMAN_ASSIGN &
+         AND TZ_SECMOD = "0"
+      THEN ERROR 2
+
+      ;
+      ; Utiliser A_TRA_TRANCHE pour les mise à jour des informations
+      ; le fichier PDTRANCHE étant "REFERENCE"
+      ;
+      GET A_TRA_TRANCHE &
+            VIA   CIECLE,          &
+                  TRANUMTRA002     &
+            USING T_CIECLEMNU ,    &
+                  TRANUMTRA002 OF PDCOMMAN_ASSIGN
+
+      ;
+      ;  Historique des modifications du fichier de PDTRANCHE
+      ;
+      IF ALTEREDRECORD OF PDCOMMAN_ASSIGN
+      THEN BEGIN
+
+        LET TRADATMAJ OF A_TRA_TRANCHE = SYSDATE
+        LET TRAHREMAJ OF A_TRA_TRANCHE = SYSTIME / 10000
+        LET TRAUSRMAJ OF A_TRA_TRANCHE = LOGONID
+      END
+      ;
+      ; Modification du statut de tranche
+      ;
+      IF  DELETEDRECORD OF PDCOMMAN_ASSIGN
+      THEN BEGIN
+        LET TRASTU OF A_TRA_TRANCHE = "I"
+      END
+
+      IF NEWRECORD OF PDCOMMAN_ASSIGN
+      THEN BEGIN
+        LET TRASTU OF A_TRA_TRANCHE = "A"
+      END
+      ;
+      ; Répercuter les modifications dans le fichier PDTRANCHE
+      ;
+      PUT A_TRA_TRANCHE
+    END ; Fin du if t_flg_delete
+  END ; Fin du FOR
+END
+
+
+BUILD
+
+
+@IF FORMAT
+
+12345678901234567890123456789012345678901234567890123456789012345678901234567890
+2xxx     1         2xxxxxxxxx3xxxxxxxxx4xxxxxxxxx5xxxxxxxxx6         7         x
+3******************************** Assignation **********************************
+4 Num. commande.: xx-xx-xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           *
+5 Projet........: xx     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              *
+6 Client........: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              *
+7                                                                              *
+8********************************* Tranches ************************************
+9  No                      Code                                         Erreur *
+0  tranche  No bloc        granit Fini      Surface Long.  Haut. Épais.  O/N   *
+1                                                                              *
+2  xxxxxxx  xxxx-xxxxx-x    xxx    xx    x,xxx.xxxx  xxxx   xxxx   xxxx   x    *
+3  xxxxxxx  xxxx-xxxxx-x    xxx    xx    x,xxx.xxxx  xxxx   xxxx   xxxx   x    *
+4  xxxxxxx  xxxx-xxxxx-x    xxx    xx    x,xxx.xxxx  xxxx   xxxx   xxxx   x    *
+5  xxxxxxx  xxxx-xxxxx-x    xxx    xx    x,xxx.xxxx  xxxx   xxxx   xxxx   x    *
+6  xxxxxxx  xxxx-xxxxx-x    xxx    xx    x,xxx.xxxx  xxxx   xxxx   xxxx   x    *
+7  xxxxxxx  xxxx-xxxxx-x    xxx    xx    x,xxx.xxxx  xxxx   xxxx   xxxx   x    *
+8  xxxxxxx  xxxx-xxxxx-x    xxx    xx    x,xxx.xxxx  xxxx   xxxx   xxxx   x    *
+9  xxxxxxx  xxxx-xxxxx-x    xxx    xx    x,xxx.xxxx  xxxx   xxxx   xxxx   x    *
+0  xxxxxxx  xxxx-xxxxx-x    xxx    xx    x,xxx.xxxx  xxxx   xxxx   xxxx   x    *
+1  xxxxxxx  xxxx-xxxxx-x    xxx    xx    x,xxx.xxxx  xxxx   xxxx   xxxx   x    *
+2                                                                              *
+3*******************************************************************************
+
+@ENDIF
+
+

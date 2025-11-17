@@ -1,0 +1,156 @@
+;/T/ Prévision des déboursés sommaire/détaillé
+;
+;/P/ Programmeur...: Thomas BRENNEUR
+;    Date Création.: 11 Aout 1993
+;
+;    Description...: Prévision des déboursés à effectuer. Ce rapport permet
+;                    de voir les paiements qui sont à faire en fonction de
+;                    l'intervalle donné en paramètre. Ce rapport est
+;                    l'inverse de l'age des comptes.
+;
+;                    Les transactions sont sélectionnées selon la période
+;                    demandée par l'usager, les soldes sont répartie dans la
+;                    bonne colonne selon la date due et la date de sélection.
+;
+;                    Les transactions doivent être journalisées.
+;
+;    Paramètres....: Compte ctb à payer     un, plusieurs
+;                    Fournisseur            Un, plusieurs ou tous
+;                    Date de début          Sélection à partir de
+;
+;
+;    Particularités: Le QTP sert à préparer un sous-fichier contenant les
+;                    factures dont il reste un solde à payer.
+;
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST
+
+RUN cp334t
+
+;
+; Code identifiant l'interval choisi pour les colonnes.
+;
+GLOBAL TEMPORARY G_CIVCOD    CHARACTER SIZE 1 PARM
+
+;
+; Date de début de sélection des pièces
+;
+GLOBAL TEMPORARY G_DATDEB    DATE PARM
+
+
+;-------------------------------------------------------------------------------
+
+REQUEST PREVISION_DEBOURSES
+
+;
+; Comptes à payer
+;
+
+ACCESS CPCPT_A_PAYER &
+
+  ;
+  ; Fournisseur de la facture, pour avoir le compte comptable du compte à
+  ; payer. Et sa catégorie
+  ;
+  LINK REFCIECLE OF CPCPT_A_PAYER, &
+       REFCLENUM OF CPCPT_A_PAYER  &
+    TO FOUCIECLE, &
+       FOUCLE                     OF CPFOURNISSEUR &
+
+  ;
+  ; Nom du Fournisseur/divers.
+  ;
+  LINK REFCIECLE OF CPCPT_A_PAYER, &
+       REFCLETYP OF CPCPT_A_PAYER, &
+       REFCLENUM OF CPCPT_A_PAYER, &
+       RADCLE    OF CPCPT_A_PAYER  &
+    TO REFCIECLE , &
+       REFCLETYP , &
+       REFCLENUM , &
+       RADCLE                       OF MCREF_ADRESSE OPTIONAL &
+
+  ;
+  ; Cédule d'encaissement, date due, montant à payer.
+  ;
+
+  LINK FOUCIECLE  OF CPCPT_A_PAYER, &
+       FOUCLE     OF CPCPT_A_PAYER, &
+       CAPCLE     OF CPCPT_A_PAYER  &
+    TO FOUCIECLE, &
+       FOUCLE, &
+       CAPCLE                       OF CPCAP_CEDULE &
+
+  ;
+  ; Transactions associées à la cédule(ajust., paiements...)
+  ;
+  LINK FOUCIECLE  OF CPCAP_CEDULE, &
+       FOUCLE     OF CPCAP_CEDULE, &
+       CAPCLE     OF CPCAP_CEDULE, &
+       CPCCLELIG  OF CPCAP_CEDULE  &
+    TO FOUCIECLE , &
+       FOUCLE , &
+       CAPCLE , &
+       CPCCLELIG                    OF CPCAP_HISTO &
+  OPTIONAL
+
+
+CHOOSE CAPCIECLE PARM, &  ; Compagnie du menu.
+       CAPCPTCAP PARM, &  ; Compte ctb à payer.
+       REFCLENUM PARM     ; Numéro de fournisseur.
+
+
+SELECT CPCPT_A_PAYER IF     (     CAPTYPECR OF CPCPT_A_PAYER = "FA"   &
+                              OR  CAPTYPECR OF CPCPT_A_PAYER = "CR"   &
+                              OR  CAPTYPECR OF CPCPT_A_PAYER = "NA"   &
+                              OR  CAPTYPECR OF CPCPT_A_PAYER = "PA" ) &
+                        AND CAPDATJOU OF CPCPT_A_PAYER <> 0
+
+SELECT CPCAP_HISTO  IF     CPHDATJOU OF CPCAP_HISTO <> 0
+
+
+TEMPORARY T_CPHMNT  FLOAT SIZE 8 ; Sommation des trs. associées.
+TEMPORARY T_SLD_TOT FLOAT SIZE 8 ; Solde de la ligne de cédule.
+
+
+SORT ON CAPCIECLE OF CPCPT_A_PAYER , & ; No compagnie
+        CAPCPTCAP OF CPCPT_A_PAYER , & ; Compte ctb à payer
+        REFCLENUM OF CPCPT_A_PAYER , & ; Numéro de fournisseur
+        CAPCLE    OF CPCPT_A_PAYER , & ; No facture
+        CPCCLELIG OF CPCAP_CEDULE      ; No Cédule
+
+;
+; Si c'est un chèque ou un chèque annulé il faut soustraire
+; le montant du montant brut.
+;
+ITEM T_CPHMNT = 0 - CPHMNTCAP OF CPCAP_HISTO &
+                         IF    CPHTYPTRA OF CPCAP_HISTO = "CH" &
+                            OR CPHTYPTRA OF CPCAP_HISTO = "CA" ELSE &
+                CPHMNTCAP OF CPCAP_HISTO
+
+;
+; Solde de la cédule.
+;
+ITEM T_SLD_TOT SUBTOTAL T_CPHMNT &
+               RESET AT CPCCLELIG TO CPCMNT OF CPCAP_CEDULE
+
+
+SUBFILE WCP334 KEEP &
+               AT CPCCLELIG &
+               IF T_SLD_TOT <> 0 &
+INCLUDE CAPCIECLE OF CPCPT_A_PAYER  , &
+        CAPCLE    OF CPCPT_A_PAYER  , &
+        CAPCPTCAP OF CPCPT_A_PAYER  , &
+        CAPDAT    OF CPCPT_A_PAYER  , &
+        REFCLENUM OF CPCPT_A_PAYER  , &
+        RADNOM    OF MCREF_ADRESSE  , &
+        RADNOMABR OF MCREF_ADRESSE  , &
+        FOUCAT    OF CPFOURNISSEUR  , &
+        CPCCLELIG OF CPCAP_CEDULE   , &
+        CPCDATDUE OF CPCAP_CEDULE   , &
+        G_DATDEB                    , &
+        T_SLD_TOT                   , &
+        G_CIVCOD
+
+BUILD cp334t

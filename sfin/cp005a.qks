@@ -1,0 +1,1446 @@
+;/T/ Rapports de dépenses - Imputation
+;
+;//M/GRA01/Francois Richard/1999-06-18
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;
+;/P/ Programmeur..: Thomas BRENNEUR
+;    Date Création: 15 Juin 1993
+;
+;    Description..: Saisie de l'imputation pour un relevé de dépense.
+;
+;/M/ Adatation....: Marc Morissette 22 Octobre 1993
+;
+;    Description..: Ajout du flg Facturable Oui/non et du numéro de client
+;                   Ajout du code d'équipement
+;                   Modification de l'ordre de saisie des champs
+;                   Écrat -> solde a vent.
+;/A/ Adaptation : Nancy Marceau, 24 mars 1994
+;
+;    Description: Afficher les valeurs par défaut du projet, du sous-projet et
+;                 de l'équipement qui ont été définis dans la maintenance des
+;                 paramètres du Prix de revient.
+;
+;/M/ Modifié par: Guy Chabot le 12 Avril 1994
+;    Impact.....: Prendre par défaut l'équipement mentionné dans la table
+;                 GPPROJETS selon le projet saisie.
+;
+;
+;-------------------------------------------------------------------------------
+;/V/ 3.00.02    Guy Chabot 12-mai-1994 (197).
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cp005a ACTIONBAR &
+              MODE LABEL "" AT 2,132 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              FROM 1,1 TO 23,132 &
+              RECEIVING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        D_LCPATRJOU, &
+                        D_DEVCLE   , &
+                        CPCPT_A_PAYER, &
+                        CPCAP_HISTO
+
+TEMPORARY T_CPTPECDEBI_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CPTPECDEBA_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_PECCLE_SIE2 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CCUPECDEBI_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CCUPECDEBA_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_PECCLE_SIE1 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+USE ussectmp   NOLIST
+    "CP005A"
+
+USE cp005a.hlp NOLIST
+
+USE usactecr   NOLIST
+
+;
+; Ouverture d'une transaction QUERY indépendante de l'écran maitre.
+; pour ne pas rompre la chaine de lecture.
+;
+USE ustrasse   NOLIST
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de compagnie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie du menu.
+TEMPORARY T_CLICIECLE CHARACTER SIZE 4 RESET AT STARTUP ; Compagnie du client.
+DEFINE    D_LCPATRJOU CHARACTER SIZE 1  ; Si le lot est autorisé.
+DEFINE    D_DEVCLE    CHARACTER SIZE 3  ; Devise de l'employé
+
+;-------------------------------------------------------------------------------
+;
+
+FILE CPCPT_A_PAYER    MASTER
+
+FILE CPCAP_HISTO      MASTER
+
+;-------------------------------------------------------------------------------
+;
+; IMPUTATION COMPTABLE
+;
+FILE CPCAP_IMPUTATION PRIMARY &
+                      OCCURS 14 &
+                      NOITEMS
+
+  ACCESS  VIA     FOUCIECLE, &
+                  FOUCLE   , &
+                  CAPCLE     &
+          USING   FOUCIECLE OF CPCPT_A_PAYER, &
+                  FOUCLE    OF CPCPT_A_PAYER, &
+                  CAPCLE    OF CPCPT_A_PAYER  &
+          ORDERBY FOUCIECLE, &
+                  FOUCLE   , &
+                  CAPCLE   , &
+                  CCITIMSTP
+
+  ITEM CLICIECLE  OF CPCAP_IMPUTATION INITIAL T_CLICIECLE
+  ITEM FOUCIECLE  OF CPCAP_IMPUTATION INITIAL FOUCIECLE OF CPCPT_A_PAYER
+  ITEM FOUCLE     OF CPCAP_IMPUTATION INITIAL FOUCLE    OF CPCPT_A_PAYER
+  ITEM CAPCLE     OF CPCAP_IMPUTATION INITIAL CAPCLE    OF CPCPT_A_PAYER
+  ITEM CCITIMSTP  OF CPCAP_IMPUTATION INITIAL SYSDATE * 1000000 + &
+                                              ROUND(SYSTIME / 100)
+  ;
+  ; Dans les comptes à payer, l'imputation est toujours un débit.
+  ;
+  ITEM CCICODDC   OF CPCAP_IMPUTATION INITIAL "D"
+  ;
+  ; Initialisation des types de taxes (il ne sont là que pour faciliter
+  ; le traitement).
+  ;
+  ITEM CCITAXTYPTPS OF CPCAP_IMPUTATION INITIAL "F"
+  ITEM CCITAXTYPTVQ OF CPCAP_IMPUTATION INITIAL "P"
+
+;-------------------------------------------------------------------------------
+;
+; Notion de charte de compte et pour avoir la devise du G/L.
+;
+FILE MCHOLDING        REFERENCE
+
+  ACCESS  VIA   CIENMC &
+          USING "1"
+
+;-------------------------------------------------------------------------------
+;
+; Validation de la charte de compte/unité.
+;
+FILE MCCHARTE_UNA     REFERENCE
+
+  ACCESS  VIA   CPTCLE, &
+                CIECLE, &
+                UNACLE &
+          USING CPTCLE OF CPCAP_IMPUTATION, &
+                T_CIECLEMNU               , &
+                UNACLE OF CPCAP_IMPUTATION
+
+;-------------------------------------------------------------------------------
+;
+; Validation de l'unité administrative.
+;
+FILE MCUNITE_ADM      REFERENCE &
+                      OCCURS WITH CPCAP_IMPUTATION
+
+  ACCESS  VIA   CIECLE, &
+                UNACLE &
+          USING T_CIECLEMNU, &
+                UNACLE OF CPCAP_IMPUTATION
+
+;-------------------------------------------------------------------------------
+;
+; Validation du compte comptable.
+;
+FILE VCPT_DSC         REFERENCE &
+                      OCCURS WITH CPCAP_IMPUTATION
+
+  ACCESS  VIA   CPTCLE &
+          USING CPTCLE OF CPCAP_IMPUTATION
+
+;-------------------------------------------------------------------------------
+;
+; Validation des codes de taxes fédéral.
+;
+FILE MCTAXE           REFERENCE &
+                      ALIAS A_TAX_TPS
+
+  ACCESS  VIA   TAXCLETYP, &
+                TAXCLECOD &
+          USING CCITAXTYPTPS OF CPCAP_IMPUTATION, &
+                CCITAXCODTPS OF CPCAP_IMPUTATION
+
+;-------------------------------------------------------------------------------
+;
+; Validation des codes de taxes provincial.
+;
+FILE MCTAXE           REFERENCE &
+                      ALIAS A_TAX_TVP
+
+  ACCESS  VIA   TAXCLETYP, &
+                TAXCLECOD &
+          USING CCITAXTYPTVQ OF CPCAP_IMPUTATION, &
+                CCITAXCODTVQ OF CPCAP_IMPUTATION
+
+;-------------------------------------------------------------------------------
+;
+; Validation du projet.
+;
+FILE GPPROJETS         REFERENCE &
+                      OCCURS WITH CPCAP_IMPUTATION
+
+  ACCESS VIA CIECLE, &
+             PRJCLE  &
+         USING T_CIECLEMNU, &
+               PRJCLE OF CPCAP_IMPUTATION
+
+;-------------------------------------------------------------------------------
+;
+; Validation de l'activité.
+;
+FILE GPPRO_ACTIVITE       REFERENCE
+
+  ACCESS VIA CIECLE, &
+             PRJCLE, &
+             PRACLE  &
+         USING T_CIECLEMNU, &
+               PRJCLE OF CPCAP_IMPUTATION, &
+               PRACLE OF CPCAP_IMPUTATION
+
+;-------------------------------------------------------------------------------
+; Valeurs par défaut à utiliser pour le projet, sous-projet et équipement.
+;
+FILE GPPARAMETRE REFERENCE &
+                 OCCURS WITH CPCAP_IMPUTATION
+
+  ACCESS VIA   CIECLE &
+         USING T_CIECLEMNU
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide l'immobilisation et affiche la description.
+;
+TEMPORARY T_IMMCLE CHARACTER SIZE 12 ; Popup sur les immobilisations.
+
+FILE IMIMMOBILISATION REFERENCE
+
+  ACCESS  VIA   CIECLE, &
+                IMMCLE &
+          USING T_CIECLEMNU , &
+                IMMCLE OF CPCAP_IMPUTATION
+
+  SELECT IF IMMSTU OF IMIMMOBILISATION = "A"
+
+
+
+
+
+;
+; Validation du numéro de client et on a besoin de certaines informations sur
+; le client , comme les termes d'encaissements, le statut, le type...
+;
+FILE VCLC_CLI         REFERENCE
+  ACCESS VIA CLICIECLE, &
+             CLICLE   , &
+             CIECLE     &
+         USING T_CLICIECLE,&
+               CLICLE OF CPCAP_IMPUTATION, &
+               T_CIECLEMNU
+
+TEMPORARY T_CLICLE    CHARACTER SIZE  6 ; Popup sur les clients
+
+;-------------------------------------------------------------------------------
+;
+; Calcul de l'écart entre le montant brut et la sommation de l'imputation.
+;
+DEFINE D_ECART FLOAT SIZE 8 = CAPMNT    OF CPCPT_A_PAYER - &
+                              CAPMNTAVA OF CPCPT_A_PAYER - &
+                              CAPCUMMNT OF CPCPT_A_PAYER
+
+
+TEMPORARY T_CPTCLE    CHARACTER SIZE 6 ; Popup sur les comptes
+TEMPORARY T_PECCLE    CHARACTER SIZE 4 ; Popup sur les comptes et unité adm.
+TEMPORARY T_CPTTYPPAT CHARACTER SIZE 1 ; Popup sur les comptes
+TEMPORARY T_CPTCATPAT CHARACTER SIZE 8 ; Popup sur les comptes
+
+TEMPORARY T_UNACLE    CHARACTER SIZE 8 ; Popup sur les unités adm.
+
+TEMPORARY T_PRJCLE    CHARACTER SIZE 8 ; Popup sur les projets.
+TEMPORARY T_PRJSTUPAT CHARACTER SIZE 8 ; Popup sur les projets.
+
+TEMPORARY T_PRACLE    CHARACTER SIZE 3 ; Popup sur les activités.
+TEMPORARY T_PRASTUPAT CHARACTER SIZE 5 ; Popup sur les activités.
+
+TEMPORARY T_TAXCLETYP CHARACTER SIZE 1 ; Popup sur les codes de taxes
+TEMPORARY T_TAXCLECOD CHARACTER SIZE 2 ; Popup sur les codes de taxes
+TEMPORARY T_TAXMODPAT CHARACTER SIZE 5 ; Popup sur les codes de taxes
+
+;
+; Pour le calcul des taxes.
+;
+TEMPORARY T_FLGMOD       CHARACTER SIZE 1 OCCURS WITH CPCAP_IMPUTATION
+                                          ; Flag pour déceler s'il y eu modif.
+TEMPORARY T_TAXMODTPSOLD CHARACTER SIZE 1 OCCURS WITH CPCAP_IMPUTATION
+                                          ; Pour diminuer le bon cumul de taxe.
+TEMPORARY T_TAXMODTVQOLD CHARACTER SIZE 1 OCCURS WITH CPCAP_IMPUTATION
+                                          ; Pour diminuer le bon cumul de taxe.
+
+TEMPORARY T_CAPMNTCTIOLD FLOAT     SIZE 8
+TEMPORARY T_CAPMNTRTIOLD FLOAT     SIZE 8
+
+
+;
+; Temporaires necessaires au calcul des taxes
+;
+USE ustaxtmp NOLIST
+
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+
+USE usdrw132 NOLIST
+USE ustit132 NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Imputation " &
+@ELSE
+      " Charge " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST
+
+
+ALIGN(,3,19) (,93,114)
+
+FIELD CAPCLE    OF CPCPT_A_PAYER &
+        FIXED &
+@IF FRANCAIS
+        LABEL "Rapport dép...:"
+@ELSE
+        LABEL "Exp. report...:"
+@ENDIF
+
+FIELD CAPMNT    OF CPCPT_A_PAYER &
+        FIXED &
+@IF FRANCAIS
+        LABEL "Montant total.:"
+@ELSE
+        LABEL "Total amount..:"
+@ENDIF
+
+FIELD CAPMNTTPS OF CPCPT_A_PAYER &
+LABEL "Montant de TPS:"&
+        DISPLAY &
+        PREDISPLAY
+
+FIELD CAPCUMMNT OF CPCPT_A_PAYER &
+LABEL "Cum. mnt brut.:"&
+        DISPLAY &
+        PREDISPLAY
+
+FIELD CAPMNTTVQ OF CPCPT_A_PAYER &
+LABEL "Montant de TVQ:"&
+        DISPLAY &
+        PREDISPLAY
+
+FIELD D_ECART &
+        DISPLAY &
+        PREDISPLAY &
+@IF FRANCAIS
+        LABEL "Solde à vent..:" &
+@ELSE
+        LABEL "Balance.......:" &
+@ENDIF
+        PICTURE "^^,^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5
+
+SKIP
+
+DRAW ,1 TO ,132
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+"Projet  SSpro Immobilis.  Unité    Compte       Montant  TF TP         TPS         TVQ Fac. Client"&
+@ENDIF
+  AT ,3
+
+; Projet  SSpro Immobilis.  Unité    Compte       Montant  TF TP         TPS         TVQ
+; xxxxxxxx xxx xxxxxxxxxxxx xxxxxxxx xxxxxx xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx              *
+
+ALIGN (3,2,3) (,,12) (,,16) (,,29) (,,38) (,,45) (,,60) (,,63) (,,66)(,,78)(,,90)(,,94)
+
+CLUSTER OCCURS WITH CPCAP_IMPUTATION ID BASE 05
+
+FIELD PRJCLE       OF CPCAP_IMPUTATION &
+        HIDDEN LABEL " "
+
+FIELD PRACLE       OF CPCAP_IMPUTATION
+
+FIELD IMMCLE       OF CPCAP_IMPUTATION &
+        LOOKUP ON IMIMMOBILISATION &
+            MESSAGE 491 ; Cette immobilisation n'existe pas ou est inactive.
+
+FIELD UNACLE       OF CPCAP_IMPUTATION &
+        DEFAULT PRAUNADEP OF GPPRO_ACTIVITE &
+        LOOKUP ON MCUNITE_ADM &
+          MESSAGE 472 ; Ce numéro d'unité administrative n'existe pas.
+
+FIELD CPTCLE       OF CPCAP_IMPUTATION  &
+        REQUIRED &
+        LOOKUP ON VCPT_DSC  &
+          MESSAGE 411 ; Ce compte est inexistant.
+
+
+FIELD CCIMNT       OF CPCAP_IMPUTATION &
+        DEFAULT D_ECART
+
+FIELD CCITAXCODTPS OF CPCAP_IMPUTATION &
+        DUPLICATE
+
+FIELD CCITAXCODTVQ OF CPCAP_IMPUTATION &
+        DUPLICATE
+
+FIELD CCIMNTTPS    OF CPCAP_IMPUTATION
+
+FIELD CCIMNTTVQ    OF CPCAP_IMPUTATION
+
+FIELD CCIFLGFAC    OF CPCAP_IMPUTATION SIZE 3
+
+FIELD CLICLE       OF CPCAP_IMPUTATION REQUIRED &
+        LOOKUP ON VCLC_CLI &
+          MESSAGE 624  ; Ce client n'existe pas.
+
+
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+
+  ;
+  ; On conserve les montants de CTI et de RTI pour vérifier s'il
+  ; ont changée à la fin de la saisie ou modification.
+  ;
+  LET T_CAPMNTCTIOLD = CAPMNTCTI OF CPCPT_A_PAYER
+  LET T_CAPMNTRTIOLD = CAPMNTRTI OF CPCPT_A_PAYER
+
+  IF HLDCHTCLI OF MCHOLDING = "1"
+  THEN LET T_CLICIECLE = T_CIECLEMNU
+  ELSE LET T_CLICIECLE = HLDCHRSUB OF MCHOLDING
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Averti l'usager si l'éciture ne balance pas.
+;
+;
+PROCEDURE EXIT
+BEGIN
+  IF D_ECART <> 0
+  THEN WARNING 459 ; L'imputation ne balance pas.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les comptes.
+;
+;
+PROCEDURE INPUT CPTCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_CPTTYPPAT = "R"
+    LET T_CPTCATPAT = "@"
+    LET T_PECCLE    = PECCLE OF CPCPT_A_PAYER
+    RUN SCREEN mc103 MODE F PASSING T_CPTCLE, &
+                                    T_CPTTYPPAT, &
+                                    T_CPTCATPAT, &
+                                    T_PECCLE &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_CPTCLE)
+  END
+  ;
+  ; Force l'éxécution du LOOKUP.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(CPTCLE OF CPCAP_IMPUTATION))
+  THEN LET FIELDTEXT = CPTCLE OF CPCAP_IMPUTATION
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation si le compte est actif.
+;
+;
+PROCEDURE EDIT CPTCLE
+BEGIN
+  ;
+  ; Note: La période de fin, est la première période d'inactivité.
+  ;
+
+  ; Ajustement pour le changement de siècle
+  IF PECCLE OF CPCPT_A_PAYER[1:1] < "8"
+  THEN LET T_PECCLE_SIE2 = "1" + PECCLE OF CPCPT_A_PAYER
+  ELSE LET T_PECCLE_SIE2 = "0" + PECCLE OF CPCPT_A_PAYER
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBA OF VCPT_DSC[1:1] < "8"
+  THEN LET T_CPTPECDEBA_SIE = "1" + CPTPECDEBA OF VCPT_DSC
+  ELSE LET T_CPTPECDEBA_SIE = "0" + CPTPECDEBA OF VCPT_DSC
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBI OF VCPT_DSC[1:1] < "8"
+  THEN LET T_CPTPECDEBI_SIE = "1" + CPTPECDEBI OF VCPT_DSC
+  ELSE LET T_CPTPECDEBI_SIE = "0" + CPTPECDEBI OF VCPT_DSC
+
+  IF T_PECCLE_SIE2 >= T_CPTPECDEBA_SIE AND &
+     ( &
+       T_PECCLE_SIE2 < T_CPTPECDEBI_SIE OR &
+       CPTPECDEBI OF VCPT_DSC = "" &
+     )
+  THEN NULL
+  ELSE ERROR 473 ; Ce compte est inactif.
+
+  IF CPTTYP OF VCPT_DSC <> "R"
+  THEN ERROR 474 ; On ne peut pas utliser ce compte dans une imputation.
+
+  IF     DEVCLE OF VCPT_DSC <> D_DEVCLE            &
+     AND DEVCLE OF VCPT_DSC <> DEVCLE OF MCHOLDING
+  THEN ERROR 578 ; Compte interdit due à la devise du compte.
+
+  IF HLDCHTCPT OF MCHOLDING = "1"
+  THEN BEGIN
+    GET MCCHARTE_UNA OPTIONAL
+    ;
+    ; Si la charte est incluse, le lien est obligatoire.
+    ;
+    IF NOT ACCESSOK
+    THEN BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN ERROR 475 ; La combinaison compte/unité adm n'existe pas.
+    END
+    ELSE BEGIN
+      ;
+      ; Si la charte est Exclusive et que la période fait partie de
+      ; l'intervalle de période de la charte alors c'est une erreur.
+      ;
+      ; Si la charte est inclusive et que la période ne fait pas partie de
+      ; l'intervalle de période de la charte alors c'est une erreur.
+      ;
+      ; Ajustement pour le changement de siècle
+      IF PECCLE OF CPCPT_A_PAYER[1:1] < "8"
+      THEN LET T_PECCLE_SIE1 = "1" + PECCLE OF CPCPT_A_PAYER
+      ELSE LET T_PECCLE_SIE1 = "0" + PECCLE OF CPCPT_A_PAYER
+
+      ; Ajustement pour le changement de siècle
+      IF CCUPECDEBA OF MCCHARTE_UNA[1:1] < "8"
+      THEN LET T_CCUPECDEBA_SIE = "1" + CCUPECDEBA OF MCCHARTE_UNA
+      ELSE LET T_CCUPECDEBA_SIE = "0" + CCUPECDEBA OF MCCHARTE_UNA
+
+      ; Ajustement pour le changement de siècle
+      IF CCUPECDEBI OF MCCHARTE_UNA[1:1] < "8"
+      THEN LET T_CCUPECDEBI_SIE = "1" + CCUPECDEBI OF MCCHARTE_UNA
+      ELSE LET T_CCUPECDEBI_SIE = "0" + CCUPECDEBI OF MCCHARTE_UNA
+
+      IF ( &
+           T_PECCLE_SIE1 >= T_CCUPECDEBA_SIE AND &
+           ( &
+             T_PECCLE_SIE1 < T_CCUPECDEBI_SIE OR &
+             CCUPECDEBI OF MCCHARTE_UNA = " " &
+           ) &
+         )
+      THEN BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "E"
+        THEN ERROR 476 ; La combinaison compte/unité administrative est inactive.
+      END
+      ELSE BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "I"
+        THEN ERROR 476 ; La combinaison compte/unité administrative est inactive.
+      END
+    END
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT UNACLE
+BEGIN
+  ;
+  ; Popup sur les unités administrative.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE = CPTCLE OF CPCAP_IMPUTATION
+    LET T_PECCLE = PECCLE OF CPCPT_A_PAYER
+    LET T_UNACLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+
+    RUN SCREEN mc104 MODE F PASSING T_CIECLEMNU, T_UNACLE &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+
+    LET FIELDTEXT = TRUNCATE(T_UNACLE)
+  END
+  ;
+  ; Force l'éxécution du LOOKUP.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(UNACLE OF CPCAP_IMPUTATION))
+  THEN LET FIELDTEXT = UNACLE OF CPCAP_IMPUTATION
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Permet d'avoir comme valeur par défaut le solde à ventiler et de calculer
+; le restant à ventiler. Force l'exécution de la procédure EDIT
+;
+PROCEDURE INPUT CCIMNT
+BEGIN
+  IF 0 = SIZE(TRUNCATE(FIELDTEXT)) AND CCIMNT = 0
+  THEN LET FIELDTEXT = ASCII(D_ECART,10)[1:8] + "." + ASCII(D_ECART,10)[9:10]
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Mise à jour du cumulatif de l'imputation.
+;
+;
+PROCEDURE EDIT CCIMNT
+BEGIN
+  ;
+  ; Valide la partie décimale.
+  ;
+  USE usvaldec NOLIST
+
+  LET CAPCUMMNT OF CPCPT_A_PAYER = CAPCUMMNT OF CPCPT_A_PAYER - &
+                                 OLDVALUE(CCIMNT OF CPCAP_IMPUTATION) + &
+                                 FIELDVALUE
+  ;
+  ; Initialise le flag à Oui dans la procédure EDIT. Car si l'usager saisie
+  ; une valeur la procédure EDIT est exécuté.
+  ;
+  LET T_FLGMOD = "1"
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Affiche l'écart.
+;
+;
+PROCEDURE PROCESS CCIMNT
+BEGIN
+  DISPLAY CAPCUMMNT OF CPCPT_A_PAYER
+  DISPLAY D_ECART
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran de consultation des codes de taxe.
+;
+;
+PROCEDURE INPUT CCITAXCODTPS
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TAXCLETYP = CCITAXTYPTPS OF CPCAP_IMPUTATION
+    LET T_TAXCLECOD = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    LET T_TAXMODPAT = "@"
+    RUN SCREEN mc111 MODE F PASSING T_TAXCLETYP, &
+                                    T_TAXCLECOD, &
+                                    T_TAXMODPAT &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNC(T_TAXCLECOD)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du code de taxe fédéral.
+;
+;
+PROCEDURE EDIT CCITAXCODTPS
+BEGIN
+  IF 0 <> SIZE(TRUNC(FIELDTEXT))
+  THEN BEGIN
+    GET A_TAX_TPS OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 421 ; Ce code de taxe est inexistant.
+
+  END
+  ;
+  ; Initialise le flag à Oui dans la procédure EDIT. Car si l'usager saisie
+  ; une valeur la procédure EDIT est exécuté.
+  ;
+  LET T_FLGMOD = "1"
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran de consultation des codes de taxe.
+;
+;
+PROCEDURE INPUT CCITAXCODTVQ
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TAXCLETYP = CCITAXTYPTVQ OF CPCAP_IMPUTATION
+    LET T_TAXCLECOD = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    LET T_TAXMODPAT = "@"
+    RUN SCREEN mc111 MODE F PASSING T_TAXCLETYP, &
+                                    T_TAXCLECOD, &
+                                    T_TAXMODPAT &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNC(T_TAXCLECOD)
+  END
+  ;
+  ; Force l'éxécution de la procédure edit, car il y a inter-relation entre
+  ; deux champs(taxe).
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     T_FLGMOD = "1"
+  THEN LET FIELDTEXT = CCITAXCODTVQ OF CPCAP_IMPUTATION
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du code de taxe provincial
+;
+;
+PROCEDURE EDIT CCITAXCODTVQ
+BEGIN
+  IF 0 <> SIZE(TRUNC(FIELDTEXT))
+  THEN BEGIN
+    GET A_TAX_TVP OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 421 ; Ce code de taxe est inexistant.
+
+    IF TAXMOD    OF A_TAX_TVP = "I" AND &
+       TAXFLGNET OF A_TAX_TVP = "2" AND &
+       TAXMOD    OF A_TAX_TPS = "S"
+    THEN ERROR 480 ; TVQ incluse et TPS en sus sont incompatible.
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du CTI = remboursement de tps.
+;
+PROCEDURE INTERNAL CALCUL_CTI
+BEGIN
+  ;
+  ; Il faut diminuer le cumul de taxe de la facture.
+  ;
+  LET CAPMNTCTI OF CPCPT_A_PAYER = CAPMNTCTI OF CPCPT_A_PAYER - &
+                                   CCIMNTCTI OF CPCAP_IMPUTATION
+  ;
+  LET CCIMNTCTI OF CPCAP_IMPUTATION = 0
+
+  ;
+  ; Calcul du remboursement fédéral.
+  ;
+  LET CCIMNTCTI OF CPCAP_IMPUTATION = &
+                ROUND( CCIMNTTPS OF CPCAP_IMPUTATION * TAXPCTCTI OF A_TAX_TPS )
+  ;
+  ; Il faut augmenter le cumul de taxe de la facture.
+  ;
+  LET CAPMNTCTI OF CPCPT_A_PAYER = CAPMNTCTI OF CPCPT_A_PAYER + &
+                                   CCIMNTCTI OF CPCAP_IMPUTATION
+END
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du RTI = remboursement de tvq.
+;
+PROCEDURE INTERNAL CALCUL_RTI
+BEGIN
+  ;
+  ; Il faut diminuer le cumul de taxe de la facture.
+  ;
+  LET CAPMNTRTI OF CPCPT_A_PAYER = CAPMNTRTI OF CPCPT_A_PAYER - &
+                                   CCIMNTRTI OF CPCAP_IMPUTATION
+  ;
+  LET CCIMNTRTI OF CPCAP_IMPUTATION = 0
+
+  ;
+  ; Calcul du remboursement fédéral.
+  ;
+  LET CCIMNTRTI OF CPCAP_IMPUTATION = &
+                ROUND( CCIMNTTVQ OF CPCAP_IMPUTATION * TAXPCTCTI OF A_TAX_TVP )
+  ;
+  ; Il faut augmenter le cumul de taxe de la facture.
+  ;
+  LET CAPMNTRTI OF CPCPT_A_PAYER = CAPMNTRTI OF CPCPT_A_PAYER + &
+                                   CCIMNTRTI OF CPCAP_IMPUTATION
+END
+
+;-------------------------------------------------------------------------------
+;
+; Calcul des taxes.
+;
+PROCEDURE PROCESS CCITAXCODTVQ
+BEGIN
+  ;
+  ; Enlève les anciennes valeurs des totaux
+  ;
+  LET CAPMNTTPS OF CPCPT_A_PAYER = CAPMNTTPS OF CPCPT_A_PAYER - &
+                                   CCIMNTTPS OF CPCAP_IMPUTATION
+  LET CAPMNTTVQ OF CPCPT_A_PAYER = CAPMNTTVQ OF CPCPT_A_PAYER - &
+                                   CCIMNTTVQ OF CPCAP_IMPUTATION
+  ;
+  ; Si le mode de taxation est ENSUS, il faut mettre à jour le cumulatif brut
+  ; de la ventilation.
+  ;
+  IF T_TAXMODTPSOLD = "S"
+  THEN LET CAPCUMMNT OF CPCPT_A_PAYER   = CAPCUMMNT OF CPCPT_A_PAYER   - &
+                                          CCIMNTTPS    OF CPCAP_IMPUTATION
+  IF T_TAXMODTVQOLD = "S"
+  THEN LET CAPCUMMNT OF CPCPT_A_PAYER   = CAPCUMMNT OF CPCPT_A_PAYER   - &
+                                          CCIMNTTVQ    OF CPCAP_IMPUTATION
+  ;
+  LET CCIMNTTPS OF CPCAP_IMPUTATION = 0
+  LET CCIMNTTVQ OF CPCAP_IMPUTATION = 0
+  ;
+  ; On prend le montant brut de l'imputation pour le calcul des taxes.
+  ;
+  LET TZ_MNTTXB = CCIMNT OF CPCAP_IMPUTATION
+  ;
+  ; Use standart pour le calcul des taxes
+  ;
+  USE ustaxcal NOLIST
+
+  LET CCIMNTTPS OF CPCAP_IMPUTATION = TZ_MNTTPS
+  LET CCIMNTTVQ OF CPCAP_IMPUTATION = TZ_MNTTVP
+
+  ;
+  ; Si le mode de taxation est "EN SUS", il faut mettre à jour le cumulatif brut
+  ; de la ventilation.
+  ;
+  IF TAXMOD OF A_TAX_TPS = "S"
+  THEN LET CAPCUMMNT OF CPCPT_A_PAYER   = CAPCUMMNT OF CPCPT_A_PAYER   + &
+                                          CCIMNTTPS    OF CPCAP_IMPUTATION
+  IF TAXMOD OF A_TAX_TVP = "S"
+  THEN LET CAPCUMMNT OF CPCPT_A_PAYER   = CAPCUMMNT OF CPCPT_A_PAYER   + &
+                                          CCIMNTTVQ    OF CPCAP_IMPUTATION
+  ;
+  ; Calcul des montants de taxe remboursable (CTI & RTI)
+  ;
+  DO INTERNAL CALCUL_CTI
+  DO INTERNAL CALCUL_RTI
+
+  ;
+  ; Mise à jour des montants totaux
+  ;
+  LET CAPMNTTPS OF CPCPT_A_PAYER = CAPMNTTPS OF CPCPT_A_PAYER + &
+                                   CCIMNTTPS OF CPCAP_IMPUTATION
+  LET CAPMNTTVQ OF CPCPT_A_PAYER = CAPMNTTVQ OF CPCPT_A_PAYER + &
+                                   CCIMNTTVQ OF CPCAP_IMPUTATION
+  ;
+  DISPLAY CCIMNTTPS OF CPCAP_IMPUTATION
+  DISPLAY CCIMNTTVQ OF CPCAP_IMPUTATION
+  DISPLAY CAPMNTTPS OF CPCPT_A_PAYER
+  DISPLAY CAPMNTTVQ OF CPCPT_A_PAYER
+  DISPLAY CAPCUMMNT OF CPCPT_A_PAYER
+  DISPLAY D_ECART
+  ;
+  ; Ré-initialise le flag à non, ce flag nous indique si le montant de l'impu-
+  ; tation ou le code de tps a été modifié.
+  ;
+  LET T_FLGMOD = "0"
+  ;
+  ; Il faut conserver l'ancienne valeur qui a servi à incrémenter le cumul
+  ; des montants brut(incluant taxe). Il faut prendre les informations du
+  ; code de taxe précédemment saisie, c'est pour cette raison que le traitement
+  ; est fait dans cette procédure.
+  ;
+  LET T_TAXMODTPSOLD = TAXMOD OF A_TAX_TPS
+  LET T_TAXMODTVQOLD = TAXMOD OF A_TAX_TVP
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; L'usager peut modifier le montant de taxe.
+;
+;
+PROCEDURE EDIT CCIMNTTPS
+BEGIN
+
+  DO INTERNAL CALCUL_CTI
+
+  LET CAPMNTTPS OF CPCPT_A_PAYER = CAPMNTTPS OF CPCPT_A_PAYER - &
+                                 OLDVALUE(CCIMNTTPS OF CPCAP_IMPUTATION) + &
+                                 FIELDVALUE
+  ;
+  ; Si le mode de taxation est ENSUS, il faut mettre à jour le cumulatif brut
+  ; de la ventilation.
+  ;
+  IF TAXMOD OF A_TAX_TPS = "S"
+  THEN LET CAPCUMMNT OF CPCPT_A_PAYER = CAPCUMMNT OF CPCPT_A_PAYER - &
+                                      OLDVALUE(CCIMNTTPS OF CPCAP_IMPUTATION) + &
+                                      FIELDVALUE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; On affiche les cumulatifs situé en-tête.
+;
+;
+PROCEDURE PROCESS CCIMNTTPS
+BEGIN
+  DISPLAY CAPMNTTPS OF CPCPT_A_PAYER
+  DISPLAY CAPCUMMNT OF CPCPT_A_PAYER
+  DISPLAY D_ECART
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; L'usager peut modifier le montant de taxe.
+;
+;
+PROCEDURE EDIT CCIMNTTVQ
+BEGIN
+
+  DO INTERNAL CALCUL_RTI
+
+  LET CAPMNTTVQ OF CPCPT_A_PAYER = CAPMNTTVQ OF CPCPT_A_PAYER - &
+                                 OLDVALUE(CCIMNTTVQ OF CPCAP_IMPUTATION) + &
+                                 FIELDVALUE
+  ;
+  ; Si le mode de taxation est ENSUS, il faut mettre à jour le cumulatif brut
+  ; de la ventilation.
+  ;
+  IF TAXMOD OF A_TAX_TVP = "S"
+  THEN LET CAPCUMMNT OF CPCPT_A_PAYER = CAPCUMMNT OF CPCPT_A_PAYER - &
+                                      OLDVALUE(CCIMNTTVQ OF CPCAP_IMPUTATION) + &
+                                      FIELDVALUE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; On affiche les cumulatifs situé en-tête.
+;
+;
+PROCEDURE PROCESS CCIMNTTVQ
+BEGIN
+  DISPLAY CAPMNTTVQ OF CPCPT_A_PAYER
+  DISPLAY CAPCUMMNT OF CPCPT_A_PAYER
+  DISPLAY D_ECART
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les projets.
+;
+;
+PROCEDURE INPUT PRJCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PRJSTUPAT = "A"
+    LET T_PRJCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gp104 MODE F PASSING T_CIECLEMNU, &
+                                    T_PRJCLE   , &
+                                    T_PRJSTUPAT &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNCATE(T_PRJCLE)
+  END
+
+  ;
+  ; Par défaut on utilise le projet défini dans GPPARAMETRE. S'il n'y en a pas
+  ; on force la validation.
+  ;
+  IF     0 = SIZE( FIELDTEXT ) &
+     AND PRJCLE    OF CPCAP_IMPUTATION = ""
+  THEN BEGIN
+    IF PROCLE    OF GPPARAMETRE <> ""
+    THEN LET FIELDTEXT = PROCLE OF GPPARAMETRE
+    ELSE LET FIELDTEXT = PRJCLE OF CPCAP_IMPUTATION
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du projet, le projet est optionel dans l'imputation.
+;
+;
+PROCEDURE EDIT PRJCLE
+BEGIN
+  GET GPPROJETS OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 512 ; Ce projet n'existe pas.
+
+  IF PRJSTU OF GPPROJETS <> "A"
+  THEN ERROR 514 ; Ce projet n'est pas actif.
+END
+
+PROCEDURE INPUT IMMCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_IMMCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN im102 MODE F &
+                     PASSING T_CIECLEMNU, &
+                             T_IMMCLE  WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE( T_IMMCLE )
+  END
+  ;
+  ; Par défaut on utilise la catégorie définie dans GPPARAMETRE. S'il n'y en a pas
+  ; on force la validation.
+  ;
+  IF     0 = SIZE(FIELDTEXT) &
+     AND 0 = SIZE(TRUNCATE(IMMCLE OF CPCAP_IMPUTATION))
+  THEN BEGIN
+     IF 0 <> SIZE(TRUNCATE(PRAIMMCLE OF GPPRO_ACTIVITE))
+     THEN LET FIELDTEXT = PRAIMMCLE OF GPPRO_ACTIVITE
+     ELSE LET FIELDTEXT = IMMCLE OF CPCAP_IMPUTATION
+  END
+
+END
+
+
+PROCEDURE EDIT IMMCLE
+BEGIN
+   IF IMMTYP OF IMIMMOBILISATION <> "E"
+   THEN ERROR 1503
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT PRACLE
+BEGIN
+  ;
+  ; Popup sur les activités.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PRJCLE    = PRJCLE OF CPCAP_IMPUTATION
+    LET T_PRASTUPAT = "A"
+    LET T_PRACLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gp108 MODE F PASSING T_CIECLEMNU, &
+                                    T_PRJCLE   , &
+                                    T_PRACLE   , &
+                                    T_PRASTUPAT &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNCATE(T_PRACLE)
+  END
+  ;
+  ; Par défaut on utilise le sous-projet défini dans GPPARAMETRE. S'il n'y en a pas
+  ; on force la validation.
+  ;
+  IF     0 = SIZE( FIELDTEXT ) &
+     AND PRACLE    OF CPCAP_IMPUTATION = ""
+  THEN BEGIN
+     IF ACTCLE    OF GPPARAMETRE <> ""
+     THEN LET FIELDTEXT = ACTCLE OF GPPARAMETRE
+     ELSE LET FIELDTEXT = PRACLE OF CPCAP_IMPUTATION
+  END
+
+  ;
+  ; Force la validation de l'activité, car l'usager peut modifier le numéro de
+  ; compagnie ou le numéro de projet sur le ligne.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(PRACLE OF CPCAP_IMPUTATION))
+  THEN LET FIELDTEXT = PRACLE OF CPCAP_IMPUTATION
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation de l'activité, l'activité est optionel dans l'imputation.
+;
+;
+PROCEDURE EDIT PRACLE
+BEGIN
+  GET GPPRO_ACTIVITE OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 471 ; Cette activité n'existe pas.
+
+  IF PRASTU OF GPPRO_ACTIVITE <> "A"
+  THEN ERROR 520 ; Cette activité est inactive.
+END
+
+PROCEDURE INPUT CCIFLGFAC
+BEGIN
+  USE usflginp NOLIST
+END
+
+PROCEDURE PROCESS CCIFLGFAC
+BEGIN
+  IF CCIFLGFAC = "0"
+  THEN BEGIN
+    LET CLICLE OF CPCAP_IMPUTATION = ""
+    DISPLAY CLICLE
+  END
+END
+
+PROCEDURE OUTPUT CCIFLGFAC
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les client.
+;
+;
+PROCEDURE INPUT CLICLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CLICLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cr102 MODE F PASSING T_CLICIECLE, T_CIECLEMNU, T_CLICLE &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNC(T_CLICLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du client.
+;
+;
+PROCEDURE EDIT CLICLE
+BEGIN
+  IF CLISTU OF VCLC_CLI = "I"
+  THEN ERROR 632 ; Le client est inactif.
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE APPEND
+BEGIN
+  ;
+  USE ussecent NOLIST
+  ;
+  ; Si notion de projet.
+  ;
+  IF HLDNTNPRO OF MCHOLDING = "1"
+  THEN BEGIN
+    ACCEPT PRJCLE    OF CPCAP_IMPUTATION
+      INFORMATION = PRJDSC1 OF GPPROJETS
+      ACCEPT PRACLE    OF CPCAP_IMPUTATION
+      INFORMATION = PRADSC1 OF GPPRO_ACTIVITE
+      ACCEPT IMMCLE    OF CPCAP_IMPUTATION
+      INFORMATION = IMMCLE  OF IMIMMOBILISATION
+  END
+  ELSE BEGIN
+    LET PRJCLE OF CPCAP_IMPUTATION = " "
+    LET PRACLE OF CPCAP_IMPUTATION = " "
+    LET IMMCLE OF CPCAP_IMPUTATION = " "
+  END
+
+  ACCEPT UNACLE    OF CPCAP_IMPUTATION
+  EDIT   UNACLE    OF CPCAP_IMPUTATION
+  INFORMATION = UNANOM OF MCUNITE_ADM
+
+  ACCEPT CPTCLE    OF CPCAP_IMPUTATION
+  INFORMATION = CPTDSCABR OF VCPT_DSC
+
+
+  ACCEPT CCIMNT       OF CPCAP_IMPUTATION
+  ACCEPT CCITAXCODTPS OF CPCAP_IMPUTATION
+  ACCEPT CCITAXCODTVQ OF CPCAP_IMPUTATION
+
+  ACCEPT CCIFLGFAC    OF CPCAP_IMPUTATION
+  IF CCIFLGFAC    OF CPCAP_IMPUTATION = "1"
+  THEN BEGIN
+    ACCEPT CLICLE OF CPCAP_IMPUTATION
+    INFORMATION = CLINOM OF VCLC_CLI
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; La procédure entry est généré car la procédure append est généré.
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  FOR CPCAP_IMPUTATION
+  BEGIN
+    PERFORM APPEND
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Cette procédure est identique à la procédure APPEND.
+;
+;
+PROCEDURE DESIGNER 05
+BEGIN
+  ;
+  ; Si notion de projet.
+  ;
+  IF HLDNTNPRO OF MCHOLDING = "1"
+  THEN BEGIN
+    ACCEPT PRJCLE OF CPCAP_IMPUTATION
+      INFORMATION = PRJDSC1 OF GPPROJETS
+      ACCEPT PRACLE OF CPCAP_IMPUTATION
+      INFORMATION = PRADSC1 OF GPPRO_ACTIVITE
+      ACCEPT IMMCLE    OF CPCAP_IMPUTATION
+      INFORMATION = IMMDSC  OF IMIMMOBILISATION
+  END
+  ELSE BEGIN
+    LET PRJCLE OF CPCAP_IMPUTATION = " "
+    LET PRACLE OF CPCAP_IMPUTATION = " "
+    LET IMMCLE OF CPCAP_IMPUTATION = " "
+  END
+
+  ACCEPT UNACLE    OF CPCAP_IMPUTATION
+  EDIT UNACLE      OF CPCAP_IMPUTATION
+  INFORMATION = UNANOM OF MCUNITE_ADM
+
+  ACCEPT CPTCLE    OF CPCAP_IMPUTATION
+  INFORMATION = CPTDSCABR OF VCPT_DSC
+
+
+  ACCEPT CCIMNT       OF CPCAP_IMPUTATION
+  ACCEPT CCITAXCODTPS OF CPCAP_IMPUTATION
+  ACCEPT CCITAXCODTVQ OF CPCAP_IMPUTATION
+
+  IF CCITAXCODTPS OF CPCAP_IMPUTATION <> ""
+  THEN ACCEPT CCIMNTTPS    OF CPCAP_IMPUTATION
+
+  IF CCITAXCODTVQ OF CPCAP_IMPUTATION <> ""
+  THEN ACCEPT CCIMNTTVQ    OF CPCAP_IMPUTATION
+
+  ACCEPT CCIFLGFAC    OF CPCAP_IMPUTATION
+  IF CCIFLGFAC    OF CPCAP_IMPUTATION = "1"
+  THEN BEGIN
+    ACCEPT CLICLE OF CPCAP_IMPUTATION
+    INFORMATION = CLINOM OF VCLC_CLI
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE POSTFIND
+BEGIN
+  FOR CPCAP_IMPUTATION
+  BEGIN
+    ;
+    ; Il faut conserver l'ancienne valeur qui a servi à incrémenter le cumul
+    ; des montants brut(incluant taxe). Il faut prendre les informations du
+    ; code de taxe précédemment saisie, c'est pour cette raison que le traitement
+    ; est fait dans cette procédure.
+    ;
+    LET T_TAXMODTPSOLD = TAXMOD OF A_TAX_TPS
+    LET T_TAXMODTVQOLD = TAXMOD OF A_TAX_TVP
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR CPCAP_IMPUTATION
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF CPCAP_IMPUTATION &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF CPCAP_IMPUTATION &
+       AND NOT NEWRECORD     OF CPCAP_IMPUTATION &
+       AND NOT DELETEDRECORD OF CPCAP_IMPUTATION &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+    ;
+    ; L'imputation est non modifiable aprés journalisation.
+    ;
+    IF (    NEWRECORD     OF CPCAP_IMPUTATION &
+         OR ALTEREDRECORD OF CPCAP_IMPUTATION &
+         OR DELETEDRECORD OF CPCAP_IMPUTATION &
+       ) &
+       AND CAPDATJOU OF CPCPT_A_PAYER <> 0
+    THEN ERROR 458 ; Impossible de mettre à jour une transaction journalisée.
+    ;
+    ; Mise à jour du timbre de modification si l'usager change l'imputation
+    ;
+    IF    NOT NEWRECORD OF CPCPT_A_PAYER &
+      AND ALTEREDRECORD OF CPCAP_IMPUTATION
+    THEN BEGIN
+      LET CAPDATMOD OF CPCPT_A_PAYER = SYSDATE
+      LET CAPHREMOD OF CPCPT_A_PAYER = SYSTIME / 10000
+      LET CAPUSRMOD OF CPCPT_A_PAYER = LOGONID
+    END
+  END
+
+  ;
+  ; Calcul du montant net
+  ;
+  LET CAPMNTNET OF CPCPT_A_PAYER  = CAPMNT OF CPCPT_A_PAYER    &
+                                  - CAPMNTCTI OF CPCPT_A_PAYER &
+                                  - CAPMNTRTI OF CPCPT_A_PAYER
+  ;
+  ; L'imputation est non modifiable Si le lot est autorisé.
+  ;
+  IF     D_LCPATRJOU = "1" &
+     AND CAPDATJOU OF CPCPT_A_PAYER = 0
+  THEN ERROR 442 ;Mise à jour non autorisée. Ce lot est journalisé.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Met à jour les cumulatifs dans la facture.
+;
+;
+PROCEDURE DELETE
+BEGIN
+  IF NOT DELETEDRECORD OF CPCAP_IMPUTATION
+  THEN BEGIN
+    ;
+    ; Enlève les anciennes valeurs des totaux
+    ;
+    LET CAPMNTTPS OF CPCPT_A_PAYER = CAPMNTTPS OF CPCPT_A_PAYER - &
+                                     CCIMNTTPS OF CPCAP_IMPUTATION
+    LET CAPMNTCTI OF CPCPT_A_PAYER = CAPMNTCTI OF CPCPT_A_PAYER - &
+                                     CCIMNTCTI OF CPCAP_IMPUTATION
+    LET CAPMNTTVQ OF CPCPT_A_PAYER = CAPMNTTVQ OF CPCPT_A_PAYER - &
+                                     CCIMNTTVQ OF CPCAP_IMPUTATION
+    LET CAPMNTRTI OF CPCPT_A_PAYER = CAPMNTRTI OF CPCPT_A_PAYER - &
+                                     CCIMNTRTI OF CPCAP_IMPUTATION
+    ;
+    LET CAPCUMMNT OF CPCPT_A_PAYER = CAPCUMMNT OF CPCPT_A_PAYER - &
+                                   CCIMNT OF CPCAP_IMPUTATION
+    IF TAXMOD OF A_TAX_TPS = "S"
+    THEN LET CAPCUMMNT OF CPCPT_A_PAYER= CAPCUMMNT OF CPCPT_A_PAYER - &
+                                       CCIMNTTPS OF CPCAP_IMPUTATION
+    IF TAXMOD OF A_TAX_TVP = "S"
+    THEN LET CAPCUMMNT OF CPCPT_A_PAYER= CAPCUMMNT OF CPCPT_A_PAYER - &
+                                       CCIMNTTVQ OF CPCAP_IMPUTATION
+
+  END
+  DELETE CPCAP_IMPUTATION
+  DISPLAY CAPMNTTPS OF CPCPT_A_PAYER
+  DISPLAY CAPMNTTVQ OF CPCPT_A_PAYER
+  DISPLAY CAPCUMMNT OF CPCPT_A_PAYER
+  DISPLAY D_ECART
+END
+
+BUILD
+@IF FORMAT
+        CP005A    ;/T/ Rapports de dépenses - Imputation    93-10-22
+
+        xxxx                                         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                              x
+        ************************************************************ Imputation ************************************************************
+        * Rapport dép...: xxxxxxxxxxxx                   Montant total.: xxxxxxxxxxxxxx                                                    *
+        * Montant de TPS: xxxxxxxxxxx                    Cum. mnt brut.: xxxxxxxxxxxxxx                                                    *
+        * Montant de TVQ: xxxxxxxxxxx                    Ecart.........: xxxxxxxxxxxxxx                                                    *
+        ********************************************************************************                                                   *
+        * Projet  SSpro Équipement Unité    Compte        Montant  TF TP         TPS         TVQ                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        * xxxxxxxx xxx  xxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxxxx xx xx xxxxxxxxxxx xxxxxxxxxxx                                           *
+        ************************************************************************************************************************************
+@ENDIF

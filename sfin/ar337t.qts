@@ -1,0 +1,168 @@
+;/T/ Impression du sommaire de commande 
+;
+;/P/ Programmeur...: Guy Chabot
+;    Date Création.: 26 octobre 1994
+;
+;    Description...: Ce programme permet de faire l'impression des bons de 
+;                    commande et de ses ajustements. 
+;
+;    Paramètres....: Compagnie          (Compagnie du menu)
+;                    Numéro de commande (Borne de début)
+;                    Numéro de commande (Borne de fin)
+;
+;/M/ Modification..: Pierre Routhier
+;    Date..........: 11 décembre 1996
+;    Description...: Sélection dans le rapport ar337z.qzs des items qui ne
+;                    sont pas annulés. J'ai arrangé le rapport en conséquence
+;                    pour que le total du bon de commande ne contienne pas
+;                    le montant des items annulés.
+;
+;/M/ Francois Richard, 99-07-09
+;
+;    Ajustement pour le changement de siècle
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST   ; set process nolimit
+
+RUN ar337t
+
+REQUEST EXTRAIRE_COMMANDES
+
+ACCESS ARCOMMANDE   &
+  LINK  FOUCIECLE OF ARCOMMANDE, &
+        FOUCLE    OF ARCOMMANDE, &
+        CIECLE    OF ARCOMMANDE  &
+    TO  FOUCIECLE, &
+        FOUCLE,    &
+        FOCCIECLE OF VFOC_FOU     &
+ 
+  LINK  CIECLE OF ARCOMMANDE, &
+        CMDCLE OF ARCOMMANDE, &
+        CMDAJT OF ARCOMMANDE  &
+    TO  CIECLE, &
+        CMDCLE, &
+        CMDAJT  OF ARCMD_DETAIL   &
+  
+  LINK  ADECLE OF ARCOMMANDE    &
+    TO  ADECLE OF ARADRESSE_EXP   OPTIONAL &
+
+  LINK  CIECLE OF ARCMD_DETAIL, &
+        CMDCLE OF ARCMD_DETAIL, &
+        CMDAJT OF ARCMD_DETAIL, &
+        CDECLE OF ARCMD_DETAIL, &
+        "1"                     &
+    TO  CIECLE, &
+        CMDCLE, &
+        CMDAJT, &
+        CDECLE, &
+        CDNIMP OF ARCDE_NOTE    OPTIONAL
+
+CHOOSE CIECLE PARM,       & ; Compagnie du menu
+       CMDCLE PARM RANGE, & ; Numéro de commande
+       CMDSTU "A","S","C"
+
+SELECT ARCMD_DETAIL IF CDESTU OF ARCMD_DETAIL <> "X"
+
+TEMPORARY T_NBRLIG    INTEGER   SIZE 4
+TEMPORARY T_FLGDRN    CHARACTER SIZE 1
+TEMPORARY T_CDEMNTNET FLOAT     SIZE 8
+
+; Ajustement pour le changement de siècle
+DEFINE D_CMDCLE_TRI CHARACTER SIZE 10 = "1" + CMDCLE OF ARCOMMANDE &
+    IF CMDCLE OF ARCOMMANDE[1:1] < "8" &
+    ELSE "0" + CMDCLE OF ARCOMMANDE
+
+SORT ON CIECLE OF ARCOMMANDE   &
+     ON D_CMDCLE_TRI           &
+     ON CMDAJT OF ARCOMMANDE D &
+     ON CDECLE OF ARCMD_DETAIL &
+     ON CDNSEQ OF ARCDE_NOTE
+
+ITEM T_NBRLIG = T_NBRLIG + 1 AT CDECLE RESET AT D_CMDCLE_TRI TO 1
+ITEM T_CDEMNTNET = CDEMNTNET OF ARCMD_DETAIL
+
+SUBFILE WAR337A KEEP &
+  INCLUDE CIECLE       OF ARCOMMANDE , &
+          ENTCLE       OF ARCOMMANDE , &
+          CMDCLE       OF ARCOMMANDE , &
+          CMDAJT       OF ARCOMMANDE , &
+          REQCLE       OF ARCMD_DETAIL,&
+          FOUCIECLE    OF ARCOMMANDE , &
+          FOUCLE       OF ARCOMMANDE , &
+          REFCLETYP    OF ARCOMMANDE , &
+          RADCLE       OF ARCOMMANDE , &
+          CMDDAT       OF ARCOMMANDE , &
+          CDEDATLIVPRE OF ARCMD_DETAIL,&
+          CDELIE       OF ARCMD_DETAIL,&
+          CDEFAB       OF ARCMD_DETAIL,&
+          CDETRP       OF ARCMD_DETAIL,&
+          CMDCOM       OF ARCOMMANDE , &
+          CDEMNTTOT    OF ARCMD_DETAIL , &
+          CDEMNTNET    OF ARCMD_DETAIL , &
+          CDEMNTTPS    OF ARCMD_DETAIL , &
+          CDEMNTTVQ    OF ARCMD_DETAIL , & 
+          CMDNBRIMP    OF ARCOMMANDE , &
+          CMDNBRDUP    OF ARCOMMANDE , &
+          FOCTERESCACH OF VFOC_FOU   , &
+          DEVCLE       OF VFOC_FOU   , &
+          FOULNG       OF VFOC_FOU   , &
+          ADENOM       OF ARADRESSE_EXP, &
+          ADEADR1      OF ARADRESSE_EXP, &
+          ADEADR2      OF ARADRESSE_EXP, &
+          ADEADR3      OF ARADRESSE_EXP, &
+          ADECP        OF ARADRESSE_EXP, &
+          CDECLE       OF ARCMD_DETAIL , &
+          PRDCLE       OF ARCMD_DETAIL , &
+          CDEDSCPRD    OF ARCMD_DETAIL , &
+          CDETAXCODTVQ OF ARCMD_DETAIL , &
+          CDETAXCODTPS OF ARCMD_DETAIL , &
+          CDEQTECOM    OF ARCMD_DETAIL , &
+          CDEPRIUNI    OF ARCMD_DETAIL , &
+          T_CDEMNTNET , &
+          CDNSEQ       OF ARCDE_NOTE   , &
+          CDNDSC       OF ARCDE_NOTE   , &
+          T_FLGDRN                     , &
+          T_NBRLIG  
+
+;-------------------------------------------------------------------------------
+;
+;
+; Cette étape met à jour le flag qui indique le dernier record de la commande.
+;
+;
+REQUEST MAJ_DERNIER_LIG
+
+ACCESS *WAR337A
+
+TEMPORARY T_MNTNET FLOAT SIZE 8
+TEMPORARY T_MNTTPS FLOAT SIZE 8
+TEMPORARY T_MNTTVQ FLOAT SIZE 8
+TEMPORARY T_MNTTOT FLOAT SIZE 8
+
+; Ajustement pour le changement de siècle
+DEFINE D_CMDCLE_TRI CHARACTER SIZE 10 = "1" + CMDCLE OF WAR337A &
+   IF CMDCLE OF WAR337A[1:1] < "8" &
+   ELSE "0" + CMDCLE OF WAR337A
+
+SORT ON CIECLE OF WAR337A   &      ; Compagnie 
+     ON D_CMDCLE_TRI        &      ; Commande
+     ON CMDAJT OF WAR337A   &
+     ON CDECLE OF WAR337A   &
+     ON CDNSEQ OF WAR337A
+
+ITEM T_MNTNET SUBTOTAL CDEMNTNET OF WAR337A AT CDECLE RESET AT D_CMDCLE_TRI
+ITEM T_MNTTPS SUBTOTAL CDEMNTTPS OF WAR337A AT CDECLE RESET AT D_CMDCLE_TRI
+ITEM T_MNTTVQ SUBTOTAL CDEMNTTVQ OF WAR337A AT CDECLE RESET AT D_CMDCLE_TRI
+ITEM T_MNTTOT SUBTOTAL CDEMNTTOT OF WAR337A AT CDECLE RESET AT D_CMDCLE_TRI
+
+OUTPUT WAR337A UPDATE AT D_CMDCLE_TRI
+
+  ITEM T_FLGDRN  OF WAR337A FINAL "1"
+  ITEM CDEMNTNET OF WAR337A FINAL T_MNTNET
+  ITEM CDEMNTTPS OF WAR337A FINAL T_MNTTPS
+  ITEM CDEMNTTVQ OF WAR337A FINAL T_MNTTVQ
+  ITEM CDEMNTTOT OF WAR337A FINAL T_MNTTOT
+
+
+BUILD

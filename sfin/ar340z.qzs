@@ -1,0 +1,175 @@
+;/T/ Liste des produits inventoriés/Fournisseur-Catégorie-Section
+;
+;/P/ Réalisé par.........: Marc Poulin
+;    Date modification...: 20 mars 2000
+;    Description.........: Impression des produits inventoriés par fournisseur, catégorie, section.
+;
+;    Paramètres..........: Compagnie   (fourni par le système);
+;                          Produit     (Borne de début);
+;                          Produit     (Borne de fin);
+;                          Catégorie   (Une, plusieurs ou tous);
+;                          Section     (Une, plusieurs ou tous);
+;                          Fournisseur (Un, plusieurs ou tous);
+;                          Statut      (A=actif,I=inactif,<retour>=tous);
+;                          Tri         (1=Numérique, 2=Alphabétique).
+;
+;    Référence...........: Demande de changement 000030.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST
+SET NOBLANKS
+
+ACCESS *WAR340A  LINK  CIECLE    OF WAR340A                         , &
+                       FOUCLE    OF WAR340A                         , &
+                       PRDCLE    OF WAR340A                           &
+                   TO  CIECLE                                       , &
+                       FOUCLE                                       , &
+                       PRDCLE    OF *WAR340B                          & ; Descriptions du produits
+
+                  AND  CIECLE    OF WAR340A                         , &
+                       FOUCLE    OF WAR340A                         , &
+                       PRDCLE    OF WAR340A                           &
+                   TO  CIECLE                                       , &
+                       FOUCLE                                       , &
+                       PRDCLE    OF *WAR340D                            ; Quantités utilisées au cours des 12 derniers mois
+
+
+CHOOSE CIECLE PARM      , & ; Compagnie du menu
+       PRDCAT PARM      , & ; Catégorie de produit
+       PRDCLE PARM RANGE    ; Code de produit
+
+;-------------------------------------------------------------------------------
+;
+; Variables obligatoires pour les en-têtes standards.
+;
+DEFINE DZ_NOMRAP1  CHARACTER SIZE 60 = "Liste des produits inventoriés/Fournisseur-Catégorie-Section"
+DEFINE DZ_NOMRAP2  CHARACTER SIZE 60 = " "
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP   CHARACTER SIZE 07 = "AR340Z"
+;
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM   CHARACTER SIZE 40 = PARM
+
+; --------------------------------------------------------------------------
+;
+; Statuts de produit demandés
+;
+DEFINE D_CBIDSC    CHARACTER SIZE 15 = "Actif"                 &
+                                    IF PRDSTU OF WAR340A = "A" &
+                                  ELSE "Inactif"               &
+                                    IF PRDSTU OF WAR340A = "I" 
+                                    
+; --------------------------------------------------------------------------
+
+DEFINE D_TRI_PARM     CHARACTER SIZE 01 = PARM
+DEFINE D_PRDCLE_DESC1 CHARACTER SIZE 40 = PRDCLE OF WAR340A &
+                                       IF D_TRI_PARM = "1"    &
+                                     ELSE PRDDSC1 OF WAR340A
+
+; --------------------------------------------------------------------------
+
+DEFINE D_SECTION      CHARACTER SIZE 03 = LJ(ASC(NCONVERT(PRDCLE OF WAR340A)))[1:3]
+
+; --------------------------------------------------------------------------
+
+DEFINE D_EFF_LIGNE    VARCHAR  SIZE 100 = " "[1:98] IF NOT RECORD WAR340D EXIST ELSE ""
+
+; --------------------------------------------------------------------------
+
+SORT ON CIECLE OF WAR340A   & ; Code de compagnie
+     ON FOUCLE OF WAR340A   & ; Catégorie de produit
+     ON PRDCAT OF WAR340A   & ; Catégorie de produit
+     ON D_SECTION           & ; Section du produit (représenté par les trois premiers chiffres du code produit)
+     ON D_PRDCLE_DESC1      & ; Code de produit ou Description 1 du produit
+     ON PRDCLE OF WAR340A     ; Code de produit
+
+; --------------------------------------------------------------------------
+
+USE ustit180 NOLIST
+ SKIP 2                               &
+  TAB 001 "Fournisseur:"              &
+  TAB 014 FOUCLE    OF WAR340A        &
+  TAB 021 FOUNOM    OF WAR340A        &
+ SKIP                                 &
+  TAB 001 "Catégorie..:"              &
+  TAB 014 PRDCAT    OF WAR340A        &
+  TAB 021 CBIDSC    OF WAR340A        &
+ SKIP                                 &
+  TAB 001 "Section....:"              &
+  TAB 014 D_SECTION                   &
+ SKIP 2                               &
+  TAB 001 "Code de                                                                                      Quantité utilisée   Point"                                                &
+ SKIP                                 &
+  TAB 001 "produit       Description                               Statut   Entrepôt  Quantité en main  (12 derniers mois)  de commande      Quantité maximum  Dernier coûtant"   &
+ SKIP                                 &
+  TAB 001 "------------  ----------------------------------------  -------  --------  ----------------  ------------------  ---------------  ----------------  -----------------" &
+ SKIP 2
+
+REPORT                                &
+  TAB 001 PRDCLE       OF WAR340B     &
+          PRINT AT PRDCLE             &
+  TAB 015 PRDDSC       OF WAR340B     &
+  TAB 057 D_CBIDSC                    &
+          PRINT AT PRDCLE             &
+  TAB 068 ENTCLE       OF WAR340D     &
+  TAB 076 PREQTEPHY    OF WAR340D     &
+          PICTURE "^^^,^^^,^^^.^^^ "  &
+          TRAILING SIGN "-"           &
+          SIGNIFICANCE 6              &
+  TAB 096 T_PRHQTETRS  OF WAR340D     &
+          PICTURE "^^^,^^^,^^^.^^^ "  &
+          TRAILING SIGN "-"           &
+          SIGNIFICANCE 6              &
+  TAB 114 PREPOICOM    OF WAR340D     &
+          PICTURE "^^^,^^^,^^^.^^^ "  &
+          TRAILING SIGN "-"           &
+          SIGNIFICANCE 6              &
+          NOBWZ                       &
+  TAB 131 PREQTEMAX    OF WAR340D     &
+          PICTURE "^^^,^^^,^^^.^^^ "  &
+          TRAILING SIGN "-"           &
+          SIGNIFICANCE 6              &
+  TAB 149 PREDERCOU    OF WAR340D     &
+          PICTURE "^^^,^^^,^^^.^^^^ " &
+          TRAILING SIGN "-"           &
+          SIGNIFICANCE 7              &
+          NOBWZ                       &
+  TAB 068 D_EFF_LIGNE
+
+FOOTING AT PRDCLE    SKIP 02
+
+FOOTING AT D_SECTION SKIP PAGE
+
+
+BUILD ar340z
+
+@IF FORMAT
+                                                                                                   1         1         1         1         1         1         1         1         1
+         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8
+123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+AR340                                                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                       Page: 9999
+99/99/99 HH:MM xxxxxxxxxxxx                                    Liste des produits inventoriés/Fournisseur-Catégorie-Section
+                                                               xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+Fournisseur: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+Catégorie..: xxxx   xxxxxxxxxxxxxxxxxxxx
+Section....: 999
+
+Code de                                                                                      Quantité utilisée   Point
+produit       Description                               Statut   Entrepôt  Quantité en main  (12 derniers mois)  de commande      Quantité maximum  Dernier coûtant  
+------------  ----------------------------------------  -------  --------  ----------------  ------------------  ---------------  ----------------  -----------------
+xxxxxxxxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxx    xxxx    999,999,999.999-    999,999,999.999-  999,999,999.999- 999,999,999.999-  999,999,999.9999-
+              xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             xxxx    999,999,999.999-    999,999,999.999-  999,999,999.999- 999,999,999.999-  999,999,999.9999-
+              xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+xxxxxxxxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxx    xxxx    999,999,999.999-    999,999,999.999-  999,999,999.999- 999,999,999.999-  999,999,999.9999-
+              xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+              xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  
+xxxxxxxxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxx    xxxx    999,999,999.999-    999,999,999.999-  999,999,999.999- 999,999,999.999-  999,999,999.9999-
+              xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             xxxx    999,999,999.999-    999,999,999.999-  999,999,999.999- 999,999,999.999-  999,999,999.9999-
+              xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             xxxx    999,999,999.999-    999,999,999.999-  999,999,999.999- 999,999,999.999-  999,999,999.9999-
+@ENDIF
+

@@ -1,0 +1,495 @@
+;/T/ Gestion des projets
+;
+;/P/ Programmeur..: Steeve Duguay
+;    Date Création: 16 décembre 1994
+;
+;    Description..: Détail du format de présentation
+;
+;/M/ François Déry, 4 mai 1999
+;       Enlever les tables déclarer en double. (GPFRD_SOMME, GPFRD_SOMME_3)
+;
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN gp156a ACTIONBAR &
+              MODE LABEL "" AT 2,80 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        GPFORMATS
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie du menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; Compagnie du menu
+
+USE ustrasse NOLIST ; Transaction QUERY pour les sous-écrans
+
+USE ussectmp NOLIST     ; Variable pour la securite
+    "GP156A"            ; Nom de l'écran
+
+USE gp156a.hlp NOLIST   ; Use servant à la documentation de l'écran
+
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-ecran
+
+
+
+;------------------------------------
+; Fichier d'unité de travail
+;------------------------------------
+FILE GPFORMATS              MASTER
+
+
+;----------------------------------------------
+; Fichier des détails de format de présentation
+;----------------------------------------------
+FILE GPFOR_DETAILS          PRIMARY &
+                            OCCURS 15
+
+  ACCESS  VIA     FRMCLE, &
+                  FRDCLE  &
+          USING   FRMCLE OF GPFORMATS,    &
+                  FRDCLE OF GPFOR_DETAILS &
+          REQUEST FRDCLE &
+          ORDERBY FRDCLE
+
+  ACCESS  VIA     FRMCLE &
+          USING   FRMCLE OF GPFORMATS &
+          ORDERBY FRDCLE
+
+
+
+FILE GPFRD_DOMAINE          DESIGNER
+
+FILE GPFRD_SOMME            DESIGNER
+
+FILE GPFRD_SOMME            DESIGNER &
+                            ALIAS GPFRD_SOMME_3
+
+FILE GPFRD_DOMAINE_OP       DESIGNER
+
+;--------------------------------------------------------------------------
+; Validation du type de format de présentation et lecture de sa description
+;--------------------------------------------------------------------------
+DEFINE    D_FRDTYP CHARACTER SIZE 16 = "FRDTYP"
+TEMPORARY T_FRDTYP CHARACTER SIZE 4
+
+FILE VCBI_DSC               REFERENCE &
+                            ALIAS MCCODE_BUIL_FRDTYP
+
+  ACCESS  VIA   XELNOM, &
+                CBICLE  &
+          USING D_FRDTYP, &
+                FRDTYP OF GPFOR_DETAILS
+
+
+TEMPORARY T_UNMCLE     CHARACTER SIZE 4
+
+FILE GPUNITE_MESURE         REFERENCE
+
+  ACCESS  VIA   UNMCLE &
+          USING UNMCLE OF GPFOR_DETAILS
+
+;-------------------------------------------------------------------------------
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+USE usdrwecr NOLIST     ; Draw pour les écrans pleine page
+USE ustitstd NOLIST     ; En-tête pour les écrans pleine page
+USE ushilite NOLIST     ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Détail du format de présentation " &
+@ELSE
+      " %%% " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP 1
+
+ALIGN(3,3,19)(,,25)
+
+FIELD FRMCLE OF GPFORMATS                             &
+      HIDDEN                                          &
+      DISPLAY
+
+FIELD FRMDSC OF GPFORMATS                             &
+      DISPLAY
+
+SKIP
+
+
+TITLE &
+@IF FRANCAIS
+"Unité de" &
+@ELSE
+      " %%% " &
+@ENDIF
+      AT ,18
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+"Ligne   Type    mesure     Description" &
+@ELSE
+      " %%% " &
+@ENDIF
+      AT ,3
+
+SKIP
+
+ALIGN (3,2,3) (,,12) (,,20) (,,30)
+
+CLUSTER OCCUR WITH GPFOR_DETAILS   ID BASE 10
+
+FIELD FRDCLE OF GPFOR_DETAILS                         &
+      LABEL " " HIDDEN &
+      LOOKUP NOTON    GPFOR_DETAILS &
+             VIA   FRMCLE,          &
+                   FRDCLE           &
+             USING FRMCLE OF GPFOR_DETAILS, &
+                   FRDCLE OF GPFOR_DETAILS MESSAGE 879 &
+      REQUIRED NOCHANGE
+
+FIELD FRDTYP OF GPFOR_DETAILS                         &
+      REQUIRED NOCHANGE                               &
+      LOOKUP ON MCCODE_BUIL_FRDTYP                    &
+        MESSAGE 829; Ce type de ligne est inexistant.
+
+FIELD UNMCLE OF GPFOR_DETAILS              &
+      NOCHANGE NOCORRECT                   &
+      IF FRMTYP OF GPFORMATS = "O"     AND &
+        (FRDTYP OF GPFOR_DETAILS = "C"  OR &
+         FRDTYP OF GPFOR_DETAILS = "F")
+
+FIELD FRDDSC OF GPFOR_DETAILS
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+PROCEDURE INPUT FRDDSC
+BEGIN
+   IF 0=SIZE(FIELDTEXT)
+   THEN LET FIELDTEXT = OLDVALUE(FRDDSC)
+END
+
+PROCEDURE EDIT FRDDSC
+BEGIN
+   IF FRDTYP OF GPFOR_DETAILS = "S"
+   THEN LET FIELDTEXT = FIELDTEXT[1:1]
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour les codes bilingues.
+;
+;
+PROCEDURE INPUT FRDTYP
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_FRDTYP = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_FRDTYP, T_FRDTYP
+    LET FIELDTEXT = TRUNCATE(T_FRDTYP)
+  END
+END
+
+
+PROCEDURE PROCESS FRDDSC
+BEGIN
+   IF FRDTYP OF GPFOR_DETAILS = "C" AND &
+      FRMTYP OF GPFORMATS     = "C"
+   THEN RUN SCREEN gp156b MODE SAME PASSING T_CIECLEMNU, &
+                                            T_CIENOM   , &
+                                            GPFORMATS  , &
+                                            GPFOR_DETAILS
+
+   IF FRDTYP OF GPFOR_DETAILS = "F" AND &
+      FRMTYP OF GPFORMATS     = "C"
+   THEN RUN SCREEN gp156c MODE SAME PASSING T_CIECLEMNU, &
+                                            T_CIENOM   , &
+                                            GPFORMATS  , &
+                                            GPFOR_DETAILS
+
+   IF FRDTYP OF GPFOR_DETAILS = "C" AND &
+      FRMTYP OF GPFORMATS     = "O"
+   THEN RUN SCREEN gp156d MODE SAME PASSING T_CIECLEMNU, &
+                                            T_CIENOM   , &
+                                            GPFORMATS  , &
+                                            GPFOR_DETAILS
+
+   IF FRDTYP OF GPFOR_DETAILS = "F" AND &
+      FRMTYP OF GPFORMATS     = "O"
+   THEN RUN SCREEN gp156e MODE SAME PASSING T_CIECLEMNU, &
+                                            T_CIENOM   , &
+                                            GPFORMATS  , &
+                                            GPFOR_DETAILS
+END
+
+
+PROCEDURE INPUT UNMCLE
+BEGIN
+   IF 0=SIZE(FIELDTEXT)
+   THEN LET FIELDTEXT = OLDVALUE(UNMCLE OF GPFOR_DETAILS)
+
+   IF FRMTYP OF GPFORMATS = "O"     AND &
+     (FRDTYP OF GPFOR_DETAILS = "C"  OR &
+      FRDTYP OF GPFOR_DETAILS = "F")
+   THEN BEGIN
+        IF FIELDTEXT = " "
+        THEN ERROR 881 ;Unité de mesure obligatoire pour un format d'opération
+   END
+   ELSE BEGIN
+        IF FIELDTEXT <> " "
+        THEN BEGIN
+             LET FIELDTEXT = " "
+             WARNING 882 ;Cet élément doit être absent.
+        END
+   END
+
+   IF 0 <> IND(FIELDTEXT,"*")
+   THEN BEGIN
+     LET T_UNMCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+     RUN SCREEN gp101 MODE F PASSING T_UNMCLE
+     LET FIELDTEXT = TRUNC(T_UNMCLE)
+   END
+
+   IF FIELDTEXT <> " "
+   THEN BEGIN
+        GET GPUNITE_MESURE &
+            VIA  UNMCLE    &
+                 USING FIELDTEXT OPTIONAL
+        IF NOT ACCESSOK
+        THEN ERROR 821
+   END
+END
+
+
+PROCEDURE INTERNAL DETRUIT_LIGNE
+BEGIN
+  IF FRMTYP OF GPFORMATS = "C"
+  THEN BEGIN
+       WHILE RETRIEVING GPFRD_SOMME &
+             VIA     FRMCLE,   &
+                     FRSREFLIG &
+             USING   FRMCLE OF GPFORMATS,     &
+                     FRDCLE OF GPFOR_DETAILS
+       BEGIN
+          GET GPFRD_SOMME_3 &
+              VIA   FRMCLE,     &
+                    FRSREFLIG   &
+              USING FRMCLE OF GPFRD_SOMME, &
+                    FRDCLE OF GPFRD_SOMME   OPTIONAL
+          IF ACCESSOK
+          THEN ERROR 872
+       END
+
+       WHILE RETRIEVING GPFRD_DOMAINE &
+             VIA     FRMCLE, &
+                     FRDCLE  &
+             USING   FRMCLE OF GPFORMATS,    &
+                     FRDCLE OF GPFOR_DETAILS
+       BEGIN
+         DELETE GPFRD_DOMAINE
+         PUT GPFRD_DOMAINE
+       END
+
+       WHILE RETRIEVING GPFRD_DOMAINE &
+             VIA     FRMCLE, &
+                     FDOCLE, &
+                     FRDTYP  &
+             USING   FRMCLE OF GPFORMATS,     &
+                     FRDCLE OF GPFOR_DETAILS, &
+                     "F"
+       BEGIN
+          DELETE GPFRD_DOMAINE
+          PUT GPFRD_DOMAINE
+       END
+
+       WHILE RETRIEVING GPFRD_SOMME &
+             VIA     FRMCLE,   &
+                     FRSREFLIG &
+             USING   FRMCLE OF GPFORMATS,     &
+                     FRDCLE OF GPFOR_DETAILS
+       BEGIN
+          DELETE GPFRD_SOMME
+          PUT GPFRD_SOMME
+       END
+
+       WHILE RETRIEVING GPFRD_SOMME &
+             VIA     FRMCLE,   &
+                     FRDCLE    &
+             USING   FRMCLE OF GPFORMATS,     &
+                     FRDCLE OF GPFOR_DETAILS
+       BEGIN
+          DELETE GPFRD_SOMME
+          PUT GPFRD_SOMME
+       END
+  END
+
+  IF FRMTYP OF GPFORMATS = "O"
+  THEN BEGIN
+       WHILE RETRIEVING GPFRD_SOMME &
+             VIA     FRMCLE,   &
+                     FRSREFLIG &
+             USING   FRMCLE OF GPFORMATS,     &
+                     FRDCLE OF GPFOR_DETAILS
+       BEGIN
+          GET GPFRD_SOMME_3 &
+              VIA   FRMCLE,     &
+                    FRSREFLIG   &
+              USING FRMCLE OF GPFRD_SOMME ,&
+                    FRDCLE OF GPFRD_SOMME OPTIONAL
+          IF ACCESSOK
+          THEN ERROR 872
+       END
+
+       WHILE RETRIEVING GPFRD_DOMAINE_OP  &
+             VIA     FRMCLE, &
+                     FRDCLE  &
+             USING   FRMCLE OF GPFORMATS,    &
+                     FRDCLE OF GPFOR_DETAILS
+       BEGIN
+         DELETE GPFRD_DOMAINE_OP
+         PUT GPFRD_DOMAINE_OP
+       END
+
+       WHILE RETRIEVING GPFRD_DOMAINE_OP  &
+             VIA     FRMCLE, &
+                     FDUCLE, &
+                     FRDTYP  &
+             USING   FRMCLE OF GPFORMATS,     &
+                     FRDCLE OF GPFOR_DETAILS, &
+                     "F"
+       BEGIN
+          DELETE GPFRD_DOMAINE_OP
+          PUT GPFRD_DOMAINE_OP
+       END
+
+       WHILE RETRIEVING GPFRD_SOMME &
+             VIA     FRMCLE,   &
+                     FRSREFLIG &
+             USING   FRMCLE OF GPFORMATS,     &
+                     FRDCLE OF GPFOR_DETAILS
+       BEGIN
+          DELETE GPFRD_SOMME
+          PUT GPFRD_SOMME
+       END
+
+       WHILE RETRIEVING GPFRD_SOMME &
+             VIA     FRMCLE,   &
+                     FRDCLE    &
+             USING   FRMCLE OF GPFORMATS,     &
+                     FRDCLE OF GPFOR_DETAILS
+       BEGIN
+          DELETE GPFRD_SOMME
+          PUT GPFRD_SOMME
+       END
+   END
+END
+
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR GPFOR_DETAILS
+  BEGIN
+     ;
+     ; Validation de la destruction
+     ;
+     IF     DELETEDRECORD OF GPFOR_DETAILS       &
+        AND TZ_SECDEL = "0"
+     THEN ERROR 1
+     ;
+     ; Validation de la modification.
+     ;
+     IF     ALTEREDRECORD     OF GPFOR_DETAILS       &
+        AND NOT NEWRECORD     OF GPFOR_DETAILS       &
+        AND NOT DELETEDRECORD OF GPFOR_DETAILS       &
+        AND TZ_SECMOD = "0"
+     THEN ERROR 2
+
+     IF DELETEDRECORD OF GPFOR_DETAILS AND &
+        FRDTYP        OF GPFOR_DETAILS = "F"
+     THEN BEGIN
+          GET GPFRD_SOMME      &
+              VIA   FRMCLE,    &
+                    FRSREFLIG  &
+              USING FRMCLE OF GPFOR_DETAILS, &
+                    FRDCLE OF GPFOR_DETAILS OPTIONAL
+          IF ACCESSOK
+          THEN ERROR 872
+     END
+
+     IF DELETEDRECORD OF GPFOR_DETAILS
+     THEN DO DETRUIT_LIGNE
+  END
+END
+
+
+BUILD
+@IF FORMAT
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+*********************** Détail du format de présentation **********************
+*                                                                             *
+* Format........: xxxx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                        *
+*                                                                  Unité de   *
+* Ligne  Type  Description                                          mesure    *
+* xxxx    x    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    xxxx     *
+* xxxx    x    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    xxxx     *
+* xxxx    x    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    xxxx     *
+* xxxx    x    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    xxxx     *
+* xxxx    x    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    xxxx     *
+* xxxx    x    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    xxxx     *
+* xxxx    x    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    xxxx     *
+* xxxx    x    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    xxxx     *
+* xxxx    x    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    xxxx     *
+* xxxx    x    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    xxxx     *
+* xxxx    x    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    xxxx     *
+* xxxx    x    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    xxxx     *
+* xxxx    x    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    xxxx     *
+* xxxx    x    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    xxxx     *
+* xxxx    x    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    xxxx     *
+*******************************************************************************
+@ENDIF
+

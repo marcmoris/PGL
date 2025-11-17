@@ -1,0 +1,251 @@
+;/T/ Couts globaux (Pilotage)
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date création: 1994-08-16
+;
+;    Description..: Ce panorama permet de gérer les coûts globaux
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd173 ACTIONBAR                    &
+             MODE LABEL "" AT 2,80        &
+             NOACTION                     &
+             FIELDMARK RETAIN STARTUP     &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU ,      &
+                       T_CIENOM
+
+;-------------------------------------------------------------------------------
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD173"
+
+;-------------------------------------------------------------------------------
+; Documentation de l'écran.
+;
+USE pd173.hlp NOLIST
+
+;-------------------------------------------------------------------------------
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+;-------------------------------------------------------------------------------
+;
+; Variable temporaire du programme
+;
+;
+TEMPORARY T_CPTCLE    CHARACTER SIZE 06 RESET AT STARTUP
+TEMPORARY T_UNACLE    CHARACTER SIZE 08 RESET AT STARTUP
+
+TEMPORARY T_CPTTYPPAT CHARACTER SIZE 01 ; Pattern type de compte
+TEMPORARY T_CPTCATPAT CHARACTER SIZE 08 ; Pattern catégorie du compte
+TEMPORARY T_PECCLE    CHARACTER SIZE 04 ; Période
+
+
+
+
+;-------------------------------------------------------------------------------
+; Déclaration du fichier primaire
+;
+
+FILE PDCOUTS_GLOBAUX PRIMARY NOITEM
+  ACCESS VIA     CIECLE,      &
+                 CGLCODCOUGBL &
+         USING   T_CIECLEMNU, &
+                 CGLCODCOUGBL OF PDCOUTS_GLOBAUX &
+         REQUEST CGLCODCOUGBL OF PDCOUTS_GLOBAUX &
+         ORDERBY CIECLE,      &
+                 CGLCODCOUGBL
+
+  ACCESS VIA     CIECLE        &
+         USING   T_CIECLEMNU   &
+         ORDERBY CIECLE,       &
+                 CGLCODCOUGBL
+
+         ITEM CIECLE OF PDCOUTS_GLOBAUX INITIAL T_CIECLEMNU
+
+;-------------------------------------------------------------------------------
+;
+; Déclaration des fichiers référence
+;
+FILE MCCOMPTE REFERENCE
+  ACCESS VIA     CPTCLE &
+         USING   CPTCLE OF PDCOUTS_GLOBAUX &
+         ORDERBY CPTCLE
+
+FILE MCUNITE_ADM REFERENCE
+  ACCESS VIA     CIECLE, &
+                 UNACLE &
+         USING   T_CIECLEMNU, &
+                 UNACLE OF PDCOUTS_GLOBAUX &
+         ORDERBY UNACLE
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+;
+;
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Coûts globaux " &
+@ELSE
+      " %%%Coûts globaux " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST ; Pour placer le TITLE OFF
+
+SKIP TO LINE 4
+
+ALIGN (2,3,19)
+
+FIELD CGLCODCOUGBL OF PDCOUTS_GLOBAUX    &
+        HIDDEN ID 05                     &
+        REQUIRED NOCHANGE                &
+        LOOKUP NOTON PDCOUTS_GLOBAUX     &
+          VIA   CIECLE,                  &
+                CGLCODCOUGBL             &
+          USING T_CIECLEMNU,             &
+                CGLCODCOUGBL OF PDCOUTS_GLOBAUX &
+          MESSAGE 2922 ; Ce coûts existe déjà
+
+FIELD CGLDSC      OF PDCOUTS_GLOBAUX     &
+        HIDDEN ID 10
+
+FIELD CPTCLE       OF PDCOUTS_GLOBAUX    &
+        HIDDEN ID 15                     &
+        REQUIRED NOCHANGE                &
+        LOOKUP ON MCCOMPTE               &
+          MESSAGE 2924 ; Ce compte n'existe pas
+
+FIELD UNACLE       OF PDCOUTS_GLOBAUX    &
+        HIDDEN ID 20                     &
+        REQUIRED NOCHANGE                &
+        LOOKUP ON MCUNITE_ADM            &
+          MESSAGE 2925 ; Cette unité n'existe pas
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Appel du popup pour le champs CPTCLE (compte)
+;
+;
+PROCEDURE INPUT CPTCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE    = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    LET T_CPTTYPPAT = "@"
+    LET T_CPTCATPAT = "@"
+    LET T_PECCLE    = ""
+    RUN SCREEN mc103 MODE F &
+                      PASSING T_CPTCLE, &
+                              T_CPTTYPPAT, &
+                              T_CPTCATPAT, &
+                              T_PECCLE
+    LET FIELDTEXT = TRUNCATE( T_CPTCLE )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Appel du popup pour le champs UNACLE (Unité administrative)
+;
+;
+PROCEDURE INPUT UNACLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE = CPTCLE OF PDCOUTS_GLOBAUX
+    LET T_PECCLE = ""
+    LET T_UNACLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+
+    RUN SCREEN mc115 MODE F &
+                     PASSING T_CIECLEMNU, &
+                             T_CPTCLE, &
+                             T_UNACLE, &
+                             T_PECCLE
+    LET FIELDTEXT = TRUNCATE( T_UNACLE )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDCOUTS_GLOBAUX &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDCOUTS_GLOBAUX &
+     AND NOT NEWRECORD     OF PDCOUTS_GLOBAUX &
+     AND NOT DELETEDRECORD OF PDCOUTS_GLOBAUX &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+END
+
+BUILD
+@IF FORMAT
+@ENDIF

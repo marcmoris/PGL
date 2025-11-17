@@ -1,0 +1,336 @@
+;/T/ Note de l'item de la facture
+;
+;//M/GRA01/Francois Richard/1999-06-18
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur..: ??
+;
+;/M/ François Déry, 30 avril 1999
+;       Modifier l'accèss au fichier de séquence car il a
+;       été converti en format interbase au lieu d'indexé.
+;
+;/M/ Marie-Josée Hamel, 96.02.14, coder la preupdate comme dans les autres écrans ou on update
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+;-------------------------------------------------------------------------------
+SCREEN fa004c ACTIONBAR &
+              MODE LABEL "" AT 2,132  &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              FROM 11,01 TO 23,132 &
+              MESSAGE ON 24 &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU  , &
+                        T_CIENOM     , &
+                        T_PECCLEMNU, &
+                        FACPT_A_REC  , &
+                        FAFAR_DETAIL , &
+                        MCREF_ADRESSE
+
+USE fa004c.hlp NOLIST
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-écrans
+
+USE ussectmp NOLIST     ; Variable pour la sécurité
+"FA004C"                ; Nom de l'écran
+
+USE ustrasse NOLIST
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Notes générales             " ACTION DESIGNER D001
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%es générales             " ACTION DESIGNER D001
+@ENDIF
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE FAFAR_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_RAD_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE MCRAD_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 04 ; Numéro de la compagnie
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie
+TEMPORARY T_PECCLEMNU CHARACTER SIZE 4
+
+DEFINE    DZ_CIECLE   CHARACTER SIZE 04 = T_CIECLEMNU
+DEFINE    DZ_CIENOM   CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+;
+; Table maitre passer en parametre.
+;
+FILE FACPT_A_REC      MASTER
+FILE MCREF_ADRESSE    MASTER
+FILE FAFAR_DETAIL     MASTER
+
+;-------------------------------------------------------------------------------
+;
+; Table primaire.
+;
+FILE FAFAR_NOTE         PRIMARY &
+                        OCCURS 5 &
+                        NOITEM
+  ACCESS VIA    CIECLE   , &
+                FARCLE   , &
+                FFDCLELIG  &
+         USING  CIECLE    OF FACPT_A_REC,  &
+                FARCLE    OF FACPT_A_REC,  &
+                FFDCLELIG OF FAFAR_DETAIL  &
+        ORDERBY CIECLE   , &
+                FARCLE   , &
+                FFDCLELIG, &
+                FFNSEQ
+
+  ITEM CIECLE    OF FAFAR_NOTE INITIAL CIECLE    OF FACPT_A_REC
+  ITEM FARCLE    OF FAFAR_NOTE INITIAL FARCLE    OF FACPT_A_REC
+  ITEM FFDCLELIG OF FAFAR_NOTE INITIAL FFDCLELIG OF FAFAR_DETAIL
+
+
+;
+; Pour avoir le type de client
+;
+FILE VCLC_CLI         REFERENCE
+  ACCESS VIA CLICIECLE, &
+             CLICLE   , &
+             CIECLE     &
+         USING REFCIECLE OF FACPT_A_REC, &
+               REFCLENUM OF FACPT_A_REC, &
+               CIECLE    OF FACPT_A_REC
+
+;------------------------------------------------------------------------------
+;
+; Numéro de séquence des adresses pour les clients divers.
+;
+FILE MCRAD_SEQ        DESIGNER &
+                      TRANSACTION GEN_RAD_SEQ
+
+FILE FAFAR_SEQ        DESIGNER &
+                      TRANSACTION GEN_NUM_SEQ
+
+
+
+
+USE ushilite NOLIST     ; Hilite pour tous les écrans
+
+DRAW FROM  2 ,1  TO  2 ,131
+DRAW FROM  2 ,1  TO  12,1
+DRAW FROM  3 ,132 TO  12,132
+DRAW FROM  12,1  TO  12,132
+
+TITLE &
+@IF FRANCAIS
+      " Notes descriptives " &
+@ELSE
+      " %%%es descriptives " &
+@ENDIF
+      CENTERED AT 2,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP
+
+ALIGN (,3,19)
+
+FIELD FARCLE    OF FACPT_A_REC  &
+      PREDISPLAY DISPLAY
+
+FIELD FFDCLELIG OF FAFAR_DETAIL &
+      LABEL "Item..........:"   &
+      PREDISPLAY DISPLAY
+
+SKIP 1
+TITLE " Séq. Description                                                      Impression" &
+AT ,02
+
+ALIGN(2,2,3) (,,8) (,,76)
+
+CLUSTER OCCURS WITH FAFAR_NOTE ID BASE 10
+
+FIELD FFNSEQ OF FAFAR_NOTE &
+        HIDDEN    &
+        LABEL " " &
+        REQUIRED  &
+        PICTURE "^^"
+FIELD FFNDSC OF FAFAR_NOTE
+FIELD FFNIMP OF FAFAR_NOTE SIZE 3
+
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+; Pour la transformation du flag d'impression en 1 et 0
+;
+PROCEDURE INPUT FFNIMP
+BEGIN
+  USE usflginp NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Pour afficher le falg sous la forme Oui ou Non
+;
+PROCEDURE OUTPUT FFNIMP
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du sous-écran des notes générales.
+;
+PROCEDURE DESIGNER D001 NODATA
+BEGIN
+  IF  FARSTU  OF FACPT_A_REC <> "P"    AND &
+     (ALTEREDRECORD OF FAFAR_NOTE       OR &
+      NEWRECORD     OF FAFAR_NOTE       OR &
+      DELETEDRECORD OF FAFAR_NOTE)
+  THEN ERROR 2739
+
+  IF ALTEREDRECORD OF FAFAR_NOTE
+  THEN ERROR 2716
+
+  RUN SCREEN fa004d  PASSING FAFAR_NOTE MODE F &
+                             WINDOW WIDTH CONSTANT WHEN CALLING
+  PUSH FIND
+END
+
+
+PROCEDURE PREUPDATE
+BEGIN
+  FOR FAFAR_NOTE
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF FAFAR_NOTE &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF FAFAR_NOTE &
+       AND NOT NEWRECORD     OF FAFAR_NOTE &
+       AND NOT DELETEDRECORD OF FAFAR_NOTE &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+
+    IF  FARSTU  OF FACPT_A_REC <> "P"    AND &
+       (ALTEREDRECORD OF FAFAR_NOTE       OR &
+        NEWRECORD     OF FAFAR_NOTE       OR &
+        DELETEDRECORD OF FAFAR_NOTE)
+    THEN ERROR 2739
+    ;
+    ; Mise à jour du timbre de modification si l'usager change la réquisition.
+    ;
+    IF    NOT NEWRECORD OF FACPT_A_REC &
+      AND ALTEREDRECORD OF FAFAR_NOTE
+    THEN BEGIN
+      LET FARDATMOD OF FACPT_A_REC= SYSDATE
+      LET FARHREMOD OF FACPT_A_REC= SYSTIME / 10000
+      LET FARUSRMOD OF FACPT_A_REC= LOGONID
+    END
+  END
+
+  IF FARCLE OF FACPT_A_REC = " "
+  THEN BEGIN
+    START TRANSACTION GEN_NUM_SEQ
+    GET FAFAR_SEQ VIA   CIECLE, &
+                        FSEANNCLE  &
+                  USING T_CIECLEMNU,&
+                        T_PECCLEMNU[1:2] &
+                  OPTIONAL
+    LET CIECLE    OF FAFAR_SEQ = T_CIECLEMNU
+    LET FSEANNCLE OF FAFAR_SEQ = T_PECCLEMNU[1:2]
+    ;  LET FSENUMSEQ OF FAFAR_SEQ = FSENUMSEQ OF FAFAR_SEQ + 1
+;an 2000
+    IF NEWRECORD OF FAFAR_SEQ
+    THEN LET FSENUMSEQ OF FAFAR_SEQ = 0
+    LET FSENUMSEQ OF FAFAR_SEQ = FSENUMSEQ OF FAFAR_SEQ + 1
+
+    LET FARCLE OF FACPT_A_REC = FSEANNCLE + &
+           ASCII(FSENUMSEQ OF FAFAR_SEQ, FSELONNUM OF FAFAR_SEQ -2)
+    PUT FAFAR_SEQ
+    COMMIT TRANSACTION GEN_NUM_SEQ
+    DISPLAY FARCLE
+  END
+  ;
+  ; On incrémente le numéro d'adresse pour les clients divers.
+  ;
+  IF     CLITYP OF VCLC_CLI = "D" &
+     AND RADCLE OF FACPT_A_REC = 0
+  THEN BEGIN
+    START TRANSACTION GEN_RAD_SEQ
+    GET MCRAD_SEQ VIA REFCIECLE, &
+                      REFCLETYP, &
+                      REFCLENUM  &
+                  USING REFCIECLE OF FACPT_A_REC, &
+                        REFCLETYP OF FACPT_A_REC, &
+                        REFCLENUM OF FACPT_A_REC  &
+                  OPTIONAL
+    LET REFCIECLE OF MCRAD_SEQ = REFCIECLE OF FACPT_A_REC
+    LET REFCLETYP OF MCRAD_SEQ = REFCLETYP OF FACPT_A_REC
+    LET REFCLENUM OF MCRAD_SEQ = REFCLENUM OF FACPT_A_REC
+    LET RASNUMSEQ OF MCRAD_SEQ = RASNUMSEQ OF MCRAD_SEQ + 1
+    LET RADCLE    OF FACPT_A_REC = RASNUMSEQ OF MCRAD_SEQ
+    PUT MCRAD_SEQ
+    COMMIT GEN_RAD_SEQ
+  END
+
+  IF FARCLE OF FAFAR_DETAIL = " "
+  THEN LET FARCLE OF FAFAR_DETAIL = FARCLE OF FACPT_A_REC
+
+  FOR FAFAR_NOTE
+  BEGIN
+     IF FARCLE OF FAFAR_NOTE = " "
+     THEN LET FARCLE OF FAFAR_NOTE = FARCLE OF FACPT_A_REC
+  END
+END
+
+BUILD
+@IF FORMAT
+******************************************************** Notes descriptives *******************************************************x
+* Facture.......: xxxxxxxxxxxx                                                                                                     *
+* Item..........: xxxxxxx                                                                                                          *
+*                                                                                                                                  *
+* Séq. Description                                                      Impression                                                 *
+* xx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxx                                                     *
+* xx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxx                                                     *
+* xx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxx                                                     *
+* xx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxx                                                     *
+* xx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxx                                                     *
+************************************************************************************************************************************
+@ENDIF
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,538 @@
+;/T/ Gestion des inventaires
+;
+;/P/ Programmeur..: Nancy Marceau
+;    Date Création: 2 mars 1994
+;
+;    Description..: Cet écran permet de faire la gestion des inventaires. Il 
+;                   permet de définir l'entrepôt et la localisation des 
+;                   produits ainsi que ses différentes caractéristiques. 
+;
+;/M/ Francois Richard, 20 juillet 1999
+;
+;    Description : Peut importe la valeur du flag de maximum, toujours laissé
+;                  la quantité affiché
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN ar002a ACTIONBAR &
+             MODE LABEL "" AT 2,132 &
+             FROM 1,1 TO 23,132 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU, &
+                       T_CIENOM,    &
+                       ARPRODUIT
+
+USE ustrasse NOLIST     ; Pour les sous-écrans
+ 
+USE ussectmp NOLIST     ; Variable pour la sécurité
+    "AR002A"             ; Nom de l'écran
+
+USE ar002a.hlp ;NOLIST  ; Use servant à la documentation de l'écran
+                      
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-écrans
+                        ;
+
+
+;-------------------------------------------------------------------------------
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de la compagnie
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie
+;-------------------------------------------------------------------------------
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;
+; Produit
+;
+FILE ARPRODUIT  MASTER
+
+;
+; Produit par entrepot
+;
+FILE ARPRD_ENT  PRIMARY NOITEM OCCURS 12
+  ACCESS VIA   CIECLE,               &
+               PRDCLE,               &   
+               ENTCLE                &
+         USING CIECLE OF ARPRODUIT,  &
+               PRDCLE OF ARPRODUIT,  &
+               ENTCLE OF ARPRD_ENT &
+         REQUEST ENTCLE    &
+         ORDERBY CIECLE,   &
+                 ENTCLE,   &
+                 ENLCLE     
+     
+
+  ACCESS VIA   CIECLE,               &
+               PRDCLE                &   
+         USING CIECLE OF ARPRODUIT , &
+               PRDCLE OF ARPRODUIT   &
+         ORDERBY CIECLE,   &
+                 ENTCLE,   &
+                 ENLCLE     
+     
+  ITEM CIECLE OF ARPRD_ENT INITIAL CIECLE OF ARPRODUIT
+  ITEM PRDCLE OF ARPRD_ENT INITIAL PRDCLE OF ARPRODUIT
+  
+;
+; Fichier permettant de faire un écran de consultation pour les entrepôts
+;
+FILE ARENTREPOT  REFERENCE
+  ACCESS VIA   CIECLE,      &
+               ENTCLE       &
+         USING CIECLE OF ARPRD_ENT ,&
+               ENTCLE OF ARPRD_ENT  
+
+
+;
+; Fichier permettant de faire un écran de consultation pour les localisations
+; d'entrepôts.
+;
+FILE ARENT_LOCAL  REFERENCE
+  ACCESS VIA   CIECLE,      &
+               ENTCLE,      &
+               ENLCLE       &
+         USING CIECLE OF ARPRD_ENT, &
+               ENTCLE OF ARPRD_ENT, & 
+               ENLCLE OF ARPRD_ENT
+
+ 
+
+; Fichier qui contient le total des quantités de produit pour les entrepôts
+; par localisations.
+
+FILE VPRE_PRD  REFERENCE &
+              OCCURS WITH ARPRD_ENT 
+  ACCESS VIA   CIECLE, &
+               PRDCLE, &
+               ENTCLE  & 
+         USING CIECLE OF ARPRD_ENT, &
+               PRDCLE OF ARPRD_ENT, &
+               ENTCLE OF ARPRD_ENT
+ 
+
+;
+; Paramètres pour la compagnie consolidé(holding)
+;
+FILE MCHOLDING  REFERENCE
+  ACCESS VIA CIENMC USING "1"
+
+
+;-------------------------------------------------------------------------------
+TEMPORARY T_FLGDEL    CHARACTER SIZE 1 ; Flag pour le sous-écran de destruction
+TEMPORARY T_ENTCLE    CHARACTER SIZE 4 ; Entrepôt pour écran dépisteur
+TEMPORARY T_ENLCLE    CHARACTER SIZE 5 ; Localisation entrepôt pour écran dépisteur
+;-------------------------------------------------------------------------------
+;
+USE usdrw132    NOLIST     ; Draw pour les écrans pleine page
+USE ustitstd132 NOLIST     ; En-tête pour les écrans pleine page
+USE ushilite    NOLIST     ; Hilite pour tous les écrans
+
+DRAW THIN 6,1 TO 6,132
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Produits inventaire  " &
+@ELSE
+      " %%%Produits inventaire  " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+;-------------------------------------------------------------------------------
+
+SKIP 1
+ALIGN (,3,19) (,,32)
+
+FIELD PRDCLE  OF ARPRODUIT FIXED
+
+FIELD PRDDSC1 OF ARPRODUIT FIXED
+
+
+SKIP 1
+TITLE &
+@IF FRANCAIS  
+      "                                                                                                     M                      N"  &
+@ELSE
+      ""  &
+@ENDIF 
+AT ,02
+
+SKIP
+TITLE &
+@IF FRANCAIS
+      "                           Qté           Qté             Coût           Dernier          Point       A            Qté       E" &
+@ELSE
+      "" &
+@ENDIF
+AT ,02
+
+SKIP 
+TITLE &
+@IF FRANCAIS 
+      " Ent.      Loc.            cmd           main            moyen          coûtant         commande     X          maximum     G" &
+@ELSE
+      "" &
+@ENDIF
+AT ,02
+
+SKIP
+
+CLUSTER OCCURS WITH ARPRD_ENT ID BASE 15
+  
+
+ALIGN (3,3,3) (,,13) (,,24) (,,38) (,,54) (,,71) (,,88) (,,103) (,,110) (,,126)
+
+FIELD ENTCLE OF ARPRD_ENT &
+        HIDDEN                 &
+        REQUIRED NOCHANGE      &
+        LABEL " "              &
+        LOOKUP ON ARENTREPOT   &
+          MESSAGE 1337,        & ; Ce code d'entrepôt n'existe pas.
+
+        NOTON ARPRD_ENT             &
+          VIA   CIECLE,                  &
+                PRDCLE,                  &
+                ENTCLE                   &
+          USING CIECLE OF ARPRODUIT,     &
+                PRDCLE OF ARPRODUIT,     &
+                ENTCLE OF ARPRD_ENT &    
+          MESSAGE 1311           ; Ce code d'entrepôt existe déjà.
+       
+FIELD ENLCLE OF ARPRD_ENT             &
+        IF PRDTYP OF ARPRODUIT <> "F" &
+        REQUIRED                      &
+        LOOKUP ON ARENT_LOCAL         &
+          MESSAGE 1338                ; Ce code de localisation n'existe pas.
+
+FIELD PREQTECOM OF VPRE_PRD &
+        DISPLAY             &
+        TRAILING SIGN "-"  
+
+FIELD PREQTEPHY OF VPRE_PRD      &
+        DISPLAY                  &
+        PICTURE "^,^^^,^^^.^^^ " &
+        TRAILING SIGN "-"        &
+        SIGNIFICANCE 6           
+
+FIELD PRECOUMYN OF VPRE_PRD   &
+        DISPLAY               &
+        TRAILING SIGN "-"    
+        
+FIELD PREDERCOU OF VPRE_PRD    &
+        DISPLAY                &
+        TRAILING SIGN "-"    
+
+FIELD PREPOICOM OF ARPRD_ENT &
+        PIC "^^^,^^^.^^^ "   &
+        TRAILING SIGN "-"    &
+        SIGNIF 6             &
+        IF PRDTYP OF ARPRODUIT <> "F" 
+
+FIELD PREFLGGESMAX OF ARPRD_ENT &
+        IF PRDTYP OF ARPRODUIT <> "F" &
+        DEFAULT "0"
+
+FIELD PREQTEMAX OF ARPRD_ENT      &
+        REQUIRED  &
+        TRAILING SIGN "-" &
+        SIGNIF 6 &
+        IF PRDTYP OF ARPRODUIT <> "F" AND &
+           PREFLGGESMAX OF ARPRD_ENT= "1" 
+        
+FIELD PREFLGAUTNEG OF ARPRD_ENT &
+        IF PRDTYP OF ARPRODUIT <> "F" &
+        DEFAULT "1"
+
+ 
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de faire un écran dépisteur pour l'entrepôt
+;
+PROCEDURE INPUT ENTCLE
+BEGIN
+  ;
+  ; Valide si l'usager peut faire de la saisie.
+  ;
+  USE ussecent NOLIST 
+
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_ENTCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN ar100 MODE F PASSING T_CIECLEMNU, T_ENTCLE
+    LET FIELDTEXT = TRUNCATE(T_ENTCLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de faire l'affichage des champs par défaut
+; en mode insertion.
+;
+PROCEDURE PROCESS ENTCLE
+BEGIN
+  LET ENLCLE OF ARPRD_ENT = ""  ; Lors d'un changement de valeur
+  DISPLAY ENLCLE OF ARPRD_ENT   ; de l'entrepôt on efface la localisation
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de faire un écran dépisteur pour les localisations
+; de l'entrepôt.
+;
+PROCEDURE INPUT ENLCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_ENTCLE = ENTCLE OF ARPRD_ENT
+    LET T_ENLCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN ar101 MODE F PASSING T_CIECLEMNU, T_ENTCLE, T_ENLCLE
+    LET FIELDTEXT = TRUNCATE(T_ENLCLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de valider la localisation saisie et permet de 
+; de l'effacer après coup puisque ce champ est optionnel.
+;
+PROCEDURE EDIT ENLCLE
+BEGIN
+  IF 0 <> SIZE (TRUNCATE (FIELDTEXT))
+  THEN BEGIN
+    GET ARENT_LOCAL OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 1338        ; Cette localisation d'entrepôt n'existe pas.
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+; Flag Oui/Non sur la gestion des maximums
+;
+PROCEDURE INPUT PREFLGGESMAX
+BEGIN
+  USE usflginp NOLIST 
+END
+
+;-------------------------------------------------------------------------------
+;
+PROCEDURE OUTPUT PREFLGGESMAX
+BEGIN
+  USE usflgout NOLIST 
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de forcer l'entrée d'une quantité maximale losrqu'il y 
+; a une gestion des maximums.
+;
+PROCEDURE INPUT PREQTEMAX
+BEGIN
+  IF NOT FINDMODE &
+     AND PREFLGGESMAX = "1" 
+  THEN BEGIN 
+    IF 0 = SIZE(TRUNCATE(FIELDTEXT))             ; Pour forcer l'exécution de la
+    THEN LET FIELDTEXT = &                       ; procédure EDIT
+      ASCII(PREQTEMAX OF ARPRD_ENT,8)[1:5] + "." + &
+      ASCII(PREQTEMAX OF ARPRD_ENT,8)[6:8]  
+  END                                             
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de valider que le quantité entrée est différente de zéro.
+;
+PROCEDURE EDIT PREQTEMAX
+BEGIN
+  IF PRDFLGRESFOR OF ARPRODUIT = "1"
+  THEN BEGIN
+    USE usvalmul NOLIST ; Permet de valider que la quantité maximum respecte 
+                           ; le multiple accepté s'il y a une restriction de 
+                           ; format.
+  END
+; IF 0 = FIELDVALUE
+; THEN ERROR 1339 ; Vous devez entrer une quantité différente de zéro
+END
+
+
+
+;-------------------------------------------------------------------------------
+; Flag Oui/Non sur l'autorisation des négatifs
+;
+PROCEDURE INPUT PREFLGAUTNEG
+BEGIN
+  USE usflginp NOLIST 
+END
+
+
+;-------------------------------------------------------------------------------
+;
+PROCEDURE OUTPUT PREFLGAUTNEG
+BEGIN
+  USE usflgout NOLIST 
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR ARPRD_ENT
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF ARPRD_ENT &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF ARPRD_ENT &
+       AND NOT NEWRECORD     OF ARPRD_ENT &
+       AND NOT DELETEDRECORD OF ARPRD_ENT &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+
+    ;
+    ; Destruction d'un produit d'entrepôt
+    ;
+    IF DELETEDRECORD OF ARPRD_ENT
+    THEN BEGIN
+      ;
+      ; On initialise le flag de retour pour savoir si le sous-écran a
+      ; bien fonctionné.
+      ;
+      LET T_FLGDEL = ""
+      ;
+      ; Appel du sous-écran qui valide si le produit est utilisé
+      ;
+      RUN SCREEN ar002ax MODE SAME &
+                        PASSING ARPRD_ENT, &
+                                T_FLGDEL
+      ;
+      ; Si la valeur de retour égale 1, cela indique que le sous-écran
+      ; n'a trouvé aucune référence pour l'identifiant demandé.
+      ;
+      IF T_FLGDEL = ""
+      THEN ERROR " "
+    END 
+  END
+END
+
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de saisir en mode de modification le
+; multiple s'il y a une restriction de format sinon on le met à nul.
+; Procédure similaire à la APPEND
+;
+PROCEDURE DESIGNER 15
+BEGIN
+  IF PRDTYP OF ARPRODUIT <> "F"
+  THEN BEGIN
+    ACCEPT ENLCLE        OF ARPRD_ENT
+    DISPLAY PREQTECOM    OF VPRE_PRD
+    DISPLAY PREQTEPHY    OF VPRE_PRD
+    DISPLAY PRECOUMYN    OF VPRE_PRD
+    DISPLAY PREDERCOU    OF VPRE_PRD
+    ACCEPT  PREPOICOM    OF ARPRD_ENT
+    ACCEPT  PREFLGGESMAX OF ARPRD_ENT
+
+    IF PREFLGGESMAX OF ARPRD_ENT = "1"
+    THEN ACCEPT PREQTEMAX OF ARPRD_ENT
+    ACCEPT PREFLGAUTNEG OF ARPRD_ENT
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de saisir en mode de modification avec 
+; Powerhouse Client le multiple s'il y a une restriction de format sinon on 
+; le met à nul. Procédure similaire à la APPEND
+;
+PROCEDURE DESIGNER PH01
+BEGIN
+  IF PRDTYP OF ARPRODUIT <> "F"
+  THEN BEGIN
+    ACCEPT ENLCLE        OF ARPRD_ENT
+    DISPLAY PREQTECOM    OF VPRE_PRD
+    DISPLAY PREQTEPHY    OF VPRE_PRD
+    DISPLAY PRECOUMYN    OF VPRE_PRD
+    DISPLAY PREDERCOU    OF VPRE_PRD
+    ACCEPT  PREPOICOM    OF ARPRD_ENT
+    ACCEPT  PREFLGGESMAX OF ARPRD_ENT
+
+    IF PREFLGGESMAX OF ARPRD_ENT = "1"
+    THEN ACCEPT PREQTEMAX OF ARPRD_ENT
+    ELSE BEGIN 
+      LET PREQTEMAX     OF ARPRD_ENT = 0
+      DISPLAY PREQTEMAX OF ARPRD_ENT
+    END
+    ACCEPT PREFLGAUTNEG OF ARPRD_ENT
+  END
+END
+
+; 
+; Procédure qui sert à détruire la première ligne d'une occurrence en
+; Powerhouse Client.
+; 
+
+PROCEDURE DESIGNER PH02
+BEGIN
+  DELETE ARPRD_ENT
+END
+
+
+
+BUILD
+
+
+@IF FORMAT
+xxxx                                           xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                            x
+******************************************************* Produits inventaire  *******************************************************
+*                                                                                                                                  *
+* Code produit..: xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                            *
+************************************************************************************************************************************
+*                                                                                                     M                      N     *
+*                         Qté          Qté                Coût           Dernier          Point       A        Qté           E     *
+* Ent.      Loc.          cmd          main              moyen           coûtant         commande     X      maximum         G     *
+* xxxx      xxxxx      xxxxxxxxxxxx   xxxxxxxxxxxx   xxxxxxxxxxxxxxx  xxxxxxxxxxxxxxx  xxxxxxxxxxxx   x      xxxxxxxxxxxxxx  x     *
+* xxxx      xxxxx      xxxxxxxxxxxx   xxxxxxxxxxxx   xxxxxxxxxxxxxxx  xxxxxxxxxxxxxxx  xxxxxxxxxxxx   x      xxxxxxxxxxxxxx  x     *
+* xxxx      xxxxx      xxxxxxxxxxxx   xxxxxxxxxxxx   xxxxxxxxxxxxxxx  xxxxxxxxxxxxxxx  xxxxxxxxxxxx   x      xxxxxxxxxxxxxx  x     *
+* xxxx      xxxxx      xxxxxxxxxxxx   xxxxxxxxxxxx   xxxxxxxxxxxxxxx  xxxxxxxxxxxxxxx  xxxxxxxxxxxx   x      xxxxxxxxxxxxxx  x     *
+* xxxx      xxxxx      xxxxxxxxxxxx   xxxxxxxxxxxx   xxxxxxxxxxxxxxx  xxxxxxxxxxxxxxx  xxxxxxxxxxxx   x      xxxxxxxxxxxxxx  x     *
+* xxxx      xxxxx      xxxxxxxxxxxx   xxxxxxxxxxxx   xxxxxxxxxxxxxxx  xxxxxxxxxxxxxxx  xxxxxxxxxxxx   x      xxxxxxxxxxxxxx  x     *
+* xxxx      xxxxx      xxxxxxxxxxxx   xxxxxxxxxxxx   xxxxxxxxxxxxxxx  xxxxxxxxxxxxxxx  xxxxxxxxxxxx   x      xxxxxxxxxxxxxx  x     *
+* xxxx      xxxxx      xxxxxxxxxxxx   xxxxxxxxxxxx   xxxxxxxxxxxxxxx  xxxxxxxxxxxxxxx  xxxxxxxxxxxx   x      xxxxxxxxxxxxxx  x     *
+* xxxx      xxxxx      xxxxxxxxxxxx   xxxxxxxxxxxx   xxxxxxxxxxxxxxx  xxxxxxxxxxxxxxx  xxxxxxxxxxxx   x      xxxxxxxxxxxxxx  x     *
+* xxxx      xxxxx      xxxxxxxxxxxx   xxxxxxxxxxxx   xxxxxxxxxxxxxxx  xxxxxxxxxxxxxxx  xxxxxxxxxxxx   x      xxxxxxxxxxxxxx  x     *
+* xxxx      xxxxx      xxxxxxxxxxxx   xxxxxxxxxxxx   xxxxxxxxxxxxxxx  xxxxxxxxxxxxxxx  xxxxxxxxxxxx   x      xxxxxxxxxxxxxx  x     *
+* xxxx      xxxxx      xxxxxxxxxxxx   xxxxxxxxxxxx   xxxxxxxxxxxxxxx  xxxxxxxxxxxxxxx  xxxxxxxxxxxx   x      xxxxxxxxxxxxxx  x     *
+*                                                                                                                                  *
+************************************************************************************************************************************
+@ENDIF

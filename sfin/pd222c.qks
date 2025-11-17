@@ -1,0 +1,626 @@
+;/T/ 2.5.8 Retour de marchandises (Diagramme).
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1996-06-18
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   les retours de marchandises de diagramme.
+;
+;/M/ François Déry, 12 mai 1999
+;       Ajout du in dict sur la transaction des séquences.
+;
+;/M/ Programmeur..: Nancy Breton
+;    Date modif...: 1998-09-22
+;
+;    Description..: Problème le programme ne mettait pas à jour les quantités
+;                   emballés ni pour les caissons ni pour le diagramme.
+;                   Modification de la procédure preupdate.
+;
+;/M/ REMY DEMERS 1999-04-09
+;    correction de la procedure preupdate qui ne mettais a jour que la promiere
+;    ligne et ajout d'un code pour modifier les qte emballe
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd222c ACTIONBAR                     &
+              MODE LABEL "" AT 2,80         &
+              NOACTION                      &
+              FIELDMARK RETAIN STARTUP      &
+              HELP POPUP FROM 4,9 TO 20,72  &
+              RECEIVING T_CIECLEMNU,        &
+                        T_CIENOM,           &
+                        PDRETOUR
+
+
+;-------------------------------------------------------------------------------
+;
+; Déclaration de la transaction pour donner un numéro séquentiel
+;
+
+TRANSACTION NO_SEQ READ WRITE &
+                   RESERVING FOR PROTECTED WRITE PDSEQ_RETOUR IN DICT
+
+
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD222C"
+
+
+;-------------------------------------------------------------------------------
+; Documentation de l'écran.
+;
+USE pd222c.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour l'appel de dépisteurs
+;
+
+TEMPORARY T_RARCODRET CHARACTER SIZE 03
+TEMPORARY T_SILENT_2 CHAR SIZE 1
+TEMPORARY EMDQTERET_OLD INTEGER SIZE 4
+TEMPORARY EMDQTERET_NEW INTEGER SIZE 4
+;-------------------------------------------------------------------------------
+;
+; Sert à valider les codes bilingue et pour les sous-écrans de consultation
+;
+DEFINE    D_FTRTYPFAC CHARACTER SIZE 16 = "FTRTYPFAC"
+TEMPORARY T_FTRTYPFAC CHARACTER SIZE 04
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du volume d'une pièce de granit
+;
+
+USE usvarvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du prix d'une ligne de détail bon de commande
+;
+USE usvarprigra NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Retour de marchandises
+;
+
+FILE PDRETOUR MASTER
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Retour de diagramme
+;
+
+FILE PDDIAG_RETOUR PRIMARY NOITEM OCCURS 10 TIMES
+
+  ACCESS VIA     CIECLE,       &
+                 RTONUMSEQ     &
+         USING   T_CIECLEMNU,  &
+                 RTONUMSEQ     OF PDRETOUR &
+         ORDERBY CIECLE,       &
+                 DIANUM002
+
+ITEM RTONUMSEQ OF PDDIAG_RETOUR FINAL RTONUMSEQ OF PDRETOUR
+ITEM CIECLE    OF PDDIAG_RETOUR FINAL CIECLE    OF PDRETOUR
+
+;-------------------------------------------------------------------------------
+;
+; Emballage diagramme
+;
+
+FILE PDEMBAL_DIAG SECONDARY OCCURS WITH PDDIAG_RETOUR NODELETE NOITEM
+
+  ACCESS VIA     CIECLE,          &
+                 CAINUMCAI,       &
+                 DIANUM002        &
+         USING   T_CIECLEMNU,     &
+                 CAINUMCAI        OF PDDIAG_RETOUR, &
+                 DIANUM002        OF PDDIAG_RETOUR
+
+FILE PDEMBAL_DIAG ALIAS A_PDEMBAL_DIAG DESIGNER
+;-------------------------------------------------------------------------------
+;
+; Diagramme
+;
+
+FILE PDDIAGRAMME SECONDARY OCCURS WITH PDDIAG_RETOUR NODELETE NOITEM
+
+  ACCESS VIA     CIECLE,          &
+                 DIANUM002        &
+         USING   T_CIECLEMNU,     &
+                 DIANUM002        OF PDDIAG_RETOUR
+
+
+;-------------------------------------------------------------------------------
+;
+; Priorité diagramme
+;
+
+FILE PDPRIORITE_DIAG SECONDARY OCCURS WITH PDDIAG_RETOUR NODELETE NOITEM
+
+  ACCESS VIA     CIECLE,          &
+                 DIANUM002,       &
+                 PRICODPRI        &
+         USING   T_CIECLEMNU,     &
+                 DIANUM002        OF PDDIAG_RETOUR, &
+                 PRICODPRI        OF PDEMBAL_DIAG
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro séquentiel pour les factures
+;
+
+FILE PDSEQ_RETOUR DESIGNER &
+                  TRANSACTION NO_SEQ
+
+
+;-------------------------------------------------------------------------------
+
+FILE PDLIVRE_CAISSON DESIGNER
+;-------------------------------------------------------------------------------
+;
+; Caisson
+;
+
+FILE PDCAISSON REFERENCE OCCURS WITH PDDIAG_RETOUR
+
+  ACCESS VIA     CIECLE,          &
+                 CAINUMCAI        &
+         USING   T_CIECLEMNU,     &
+                 CAINUMCAI        OF PDDIAG_RETOUR
+
+
+;-------------------------------------------------------------------------------
+;
+; Raison retour
+;
+
+FILE PDRAISON_RETOUR REFERENCE OCCURS WITH PDDIAG_RETOUR
+
+  ACCESS VIA   CIECLE,          &
+               RARCODRET        &
+         USING T_CIECLEMNU,     &
+               RARCODRET        OF PDDIAG_RETOUR
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire au traitement
+;
+
+DEFINE    D_MNT       FLOAT SIZE 08 = EMDQTEVEN OF PDEMBAL_DIAG * EMDPRIUNI OF PDEMBAL_DIAG
+TEMPORARY T_TYPE_PROD CHARACTER SIZE 02 INITIAL "DI" RESET AT STARTUP ; Type de produit traiter par l'écran
+
+
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+
+SKIP
+
+
+TITLE &
+@IF FRANCAIS
+      " Retour de marchandises " &
+@ELSE
+      " %%%Retour de marchandises " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+
+ALIGN ( ,3,19) (41,41,57)
+
+
+FIELD RTONUMSEQ        OF PDRETOUR         &
+label "Num. séquence.:"&
+        FIXED
+
+FIELD EXPNUMEXP OF PDRETOUR &
+label "Num expédi...:"&
+       FIXED
+
+FIELD SPRNUMSOR OF PDRETOUR &
+label "No sortie....:"&
+       FIXED
+
+FIELD BLINUMBLI OF PDRETOUR &
+label "Bon livraison:"&
+       FIXED
+
+FIELD RTODATRET        OF PDRETOUR          FORMAT YYYYMMDD &
+PATTERN "####/##/##"&
+label "Date retour...:"&
+        FIXED
+
+
+DRAW 8,2 TO 8,79
+
+
+SKIP TO LINE 8
+
+
+TITLE &
+@IF FRANCAIS
+      " Diagramme " &
+@ELSE
+      " %%%Diagramme " &
+@ENDIF
+      CENTERED AT ,1
+
+
+SKIP TO LINE 10
+
+
+TITLE &
+@IF FRANCAIS
+      " Diagr.   Caisson   Qte        Rai                Description" &
+@ELSE
+      "%%%agr.   Caisson   Qte        Rai                Description" &
+@ENDIF
+      AT ,3
+
+
+ALIGN (02,02,03) (,,11) (,,22) (,,27) (,,34) (,,40) (,,60)
+;ALIGN (02,02,03) (,,11) (,,22) (,,27) (,,30) (,,34) (,,40) (,,60)
+
+
+CLUSTER OCCURS WITH PDDIAG_RETOUR ID BASE 90
+
+
+FIELD DIANUM002        OF PDDIAG_RETOUR    &
+        HIDDEN                             &
+        REQUIRED                           &
+        LABEL " "                          &
+        LOOKUP PDDIAGRAMME                 &
+          MESSAGE 2998 ; Ce numéro de diagramme n'existe pas
+
+
+FIELD CAINUMCAI        OF PDDIAG_RETOUR    &
+        HIDDEN                             &
+        NUM &
+        REQUIRED                           &
+        LOOKUP ON PDCAISSON                &
+          MESSAGE 3129 , & ; Ce numéro de caisson n'existe pas
+        ON PDEMBAL_DIAG
+
+
+FIELD EMDQTERET        OF PDDIAG_RETOUR    &
+        HIDDEN                             &
+        REQUIRED
+
+
+FIELD T_SILENT_2  &
+      SILENT
+
+
+FIELD RARCODRET        OF PDDIAG_RETOUR    &
+        HIDDEN                             &
+        LOOKUP ON PDRAISON_RETOUR          &
+          MESSAGE 2976 ; Cette raison n'existe pas
+
+
+FIELD RTDDSCRAIRET     OF PDDIAG_RETOUR    &
+        HIDDEN                             &
+        DEFAULT RARDSCFRA OF PDRAISON_RETOUR &
+        FOR ,35
+
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul du volume d'une pièce de granit
+;
+
+USE uscalvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul du prix d'une ligne de détail bon commande
+;
+
+USE uscalprigra NOLIST
+
+
+;-------------------------------------------------------------------------------
+PROCEDURE INPUT EMDQTERET
+BEGIN
+ LET EMDQTERET_OLD = EMDQTERET OF PDDIAG_RETOUR
+ END
+;-------------------------------------------------------------------------------
+PROCEDURE EDIT EMDQTERET
+BEGIN
+ LET EMDQTERET_NEW = EMDQTERET OF PDDIAG_RETOUR
+ END
+;-------------------------------------------------------------------------------
+PROCEDURE EDIT T_SILENT_2
+BEGIN
+IF NEWRECORD OF PDDIAG_RETOUR
+ THEN LET RTOSURMC2DIA OF PDRETOUR = RTOSURMC2DIA OF PDRETOUR + (DIASURMC2 OF PDDIAGRAMME * EMDQTERET OF PDEMBAL_DIAG)
+END
+;-------------------------------------------------------------------------------
+;
+; Dépisteur pour le champ
+;
+
+PROCEDURE EDIT CAINUMCAI
+BEGIN
+ IF EXPNUMEXP OF PDRETOUR <> 0
+   THEN BEGIN
+   GET PDLIVRE_CAISSON OPT &
+     VIA CIECLE,EXPNUMEXP,BLINUMBLI,CAINUMCAI USING &
+         T_CIECLEMNU,EXPNUMEXP OF PDRETOUR,BLINUMBLI OF PDRETOUR,CAINUMCAI OF PDEMBAL_DIAG
+     IF NOT ACCESSOK
+     THEN ERROR = "MAUVAISE SELECTION POUR CETTE EXPEDITION"
+   END
+
+LET EMDQTERET_OLD = EMDQTERET OF PDDIAG_RETOUR
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur pour le champ
+;
+
+PROCEDURE INPUT RARCODRET
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_RARCODRET = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd137 MODE F &
+                     PASSING T_RARCODRET,&
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_RARCODRET )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Initialisation du champ par défaut
+;
+
+PROCEDURE INPUT RTDDSCRAIRET
+BEGIN
+  IF     0 = SIZE( TRUNCATE( FIELDTEXT)) &
+     AND 0 = SIZE( TRUNCATE( RTDDSCRAIRET OF PDDIAG_RETOUR ))
+  THEN BEGIN
+    LET FIELDTEXT = RARDSCFRA OF PDRAISON_RETOUR
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure de mise à jour
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF PDDIAG_RETOUR &
+       AND TZ_SECDEL = "0"
+    THEN BEGIN
+       ERROR 1
+    END
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF PDDIAG_RETOUR &
+       AND NOT NEWRECORD     OF PDDIAG_RETOUR &
+       AND NOT DELETEDRECORD OF PDDIAG_RETOUR &
+       AND TZ_SECMOD = "0"
+    THEN BEGIN
+      ERROR 2
+    END
+
+  LET RTOSURMC2DIA OF PDRETOUR = 0
+
+  FOR PDDIAG_RETOUR
+  BEGIN
+
+    IF NOT DELETEDRECORD OF PDDIAG_RETOUR
+    THEN BEGIN
+      NULL
+    END
+    ;
+    ;mise a jour de la quantite emballer pour un nouveau record
+    ;
+   IF RARCODRET OF PDDIAG_RETOUR = "FIN" OR RARCODRET OF PDDIAG_RETOUR = "INV"
+   THEN BEGIN
+     IF NEWRECORD     OF PDDIAG_RETOUR
+     THEN BEGIN
+        GET A_PDEMBAL_DIAG OPT &
+         VIA     CIECLE,          &
+                 CAINUMCAI,       &
+                 DIANUM002        &
+         USING   T_CIECLEMNU,     &
+                 CAINUMCAI        OF PDDIAG_RETOUR, &
+                 DIANUM002        OF PDDIAG_RETOUR
+       IF ACCESSOK
+       THEN BEGIN
+         LET EMDQTEPRD OF A_PDEMBAL_DIAG = EMDQTEPRD OF A_PDEMBAL_DIAG - &
+                                         EMDQTERET OF PDDIAG_RETOUR
+         GET PDDIAGRAMME OPT
+         IF ACCESSOK
+         THEN LET DIAQTEEMB OF PDDIAGRAMME = DIAQTEEMB OF PDDIAGRAMME - &
+                                             EMDQTERET OF PDDIAG_RETOUR
+      PUT A_PDEMBAL_DIAG RESET
+      END
+     END
+     ;
+     ;mise a jour qte embal pour une modif
+     ;
+     IF ALTEREDRECORD OF PDDIAG_RETOUR AND &
+        NOT NEWRECORD OF PDDIAG_RETOUR
+     THEN BEGIN
+       GET PDEMBAL_DIAG OPT
+       IF ACCESSOK
+       THEN LET EMDQTEPRD OF PDEMBAL_DIAG = (EMDQTEPRD OF PDEMBAL_DIAG + &
+                                             EMDQTERET_OLD) - EMDQTERET_NEW
+
+       GET PDDIAGRAMME OPT
+       IF ACCESSOK
+       THEN LET DIAQTEEMB OF PDDIAGRAMME = (DIAQTEEMB OF PDDIAGRAMME + &
+                                            EMDQTERET_OLD) - EMDQTERET_NEW
+     END
+     ;
+     ; mise a jour si delete qte embal
+     ;
+     IF      DELETEDRECORD OF PDDIAG_RETOUR
+     THEN BEGIN
+       GET PDEMBAL_DIAG OPT
+       IF ACCESSOK
+       THEN LET EMDQTEPRD OF PDEMBAL_DIAG = EMDQTEPRD OF PDEMBAL_DIAG + &
+                                            EMDQTERET OF PDDIAG_RETOUR
+       GET PDDIAGRAMME OPT
+       IF ACCESSOK
+       THEN LET DIAQTEEMB OF PDDIAGRAMME = DIAQTEEMB OF PDDIAGRAMME + &
+                                           EMDQTERET OF PDDIAG_RETOUR
+     END
+   END
+
+
+ END
+  ;
+  ; Incrémentation du numéro de séquence
+  ;
+  IF 0 = RTONUMSEQ OF PDRETOUR
+  THEN BEGIN
+    START TRANSACTION NO_SEQ
+    GET PDSEQ_RETOUR OPTIONAL           &
+      VIA   CIECLE                      &
+      USING T_CIECLEMNU
+    IF NOT ACCESSOK
+    THEN BEGIN
+      LET CIECLE OF PDSEQ_RETOUR = T_CIECLEMNU
+    END
+    LET SETNUMRAP        OF PDSEQ_RETOUR     = SETNUMRAP        OF PDSEQ_RETOUR  + 1
+    LET RTONUMSEQ        OF PDRETOUR         = SETNUMRAP        OF PDSEQ_RETOUR
+    PUT PDSEQ_RETOUR
+    DISPLAY RTONUMSEQ OF PDRETOUR
+  END
+END
+
+;---------------------------------------------------------------------
+PROCEDURE DELETE
+BEGIN
+ LET RTOSURMC2DIA OF PDRETOUR = RTOSURMC2DIA OF PDRETOUR &
+                     - (DIASURMC2 OF PDDIAGRAMME * EMDQTERET OF PDEMBAL_DIAG)
+ DELETE PDDIAG_RETOUR
+END
+;-------------------------------------------------------------------------
+
+PROCEDURE UPDATE
+BEGIN
+  PUT PDRETOUR
+  FOR PDDIAG_RETOUR
+  BEGIN
+    PUT PDDIAG_RETOUR
+    PUT PDEMBAL_DIAG
+    PUT PDDIAGRAMME
+    PUT PDPRIORITE_DIAG
+  END
+END
+
+
+
+BUILD DETAIL LIST
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+**************************** Retour de marchandises ****************************
+*                                                                              *
+* Num. séquence.: xxxxxxxxx             No. facture...: xxxxxxx                *
+* Date retour...: xxxxxxxx              Type facture..: x xxxxxxxxxxxxxxxxx    *
+*                                                                              *
+********************************** Diagramme ***********************************
+*                                                                              *
+*  Diagr.   Caisson   Qte  Prx ventes     Montant Inv Rai Description          *
+* xxxxxxx xxxxxxxxx xxxxx xxxxxxxxxxx xxxxxxxxxxx xxx xxx 12345678901234567890 *
+* xxxxxxx xxxxxxxxx xxxxx xxxxxxxxxxx xxxxxxxxxxx xxx xxx xxxxxxxxxxxxxxxxxxxx *
+* xxxxxxx xxxxxxxxx xxxxx xxxxxxxxxxx xxxxxxxxxxx xxx xxx xxxxxxxxxxxxxxxxxxxx *
+* xxxxxxx xxxxxxxxx xxxxx xxxxxxxxxxx xxxxxxxxxxx xxx xxx xxxxxxxxxxxxxxxxxxxx *
+* xxxxxxx xxxxxxxxx xxxxx xxxxxxxxxxx xxxxxxxxxxx xxx xxx xxxxxxxxxxxxxxxxxxxx *
+* xxxxxxx xxxxxxxxx xxxxx xxxxxxxxxxx xxxxxxxxxxx xxx xxx xxxxxxxxxxxxxxxxxxxx *
+* xxxxxxx xxxxxxxxx xxxxx xxxxxxxxxxx xxxxxxxxxxx xxx xxx xxxxxxxxxxxxxxxxxxxx *
+* xxxxxxx xxxxxxxxx xxxxx xxxxxxxxxxx xxxxxxxxxxx xxx xxx xxxxxxxxxxxxxxxxxxxx *
+* xxxxxxx xxxxxxxxx xxxxx xxxxxxxxxxx xxxxxxxxxxx xxx xxx xxxxxxxxxxxxxxxxxxxx *
+* xxxxxxx xxxxxxxxx xxxxx xxxxxxxxxxx xxxxxxxxxxx xxx xxx xxxxxxxxxxxxxxxxxxxx *
+* xxxxxxx xxxxxxxxx xxxxx xxxxxxxxxxx xxxxxxxxxxx xxx xxx xxxxxxxxxxxxxxxxxxxx *
+*                                                                              *
+********************************************************************************
+@ENDIF

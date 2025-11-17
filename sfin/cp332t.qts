@@ -1,0 +1,274 @@
+;/T/ Ages des comptes à payer sommaire/détaillé
+;
+;;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur...: Alain Côté / Adapté pour les C.R. par Thomas BRENNEUR
+;    Date Création.: 5 Aout 1993
+;
+;    Description...: Age des comptes à payer de type comptable, sert à avoir
+;                    une vision global des soldes à payer et de balancer
+;                    le compte ctb à payer avec le Grand Livre.
+;
+;                    Les transactions sont sélectionnées selon la période
+;                    demandée par l'usager, les soldes sont répartie dans la
+;                    bonne colonne selon la date due et la date de fin de
+;                    période.
+;
+;                    Les transactions doivent être journalisées.
+;
+;    Paramètres....: Compte ctb à payer     un, plusieurs
+;                    Fournisseur            Un, plusieurs ou tous
+;                    Periode Comptable      Jusqu'à
+;
+;
+;    Particularités: Le QTP sert à préparer un sous-fichier contenant les
+;                    factures dont il reste un solde à payer.
+;
+;
+;/M/ Modifié par...: Guy Chabot le 18 octobre 1994
+;
+;    Description...: Introduction du P.N.A. aux payables sur le même principe
+;                    ou presque des recevables.
+;
+;
+;/M/ Modifié par...: Guy Chabot le 30 novembre 1994
+;
+;    Description...: Ne pas include les cédules non-dues pour les papiements auto.
+;
+;/M/ Programmeur...: Sébastien Chabot
+;    Date modif....: 10 Septembre 1996
+;    Description...: Modifier selon la demande du client (gra01 9311 315)
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST
+SET LOCK RECORD UPDATE
+
+RUN cp332t
+
+
+GLOBAL TEMPORARY G_PECFIN    CHARACTER SIZE 4 ; Période de fin de sélection
+GLOBAL TEMPORARY G_DATFIN    DATE             ; Date de fin de la période.
+GLOBAL TEMPORARY G_CIVCOD    CHARACTER SIZE 1 PARM
+                                              ; Code identifiant l'interval
+                                              ; choisi pour les colonnes.
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Lecture de la période de référence pour obtenir la date de fin de cette
+; periode. Cette date de fin va servir pour la répartition des soldes.
+;
+;
+REQUEST DATE_FIN_PERIODE
+
+ACCESS MCPERIODE_CTB
+
+CHOOSE PECCLE PARM
+
+ITEM G_PECFIN = PECCLE    OF MCPERIODE_CTB
+ITEM G_DATFIN = PECDATFIN OF MCPERIODE_CTB
+
+
+;-------------------------------------------------------------------------------
+;
+; Création de subfiles indexés afin d'accroître la performance sur les accès.
+
+request r_cpfournisseur
+
+access cpfournisseur ; Table des fournisseurs.
+
+subfile wcpfournisseur keep include foucle of cpfournisseur, &
+                                    foucat of cpfournisseur  &
+                              index yfou_index               &
+                            segment foucle
+
+request r_mcref_adresse
+
+access mcref_adresse
+
+subfile wmcref_adresse keep include refcletyp, &
+                                    refclenum, &
+                                    radcle   , &
+                                    refciecle, &
+                                    radnom   , &
+                                    radnomabr  &
+                              index yref_index &
+                            segment refcletyp, &
+                                    refclenum, &
+                                    radcle   , &
+                                    refciecle  
+                                    
+request r_cpcap_cedule
+
+access cpcap_cedule
+
+subfile wcpcap_cedule keep include fouciecle, &
+                                   foucle   , &
+                                   capcle   , &
+                                   cpcclelig, &
+                                   cpcdatdue, &
+                                   cpcmnt     &
+                             index ycap_index &
+                           segment fouciecle, &
+                                   foucle   , &
+                                   capcle     
+                                   
+                                                                       
+request r_cpcap_histo
+
+access cpcap_histo
+
+subfile wcpcap_histo keep include fouciecle , &
+                                  foucle    , &
+                                  capcle    , &
+                                  cpcclelig , &
+                                  peccle    , &
+                                  cphdatjou , &
+                                  cphmntcap , &
+                                  cphtyptra   &
+                             index ycap_index &
+                           segment fouciecle, &
+                                   foucle   , &
+                                   capcle   , &
+                                   cpcclelig
+
+;-------------------------------------------------------------------------------
+
+REQUEST AGES_COMPTE_CAP
+
+;
+; Comptes à payer
+;
+
+ACCESS CPCPT_A_PAYER &
+
+  ;
+  ; Fournisseur de la facture, pour avoir la catégorie...
+  ;
+  LINK REFCLENUM OF CPCPT_A_PAYER  &
+    TO FOUCLE                     OF *wcpfournisseur &
+
+  ;
+  ; Nom du Fournisseur/divers.
+  ;
+  LINK REFCLETYP OF CPCPT_A_PAYER, &
+       REFCLENUM OF CPCPT_A_PAYER, &
+       RADCLE    OF CPCPT_A_PAYER, &
+       REFCIECLE OF CPCPT_A_PAYER  &
+    TO REFCLETYP , &
+       REFCLENUM , &
+       RADCLE    , &
+       REFCIECLE                 OF *wmcref_adresse OPTIONAL &
+
+  ;
+  ; Cédule de paiement, date due, montant à payer.
+  ;
+
+  LINK FOUCIECLE  OF CPCPT_A_PAYER, &
+       FOUCLE     OF CPCPT_A_PAYER, &
+       CAPCLE     OF CPCPT_A_PAYER  &
+    TO FOUCIECLE, &
+       FOUCLE, &
+       CAPCLE                       OF *wcpcap_cedule &
+
+  ;
+  ; Transactions associées à la cédule(ajust., paiements...)
+  ;
+  LINK FOUCIECLE  OF wcpcap_cedule, &
+       FOUCLE     OF wcpcap_cedule, &
+       CAPCLE     OF wcpcap_cedule, &
+       CPCCLELIG  OF wcpcap_cedule  &
+    TO FOUCIECLE , &
+       FOUCLE , &
+       CAPCLE , &
+       CPCCLELIG  OF *wcpcap_histo OPTIONAL
+
+
+CHOOSE CAPCIECLE PARM, &  ; Compagnie du menu.
+       CAPCPTCAP PARM, &  ; Compte ctb à payer.
+       REFCLENUM PARM     ; Numéro de fournisseur.
+
+; Ajustement pour le changement de siècle
+DEFINE T_PECCLE_SIE CHARACTER SIZE 5 = "1" + PECCLE OF CPCPT_A_PAYER &
+         IF PECCLE OF CPCPT_A_PAYER[1:1] < "8" &
+         ELSE "0" + PECCLE OF CPCPT_A_PAYER
+; Ajustement pour le changement de siècle
+DEFINE G_PECCLE_SIE1 CHARACTER SIZE 5 = "1" + G_PECFIN &
+         IF G_PECFIN[1:1] < "8" &
+         ELSE "0" + G_PECFIN
+
+SELECT CPCPT_A_PAYER IF     (     CAPTYPECR OF CPCPT_A_PAYER = "FA"   &
+                              OR  CAPTYPECR OF CPCPT_A_PAYER = "CR"   &
+                              OR  CAPTYPECR OF CPCPT_A_PAYER = "NA"   &
+                              OR  CAPTYPECR OF CPCPT_A_PAYER = "PA" ) &
+                        AND T_PECCLE_SIE <= G_PECCLE_SIE1 &
+                        AND CAPDATJOU OF CPCPT_A_PAYER <> 0
+
+; Ajustement pour le changement de siècle
+DEFINE T_PECCLE_SIE2 CHARACTER SIZE 5 = "1" + PECCLE OF wcpcap_histo &
+         IF PECCLE OF wcpcap_histo[1:1] < "8" &
+         ELSE "0" + PECCLE OF wcpcap_histo
+; Ajustement pour le changement de siècle
+DEFINE D_PECFIN_SIE2 CHARACTER SIZE 5 = "1" + G_PECFIN &
+         IF G_PECFIN[1:1] < "8" &
+         ELSE "0" + G_PECFIN
+
+
+SELECT wcpcap_histo IF     CPHDATJOU OF wcpcap_histo <> 0 &
+                      AND T_PECCLE_SIE2 <= D_PECFIN_SIE2
+
+
+TEMPORARY T_CPHMNT  FLOAT SIZE 8 ; Sommation des trs. associées.
+TEMPORARY T_SLD_TOT FLOAT SIZE 8 ; Solde de la ligne de cédule.
+
+
+SORT ON CAPCIECLE OF CPCPT_A_PAYER , & ; No compagnie
+        CAPCPTCAP OF CPCPT_A_PAYER , & ; Compte ctb à payer
+        REFCLENUM OF CPCPT_A_PAYER , & ; Numéro de fournisseur
+        CAPCLE    OF CPCPT_A_PAYER , & ; No facture
+        CPCCLELIG OF wcpcap_cedule     ; No Cédule
+
+;
+; Si c'est un chèque ou un chèque annulé il faut soustraire
+; le montant du montant brut.
+;
+ITEM T_CPHMNT = 0 - CPHMNTCAP OF wcpcap_histo &
+                         IF    CPHTYPTRA OF wcpcap_histo = "CH" &
+                            OR CPHTYPTRA OF wcpcap_histo = "CA" ELSE &
+                CPHMNTCAP OF wcpcap_histo
+
+;
+; Solde de la cédule.
+;
+ITEM T_SLD_TOT SUBTOTAL T_CPHMNT &
+               RESET AT CPCCLELIG TO CPCMNT OF wcpcap_cedule
+
+SUBFILE WCP332 KEEP &
+               AT CPCCLELIG &
+               IF ( "PA" <> CAPTYPECR OF CPCPT_A_PAYER &
+                  AND T_SLD_TOT <> 0) &
+                  OR ( "PA"      = CAPTYPECR OF CPCPT_A_PAYER &
+                  AND G_DATFIN >= CPCDATDUE OF wcpcap_cedule ) &
+INCLUDE CAPCIECLE OF CPCPT_A_PAYER  , &
+        CAPCLE    OF CPCPT_A_PAYER  , &
+        CAPCPTCAP OF CPCPT_A_PAYER  , &
+        CAPDAT    OF CPCPT_A_PAYER  , &
+        CAPMNT    OF CPCPT_A_PAYER  , &                    <-- SEBCHA960910
+        REFCLENUM OF CPCPT_A_PAYER  , &
+        RADNOM    OF wmcref_adresse , &
+        RADNOMABR OF wmcref_adresse , &
+        FOUCAT    OF wcpfournisseur , &
+        CPCCLELIG OF wcpcap_cedule  , &
+        CPCDATDUE OF wcpcap_cedule  , &
+        G_DATFIN                    , &
+        T_SLD_TOT                   , &
+        G_CIVCOD
+
+BUILD cp332t

@@ -1,0 +1,794 @@
+;/T/ 2.5.1 Enregistrer les caissons. (DIAGRAMME)
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1995-04-24
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   la liste d'emblalage.
+;
+;/M/ François Déry, 6 mai 1999
+;       Modification de la table des diagrammes pour enlever les champs compute
+;       qu'elle contenait et création d'une vue pour compenser.
+;
+;/M/ Programmeur..: Nancy Breton
+;    Date modif...: 1998-12-22
+;
+;    Description..: Modification de la procédure POSTUPDATE lors du calcule de
+;                   t_sum l'élément EMDQTEPRD ne provenait pas de la bonne
+;                   table. (sos #523)
+;
+;/M/ Programmeur..: Claudie Doyon
+;    Date.........: 1999/10/12
+;    Description..: Modification de la procédure préupdate pour empêcher la
+;                   modification de l'enregistrement si caisson expédié.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd216b ACTIONBAR                     &
+              MODE LABEL "" AT 2,80         &
+              NOACTION                      &
+              FIELDMARK RETAIN STARTUP      &
+              HELP POPUP FROM 4,9 TO 20,72  &
+              RECEIVING T_CIECLEMNU,        &
+                        T_CIENOM,           &
+                        PDCAISSON,          &
+                        PDCOMMAN_INTERNE
+
+
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD216B"
+
+
+;-------------------------------------------------------------------------------
+; Documentation de l'écran.
+;
+USE pd216b.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Sert à valider les codes bilingue et pour les sous-écrans de consultation
+;
+DEFINE    D_CAISTU    CHARACTER SIZE 16 = "CAISTU"
+TEMPORARY T_CAISTU    CHARACTER SIZE 04
+DEFINE    D_CAIETA    CHARACTER SIZE 16 = "CAIETA"
+TEMPORARY T_CAIETA    CHARACTER SIZE 04
+
+TEMPORARY T_SUM INTEGER SIZE 4
+DEFINE    D_SUM INTEGER SIZE 4 = T_SUM
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire au traitement
+;
+
+TEMPORARY T_TOT_IMP   INTEGER   UNSIGNED SIZE 04
+TEMPORARY T_QTE_IMP   INTEGER   UNSIGNED SIZE 04
+TEMPORARY T_TYPE_PROD CHARACTER          SIZE 02 INITIAL "DI" RESET AT STARTUP ; Type de produit traiter par l'écran
+TEMPORARY T_TOTSURMC2 FLOAT              SIZE 08              RESET AT STARTUP ; Total surface des pièces de granit
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du volume d'une pièce de granit
+;
+
+USE usvarvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Caisson
+;
+
+FILE PDCAISSON MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Commande interne
+;
+
+FILE PDCOMMAN_INTERNE MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Diagramme
+;
+
+FILE PDEMBAL_DIAG PRIMARY &
+                  NOITEM &
+                  OCCURS 24 TIMES
+
+  ACCESS VIA     CIECLE,          &
+                 CAINUMCAI        &
+         USING   T_CIECLEMNU,                     &
+                 CAINUMCAI        OF PDEMBAL_DIAG &
+         ORDERBY CIECLE,          &
+                 CAINUMCAI,       &
+                 DIANUM002
+
+
+  ITEM CIECLE           OF PDEMBAL_DIAG INITIAL T_CIECLEMNU
+  ITEM CAINUMCAI        OF PDEMBAL_DIAG INITIAL CAINUMCAI        OF PDCAISSON
+  ITEM PJTABR           OF PDEMBAL_DIAG INITIAL PJTABR           OF PDCOMMAN_INTERNE
+  ITEM PJTANN           OF PDEMBAL_DIAG INITIAL PJTANN           OF PDCOMMAN_INTERNE
+  ITEM PJTNUMSEQ        OF PDEMBAL_DIAG INITIAL PJTNUMSEQ        OF PDCOMMAN_INTERNE
+  ITEM PJTNUMPRO        OF PDEMBAL_DIAG INITIAL PJTNUMPRO        OF PDCOMMAN_INTERNE
+  ITEM COMNUMCOMINT     OF PDEMBAL_DIAG INITIAL COMNUMCOMINT     OF PDCOMMAN_INTERNE
+  ITEM COMNUMCOM        OF PDEMBAL_DIAG INITIAL COMNUMCOM        OF PDCOMMAN_INTERNE
+  ITEM DIANUM002        OF PDEMBAL_DIAG FINAL   PJTABR           OF PDCOMMAN_INTERNE + &
+                                                DIANUMDIA002     OF PDEMBAL_DIAG
+
+
+
+FILE PDEMBAL_DIAG ALIAS PDEMBAL_DIAGG DESIGNER
+
+  ACCESS VIA     CIECLE,          &
+                 CAINUMCAI        &
+         USING   T_CIECLEMNU,     &
+                 CAINUMCAI        OF PDCAISSON
+
+;-------------------------------------------------------------------------------
+;
+; Diagramme
+;
+
+FILE PDDIAGRAMME REFERENCE
+
+  ACCESS VIA     PJTABR,          &
+                 DIANUMDIA002,     &
+                 CIECLE            &
+         USING   PJTABR           OF PDCOMMAN_INTERNE, &
+                 DIANUMDIA002     OF PDEMBAL_DIAG  , &
+                 T_CIECLEMNU
+;
+; Quantité calculée.
+;
+FILE VDIAQTE          REFERENCE
+  ACCESS VIA   PJTABR, &
+               DIANUMDIA001, &
+               DIANUMDIA002, &
+               CIECLE &
+         USING PJTABR OF PDDIAGRAMME, &
+               DIANUMDIA001 OF PDDIAGRAMME, &
+               DIANUMDIA002 OF PDDIAGRAMME, &
+               CIECLE OF PDDIAGRAMME
+
+
+FILE PDDIAGRAMME ALIAS PDDIAGRAMMEE REFERENCE OCCURS WITH PDEMBAL_DIAGG
+
+  ACCESS VIA     PJTABR,          &
+                 DIANUMDIA002,     &
+                 CIECLE            &
+         USING   PJTABR           OF PDCOMMAN_INTERNE, &
+                 DIANUMDIA002     OF PDEMBAL_DIAGG  , &
+                 T_CIECLEMNU
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Priorité diagramme
+;
+
+FILE PDPRIORITE_DIAG REFERENCE
+
+  ACCESS VIA     CIECLE,          &
+                 PJTABR,          &
+                 DIANUMDIA002,    &
+                 PRICODPRI        &
+         USING   T_CIECLEMNU,                          &
+                 PJTABR           OF PDEMBAL_DIAG,     &
+                 DIANUMDIA002     OF PDEMBAL_DIAG,     &
+                 PRICODPRI        OF PDEMBAL_DIAG
+
+
+;-------------------------------------------------------------------------------
+;
+; Priorité diagramme
+;
+
+FILE PDPRIORITE_DIAG DESIGNER ALIAS PRD_PRIO_DIAG
+
+
+;-------------------------------------------------------------------------------
+;
+; Code bilingue (Statut)
+;
+
+FILE VCBI_DSC  REFERENCE &
+               ALIAS A_CBI_CAISTU
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_CAISTU,                             &
+               CAISTU              OF PDCAISSON
+
+
+;-------------------------------------------------------------------------------
+;
+; Code bilingue (État)
+;
+
+FILE VCBI_DSC  REFERENCE &
+               ALIAS A_CBI_CAIETA
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_CAIETA,                             &
+               CAIETA              OF PDCAISSON
+
+
+;-------------------------------------------------------------------------------
+;
+; Type de granit
+;
+
+FILE PDTYPE_GRANIT REFERENCE
+
+  ACCESS VIA   CIECLE,          &
+               TGRCODGRA        &
+         USING T_CIECLEMNU,     &
+               TGRCODGRA           OF PDDIAGRAMME
+
+FILE PDTYPE_GRANIT ALIAS PDTYPE_GRANITE REFERENCE
+
+  ACCESS VIA   CIECLE,          &
+               TGRCODGRA        &
+         USING T_CIECLEMNU,     &
+               TGRCODGRA           OF PDDIAGRAMMEE
+
+
+FILE PDPROD_BON_CMD DESIGNER
+;-------------------------------------------------------------------------------
+;
+; Variables nécessaire au traitement
+;
+
+TEMPORARY T_ALTREC      CHARACTER        SIZE 01 OCCURS WITH PDEMBAL_DIAG
+TEMPORARY T_NEWREC      CHARACTER        SIZE 01 OCCURS WITH PDEMBAL_DIAG
+TEMPORARY T_DELREC      CHARACTER        SIZE 01 OCCURS WITH PDEMBAL_DIAG
+TEMPORARY T_QTE_EMB     INTEGER SIGNED   SIZE 04 OCCURS WITH PDEMBAL_DIAG
+TEMPORARY T-OLD         INTEGER SIGNED   SIZE 04 OCCURS WITH PDEMBAL_DIAG
+
+TEMPORARY T_DIANUMDIA002 CHARACTER SIZE 05 RESET AT STARTUP
+
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Caisson " &
+@ELSE
+      " %%%Caisson " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+
+ALIGN (,03,19) (,48,64)
+
+
+FIELD CAINUMCAI        OF PDCAISSON        &
+LABEL "Num. caisson..:"&
+        DISPLAY                            &
+        NUMERIC   SIGNIF 9                         &
+        FIXED
+
+
+FIELD D_SUM &
+      LABEL "Qte...........:" &
+      DISPLAY
+
+ALIGN (,03,19) (,21,22) (24,24,25) (,,29)
+
+FIELD PJTABR           OF PDCAISSON        &
+        DISPLAY FIXED &
+        LABEL "Num. commande.:"
+
+FIELD PJTANN           OF PDCAISSON        &
+        LABEL "-"                          &
+        DISPLAY FIXED
+
+
+FIELD COMNUMCOMINT     OF PDCAISSON        &
+        LABEL "-"                          &
+        NUMERIC                            &
+        BWZ DISPLAY FIXED
+
+;FIELD COMNUMCOM        OF PDCAISSON        &
+;        DISPLAY                            &
+;        FIXED
+
+
+FIELD COMNOM           OF PDCOMMAN_INTERNE &
+        DISPLAY                            &
+        FIXED
+
+
+ALIGN (,03,19) (,,22)
+
+
+FIELD CAISTU           OF PDCAISSON        &
+LABEL "Statut........:"&
+        DISPLAY                            &
+        FIXED
+
+
+FIELD CBIDSC           OF A_CBI_CAISTU     &
+        DISPLAY                            &
+        FIXED
+
+
+ALIGN (,03,19) (,,22) (,48,64)
+
+
+FIELD CAIETA           OF PDCAISSON        &
+LABEL "État..........:"&
+        DISPLAY                            &
+        FIXED
+
+
+FIELD CBIDSC           OF A_CBI_CAIETA     &
+        DISPLAY                            &
+        FIXED
+
+
+FIELD CAIMC2           OF PDCAISSON        &
+LABEL "Surface.......:"&
+        DISPLAY                            &
+        FIXED
+
+
+ALIGN (,03,19) (,48,64)
+
+
+FIELD CAIPOIEST        OF PDCAISSON        &
+        LABEL "Poids estimé..: "           &
+        DISPLAY                            &
+        FIXED
+
+
+FIELD CAIPOIREE        OF PDCAISSON        &
+LABEL "Poids réel....:"&
+        DISPLAY                            &
+        FIXED
+
+
+DRAW 11,01 TO 11,80
+
+
+SKIP TO LINE 11
+
+
+TITLE &
+@IF FRANCAIS
+      " Diagramme " &
+@ELSE
+      " %%%Diagramme " &
+@ENDIF
+      CENTERED AT ,1
+
+
+SKIP TO LINE 13
+
+
+TITLE &
+@IF FRANCAIS
+      "  Diag.   Qte  Pr           Diag.   Qte  Pr           Diag.   Qte  Pr " &
+@ELSE
+      "%%%iag.   Qte  Pr           Diag.   Qte  Pr           Diag.   Qte  Pr " &
+@ENDIF
+      AT ,2
+
+DRAW 11,24 TO 23,24
+DRAW 11,50 TO 23,50
+
+
+SKIP TO LINE 14
+
+
+ALIGN (02,03,04) (,,10) (,,17)
+
+
+CLUSTER VERTICAL OCCURS WITH PDEMBAL_DIAG ID BASE 25 FOR 1,26
+
+
+FIELD DIANUMDIA002     OF PDEMBAL_DIAG     &
+        HIDDEN                             &
+        LABEL " "                          &
+        REQUIRED                           &
+        NOCHANGE                           &
+        LOOKUP ON PDDIAGRAMME              &
+               VIA     CIECLE,                &
+                       DIANUM002              &
+               USING   T_CIECLEMNU,           &
+                       PJTABR OF PDCOMMAN_INTERNE + DIANUMDIA002 OF PDEMBAL_DIAG &
+          MESSAGE 2998, & ; Ce numéro de diagramme n'existe pas
+               NOTON PDEMBAL_DIAG &
+               VIA     CIECLE,                &
+                       CAINUMCAI,             &
+                       DIANUM002              &
+               USING   T_CIECLEMNU,           &
+                       CAINUMCAI OF PDCAISSON, &
+                       PJTABR OF PDCOMMAN_INTERNE + DIANUMDIA002 OF PDEMBAL_DIAG &
+               MESSAGE 2921  ; Ce numéro de ligne existe déjà
+
+FIELD EMDQTEPRD        OF PDEMBAL_DIAG     &
+        HIDDEN                             &
+        REQUIRED SIZE 5
+
+
+FIELD PRICODPRI        OF PDEMBAL_DIAG     &
+        HIDDEN                             &
+        REQUIRED                           &
+        NUMERIC        SIZE 2
+
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Assigne le numéro complèt du diagramme
+;
+
+PROCEDURE INPUT DIANUMDIA002
+BEGIN
+  LET DIANUM002 OF PDEMBAL_DIAG = PJTABR OF PDCOMMAN_INTERNE + &
+                                   FIELDTEXT
+END
+;---------------------------------------------------------
+PROCEDURE PROCESS DIANUMDIA002
+BEGIN
+ IF BCMNUMBCM OF PDCAISSON <> 0
+ THEN BEGIN
+   GET PDPROD_BON_CMD OPT &
+     VIA   CIECLE   ,&
+           BCMNUMBCM,&
+           DIANUM002 &
+    USING  T_CIECLEMNU ,&
+           BCMNUMBCM OF PDCAISSON,&
+           DIANUM002 OF PDEMBAL_DIAG
+  IF NOT ACCESSOK
+  THEN ERROR = "Mauvais PO"
+ END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide la qte saisie
+;
+
+PROCEDURE EDIT EMDQTEPRD
+BEGIN
+  ;IF CAISTU OF PDCAISSON <> "I"
+  ;THEN BEGIN
+  ;  ERROR 3194 ; Le caisson est déjà expédié
+  ;END
+  ;
+  ; Valide que la quantité est plus grande que zéro
+  ;
+  IF FIELDVALUE <= 0
+  THEN BEGIN
+    ERROR 3056 ; La quantité doit être plus grande que zéro
+  END
+
+
+
+  IF FIELDVALUE > (DIAQTECMD OF PDDIAGRAMME - DIAQTEEMB OF PDDIAGRAMME)
+  THEN BEGIN
+    WARNING 3139 NOW RESP ; La quantité saisie est suppérieur à la quantité requise
+  END
+  IF CAISITEMB = "GR"
+  THEN BEGIN
+    IF DIAQTEPLADBTGRA  OF VDIAQTE = 0 AND (CAIETA OF PDCAISSON = "S" OR &
+                                                CAIETA OF PDCAISSON = "C")
+    THEN BEGIN
+      ERROR 3140 ; La quantité saisie est n'est pas requise pour ce site
+    END
+    IF DIAQTEPLAFINGRA  OF VDIAQTE = 0 AND (CAIETA OF PDCAISSON = "F" OR &
+                                                CAIETA OF PDCAISSON = "C")
+    THEN BEGIN
+      ERROR 3140 ; La quantité saisie est n'est pas requise pour ce site
+    END
+  END
+  IF CAISITEMB = "US"
+  THEN BEGIN
+    IF DIAQTEPLADBTUSC  OF VDIAQTE = 0 AND (CAIETA OF PDCAISSON = "S" OR &
+                                                CAIETA OF PDCAISSON = "C")
+    THEN BEGIN
+      ERROR 3140 ; La quantité saisie est n'est pas requise pour ce site
+    END
+    IF DIAQTEPLAFINUSC  OF VDIAQTE = 0 AND (CAIETA OF PDCAISSON = "F" OR &
+                                                CAIETA OF PDCAISSON = "C")
+    THEN BEGIN
+      ERROR 3140 ; La quantité saisie est n'est pas requise pour ce site
+    END
+  END
+  IF CAISITEMB = "SC"
+  THEN BEGIN
+    IF DIAQTEPLADBTSCT  OF VDIAQTE = 0 AND (CAIETA OF PDCAISSON = "S" OR &
+                                                CAIETA OF PDCAISSON = "C")
+    THEN BEGIN
+      ERROR 3140 ; La quantité saisie est n'est pas requise pour ce site
+    END
+    IF DIAQTEPLAFINSCT  OF VDIAQTE = 0 AND (CAIETA OF PDCAISSON = "F" OR &
+                                                CAIETA OF PDCAISSON = "C")
+    THEN BEGIN
+      ERROR 3140 ; La quantité saisie est n'est pas requise pour ce site
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation a effectuer lors de la saisi du champ
+;
+
+;PROCEDURE EDIT PRICODPRI
+;BEGIN
+  ;IF CAISTU OF PDCAISSON <> "I"
+  ;THEN BEGIN
+  ;  ERROR 3194 ; Le caisson est déjà expédié
+  ;END
+;END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+  LET TPDTYPPRD OF PDCAISSON = "DI"
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul du volume d'une pièce de granit
+;
+
+USE uscalvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+
+ IF CAISTU OF PDCAISSON = "E"
+  THEN ERROR "Vous ne pouvez modifier/saisir/d\351truire car caisson expédié"
+
+  IF CAISTU OF PDCAISSON = "A"
+  THEN ERROR "Vous ne pouvez modifier/saisir/détruire car caisson annulé"
+
+
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDEMBAL_DIAG &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ;Validation du status du caisson,ne doit pas etre expedier
+  ;IF     DELETEDRECORD OF PDEMBAL_DIAG &
+  ;   AND CAISTU OF PDCAISSON ="E"
+  ;THEN ERROR = "LE CAISSON EST EXPEDIER"
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDEMBAL_DIAG &
+     AND NOT NEWRECORD     OF PDEMBAL_DIAG &
+     AND NOT DELETEDRECORD OF PDEMBAL_DIAG &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+
+  LET CAIMC2    OF PDCAISSON = 0.00
+  LET CAIPOIEST OF PDCAISSON = 0.00
+
+  FOR PDEMBAL_DIAG
+  BEGIN
+   IF 0 <> SIZE(TRUNC(T_DIANUMDIA002))
+    THEN BEGIN
+           IF T_DIANUMDIA002 = DIANUMDIA002 OF PDEMBAL_DIAG
+           THEN &
+           ERROR "Vous ne pouvez pas saisir un même diagramme plus d'une fois !"
+    END
+    LET T_DIANUMDIA002 = DIANUMDIA002 OF PDEMBAL_DIAG
+
+    LET T_ALTREC = "0"
+    LET T_NEWREC = "0"
+    LET T_DELREC = "0"
+
+    IF ALTEREDRECORD OF PDEMBAL_DIAG
+    THEN BEGIN
+      LET T_QTE_EMB = EMDQTEPRD OF PDEMBAL_DIAG - &
+                      T-OLD
+      LET T_ALTREC = "1"
+    END
+
+    IF NEWRECORD     OF PDEMBAL_DIAG
+    THEN BEGIN
+      LET T_QTE_EMB = EMDQTEPRD OF PDEMBAL_DIAG
+      LET T_NEWREC = "1"
+    END
+
+    IF DELETEDRECORD OF PDEMBAL_DIAG
+    THEN BEGIN
+      LET T_QTE_EMB = EMDQTEPRD OF PDEMBAL_DIAG * -1
+      LET T_DELREC = "1"
+    END
+    RUN SCREEN pd216by &
+               PASSING PDCAISSON,       &
+                       PDEMBAL_DIAG,    &
+                       PDPRIORITE_DIAG, &
+                       PDDIAGRAMME,     &
+                       T_QTE_EMB,       &
+                       T_ALTREC,        &
+                       T_NEWREC,        &
+                       T_DELREC,        &
+                       T_CIECLEMNU
+
+  END
+  DISPLAY CAIMC2 OF PDCAISSON
+  DISPLAY CAIPOIEST OF PDCAISSON
+END
+;----------------------------------------------------------------------------
+PROCEDURE POSTFIND
+BEGIN
+  FOR PDEMBAL_DIAG
+  BEGIN
+    LET T-OLD = EMDQTEPRD OF PDEMBAL_DIAG
+    LET T_SUM = T_SUM + EMDQTEPRD OF PDEMBAL_DIAG
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Permet de retrouver le caisson avec le statut (BUG PowerHouse - InterBase)
+;
+
+PROCEDURE POSTUPDATE
+BEGIN
+  GET PDCAISSON OPTIONAL &
+    VIA CIECLE,          &
+        CAINUMCAI        &
+    USING T_CIECLEMNU,   &
+          CAINUMCAI OF PDCAISSON
+  LET CAIMC2    OF PDCAISSON = 0.00
+  LET CAIPOIEST OF PDCAISSON = 0.00
+  LET T_SUM = 0
+  WHILE RETRIEVING PDEMBAL_DIAGG
+  BEGIN
+    ;
+    ; Calcul de la surface et du volume vendu
+    ;
+    LET CAIPOIEST OF PDCAISSON = CAIPOIEST OF PDCAISSON + &
+                                 (EMDQTEPRD OF PDEMBAL_DIAGG * &
+                                  TGRPOI    OF PDTYPE_GRANITE * &
+                                  DIAVOLMC3 OF PDDIAGRAMMEE)
+
+    LET CAIMC2    OF PDCAISSON = CAIMC2    OF PDCAISSON + &
+                                 (EMDQTEPRD OF PDEMBAL_DIAGG * &
+                                  DIASURMC2 OF PDDIAGRAMMEE)
+    LET T_SUM = T_SUM + EMDQTEPRD OF PDEMBAL_DIAGG
+;    let d_sum = t_sum
+   END
+DISPLAY D_SUM
+push find
+;WARNING = ""
+END
+
+;-------------------------------------------------------------------------
+ PROCEDURE FIND
+   BEGIN
+     FOR MISSING PDEMBAL_DIAG
+       BEGIN
+         GET PDEMBAL_DIAG VIA CIECLE , CAINUMCAI ORDERBY CIECLE , &
+               CAINUMCAI , DIANUM002 USING T_CIECLEMNU , CAINUMCAI OF &
+               PDEMBAL_DIAG
+
+
+         END
+     END
+
+
+BUILD
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+*********************************** Caisson ************************************
+*                                                                              *
+* Num. caisson..: xxxxxxxxxxx                                                  *
+* Commande int..: xxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           *
+* Statut........: x  xxxxxxxxxxxxxxxxxxxxxxxxx                                 *
+* État..........: x  xxxxxxxxxxxxxxxxxxxxxxxxx Surface.......: xxxxxxxxxx      *
+* Poids estimer.: xxxxxxxxxxxxx                Poids réel....: xxxxxxxxxxxxx   *
+*                                                                              *
+********************************** Diagramme ***********************************
+*                      *                         *                             *
+*  Diag.   Qte  Pr     *     Diag.   Qte  Pr     *     Diag.   Qte  Pr         *
+*  xxxxx xxxxx  xx     *     xxxxx xxxxx  xx     *     xxxxx xxxxx  xx         *
+*  xxxxx xxxxx  xx     *     xxxxx xxxxx  xx     *     xxxxx xxxxx  xx         *
+*  xxxxx xxxxx  xx     *     xxxxx xxxxx  xx     *     xxxxx xxxxx  xx         *
+*  xxxxx xxxxx  xx     *     xxxxx xxxxx  xx     *     xxxxx xxxxx  xx         *
+*  xxxxx xxxxx  xx     *     xxxxx xxxxx  xx     *     xxxxx xxxxx  xx         *
+*  xxxxx xxxxx  xx     *     xxxxx xxxxx  xx     *     xxxxx xxxxx  xx         *
+*  xxxxx xxxxx  xx     *     xxxxx xxxxx  xx     *     xxxxx xxxxx  xx         *
+*  xxxxx xxxxx  xx     *     xxxxx xxxxx  xx     *     xxxxx xxxxx  xx         *
+*                      *                         *                             *
+********************************************************************************
+@ENDIF

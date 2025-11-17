@@ -1,0 +1,659 @@
+;/T/ Exécution interactive de programme
+
+;/P/ Prosig Informatique
+
+;/M/ François Déry, 27 mai 1999
+;       Nouveau programme. Cette écran ressemble à gs090. Elle ne demande aucun
+;       paramètre à l'usager car il sont transmis dans la liste de valeur.
+;
+;/M/ Patrick Langlois , 23 Août 1999
+;       Nouveau programme. Cette écran ressemble à gs090. Il ne demande aucun
+;       paramètre à l'usager car il sont transmis dans la liste de valeur. Ne pas
+;       afficher l'imprimante et le nombre de copie dans le bas de la page.
+;
+;-------------------------------------------------------------------------------
+;/V/ Écran vérifier pour le passage à l'an 2000
+SCREEN gs092 NOMODE NOACTION     &
+             RECEIVING D_XPRNOM, &
+                       D_LISPAR, &
+                       D_INDLON, &
+                       D_LISVAL
+
+;USE usactecr NOLIST
+;
+; Sert à la génération du numéro de séquence
+;
+;TRANSACTION GEN_NUM_SEQ READ WRITE &
+;                       RESERVING FOR PROTECTED WRITE GSXLG_SEQ IN DICT
+;                                                ; Le IN DICT est pour unix
+;
+; Valeur recu de l'écran précédant.
+;
+DEFINE D_XPRNOM CHARACTER SIZE 7   ; Nom du programme
+DEFINE D_LISPAR CHARACTER SIZE 204 ; Liste des paramètres reçus
+DEFINE D_INDLON CHARACTER SIZE 112 ; Indice et longueur des paramètres(Maximum 12)
+DEFINE D_LISVAL CHARACTER SIZE 300 ; Liste des valeurs(data).
+;
+; Code de locasation
+;
+TEMPORARY T_XLOCLE CHARACTER SIZE 4 ;
+TEMPORARY T_NBRCOP INTEGER   SIZE 2
+TEMPORARY T_XJBCLE CHARACTER SIZE 5
+;
+; On se sert du nom la liste ou de la procédure pour la sécurité.
+;
+USE ussectmp NOLIST
+  D_XPRNOM
+
+;
+FILE GSPROGRAMME      REFERENCE
+  ACCESS VIA   XPRNOM &
+         USING D_XPRNOM
+;
+; Pour avoir la langue et la localisation de l'usager.
+;
+FILE GSUSAGER         REFERENCE
+  ACCESS VIA   USRCLE &
+         USING LOGONID
+;
+; Validation du code d'imprimante selon la localisation.
+;
+FILE GSXIM_LOCAL      REFERENCE
+  ACCESS VIA   XLOCLE, &
+               XIMCOD &
+         USING T_XLOCLE, &
+               XIMCOD OF GSPROGRAMME
+;
+; Recherche du nom physique de la forme d'impression
+;
+FILE GSFORME          REFERENCE
+  ACCESS VIA   XFRCLE &
+         USING XFRCLE OF GSPROGRAMME
+
+TEMPORARY T_SELECT       CHARACTER SIZE 8    ; $ENDIF
+;
+; Détail des lignes du programme.
+;
+FILE GSPR_DETAIL      IN DICT DESIGNER
+  ACCESS VIA XPRNOM &
+         USING XPRNOM OF GSPROGRAMME &
+         ORDERBY XPRNOM, &
+                 XPDNUMLIG
+SELECT IF T_SELECT = ""  OR &
+          T_SELECT = UPSHIFT(XPDCMD OF GSPR_DETAIL)[1:8]
+
+;
+; Contient le fichier de commandes selon le système d'exploitation.
+;
+FILE GSFICHIER_CMD    DESIGNER &
+                      NEED ALL
+@IF UNIX
+  TEMPORARY T_RETURN INTEGER SIZE 1 INITIAL 10 ; Code ascii pour un <return>
+  TEMPORARY T_NULL   INTEGER SIZE 1 INITIAL 0  ; Code ascii pour un <null>
+  ITEM XFCFLGRET OF GSFICHIER_CMD FINAL CHAR(T_RETURN)
+@ENDIF
+;
+; Numéro de séquence des jobs
+;
+FILE GSXLG_SEQ        DESIGNER &
+                      TRANSACTION GEN_NUM_SEQ
+
+;-------------------------------------------------------------------------------
+;
+; Les variables qui suivent representent les champs qui sont à l'écran
+;
+TEMPORARY T_CHOIX        CHARACTER SIZE 1    ; Choix exécution 01 à 99
+TEMPORARY T_VECTCHOIX    CHARACTER SIZE 4 OCCURS 99 TIMES
+                                             ; Vecteur qui garde les choix
+                                             ; d'exécution
+TEMPORARY T_INDCHOIX     INTEGER   SIZE   2  ; Indice du vecteur de choix
+TEMPORARY T_CHOIX1       CHARACTER SIZE 4    ; Permet de codifier les $IF avec
+TEMPORARY T_CHOIX2       CHARACTER SIZE 4    ; UN or.
+
+;
+; Variables de traitement
+;
+TEMPORARY T_FICCMD       CHARACTER SIZE  35 RESET AT STARTUP
+                                            ; Fichier commande
+TEMPORARY T_FICLOG       CHARACTER SIZE  35 ; Fichier de logfile
+TEMPORARY T_FICPRT       CHARACTER SIZE  35 ; Fichier d'impression
+TEMPORARY T_CMD          CHARACTER SIZE 255 ; Commande de système exploitation
+TEMPORARY T_DATA         CHARACTER SIZE 132 ; Contient les cmds de T-FICHIER-CMD
+
+TEMPORARY T_CODE         CHARACTER SIZE   2 ; Code de saisie, DU,CU...
+TEMPORARY T_INDPAR       INTEGER   SIZE   2 ; Indice du paramètre dans la liste
+TEMPORARY T_MODPOW       CHARACTER SIZE   4 ; Mode pow de GSPR_DETAIL (QTP/QUIZ)
+TEMPORARY T_RESTE        CHARACTER SIZE  65 ; Contient le reste de la ligne de
+                                            ; GSPR_DETAIL apres la donnee.
+TEMPORARY T_XPANOM       CHARACTER SIZE  16 ; Nom du param venant de GSPR_DETAIL
+;-------------------------------------------------------------------------------
+;
+DEFINE D_XPRDSC     CHARACTER  SIZE 60 = CENTER( XPRDSCFRA OF GSPROGRAMME )
+DEFINE D-NOM-LISTE  CHARACTER  SIZE 10 = "gs304z"
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de la liste ou de la procédure.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  ;
+  ; # de jobs pour log
+  ;
+  START TRANSACTION GEN_NUM_SEQ
+  GET GSXLG_SEQ VIA XLSCLE USING "2" OPTIONAL
+  LET XLSCLE    OF GSXLG_SEQ = "2"
+  ;
+  ; On recommence à 1 si le compteur est rendu à 99999.
+  ;
+  IF XLSNUMSEQ OF GSXLG_SEQ = 9999
+  THEN LET XLSNUMSEQ OF GSXLG_SEQ = 0
+  LET XLSNUMSEQ OF GSXLG_SEQ = XLSNUMSEQ OF GSXLG_SEQ + 1
+  LET T_XJBCLE = "i" + ASCII(XLSNUMSEQ OF GSXLG_SEQ, 4)
+  PUT GSXLG_SEQ
+
+  COMMIT TRANSACTION GEN_NUM_SEQ
+  ;
+  ; Assigne la localisation de l'usager.
+  ;
+  LET T_XLOCLE = XLOCLE OF GSUSAGER
+  LET T_NBRCOP = XPRNBRCOP OF GSPROGRAMME
+
+  PUSH UPDATE
+END
+
+;*****************************************************************************
+;
+;
+;*****************************************************************************
+
+
+PROCEDURE PATH
+NULL
+
+PROCEDURE FIND
+DISABLE
+
+PROCEDURE DELETE
+DISABLE
+
+
+;-------------------------------------------------------------------------------
+;
+; Cette procedure force l'impression d'une ligne blanche dans le fichier
+; commande.
+;
+;
+PROCEDURE INTERNAL NULL ;OK
+BEGIN
+  LET XFCLIG OF GSFICHIER_CMD = "-=-=-=-=-="
+  LET XFCLIG OF GSFICHIER_CMD = TRUNCATE(" ")
+  PUT GSFICHIER_CMD RESET
+END
+;-------------------------------------------------------------------------------
+;
+; Cette procédure écrit le paramètre saisie et enlève les espaces blancs
+; à la fin de la ligne.
+;
+PROCEDURE INTERNAL PUT_CMD ;OK
+BEGIN
+  ;
+  ; Indique "fin de ligne", on doit enlever le séparateur avant d'écrire
+  ; la ligne dans le fichier de commande.
+  ;
+  IF "FN" = T_CODE
+  THEN LET T_DATA = XFCLIG OF GSFICHIER_CMD[1: &
+                    SIZE(TRUNCATE(XFCLIG OF GSFICHIER_CMD)) - 1]
+  ;
+  ; Dans le cas du code PU, il ne faut pas avoir de "cariage return" à chaque
+  ; paramètre et en plus il faut un caractère de fin ligne pour bien traiter
+  ; les espsaces blanc.
+  ;
+  IF T_CODE <> "PU" AND T_CODE <> "RP"
+  THEN BEGIN
+    LET XFCLIG OF GSFICHIER_CMD = TRUNCATE(T_DATA)
+@IF UNIX
+    ;
+    ; Si la ligne de commande de termine par un \, il faut complèter la ligne
+    ; avec des nulls. Car s'il y a des espaces entre le caractère \ et le
+    ; line feed cela ne fonctionne pas sur Unix.
+    ;
+    IF "" <> TRUNCATE(T_DATA)
+    THEN BEGIN
+      IF "\" = T_DATA[SIZE(TRUNCATE(T_DATA)):1]
+      THEN BEGIN
+        FOR 132
+        BEGIN
+          IF OCCURRENCE > SIZE(TRUNCATE(T_DATA))
+          THEN LET XFCLIG OF GSFICHIER_CMD = &
+                               XFCLIG OF GSFICHIER_CMD[1:OCCURRENCE - 1] + &
+                               CHARACTERS(T_NULL)
+        END
+      END
+    END
+@ENDIF
+    PUT GSFICHIER_CMD RESET
+  END
+  ELSE LET XFCLIG OF GSFICHIER_CMD = XFCLIG OF GSFICHIER_CMD[1: &
+                                     SIZE(TRUNCATE(XFCLIG OF GSFICHIER_CMD)) - 1] &
+                                    + &
+                                    TRUNCATE(T_DATA) + "|"
+END
+;-------------------------------------------------------------------------------
+;
+; Cette procedure execute la procedure INTERNAL correspondant au
+; parametre indiquer dans le fichier GSPR_DETAIL
+;
+;
+PROCEDURE INTERNAL PARAMETRE
+BEGIN
+  ;
+  ; Code de ligne. (DU,CU...)
+  ;
+  LET T_CODE   = XPDCMD OF GSPR_DETAIL[2:2]   ; CODE DE PARAMETRE (C, CU...)
+  ;
+  ; Nom du paramètre.
+  ;
+  LET T_XPANOM = UPSHIFT(XPDCMD OF GSPR_DETAIL[ 4 : &
+                          INDEX(XPDCMD OF GSPR_DETAIL[4:17]," ") &
+                                              ] )
+  ;
+  ; Reste de la ligne.
+  ;
+  LET T_RESTE  = XPDCMD[4 + SIZE(TRUNCATE(T_XPANOM)):70]
+  ;
+  ; Ajout d'une ligne blanche.
+  ;
+  IF "F_NULL" = T_XPANOM
+  THEN DO INTERNAL NULL
+  ;
+  ; Date du jour.
+  ;
+  IF "F_SYSDATE" = T_XPANOM
+  THEN BEGIN
+    LET T_DATA = ASCII(SYSDATE)
+    DO INTERNAL PUT_CMD
+  END
+  ;
+  ; Heure du jour.
+  ;
+  IF "F_SYSTIME" = T_XPANOM
+  THEN BEGIN
+    LET T_DATA = ASCII(FLOOR(SYSTIME/100),6)
+    DO INTERNAL PUT_CMD
+  END
+  ;
+  ; USERNAME de l'usager.
+  ;
+  IF "F_LOGONID" = T_XPANOM
+  THEN BEGIN
+    LET T_DATA = LOGONID
+    DO INTERNAL PUT_CMD
+  END
+  ;
+  ; Nom du programme
+  ;
+  IF "F_XPRDSC" = T_XPANOM
+  THEN BEGIN
+    LET T_DATA = D_XPRDSC
+    DO INTERNAL PUT_CMD
+  END
+  ;
+  ; Nom du fichier d'impression.
+  ;
+  IF "F_PRFICIMP" = T_XPANOM
+  THEN BEGIN
+    LET T_DATA = T_FICPRT
+    DO INTERNAL PUT_CMD
+  END
+  ;
+  ; On vérifie si c'est un paramètre provenant du menu.
+  ;
+  LET T_INDPAR = INDEX(D_LISPAR,T_XPANOM)
+  IF 0 <> T_INDPAR
+  THEN BEGIN
+    ;
+    ; Exemple de contenu:
+    ;   D_LISPAR = "F_CIECLE        |F_CENCLE        |"
+    ;   D_INDLON = "001002|003004|"
+    ;   D_LISVAL = "02|1234|"
+    ;
+    ; On ramène l'indice de caractère en numéro de paramètre.
+    ; Ex: Si l'indice = 18 cela indique la paramètre 2.
+    ;     Si l'indice = 35 cela indique la paramètre 3.
+    ;
+    LET T_INDPAR = (T_INDPAR - 1) / 17 + 1
+    ;
+    ; On extrait la donnée selon les positions déterminés dans le menu.
+    ; Le premier chiffre nous donne la position dans la liste, le second
+    ; nous donne la longueur.
+    ;
+    LET T_DATA = &
+                 D_LISVAL[ NCONVERT(D_INDLON[(T_INDPAR - 1) * 7 + 1 : 3])&
+                         : &
+                           NCONVERT(D_INDLON[(T_INDPAR - 1) * 7 + 4 : 3])&
+                         ]
+    DO INTERNAL PUT_CMD
+  END
+  ;
+  ; Pour les chooses range, on répète la valeur avant le null.
+  ;
+  IF T_CODE = "CR"
+  THEN BEGIN
+    LET T_DATA = "-=-=" + T_DATA
+    LET T_DATA = T_DATA[5:128]
+    DO INTERNAL PUT_CMD
+  END
+
+  IF "C" = T_CODE[1:1]
+  THEN DO INTERNAL NULL
+END
+
+;-------------------------------------------------------------------------------
+;
+; Traitement des lignes débutant par "!".
+;
+;
+PROCEDURE INTERNAL LIGNE_SPECIAL ;OK
+BEGIN
+  LET T_CODE = XPDCMD OF GSPR_DETAIL[2:2]
+  ;
+  ; Traitement de ligne spécial, sert surtout pour les programmes C.
+  ; Le but est de composer une ligne de commande constituer de constante
+  ; et de valeur saisie par l'usager(voir code "PU").
+  ;
+  ; EX:    Commande           XFCLIG               Commentaire
+  ;        ------------       -------------------  ----------------
+  ;        !DBGL950 "|        GL950 "|             début
+  ;        %PUPECCLE          GL950 "9201|         demande période ctb
+  ;        !+ , |             GL950 "9201, |       ajoute ,
+  ;        %PUEFICLE          GL950 "9201, TOMB|   demande code E/F
+  ;        !+ "|              GL950 "9201, TOMB"|  ajoute "
+  ;        !FN                GL950 "9201, TOMB"   (résultat)
+  ;
+  ;
+  ;
+  ; Indique début de ligne., on assigne la valeur incluant le caractère
+  ; de sépération.
+  ;
+  IF "DB" = T_CODE
+  THEN LET XFCLIG OF GSFICHIER_CMD = XPDCMD OF GSPR_DETAIL[4: &
+                                     SIZE(TRUNCATE(XPDCMD OF GSPR_DETAIL)) - 3]
+  ;
+  ; On ajoute la valeur à la suite. Il faut enlever le caractère de sépa-
+  ; ration de la ligne en traitement et ajouter la valeur avec le carac-
+  ; tère de séparation.
+  ;
+  IF "+ " = T_CODE
+  THEN LET XFCLIG OF GSFICHIER_CMD = XFCLIG OF GSFICHIER_CMD[1: &
+                                     SIZE(TRUNCATE(XFCLIG OF GSFICHIER_CMD)) - 1] &
+                                     + &
+                                     XPDCMD OF GSPR_DETAIL[4: &
+                                     SIZE(TRUNCATE(XPDCMD OF GSPR_DETAIL)) - 3]
+  ;
+  ; Indique "fin de ligne", on doit enlever le séparateur avant d'écrire
+  ; la ligne dans le fichier de commande.
+  ;
+  IF "FN" = T_CODE
+  THEN BEGIN
+    DO INTERNAL PUT_CMD
+  END
+END
+;-------------------------------------------------------------------------------
+;
+; Génération des informations minimales nécessaire pouir le traitement des
+; impressions
+;
+PROCEDURE INTERNAL PREPARATION_FICHIER_CMD
+BEGIN
+  LET T_FICCMD = "$PG_TEMP/" + DOWNSHIFT( TRUNCATE( XPRNOM OF GSPROGRAMME )) + &
+                  "_" + T_XJBCLE + ".tmp" ; Fichier de commandes
+  LET T_FICPRT = "$PG_TEMP/" + DOWNSHIFT( TRUNCATE( XPRNOM OF GSPROGRAMME )) + &
+                  "_" + T_XJBCLE + ".txt" ; Fichier d'impression
+  LET T_FICLOG = "$PG_TEMP/" + DOWNSHIFT( TRUNCATE( XPRNOM OF GSPROGRAMME )) + &
+                  "_" + T_XJBCLE + ".log" ; Log file
+  ;
+  ; Le fichier de commande GSFICHIER_CMD est assigné à une variable environne-
+  ; mental qui est initialisé à l'entré de l'usager dans le système par
+  ; l'entremise du ".profile". La variable environnemental est escrit dans le
+  ; OPENNAME dans le dictionnaire.
+  ;
+  ;
+  ; Il faut que le fichier de commande soit créer à vide.
+  ;
+  LET T_CMD = "echo ' ' > $FILEID"
+  RUN COMMAND T_CMD
+  ;
+  ; Variable d'environnement pour travailler dans la bonne base de donnée.
+  ;
+  LET T_DATA = "cd $PG_TEMP"
+  DO INTERNAL PUT_CMD
+  ;
+  ; Assigne le fichier d'impression.
+  ;
+  LET T_DATA = "PRFICIMP=" + T_FICPRT
+  DO INTERNAL PUT_CMD
+  LET T_DATA = "export PRFICIMP"
+  DO INTERNAL PUT_CMD
+  ;
+  ; Il faut créer un répertoire à cause des SUBFILES.
+  ;
+  LET T_DATA = "BASE=$PG_TEMP/r" + T_XJBCLE + ".dir"
+  DO INTERNAL PUT_CMD
+  LET T_DATA = "export BASE"
+  DO INTERNAL PUT_CMD
+  LET T_DATA = "mkdir $BASE"
+  DO INTERNAL PUT_CMD
+  LET T_DATA = "cd $BASE"
+  DO INTERNAL PUT_CMD
+END
+;-------------------------------------------------------------------------------
+;
+; Gére les choix d'execution demander à l'usager
+;
+PROCEDURE INTERNAL CHOIX_EXECUTION
+BEGIN
+  IF "$IF" = UPSHIFT(XPDCMD OF GSPR_DETAIL)[1:3] AND &
+     (NOT MATCHPATTERN(XPDCMD OF GSPR_DETAIL[4:2],"##") OR &
+      "00" = XPDCMD OF GSPR_DETAIL[4:2])
+  THEN SEVERE 27 ; Problème avec le paramètre demandé
+
+  IF "$IF" = UPSHIFT(XPDCMD OF GSPR_DETAIL)[1:3] ; $IF 0
+  THEN BEGIN
+    LET T_INDCHOIX = NCONVERT(XPDCMD OF GSPR_DETAIL[4:2])
+
+    LET T_CHOIX1 = UPSHIFT(XPDCMD OF GSPR_DETAIL)[7:4]
+    LET T_CHOIX2 = UPSHIFT(XPDCMD OF GSPR_DETAIL)[15:4]
+
+    FOR T_VECTCHOIX
+    BEGIN
+      IF OCCURRENCE = T_INDCHOIX
+      THEN BEGIN
+        IF T_VECTCHOIX   <> T_CHOIX1 AND &
+           T_VECTCHOIX   <> T_CHOIX2
+        THEN LET T_SELECT = "$ENDIF" + UPSHIFT(XPDCMD OF GSPR_DETAIL)[4:2]
+      END
+    END
+  END
+  IF T_SELECT = UPSHIFT(XPDCMD OF GSPR_DETAIL)[1:8]
+  THEN BEGIN
+    LET T_SELECT = ""
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Traitement de ligne contenant des commandes de système d'exploitation.
+;
+;
+PROCEDURE INTERNAL CMD_SYSTEME ; ok
+BEGIN
+  IF "$IF"    = UPSHIFT(XPDCMD OF GSPR_DETAIL)[1:3] OR & ; $IF
+     "$ENDIF" = UPSHIFT(XPDCMD OF GSPR_DETAIL)[1:6]      ; $ENDIF
+  THEN DO INTERNAL CHOIX_EXECUTION
+  ;
+  ; Il faut conserver si on est dans QUIZ ou QTP pour des traitements après
+  ; le EXIT.
+  ;
+  IF "$QUIZ" = UPSHIFT(XPDCMD OF GSPR_DETAIL) OR &
+     "$QTP"  = UPSHIFT(XPDCMD OF GSPR_DETAIL)
+  THEN LET T_MODPOW = UPSHIFT(XPDCMD OF GSPR_DETAIL[2:4])
+  ;
+  ; On genere les commandes pour imprimer la liste des paramètres
+  ;
+  IF "$QUIZ" = UPSHIFT(XPDCMD)
+  THEN BEGIN
+
+    ;
+    ; On ajoute "echo '" pour le quiz
+    ;
+    LET T_DATA = 'echo "'
+    DO INTERNAL PUT_CMD
+    IF XPRFLGLSTPAR OF GSPROGRAMME = "1"
+    THEN BEGIN
+      LET T_DATA = "exe " + D-NOM-LISTE
+      DO INTERNAL PUT_CMD
+      LET T_DATA = T_XJBCLE
+      DO INTERNAL PUT_CMD
+      DO INTERNAL NULL
+      LET T_DATA = D_XPRDSC
+      DO INTERNAL PUT_CMD
+    END
+  END
+  ;
+  ; Appel de QTP.
+  ;
+  IF "$QTP" = UPSHIFT(XPDCMD OF GSPR_DETAIL)
+  THEN BEGIN
+    LET T_DATA = 'echo "'
+    DO INTERNAL PUT_CMD
+  END
+
+  ;
+  ; Traitement des lignes conditionnelles selon le système d'exploitation.
+  ;
+  IF "$@UNIX" = XPDCMD OF GSPR_DETAIL[1:6]
+  THEN BEGIN
+    LET T_DATA = XPDCMD OF GSPR_DETAIL[7:70]
+    DO INTERNAL PUT_CMD
+  END
+END
+;
+; Boucle sur le détail des paramètres pour créer les instructions
+;
+PROCEDURE INTERNAL CREATION_FICHIER_CMD
+BEGIN
+  ;
+  ; Lecture du détail d'un programme.
+  ;
+  ; Premier caractère de la ligne:   $ ==> Commande de système
+  ;                                  % ==> Traitement de paramètre
+  ;                                  ! ==> Manipulation de caractères
+  ;                                    ==> Ligne de texte
+  ;
+  WHILE RETRIEVING GSPR_DETAIL VIA     XPRNOM  &
+                               USING   XPRNOM OF GSPROGRAMME &
+                               ORDERBY XPRNOM, XPDNUMLIG
+  BEGIN
+    LET T_CODE = " "
+
+    IF "$" = XPDCMD OF GSPR_DETAIL[1:1]
+    THEN DO INTERNAL CMD_SYSTEME
+    ELSE BEGIN
+      IF "%" = XPDCMD OF GSPR_DETAIL[1:1]
+      THEN DO INTERNAL PARAMETRE
+      ELSE BEGIN
+        IF "!" = XPDCMD OF GSPR_DETAIL[1:1]
+        THEN DO INTERNAL LIGNE_SPECIAL
+        ELSE BEGIN
+          IF "EXIT" = UPSHIFT(XPDCMD OF GSPR_DETAIL)
+          THEN BEGIN
+            ;
+            ; Quiz ou QTP se retrouve après le exit pour UNIX.
+            ;
+            IF "QUIZ" = UPSHIFT(T_MODPOW)
+            THEN LET T_DATA = 'EXIT " | ' + &
+                              " quiz procloc=$PG_EXEC $QUIZ_OPT"
+
+            IF "QTP" = UPSHIFT(T_MODPOW)
+            THEN LET T_DATA = 'EXIT " | ' + &
+                              " qtp procloc=$PG_EXEC $QTP_OPT"
+            DO INTERNAL PUT_CMD
+          END
+          ELSE BEGIN
+            LET T_DATA = TRUNCATE(XPDCMD OF GSPR_DETAIL)
+            IF "EXE" = UPSHIFT( T_DATA[1:3] )
+            THEN LET T_DATA = DOWNSHIFT( T_DATA )
+            DO INTERNAL PUT_CMD
+          END
+        END
+      END
+    END
+  END
+  LET T_CODE = " "
+END
+;
+; Exécution de la procédure
+;
+PROCEDURE INTERNAL EXECUTION
+BEGIN
+  LET T_DATA = "$LOG_PRO/print.sh -f" + &
+               TRUNCATE( T_FICPRT ) + &
+               " -d" + &
+               TRUNCATE(XILQUENAM OF GSXIM_LOCAL) + &
+               " -p" + &
+               TRUNCATE(XFRPHYNAM OF GSFORME) + &
+               " -g" + &
+               TRUNCATE(XILGRPIMP OF GSXIM_LOCAL) + &
+               " -n" + &
+               ASCII( T_NBRCOP ) + &
+               " -- -c"
+  DO INTERNAL PUT_CMD
+
+  LET T_DATA = "rm " + TRUNC(T_FICCMD)
+  DO INTERNAL PUT_CMD
+  LET T_DATA = "cd .."
+  DO INTERNAL PUT_CMD
+  LET T_DATA = "rm -r $BASE"
+  DO INTERNAL PUT_CMD
+
+  CLOSE GSFICHIER_CMD
+
+  LET T_CMD = "echo '#!/bin/ksh' > " + T_FICCMD
+  RUN COMMAND T_CMD
+
+  LET T_CMD = "cat $FILEID >> " + T_FICCMD
+  RUN COMMAND T_CMD
+
+  LET T_CMD = "rm $FILEID"
+  RUN COMMAND T_CMD
+
+  LET T_CMD = "chmod +x " + T_FICCMD
+  RUN COMMAND T_CMD
+
+  INFORMATION = "Un instant S.V.P. , Exécution en cours..." NOW
+
+  LET T_CMD = T_FICCMD + "1> " + T_FICLOG + "2>&1"
+  RUN COMMAND T_CMD NOWARN ON ERROR CONTINUE
+END
+
+PROCEDURE PREUPDATE
+BEGIN
+  DO INTERNAL PREPARATION_FICHIER_CMD
+
+  DO INTERNAL CREATION_FICHIER_CMD
+
+  DO INTERNAL EXECUTION
+  RETURN
+END
+
+BUILD

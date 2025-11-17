@@ -1,0 +1,371 @@
+;/T/ Solde des engagements / Détaill.
+;
+;/P/ Programmeur...: Nancy Marceau
+;    Date Création.: 4 mai 1994
+;
+;    Description...: Ce rapport permet de consulter pour les commandes d'achat
+;                    les montants engagés et désengagés jusqu'à une période
+;                    déterminée.
+;
+;    Paramètres....: Compagnie
+;                    Numéro de commande (Borne début,<retour>=tous)
+;                    Numéro de commande (Borne fin)
+;                    Période comptable  (Obligatoire)
+;
+;/M/ Francois Richard, 1999-07-12
+;
+;    Ajustement pour le changement de siècle
+;-------------------------------------------------------------------------------
+;
+; Ce premier  QUIZ permet d'établir le solde des engagements détaillé.
+;
+USE ussetqzs NOLIST
+SET FORMFEED
+
+ACCESS *WAR331A  &
+   ;
+   ; Pour avoir la description du compte.
+   ;
+  LINK CPTCLE OF WAR331A  &
+    TO CPTCLE OF VCPT_DSC   &
+
+   ;
+   ; Pour avoir la description de l'unité.
+   ;
+  LINK CIECLE OF WAR331A, &
+       UNACLE OF WAR331A  &
+    TO CIECLE,&
+       UNACLE OF MCUNITE_ADM    &
+
+   ;
+   ; Pour avoir la devise du consolidé.
+   ;
+  LINK ("1") &
+    TO CIENMC OF MCHOLDING   &
+
+   ;
+   ; Statut de la commande
+   ;
+  LINK ("CMDSTU",            &
+         CMDSTU OF WAR331A)  &
+    TO XELNOM,                     &
+       CBICLE OF VCBI_DSC   ALIAS A_CBI_CMDSTU OPTIONAL 
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables obligatoires pour les en-têtes standards.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+       "Solde des engagements / Détaillé"
+@ELSE
+       "%%%Solde des engagements / Détaillé"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+       "à la période " + &
+       D_PECCLE OF WAR331A[1:2] + "-" + &
+       D_PECCLE OF WAR331A[3:4]
+@ELSE
+       "%%%à la période " + &
+       D_PECCLE OF WAR331A[1:2] + "-" + &
+       D_PECCLE OF WAR331A[3:4]
+@ENDIF
+
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE  7 = "AR331ZA"
+;
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM
+
+DEFINE D_CBIDSC CHARACTER SIZE 15 = CBIDSC OF A_CBI_CMDSTU
+
+
+DEFINE    D_DEVCLE   CHARACTER SIZE 04 = " " &
+          IF DEVCLE OF WAR331A = DEVCLE OF MCHOLDING OR &
+             0 = SIZE(TRUNCATE(FOUCLE OF WAR331A)) &
+          ELSE "/" + DEVCLE OF WAR331A
+
+
+  ;
+  ; Solde d'engagement
+  ;
+DEFINE D_SOLDE FLOAT SIZE 8 = ENGMNTENG OF WAR331A - &
+                              ENGMNTDES OF WAR331A 
+
+; Ajustement pour le changement de siècle
+DEFINE D_CMDCLE_TRI CHARACTER SIZE 10 = "1" + CMDCLE OF WAR331A &
+    IF CMDCLE OF WAR331A[1:1] < "1" &
+    ELSE "0" + CMDCLE OF WAR331A
+
+SORT   ON D_CMDCLE_TRI       & ; Numéro de commande
+       ON HENDAT  OF WAR331A & ; Date de la commande
+       ON CPTCLE  OF WAR331A & ; Compte
+       ON UNACLE  OF WAR331A   ; Unité
+
+
+DEFINE D_RADNOM CHARACTER SIZE 40 = RADNOM OF WAR331A[1:40]
+
+USE ustitstd NOLIST 
+  SKIP 3 &
+@IF FRANCAIS
+TAB 001 "No.       Commande       Période                                                                              Montant" &
+@ELSE
+TAB 001 "%%%       Commande       Période                                                                              Montant" &
+@ENDIF
+
+  SKIP &
+@IF FRANCAIS
+TAB 001 "entrepôt  d'achat       comptable   Fournisseur                                     Statut                    brut   " &
+@ELSE
+TAB 001 "%%erepôt  d'achat       comptable   Fournisseur                                     Statut                    brut   " &
+@ENDIF
+  SKIP &
+TAB 001 "--------  ------------- ----------- ----------------------------------------------- ---------------     ------------------- " &
+  SKIP 1
+
+
+
+HEADING AT D_CMDCLE_TRI &
+TAB 003 HENCLE3 OF WAR331A &
+TAB 013 CMDCLE OF WAR331A &
+TAB 028 PECCLE OF WAR331A &
+  PICTURE "^^-^^" &
+TAB 037 FOUCLE OF WAR331A &
+TAB 044 D_RADNOM &
+TAB 085 D_CBIDSC &
+TAB 106 CMDMNTTOT OF WAR331A &
+TAB 120 D_DEVCLE &
+  SKIP 2 &
+@IF FRANCAIS
+TAB 010 "Compte                      Unité administrative            Montant engagé    Montant désengagé               Solde " &
+@ELSE
+TAB 010 "%%%pte                      Unité administrative            Montant engagé    Montant désengagé               Solde " &
+@ENDIF
+  SKIP 1 &
+TAB 010 "--------------------------- -----------------------------   ---------------   -----------------      ---------------" &
+  SKIP 1
+
+FOOTING AT UNACLE &
+TAB 010 CPTCLE OF WAR331A &
+TAB 017 CPTDSCABR OF VCPT_DSC &
+TAB 038 UNACLE OF WAR331A &
+TAB 047 UNANOMABR OF MCUNITE_ADM  &
+TAB 070 ENGMNTENG OF WAR331A SUBTOTAL &
+  PICTURE "^^^,^^^,^^^.^^ " &
+  TRAILING SIGN "-"         &
+  SIGNIFICANCE 5            &
+  BWZ &
+TAB 090 ENGMNTDES OF WAR331A SUBTOTAL &
+  PICTURE "^^^,^^^,^^^.^^ " &
+  TRAILING SIGN "-"         &
+  SIGNIFICANCE 5            &
+  BWZ &
+TAB 111 D_SOLDE SUBTOTAL &
+  PICTURE "^^^,^^^,^^^.^^ " &
+  TRAILING SIGN "-"         &
+  SIGNIFICANCE 5            &
+  BWZ
+ 
+
+FOOTING AT D_CMDCLE_TRI &
+  SKIP 1 &
+TAB 070 "---------------   -----------------      ---------------" &
+  SKIP &
+TAB 070 ENGMNTENG OF WAR331A SUBTOTAL &
+  PICTURE "^^^,^^^,^^^.^^ " &
+  TRAILING SIGN "-"         &
+  SIGNIFICANCE 5            &
+  BWZ &
+TAB 090 ENGMNTDES OF WAR331A SUBTOTAL &
+  PICTURE "^^^,^^^,^^^.^^ " &
+  TRAILING SIGN "-"         &
+  SIGNIFICANCE 5            &
+  BWZ &
+TAB 111 D_SOLDE SUBTOTAL &
+  PICTURE "^^^,^^^,^^^.^^ " &
+  TRAILING SIGN "-"         &
+  SIGNIFICANCE 5            &
+  BWZ   &
+SKIP 2
+
+
+BUILD ar331za
+
+
+@IF FORMAT
+         1         2         3         4         5         6         7         8         9        10        11        12        13        14        15        16        17        18        19        20
+12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+AR331ZA                                       xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                                 Page: 9999 
+99/99/99 HH:MM xxxxxxxxxxxx                      Solde des engagements / Détaillé                    
+                                                      à la période xx-xx
+
+
+No.       Commande       Période                                                                               Montant
+entrepôt  d'achat       comptable   Fournisseur                                     Statut                     brut  
+--------  ------------- ----------- ----------------------------------------------- ---------------        ---------------
+  xxxx      xxxxxxxxx      xx-xx    xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxx        999,999,999.99-/xxx
+
+         Compte                      Unité administrative            Montant engagé    Montant désengagé               Solde 
+         --------------------------- -----------------------------   ---------------   -----------------      ---------------
+         xxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxxxxxxx   999,999,999.99-     999,999,999.99-      999,999,999.99-
+         xxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxxxxxxx   999,999,999.99-     999,999,999.99-      999,999,999.99-
+                                                                     ---------------   -----------------      ---------------
+                                                                     999,999,999.99-     999,999,999.99-      999,999,999.99-
+
+  xxxx      xxxxxxxxx      xx-xx    xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxx        999,999,999.99-/xxx
+
+         Compte                      Unité administrative            Montant engagé    Montant désengagé               Solde 
+         --------------------------- -----------------------------   ---------------   -----------------      ---------------
+         xxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxxxxxxx   999,999,999.99-     999,999,999.99-      999,999,999.99-
+         xxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxxxxxxx   999,999,999.99-     999,999,999.99-      999,999,999.99-
+                                                                     ---------------   -----------------      ---------------
+                                                                     999,999,999.99-     999,999,999.99-      999,999,999.99-
+@ENDIF
+
+;-------------------------------------------------------------------------------
+;
+; Ce deuxième QUIZ permet d'établir le solde des engagements sommaire.
+;
+USE ussetqzs NOLIST
+
+ACCESS *WAR331A  &
+   ;
+   ; Pour avoir la description du compte.
+   ;
+  LINK CPTCLE OF WAR331A  &
+    TO CPTCLE OF VCPT_DSC   &
+
+   ;
+   ; Pour avoir la description de l'unité.
+   ;
+  LINK CIECLE OF WAR331A, &
+       UNACLE OF WAR331A  &
+    TO CIECLE,&
+       UNACLE OF MCUNITE_ADM    
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables obligatoires pour les en-têtes standards.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+       "Solde des engagements / Détaillé"
+@ELSE
+       "%%%Solde des engagements / Détaillé"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+       "à la période " + &
+       D_PECCLE OF WAR331A[1:2] + "-" + &
+       D_PECCLE OF WAR331A[3:4]
+@ELSE
+       "%%%à la période " + &
+       D_PECCLE OF WAR331A[1:2] + "-" + &
+       D_PECCLE OF WAR331A[3:4]
+@ENDIF
+
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE  7 = "AR331ZB"
+;
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM
+
+  ;
+  ; Solde d'engagement
+  ;
+DEFINE D_SOLDE FLOAT SIZE 8 = ENGMNTENG OF WAR331A - &
+                              ENGMNTDES OF WAR331A 
+
+
+SORT   ON CPTCLE OF WAR331A & ; Compte
+       ON UNACLE OF WAR331A   ; Unité
+
+
+USE ustitstd NOLIST 
+         TAB 013 "Sommaire des engagements" &
+  SKIP 3 TAB 010 "Compte                      Unité administrative            Montant engagé    Montant désengagé               Solde " &
+  SKIP 1 TAB 010 "--------------------------- -----------------------------   ---------------   -----------------      ---------------" &
+  SKIP 
+
+FOOTING AT UNACLE &
+TAB 010 CPTCLE OF WAR331A  PRINT AT CPTCLE &
+TAB 017 CPTDSC OF VCPT_DSC PRINT AT CPTCLE  &
+TAB 038 UNACLE    OF WAR331A &
+TAB 047 UNANOMABR OF MCUNITE_ADM  &
+TAB 070 ENGMNTENG OF WAR331A SUBTOTAL &
+  PICTURE "^^^,^^^,^^^.^^ " &
+  TRAILING SIGN "-"         &
+  SIGNIFICANCE 5            &
+  BWZ &
+TAB 090 ENGMNTDES OF WAR331A SUBTOTAL &
+  PICTURE "^^^,^^^,^^^.^^ " &
+  TRAILING SIGN "-"         &
+  SIGNIFICANCE 5            &
+  BWZ &
+TAB 111 D_SOLDE  SUBTOTAL &
+  PICTURE "^^^,^^^,^^^.^^ " &
+  TRAILING SIGN "-"         &
+  SIGNIFICANCE 5            &
+  BWZ
+
+
+FINAL FOOTING &
+  SKIP 1 &
+TAB 070 "---------------   -----------------      ---------------" &
+  SKIP &
+TAB 070 ENGMNTENG OF WAR331A SUBTOTAL &
+  PICTURE "^^^,^^^,^^^.^^ " &
+  TRAILING SIGN "-"         &
+  SIGNIFICANCE 5            &
+  BWZ &
+TAB 090 ENGMNTDES OF WAR331A SUBTOTAL &
+  PICTURE "^^^,^^^,^^^.^^ " &
+  TRAILING SIGN "-"         &
+  SIGNIFICANCE 5            &
+  BWZ &
+TAB 111 D_SOLDE SUBTOTAL &
+  PICTURE "^^^,^^^,^^^.^^ " &
+  TRAILING SIGN "-"         &
+  SIGNIFICANCE 5            &
+  BWZ                       &
+  SKIP &
+TAB 070 "---------------   -----------------      ---------------" 
+
+
+BUILD ar331zb
+
+
+@IF FORMAT
+         1         2         3         4         5         6         7         8         9        10        11        12        13        14        15        16        17        18        19        20
+12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+AR331ZB                                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                                 Page: 9999 
+99/99/99 HH:MM xxxxxxxxxxxx                      Solde des engagements / Détaillé                    
+                                                      à la période xx-xx
+
+Sommaire des engagements 
+
+         Compte                      Unité administrative            Montant engagé    Montant désengagé               Solde 
+         --------------------------- -----------------------------   ---------------   -----------------      ---------------
+         xxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxxxxxxx   999,999,999.99-     999,999,999.99-      999,999,999.99-
+         xxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxxxxxxx   999,999,999.99-     999,999,999.99-      999,999,999.99-
+         xxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxxxxxxx   999,999,999.99-     999,999,999.99-      999,999,999.99-
+         xxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxxxxxxx   999,999,999.99-     999,999,999.99-      999,999,999.99-
+         xxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxxxxxxx   999,999,999.99-     999,999,999.99-      999,999,999.99-
+         xxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxxxxxxxx   999,999,999.99-     999,999,999.99-      999,999,999.99-
+                                                                     ---------------     ---------------      ---------------
+                                                                     999,999,999.99-     999,999,999.99-      999,999,999.99-
+
+@ENDIF

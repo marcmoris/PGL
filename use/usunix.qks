@@ -1,0 +1,448 @@
+;/T/ Partie de l'écran GS090 pour Unix
+;
+;/P/ Prosig Informatique, Marc Morissette 13 Aout 1993
+;
+;/M/ François Déry, 7 mai 1999
+;       Mise à jour selon les nouveaux outils disponibles sur unix.
+;       Ajout du nouveau gestionnaire batch.
+;
+;Note Le Option de compilation disponible dans ce source sont
+;
+; Condition        Système
+;
+;  IBMR2AIX        Aix ( IBM RISK 6000 )
+;  HPUX            HP-UX
+;  SUNOS           Sun
+;  MIPSULTRIX      Ultrix
+;  SCOUX           Sco-Unix
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par...: Marc Poulin
+;    Date..........: 07 mars 2000.
+;    Description...: Création de deux variables d'environnements supplémentaires afin de regrouper trois traitements différents 
+;                    (PD226T - Impression du bon de livraison, PD680 - Détail du bon de livraison et PD685 - Detail de facturation
+;                    du bon de livraison). Ces trois traitements s'exécutent sur deux type d'imprimantes (matricielle & laser) et
+;                    utilisent deux formes d'impressions différentes (format DOUANE et format Recto/Verso).
+;
+;    Référence.....: Demande de changement 000025.
+;
+;    Signet........: MP-00-03-07_D25.
+;
+;    --------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par...: Marc Poulin
+;    Date..........: 20 avril 2000.
+;    Description...: Ajustement de l'impression sur les imprimantes LASER afin qu'aucune page blanche 
+;                    ne s'imprime à la fin de chaque rapport.
+;
+;    Référence.....: Demande directe 999999.
+;
+;    Signet........: MP-00-04-20_DD999999.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+PROCEDURE INTERNAL PREPARATION_FICHIER_CMD
+BEGIN
+  LET T_FICCMD  = "$PG_TEMP/" + DOWNSHIFT( TRUNCATE( XPRNOM OF GSPROGRAMME )) + &
+                   "_" + XJBCLE OF GSJOB + ".tmp" ; Fichier de commandes
+  LET T_FICPRT  = "$PG_TEMP/" + DOWNSHIFT( TRUNCATE( XPRNOM OF GSPROGRAMME )) + &
+                   "_" + XJBCLE OF GSJOB + ".txt" ; Fichier d'impression
+
+  LET T_FICPRT2 = "$PG_TEMP/" + DOWNSHIFT( TRUNCATE( XPRNOM OF GSPROGRAMME )) + & ; MP-00-03-07_D25.
+                   "_" + XJBCLE OF GSJOB + "2.txt" ; Fichier d'impression
+
+  LET T_FICPRT3 = "$PG_TEMP/" + DOWNSHIFT( TRUNCATE( XPRNOM OF GSPROGRAMME )) + & ; MP-00-03-07_D25.
+                   "_" + XJBCLE OF GSJOB + "3.txt" ; Fichier d'impression
+
+  LET T_FICLOG  = "$PG_TEMP/" + DOWNSHIFT( TRUNCATE( XPRNOM OF GSPROGRAMME )) + &
+                   "_" + XJBCLE OF GSJOB + ".log" ; Log file
+  ;
+  ; Le fichier de commande GSFICHIER_CMD est assigné à une variable environne-
+  ; mental qui est initialisé à l'entré de l'usager dans le système par
+  ; l'entremise du ".profile". La variable environnemental est escrit dans le
+  ; OPENNAME dans le dictionnaire.
+  ;
+  ;
+  ; Il faut que le fichier de commande soit créer à vide.
+  ;
+  LET T_CMD = "echo ' ' > $FILEID"
+  RUN COMMAND T_CMD
+  ;
+  ; Variable d'environnement pour travailler dans la bonne base de donnée.
+  ;
+  LET T_DATA = "cd $PG_TEMP"
+  DO INTERNAL PUT_CMD
+  ;
+  ; Assigne le fichier d'impression.
+  ;
+  LET T_DATA = "PRFICIMP=" + T_FICPRT
+  DO INTERNAL PUT_CMD
+  LET T_DATA = "export PRFICIMP"
+  DO INTERNAL PUT_CMD
+
+; -----------------------------------------
+; MP-00-03-07_D25.
+;
+; Puisqu'il s'agit ici d'un cas d'exception, il y aura donc gestion statique d'un tel cas. Si l'exception devenait récurrente, 
+; la gestion devrait être dynamique. La définition de règles et la programmation de procédures devront être alors réalisés.
+;
+
+  IF XPRNOM OF GSPROGRAMME = "PD688"
+  THEN BEGIN
+    LET T_DATA = "PRFICIMP2=" + T_FICPRT2
+    DO INTERNAL PUT_CMD
+    LET T_DATA = "export PRFICIMP2"
+    DO INTERNAL PUT_CMD
+
+    LET T_DATA = "PRFICIMP3=" + T_FICPRT3
+    DO INTERNAL PUT_CMD
+    LET T_DATA = "export PRFICIMP3"
+    DO INTERNAL PUT_CMD
+  END
+
+; -----------------------------------------
+
+  ;
+  ; Il faut créer un répertoire à cause des SUBFILES.
+  ;
+  LET T_DATA = "BASE=$PG_TEMP/r" + XJBCLE OF GSJOB + ".dir"
+  DO INTERNAL PUT_CMD
+  LET T_DATA = "export BASE"
+  DO INTERNAL PUT_CMD
+  LET T_DATA = "mkdir $BASE"
+  DO INTERNAL PUT_CMD
+  LET T_DATA = "cd $BASE"
+  DO INTERNAL PUT_CMD
+END
+
+;-------------------------------------------------------------------------------
+;
+; Traitement de ligne contenant des commandes de système d'exploitation.
+;
+;
+PROCEDURE INTERNAL CMD_SYSTEME ; ok
+BEGIN
+  IF "$IF"    = UPSHIFT(XPDCMD OF GSPR_DETAIL)[1:3] OR & ; $IF
+     "$ENDIF" = UPSHIFT(XPDCMD OF GSPR_DETAIL)[1:6]      ; $ENDIF
+  THEN DO INTERNAL CHOIX_EXECUTION
+  ;
+  ; Il faut conserver si on est dans QUIZ ou QTP pour des traitements après
+  ; le EXIT.
+  ;
+  IF "$QUIZ" = UPSHIFT(XPDCMD OF GSPR_DETAIL) OR &
+     "$QTP"  = UPSHIFT(XPDCMD OF GSPR_DETAIL)
+  THEN LET T_MODPOW = UPSHIFT(XPDCMD OF GSPR_DETAIL[2:4])
+  ;
+  ; On genere les commandes pour imprimer la liste des paramètres
+  ;
+  IF "$QUIZ" = UPSHIFT(XPDCMD)
+  THEN BEGIN
+
+    ;
+    ; On ajoute "echo '" pour le quiz
+    ;
+    LET T_DATA = 'echo "'
+    DO INTERNAL PUT_CMD
+    IF XPRFLGLSTPAR OF GSPROGRAMME = "1"
+    THEN BEGIN
+      LET T_DATA = "exe " + D-NOM-LISTE
+      DO INTERNAL PUT_CMD
+      LET T_DATA = XJBCLE OF GSJOB
+      DO INTERNAL PUT_CMD
+      DO INTERNAL NULL
+      LET T_DATA = D_XPRDSC
+      DO INTERNAL PUT_CMD
+    END
+  END
+  ;
+  ; Appel de QTP.
+  ;
+  IF "$QTP" = UPSHIFT(XPDCMD OF GSPR_DETAIL)
+  THEN BEGIN
+    LET T_DATA = 'echo "'
+    DO INTERNAL PUT_CMD
+  END
+
+  ;
+  ; Traitement des lignes conditionnelles selon le système d'exploitation.
+  ;
+  IF "$@UNIX" = XPDCMD OF GSPR_DETAIL[1:6]
+  THEN BEGIN
+    LET T_DATA = XPDCMD OF GSPR_DETAIL[7:70]
+    LET T_POSDEB = IND( UPSHIFT( T_DATA ) ,"QUICK" )
+    IF 0 <> T_POSDEB
+    THEN LET T_DATA = T_DATA[1:T_POSDEB - 1 ] + &
+                      "nice -n " + ASCII( XQBPRI OF GSQUEUE_BATCH ) + " " + &
+                      T_DATA[T_POSDEB:71 - T_POSDEB ]
+    DO INTERNAL PUT_CMD
+  END
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Cette procedure détruit le fichier commande n'effectu pas de mise à jour.
+;
+;
+PROCEDURE INTERNAL DETRUIT_FICCMD
+BEGIN
+  CLOSE GSFICHIER_CMD
+  LET T_CMD = "rm $FILEID"
+  RUN COMMAND T_CMD
+END
+
+
+PROCEDURE INTERNAL CREATION_FICHIER_CMD
+BEGIN
+  ;
+  ; Lecture du détail d'un programme.
+  ;
+  ; Premier caractère de la ligne:   $ ==> Commande de système
+  ;                                  % ==> Traitement de paramètre
+  ;                                  ! ==> Manipulation de caractères
+  ;                                    ==> Ligne de texte
+  ;
+  WHILE RETRIEVING GSPR_DETAIL VIA     XPRNOM  &
+                               USING   XPRNOM OF GSPROGRAMME &
+                               ORDERBY XPRNOM, XPDNUMLIG
+  BEGIN
+    LET T_CODE = " "
+
+    IF "$" = XPDCMD OF GSPR_DETAIL[1:1]
+    THEN DO INTERNAL CMD_SYSTEME
+    ELSE BEGIN
+      IF "%" = XPDCMD OF GSPR_DETAIL[1:1]
+      THEN DO INTERNAL PARAMETRE
+      ELSE BEGIN
+        IF "!" = XPDCMD OF GSPR_DETAIL[1:1]
+        THEN DO INTERNAL LIGNE_SPECIAL
+        ELSE BEGIN
+          IF "EXIT" = UPSHIFT(XPDCMD OF GSPR_DETAIL)
+          THEN BEGIN
+            ;
+            ; Quiz ou QTP se retrouve après le exit pour UNIX.
+            ;
+            IF "QUIZ" = UPSHIFT(T_MODPOW)
+            THEN LET T_DATA = 'EXIT " | ' + &
+                              "nice -n "  + ASCII(XQBPRI OF GSQUEUE_BATCH) + &
+                              " quiz procloc=$PG_EXEC $QUIZ_OPT"
+
+            IF "QTP" = UPSHIFT(T_MODPOW)
+            THEN LET T_DATA = 'EXIT " | ' + &
+                              "nice -n "  + ASCII(XQBPRI OF GSQUEUE_BATCH) + &
+                              " qtp procloc=$PG_EXEC $QTP_OPT"
+            DO INTERNAL PUT_CMD
+          END
+          ELSE BEGIN
+            LET T_DATA = TRUNCATE(XPDCMD OF GSPR_DETAIL)
+            IF "EXE" = UPSHIFT( T_DATA[1:3] )
+            THEN LET T_DATA = DOWNSHIFT( T_DATA )
+            DO INTERNAL PUT_CMD
+          END
+        END
+      END
+    END
+  END
+  LET T_CODE = " "
+
+END
+
+
+
+PROCEDURE INTERNAL EXECUTION_LOT
+BEGIN
+  IF XILGRPIMP OF GSXIM_LOCAL = "LAS0"
+  THEN LET T_DATA = "$LOG_PRO/print.sh -f"             + &
+                    TRUNCATE( T_FICPRT )               + &
+                    " -d"                              + &
+                    TRUNCATE(XILQUENAM OF GSXIM_LOCAL) + &
+                    " -p"                              + &
+                    TRUNCATE(XFRPHYNAM OF GSFORME)     + &
+                    " -g"                              + &
+                    TRUNCATE(XILGRPIMP OF GSXIM_LOCAL) + &
+                    " -n"                              + &
+                    ASCII( XJBNBRCOP OF GSJOB )        + &
+                    " -- -c -ono_ff -odetachtime=9999999" ; MP-00-04-20_DD999999.
+  ELSE LET T_DATA = "$LOG_PRO/print.sh -f"             + &
+                    TRUNCATE( T_FICPRT )               + &
+                    " -d"                              + &
+                    TRUNCATE(XILQUENAM OF GSXIM_LOCAL) + &
+                    " -p"                              + &
+                    TRUNCATE(XFRPHYNAM OF GSFORME)     + &
+                    " -g"                              + &
+                    TRUNCATE(XILGRPIMP OF GSXIM_LOCAL) + &
+                    " -n"                              + &
+                    ASCII( XJBNBRCOP OF GSJOB )        + &
+                    " -- -c -odetachtime=9999999"
+   
+  DO INTERNAL PUT_CMD
+
+; -----------------------------------------
+; MP-00-03-07_D25.
+;
+; Puisqu'il s'agit ici d'un cas d'exception, il y aura donc gestion statique d'un tel cas. Si l'exception devenait récurrente, 
+; la gestion devrait être dynamique. La définition de règles et la programmation de procédures devront être alors réalisés.
+;
+
+  IF XPRNOM OF GSPROGRAMME = "PD688"
+  THEN BEGIN
+    LET T_DATA = "$LOG_PRO/print.sh -f" + TRUNCATE( T_FICPRT2 ) + " -di14 -pL6511225522 -gLAS0 -n4 -- -c -ono_ff -odetachtime=9999999"    ; MP-00-04-20_DD999999.
+    DO INTERNAL PUT_CMD
+    LET T_DATA = "$LOG_PRO/print.sh -f" + TRUNCATE( T_FICPRT3 ) + " -di14 -pRVL6511225522 -gLAS0 -n2 -- -c -ono_ff -odetachtime=9999999"  ; MP-00-04-20_DD999999.
+    DO INTERNAL PUT_CMD
+  END
+
+; -----------------------------------------
+
+  LET T_DATA = "rm " + TRUNC(T_FICCMD)
+  DO INTERNAL PUT_CMD
+  LET T_DATA = "cd .."
+  DO INTERNAL PUT_CMD
+  LET T_DATA = "rm -r $BASE"
+  DO INTERNAL PUT_CMD
+
+  CLOSE GSFICHIER_CMD
+
+  LET T_CMD = "echo '#!/bin/ksh' > " + T_FICCMD
+  RUN COMMAND T_CMD
+
+  LET T_CMD = "echo " + GETSYSTEMVAL("SETBASE") + " >> " + T_FICCMD
+  RUN COMMAND T_CMD
+
+  LET T_CMD = "echo " + '"' + "HOME='$HOME';export HOME" + &
+              '"' + ">> " + TRUNCATE( T_FICCMD )
+  RUN COMMAND T_CMD
+
+  LET T_CMD = "cat $FILEID >> " + T_FICCMD
+  RUN COMMAND T_CMD
+
+  LET T_CMD = "rm $FILEID"
+  RUN COMMAND T_CMD
+
+  LET T_CMD = "chmod +x " + T_FICCMD
+  RUN COMMAND T_CMD
+  ;
+  ; Création du fichier pour le lancement en lot
+  ;
+  LET TRTPRI OF GSTRAITEMENT = 500
+  LET USRCLE OF GSTRAITEMENT = UPSHIFT(LOGONID)
+  LET XPRNOM OF GSTRAITEMENT = XPRNOM OF GSPROGRAMME
+  LET TRTENV OF GSTRAITEMENT = UPSHIFT( GETSYSTEMVAL("PG_ENV") )
+  LET TRTDSC OF GSTRAITEMENT = "Env.: " + TRTENV OF GSTRAITEMENT + "  Nom: " + &
+                                XPRDSCFRA OF GSPROGRAMME[1:55]
+  LET TRTFIC OF GSTRAITEMENT = GETSYSTEMVAL("PG_TEMP") + &
+                               "/" +  &
+                               DOWNSHIFT( TRUNCATE( XPRNOM OF GSPROGRAMME )) + &
+                               "_" + &
+                               XJBCLE OF GSJOB + &
+                               ".tmp"
+  LET TRTDATDEM OF GSTRAITEMENT = SYSDATE
+  LET TRTHREDEM OF GSTRAITEMENT = SYSTIME/100
+
+  IF XJBNBRJRS <> 0 OR "" <> TRUNCATE(XJBHREDIF)
+  THEN LET TRTDATTRT OF GSTRAITEMENT = DATE(DAYS(SYSDATE) + XJBNBRJRS)
+  ELSE LET TRTDATTRT OF GSTRAITEMENT = SYSDATE
+
+  IF "" <> TRUNCATE(XJBHREDIF)
+  THEN LET TRTHRETRT OF GSTRAITEMENT = &
+           NCONVERT(XJBHREDIF[1:(INDEX(XJBHREDIF,":") - 1)]) * 10000 + &
+           NCONVERT(XJBHREDIF[(INDEX(XJBHREDIF,":") + 1):2]) * 100
+  ELSE LET TRTHRETRT OF GSTRAITEMENT = SYSTIME/100
+
+  LET TRTQUE    OF GSTRAITEMENT =  XQBNAM OF GSQUEUE_BATCH
+  LET TRTFICLOG OF GSTRAITEMENT = &
+                        GETSYSTEMVAL("PG_TEMP") + &
+                        "/" +  &
+                        DOWNSHIFT( TRUNCATE( XPRNOM OF GSPROGRAMME )) + &
+                        "_" + &
+                        XJBCLE OF GSJOB + ".log"
+  LET TRTSTU    OF GSTRAITEMENT = 'A'
+  PUT GSTRAITEMENT
+END
+
+PROCEDURE INTERNAL EXECUTION_INTERACTIVE
+BEGIN
+    LET T_DATA = "cd .."
+    DO INTERNAL PUT_CMD
+    LET T_DATA = "rm -r $BASE"
+    DO INTERNAL PUT_CMD
+    CLOSE GSFICHIER_CMD
+    LET T_CMD = "mv $FILEID " + T_FICCMD
+    RUN COMMAND T_CMD NOWARN ON ERROR CONTINUE
+    LET T_CMD = "clear "
+    RUN COMMAND T_CMD NOWARN ON ERROR CONTINUE
+    LET T_CMD = "echo '             Un instant S.V.P...'"
+    RUN COMMAND T_CMD NOWARN ON ERROR CONTINUE
+    LET T_CMD = "chmod +x " + T_FICCMD
+    RUN COMMAND T_CMD NOWARN ON ERROR CONTINUE
+    LET T_CMD = T_FICCMD + "1> " + T_FICLOG + "2>&1"
+    RUN COMMAND T_CMD NOWARN ON ERROR CONTINUE
+    LET T_CMD = "clear"
+    RUN COMMAND T_CMD NOWARN ON ERROR CONTINUE
+    LET T_CMD = "$LOG_PRO/aff_ecran.sh " + TRUNCATE(T_FICPRT) + " 132"
+    RUN COMMAND T_CMD NOWARN ON ERROR CONTINUE RESPONSE
+    REFRESH ALL
+    DISPLAY D_LABEL  FROM D_LBLIMP
+    DISPLAY D_XPAHLP FROM D_HLPIMP
+    LET T_FIELD  = "N"
+    LET T_FLGIMP = "O"
+    LET T_REQOPT = "O" ; Optionnel
+    ACCEPT T_FIELD
+    IF T_FIELD = "O" OR T_FIELD = "Y" OR T_FIELD = "1"
+    THEN BEGIN
+      ACCEPT XLOCLE OF GSJOB
+      ACCEPT XIMCOD OF GSJOB
+      DISPLAY D_XILDSC
+      ACCEPT XJBNBRCOP OF GSJOB
+
+      IF XILGRPIMP OF GSXIM_LOCAL = "LAS0"
+      THEN LET T_CMD = "$LOG_PRO/print.sh -f"             + &
+                       TRUNCATE( T_FICPRT )               + &
+                       " -d"                              + &
+                       TRUNCATE(XILQUENAM OF GSXIM_LOCAL) + &
+                       " -p"                              + &
+                       TRUNCATE(XFRPHYNAM OF GSFORME)     + &
+                       " -g"                              + &
+                       TRUNCATE(XILGRPIMP OF GSXIM_LOCAL) + &
+                       " -n"                              + &
+                       ASCII( XJBNBRCOP OF GSJOB )        + &
+                       " -- -c -ono_ff -odetachtime=9999999" ; MP-00-04-20_DD999999.
+      ELSE LET T_CMD = "$LOG_PRO/print.sh -f"             + &
+                       TRUNCATE( T_FICPRT )               + &
+                       " -d"                              + &
+                       TRUNCATE(XILQUENAM OF GSXIM_LOCAL) + &
+                       " -p"                              + &
+                       TRUNCATE(XFRPHYNAM OF GSFORME)     + &
+                       " -g"                              + &
+                       TRUNCATE(XILGRPIMP OF GSXIM_LOCAL) + &
+                       " -n"                              + &
+                       ASCII( XJBNBRCOP OF GSJOB )        + &
+                       " -- -c -odetachtime=9999999"
+
+      RUN COMMAND T_CMD  NOWARN ON ERROR CONTINUE
+
+      ; -----------------------------------------
+      ; MP-00-03-07_D25.
+      ;
+      ; Puisqu'il s'agit ici d'un cas d'exception, il y aura donc gestion statique d'un tel cas. Si l'exception devenait récurrente, 
+      ; la gestion devrait être dynamique. La définition de règles et la programmation de procédures devront être alors réalisés.
+      ;
+
+      IF XPRNOM OF GSPROGRAMME = "PD688"
+      THEN BEGIN
+        LET T_DATA = "$LOG_PRO/print.sh -f" + TRUNCATE( T_FICPRT2 ) + " -di14 -pL6511225522 -gLAS0 -n4 -- -c -ono_ff -odetachtime=9999999"    ; MP-00-04-20_DD999999.
+        RUN COMMAND T_CMD  NOWARN ON ERROR CONTINUE
+
+        LET T_DATA = "$LOG_PRO/print.sh -f" + TRUNCATE( T_FICPRT3 ) + " -di14 -pRVL6511225522 -gLAS0 -n2 -- -c -ono_ff -odetachtime=9999999"  ; MP-00-04-20_DD999999.
+        RUN COMMAND T_CMD  NOWARN ON ERROR CONTINUE
+      END
+
+      ; -----------------------------------------
+
+    END
+    LET T_CMD = "rm " + TRUNC(T_FICCMD)
+    RUN COMMAND T_CMD NOWARN ON ERROR CONTINUE
+END
+

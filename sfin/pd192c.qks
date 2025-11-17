@@ -1,0 +1,494 @@
+;Gérer les sorties de produits (diagramme).
+;
+;/P/ Programmeur..: René Bonneau
+;    Date Création: 1994-10-20
+;
+;    Description..: Cette écran permet de faire la gestion des produits qui
+;                   sortent de l'usine sans utiliser le processus normal.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd192c ACTIONBAR                    &
+              FROM 06,01 TO 23,80          &
+              MODE LABEL "" AT 2,80        &
+              NOACTION                     &
+              FIELDMARK RETAIN STARTUP     &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING PDSORTIE_PRODUIT,  &
+              T_CIECLEMNU
+
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 04
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+
+USE ussectmp  NOLIST
+    "PD192C"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+
+USE pd192c.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du volume d'une pièce de granit
+;
+
+USE usvarvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Dimension maximum et minimun
+;
+
+USE usdimprd NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Sortie de produits
+;
+
+FILE PDSORTIE_PRODUIT MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Sortie de diagramme
+;
+
+FILE PDSORTIE_DIAGRAM  PRIMARY OCCURS 11            &
+                       NOITEM
+
+  ACCESS VIA     CIECLE,SPRNUMSOR                          &
+         USING   T_CIECLEMNU,SPRNUMSOR      OF PDSORTIE_PRODUIT &
+         ORDERBY CIECLE,DIANUM002
+
+  ACCESS VIA CIECLE  &
+         USING T_CIECLEMNU  &
+         ORDERBY CIECLE,DIANUM002
+
+  ITEM CIECLE    OF PDSORTIE_DIAGRAM INITIAL T_CIECLEMNU
+  ITEM SPRNUMSOR OF PDSORTIE_DIAGRAM FINAL &
+                                     FIRST(SPRNUMSOR OF PDSORTIE_PRODUIT)
+
+
+;-------------------------------------------------------------------------------
+;
+; Diagramme
+;
+
+FILE PDDIAGRAMME      DESIGNER OCCURS WITH PDSORTIE_DIAGRAM
+
+  ACCESS VIA    CIECLE,DIANUM002                          &
+         USING  T_CIECLEMNU,DIANUM002   OF PDSORTIE_DIAGRAM
+
+
+;-------------------------------------------------------------------------------
+; embal
+;
+
+FILE PDEMBAL_DIAG  REFERENCE OCCURS WITH PDSORTIE_DIAGRAM
+
+  ACCESS VIA    CIECLE,CAINUMCAI                 &
+         USING  T_CIECLEMNU,CAINUMCAI OF PDSORTIE_DIAGRAM
+
+;-----------------------------------------------------------------------------
+FILE PDCAISSON DESIGNER OCCURS WITH PDSORTIE_DIAGRAM
+
+  ACCESS VIA    CIECLE,                                 &
+                CAINUMCAI &
+         USING  T_CIECLEMNU,                            &
+                CAINUMCAI OF PDSORTIE_DIAGRAM
+;-------------------------------------------------------------------------------
+;
+; Prriorité Diagramme
+;
+
+FILE PDPRIORITE_DIAG  REFERENCE OCCURS WITH PDSORTIE_DIAGRAM
+
+  ACCESS VIA    CIECLE,                                 &
+                PRICODPRI,                              &
+                DIANUM002                               &
+         USING  T_CIECLEMNU,                            &
+                PRICODPRI      OF PDSORTIE_DIAGRAM,     &
+                DIANUM002      OF PDSORTIE_DIAGRAM
+
+
+;-------------------------------------------------------------------------------
+;
+; Daigramme pour mise a jour
+;
+
+FILE PDDIAGRAMME        DESIGNER ALIAS PDDIAGRAMME_MAJ &
+                                 OCCURS WITH PDSORTIE_DIAGRAM
+
+
+;-------------------------------------------------------------------------------
+;
+; Type de granit
+;
+
+FILE PDTYPE_GRANIT    REFERENCE OCCURS WITH PDSORTIE_DIAGRAM
+
+  ACCESS VIA    CIECLE,TGRCODGRA                          &
+         USING  T_CIECLEMNU,TGRCODGRA      OF PDDIAGRAMME
+
+;------------------------------------------------------------------------------
+FILE PDSEQ_SORTIE     DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+; Définition de variable temporaire pour le traitement
+;
+
+TEMPORARY T_OLD_VOL      FLOAT     SIZE 8
+TEMPORARY T_OLD_SUR      FLOAT     SIZE 8
+
+DEFINE D_TGRDSCFRA001 CHARACTER SIZE 30 = TGRDSCFRA001 OF PDTYPE_GRANIT[1:30]
+
+
+;-------------------------------------------------------------------------------
+;
+; Clés de recherche pour les popup de consultations et les sous écrans
+;
+
+TEMPORARY T_PJTABR          CHARACTER SIZE 02
+TEMPORARY T_PJTNUMSEQ       CHARACTER SIZE 03
+TEMPORARY T_COMNUMCOMINT    CHARACTER SIZE 03
+TEMPORARY T_DIANUM002       CHARACTER SIZE 07
+TEMPORARY T_DIANUMDIA002    CHARACTER SIZE 05
+TEMPORARY T_PRICODPRI       CHARACTER SIZE 02
+TEMPORARY T_USINE_SEC       CHARACTER SIZE 01
+TEMPORARY T_CHAMP           INTEGER UNSIGNED SIZE 01
+
+
+;-------------------------------------------------------------------------------
+;
+;
+DRAW 3,1 TO 18,80   ; Remplace le Draw pour les écrans pleine page
+;USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP 2
+
+TITLE &
+@IF FRANCAIS
+      " Diagrammes " &
+@ELSE
+      " %%%Diagrammes " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP 1
+
+
+TITLE &
+" Caisson                                       Poids estime    Poids reel"at , 2
+
+
+SKIP
+
+; No. diag Type de granit                      Pri US/SC  Qte   Surf totale    *
+; xx-xxxxx xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xx    x    xxxxx xxxxxxxxxxxx   *
+
+
+;ALIGN (2,2,3) (11,11,12) (15,15,16) (48,48,49) ;(53,53,54) &
+;      (58,58,59) (64,64,65)
+ALIGN (2,2,3) (11,11,12) (48,48,49) (53,53,54) &
+      (58,58,59) (64,64,65)
+
+
+CLUSTER OCCURS WITH PDSORTIE_DIAGRAM ID BASE 10
+
+
+  FIELD CAINUMCAI OF PDSORTIE_DIAGRAM              &
+          HIDDEN                                         &
+          LABEL " "                                      &
+          LOOKUP NOTON PDSORTIE_DIAGRAM                  &
+            VIA    CIECLE,CAINUMCAI &
+            USING  T_CIECLEMNU,CAINUMCAI OF PDSORTIE_DIAGRAM         &
+            MESSAGE 3004 & ; Ce caisson est deja sortie
+          ,ON PDCAISSON &
+            VIA    CIECLE,CAINUMCAI &
+            USING  T_CIECLEMNU,CAINUMCAI OF PDSORTIE_DIAGRAM         &
+            MESSAGE 2998 ; Ce numéro de caisson n'existe pas
+
+
+  FIELD CAIPOIEST OF PDCAISSON &
+          HIDDEN                                   &
+          DISPLAY                                  &
+          REFRESH                                  &
+          LABEL " "
+
+
+  FIELD CAIPOIREE OF PDCAISSON &
+          HIDDEN                                   &
+          DISPLAY                                  &
+          REFRESH                                  &
+          LABEL " "
+
+
+
+
+CLUSTER
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+
+  USE ussececr NOLIST
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procedure pour le calcul du volume d'une pièce de granit
+;
+
+use uscalvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+
+  USE ussecent NOLIST
+
+  IF SPRCON OF PDSORTIE_PRODUIT = "O"
+  THEN ERROR 3012 ; La saisie est impossible car la sortie est confirmée
+
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+
+  IF 0 = SPRNUMSOR        OF PDSORTIE_PRODUIT
+  THEN BEGIN
+    GET PDSEQ_SORTIE OPTIONAL SEQUENTIAL
+    LET CIECLE    OF PDSEQ_SORTIE       = T_CIECLEMNU
+    LET SPRNUMSOR OF PDSEQ_SORTIE       = SPRNUMSOR OF PDSEQ_SORTIE + 1
+    LET SPRNUMSOR OF PDSORTIE_PRODUIT   = SPRNUMSOR OF PDSEQ_SORTIE
+    PUT PDSEQ_SORTIE
+  END
+  LET SPRNUMSOR OF PDSORTIE_DIAGRAM = SPRNUMSOR OF PDSORTIE_PRODUIT
+
+
+  FOR PDSORTIE_PRODUIT
+  BEGIN
+
+    ;
+    ; Empeche la destruction car la ssortie est confirmée
+    ;
+    IF SPRCON OF PDSORTIE_PRODUIT = "O" &
+       AND  DELETEDRECORD OF PDSORTIE_DIAGRAM
+    THEN ERROR 3013 ; La destruction est impossible, la sortie est confirmée
+
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF PDSORTIE_DIAGRAM &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF PDSORTIE_DIAGRAM &
+       AND NOT NEWRECORD     OF PDSORTIE_DIAGRAM &
+       AND NOT DELETEDRECORD OF PDSORTIE_DIAGRAM &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+    ;
+    ;mise a jour qte exp sc
+    IF NOT DELETEDRECORD OF PDSORTIE_DIAGRAM &
+       AND     NEWRECORD     OF PDSORTIE_DIAGRAM
+        THEN BEGIN
+        GET PDEMBAL_DIAG OPT
+        IF ACCESSOK
+          THEN BEGIN
+           GET PDDIAGRAMME OPT VIA CIECLE,DIANUM002 USING &
+                                    T_CIECLEMNU,DIANUM002 OF PDEMBAL_DIAG
+           IF ACCESSOK
+           THEN BEGIN
+             LET DIAQTEEXPSCT OF PDDIAGRAMME = DIAQTEEXPSCT OF PDDIAGRAMME + &
+                                                 EMDQTEPRD OF PDEMBAL_DIAG
+             PUT PDDIAGRAMME RESET
+           END
+          END
+        END
+
+
+
+    IF NOT DELETEDRECORD OF PDSORTIE_DIAGRAM
+    THEN BEGIN
+      GET PDCAISSON OPT &
+         VIA    CIECLE,CAINUMCAI                 &
+         USING  T_CIECLEMNU,CAINUMCAI OF PDSORTIE_DIAGRAM
+         IF ACCESSOK
+         THEN BEGIN
+           IF CAIETA OF PDCAISSON <> "S"
+           THEN ERROR = "LE CAISSON N'EST PAS SEMI-FINI"
+           ELSE BEGIN
+             LET CAISTU OF PDCAISSON = "E" ; Chargé
+             let sprnumsor of pdcaisson = sprnumsor of pdsortie_produit
+             PUT PDCAISSON
+           END
+        END
+   END
+  END
+END
+;-----------------------------------------------------------------
+PROCEDURE DELETE
+BEGIN
+   GET PDCAISSON OPT &
+    VIA    CIECLE,CAINUMCAI                 &
+    USING  T_CIECLEMNU,CAINUMCAI OF PDSORTIE_DIAGRAM
+     IF ACCESSOK
+     THEN begin
+       LET CAISTU OF PDCAISSON = "I" ; INVENTAIRE
+       let sprnumsor of pdcaisson = 0
+     end
+     PUT PDCAISSON RESET
+
+     ;mise a jour qte exp sct
+     GET PDEMBAL_DIAG OPT
+     IF ACCESSOK
+      THEN BEGIN
+      GET PDDIAGRAMME OPT VIA CIECLE,DIANUM002 USING &
+                              T_CIECLEMNU,DIANUM002 OF PDEMBAL_DIAG
+      IF ACCESSOK
+        THEN BEGIN
+             LET DIAQTEEXPSCT OF PDDIAGRAMME = DIAQTEEXPSCT OF PDDIAGRAMME - &
+                                                 EMDQTEPRD OF PDEMBAL_DIAG
+             PUT PDDIAGRAMME RESET
+        END
+      END
+   DELETE PDSORTIE_DIAGRAM
+END
+;------------------------------------------------------------
+PROCEDURE UPDATE
+BEGIN
+ PUT PDSORTIE_PRODUIT
+ FOR PDSORTIE_DIAGRAM
+ BEGIN
+  PUT PDSORTIE_DIAGRAM
+ END
+END
+;-----------------------------------------------------------------
+PROCEDURE FIND
+BEGIN
+  FOR MISSING PDSORTIE_DIAGRAM
+   BEGIN
+     IF PATH = 1
+     THEN BEGIN
+       GET PDSORTIE_DIAGRAM VIA CIECLE , SPRNUMSOR ORDERBY &
+       CIECLE , DIANUM002 USING T_CIECLEMNU , SPRNUMSOR OF &
+               PDSORTIE_PRODUIT
+       GET PDCAISSON VIA CIECLE,CAINUMCAI USING T_CIECLEMNU,CAINUMCAI OF PDSORTIE_DIAGRAM
+     END
+     IF PATH = 2
+     THEN BEGIN
+        GET PDSORTIE_DIAGRAM VIA CIECLE ORDERBY CIECLE , &
+               DIANUM002 USING T_CIECLEMNU
+        GET PDCAISSON VIA CIECLE,CAINUMCAI USING T_CIECLEMNU,CAINUMCAI OF PDSORTIE_DIAGRAM
+     END
+  END
+END
+;----------------------------------------------------------------------
+PROCEDURE INPUT CAINUMCAI
+BEGIN
+  IF 0 <> SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    LET FIELDTEXT = ASCII(NCONVERT(FIELDTEXT),9)
+  END
+END
+;-------------------------------------------------------------------------------
+;
+; Valide le format du numéro de caisson
+;
+
+PROCEDURE EDIT CAINUMCAI
+BEGIN
+  IF     0 = SIZE(TRUNCATE(FIELDTEXT)) &
+     AND NOT MATCHPATTERN(FIELDTEXT,"#########")
+  THEN BEGIN
+    ERROR 9999
+  END
+END
+
+;-------------------------------------------------------
+PROCEDURE OUTPUT CAINUMCAI
+BEGIN
+  LET FIELDTEXT = ASCII(NCONVERT(FIELDTEXT),9)
+END
+
+BUILD DETAIL LIST
+
+
+@IF FORMAT
+
+********************************** Diagrammes **********************************
+*                                                                              *
+* No. diag Type de granit                      Pri US/SC  Qte   Surf totale    *
+* xxxxxxx  xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xx   x    xxxxx xxxxxxxxx      *
+* xxxxxxx  xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xx   x    xxxxx xxxxxxxxx      *
+* xxxxxxx  xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xx   x    xxxxx xxxxxxxxx      *
+* xxxxxxx  xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xx   x    xxxxx xxxxxxxxx      *
+* xxxxxxx  xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xx   x    xxxxx xxxxxxxxx      *
+* xxxxxxx  xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xx   x    xxxxx xxxxxxxxx      *
+* xxxxxxx  xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xx   x    xxxxx xxxxxxxxx      *
+* xxxxxxx  xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xx   x    xxxxx xxxxxxxxx      *
+* xxxxxxx  xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xx   x    xxxxx xxxxxxxxx      *
+* xxxxxxx  xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xx   x    xxxxx xxxxxxxxx      *
+* xxxxxxx  xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xx   x    xxxxx xxxxxxxxx      *
+*                                                                              *
+********************************************************************************
+@ENDIF

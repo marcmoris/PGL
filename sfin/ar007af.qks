@@ -1,0 +1,306 @@
+;/T/ Détail de la commande écran fantôme puisque le nombre maximum de fichier atteint.
+;
+;/P/ Programmeur..: Claudie Doyon
+;    Date Création: 1999-09-14
+;
+
+
+
+SCREEN ar007af NOMODE                    &
+               RECEIVING T_CIECLEMNU  , &
+                         T_CIENOM     , &
+                         T_CMDSTUOLD  , &
+                         T_PECCLEMNU  , &
+                         T_ERREUR     , &
+                         T_CDECLEFND  , &
+                         T_CDECLE     , &
+                         T_ITEM_COMPT , &
+                         ARCMD_DETAIL , &
+                         VFOC_FOU     , &
+                         VPRE_PRD     , &
+                         ARCOMMANDE   , &
+                         MCREF_ADRESSE ,&
+                         ARCMD_HISTO
+
+
+TRANSACTION UPDATE INHERITED NOCOMMIT
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de la compagnie
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie
+TEMPORARY T_PECCLEMNU CHARACTER SIZE 4  ; Période du menu
+TEMPORARY T_CMDSTUOLD CHARACTER SIZE 1  ; Ancien statut de la commande
+TEMPORARY T_CDECLEFND CHARACTER SIZE 1  ; Ligne de détail (recherche par écran AR016)
+TEMPORARY T_CDECLE    INTEGER   SIZE 4  ; Ligne de détail (recherche par écran AR016)
+TEMPORARY T_ITEM_COMPT          INTEGER   SIZE 4   RESET AT STARTUP
+TEMPORARY T_ERREUR    INTEGER SIZE 1
+
+TEMPORARY T_CPTLIG    INTEGER UNSIGNED SIZE 2
+TEMPORARY T_MNTANN    ZONED SIZE 12
+
+TEMPORARY T_CDEQTEREJ INTEGER   SIZE 4  ; Quantités négatives lorsque ligne "X"
+
+TEMPORARY T_PECCLEDES CHARACTER SIZE 4
+                                        ; Période de désengagement
+
+TEMPORARY TZ_LOGONID CHARACTER SIZE 12
+
+USE ustrasse NOLIST     ; Pour les sous-écrans
+
+;-----------------------------------------------------------------------------
+
+FILE ARCOMMANDE    MASTER
+FILE ARCMD_DETAIL  MASTER 
+FILE VFOC_FOU      MASTER
+FILE VPRE_PRD      MASTER
+FILE MCREF_ADRESSE MASTER
+FILE ARCMD_HISTO   MASTER
+
+;------------------------------------------------------------------------------
+
+FILE ARRECEPTION       DESIGNER
+  ACCESS VIA   CIECLE, &
+               CMDCLE  &
+         USING CIECLE OF ARCOMMANDE, &
+               CMDCLE OF ARCOMMANDE
+
+
+;-------------------------------------------------------------------------------
+;
+; Pour l'unité administrative d'inter.
+;
+
+FILE MCCOMPAGNIE   DESIGNER
+
+  ACCESS VIA   CIECLE &
+         USING FOUCIEINT OF VFOC_FOU
+
+;-------------------------------------------------------------------------------
+
+;
+; Historique d'engagement
+;
+FILE MCHIS_ECR_ENG     DESIGNER TRANSACTION UPDATE
+FILE MCHIS_PROJET_ENG  DESIGNER TRANSACTION UPDATE
+;
+; Fichier d'historique des transactions
+;
+FILE ARPRD_HISTO       DESIGNER TRANSACTION UPDATE
+
+
+FILE MCPERIODE_CIE     DESIGNER
+  ACCESS VIA   CIECLE, &
+               PECCLE  &
+         USING CIECLE OF ARCOMMANDE, &
+               PECCLE OF ARCOMMANDE
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de mettre à jour les engagements losrque la commande
+; est approuvée.  A noter qu'un trigger met à jour les soldes annuels du grand
+; livre.
+;
+PROCEDURE INTERNAL MAJ_ENGAGEMENTS
+BEGIN
+
+  LET T_CPTLIG = T_CPTLIG + 1
+
+  LET HENCLE       OF MCHIS_ECR_ENG = HENCLE      OF ARCOMMANDE
+  LET CPTCLE       OF MCHIS_ECR_ENG = CPTCLE      OF ARCMD_DETAIL
+  LET UNACLE       OF MCHIS_ECR_ENG = UNACLE      OF ARCMD_DETAIL
+  LET CIECLE       OF MCHIS_ECR_ENG = CIECLE      OF ARCMD_DETAIL
+  LET PECCLE       OF MCHIS_ECR_ENG = T_PECCLEDES
+  LET HEENUMDOC2   OF MCHIS_ECR_ENG = " "
+  IF FOUTYP OF VFOC_FOU <> "I"
+  THEN LET HEECIEINT OF MCHIS_ECR_ENG = CIECLE      OF ARCMD_DETAIL
+  ELSE LET HEECIEINT OF MCHIS_ECR_ENG = FOUCIEINT   OF VFOC_FOU
+  LET HEEUNAINT    OF MCHIS_ECR_ENG = CIEUNABIL OF MCCOMPAGNIE
+  LET HEEFLGINT    OF MCHIS_ECR_ENG = "0"
+  LET HEEMNTCRT    OF MCHIS_ECR_ENG = 0
+  LET HEEMNTCRTORI OF MCHIS_ECR_ENG = 0
+  LET HEEMNTDBT    OF MCHIS_ECR_ENG = 0
+  LET HEEMNTDBTORI OF MCHIS_ECR_ENG = 0
+
+  LET T_MNTANN                      =  ( CDEMNTENG OF ARCMD_DETAIL - &
+                                         CDEMNTDES OF ARCMD_DETAIL  )
+  IF T_MNTANN >= 0
+  THEN BEGIN
+    LET HEEMNTCRT    OF MCHIS_ECR_ENG = T_MNTANN
+    LET HEEMNTCRTORI OF MCHIS_ECR_ENG = T_MNTANN
+  END
+  ELSE BEGIN
+    LET HEEMNTDBT    OF MCHIS_ECR_ENG = ABSOLUTE(T_MNTANN)
+    LET HEEMNTDBTORI OF MCHIS_ECR_ENG = ABSOLUTE(T_MNTANN)
+  END
+
+  PUT MCHIS_ECR_ENG RESET
+
+
+  LET HENCLE       OF MCHIS_PROJET_ENG = HENCLE      OF ARCOMMANDE
+  LET HPENUMLIG    OF MCHIS_PROJET_ENG = T_CPTLIG
+  LET PRJCLE       OF MCHIS_PROJET_ENG = PRJCLE      OF ARCMD_DETAIL
+  LET PRACLE       OF MCHIS_PROJET_ENG = PRACLE      OF ARCMD_DETAIL
+  LET CPTCLE       OF MCHIS_PROJET_ENG = CPTCLE      OF ARCMD_DETAIL
+  LET UNACLE       OF MCHIS_PROJET_ENG = UNACLE      OF ARCMD_DETAIL
+  LET CIECLE       OF MCHIS_PROJET_ENG = CIECLE      OF ARCMD_DETAIL
+  LET PECCLE       OF MCHIS_PROJET_ENG = T_PECCLEDES
+  LET IMMCLE       OF MCHIS_PROJET_ENG = IMMCLE      OF ARCMD_DETAIL
+  LET HPEMNTDBT    OF MCHIS_PROJET_ENG = 0
+  LET HPEMNTDBTORI OF MCHIS_PROJET_ENG = 0
+  LET HPEMNTCRT    OF MCHIS_PROJET_ENG = 0
+  LET HPEMNTCRTORI OF MCHIS_PROJET_ENG = 0
+
+  IF T_MNTANN >= 0
+  THEN BEGIN
+    LET HPEMNTCRT    OF MCHIS_PROJET_ENG = T_MNTANN
+    LET HPEMNTCRTORI OF MCHIS_PROJET_ENG = T_MNTANN
+  END
+  ELSE BEGIN
+    LET HPEMNTDBT    OF MCHIS_PROJET_ENG = ABSOLUTE(T_MNTANN)
+    LET HPEMNTDBTORI OF MCHIS_PROJET_ENG = ABSOLUTE(T_MNTANN)
+  END
+
+  PUT MCHIS_PROJET_ENG RESET
+
+END
+
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de mettre à jour l'historique losrque la commande
+; est approuvée.  A noter, qu'un trigger met à jour l'information des quantités
+; dans le catalogue fournisseur ainsi que dans le produit entrepôt.
+;
+
+
+PROCEDURE INTERNAL MAJ_HISTORIQUE
+BEGIN
+  LET T_CDEQTEREJ = CDEQTEREJ OF ARCMD_DETAIL * -1
+
+  LET CIECLE    OF ARPRD_HISTO = CIECLE OF ARCMD_DETAIL
+  LET PRDCLE    OF ARPRD_HISTO = PRDCLE OF ARCMD_DETAIL
+  LET PRDTYP    OF ARPRD_HISTO = PRDTYP OF VPRE_PRD
+  LET PRHTIMSTP OF ARPRD_HISTO = SYSDATE * 1000000 + ROUND(SYSTIME / 100)
+  LET ENTCLE    OF ARPRD_HISTO = ENTCLE OF ARCOMMANDE
+  LET PECCLE    OF ARPRD_HISTO = PECCLE OF ARCOMMANDE
+  LET PRHNUMREF OF ARPRD_HISTO = CMDCLE OF ARCMD_DETAIL + CMDAJT OF ARCMD_DETAIL
+  LET PRHDATREF OF ARPRD_HISTO = CMDDAT OF ARCOMMANDE
+  LET PRHTYP    OF ARPRD_HISTO = "01"   ; Commande.
+
+  LET PRHQTETRS OF ARPRD_HISTO = T_CDEQTEREJ
+  LET PRHUSRCRE OF ARPRD_HISTO = TZ_LOGONID
+  LET PRHDATCRE OF ARPRD_HISTO = SYSDATE
+  LET PRHHRECRE OF ARPRD_HISTO = SYSTIME / 10000
+
+  LET PRHITM    OF ARPRD_HISTO = CDECLE    OF ARCMD_DETAIL
+  LET PRHDERCOU OF ARPRD_HISTO = CDEPRIUNI OF ARCMD_DETAIL
+  LET FOUCIECLE OF ARPRD_HISTO = FOUCIECLE OF ARCOMMANDE
+  LET FOUCLE    OF ARPRD_HISTO = FOUCLE    OF ARCOMMANDE
+  LET PRHDSC    OF ARPRD_HISTO = RADNOM    OF MCREF_ADRESSE
+  LET PRHREFFOU OF ARPRD_HISTO = CDEREFFOU OF ARCMD_DETAIL
+
+  PUT ARPRD_HISTO RESET
+
+END
+
+
+
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de mettre à jour les quantités rejetées lorsque le statut de la
+; la ligne de commande est annulée et que la commande est déjà approuvée. Les
+; montants à désengager sont également mis à jour.
+;
+PROCEDURE INTERNAL DESENGAGER_MONTANTS
+BEGIN
+
+
+    LET T_CPTLIG = 50
+    ;
+    ; Valider que s'il y a des réceptions, elles soient journalisées.
+    ; S'il n'y a pas de réceptions, on peut annuler la ligne sans problème.
+    ;
+
+    WHILE RETRIEVING ARRECEPTION
+    BEGIN
+      IF RECDATJOU OF ARRECEPTION = 0
+      THEN LET T_ERREUR = 1
+
+    ; THEN ERROR 1470 ; Impossible d'annuler la ligne, il reste des réceptions
+   ;                 ; non journalisées.
+    END
+
+    ;
+    ; Valider si la période de la commande d'achat est fermée. Si oui,
+    ; il faut désengager dans la période courante.
+    ;
+    IF T_ERREUR = 0
+    THEN BEGIN
+    
+        GET MCPERIODE_CIE OPTIONAL
+        IF ACCESSOK
+        THEN BEGIN
+        
+              IF PCCSTUAR OF MCPERIODE_CIE = "F"
+              THEN BEGIN
+
+                  LET T_ERREUR = 2
+                ; WARNING 1407    ; La période de la commande est fermée, désengagement
+                ;                ; dans la période courante.
+             
+                  GET MCPERIODE_CIE &
+                  VIA   CIECLE,  &
+                        PCCSTUAR &
+                  USING CIECLE OF ARCOMMANDE, &
+                        "C" OPTIONAL
+           
+                  IF ACCESSOK
+                  THEN LET T_PECCLEDES = PECCLE OF MCPERIODE_CIE
+                  ELSE LET T_ERREUR = 3 ;ERROR 1308 ; Il n'y a pas de période courante définie
+               END
+               ELSE LET T_PECCLEDES = PECCLE OF ARCOMMANDE    
+        END
+    
+
+
+
+
+        IF T_ERREUR  <> 3 AND T_ERREUR <> 1
+        THEN BEGIN
+
+           DO INTERNAL MAJ_ENGAGEMENTS
+
+
+           LET CDEMNTDES OF ARCMD_DETAIL = CDEMNTDES OF ARCMD_DETAIL + &
+                                         ( CDEMNTENG OF ARCMD_DETAIL - &
+                                           CDEMNTDES OF ARCMD_DETAIL )
+
+           LET CDEQTEREJ OF ARCMD_DETAIL = CDEQTECOM OF ARCMD_DETAIL - &
+                                           CDEQTEREC OF ARCMD_DETAIL
+
+
+          ; On met à jour l'historique seulement si c'est pas un produit divers
+          ; ou un produit de frais.
+          ;
+           IF    PRDTYP OF VPRE_PRD <> "D" &
+           AND PRDTYP OF VPRE_PRD <> "F"
+           THEN DO INTERNAL MAJ_HISTORIQUE
+
+         END
+    END
+END
+
+;------------------------------------------------------------------------------------
+
+PROCEDURE INITIALIZE
+BEGIN
+   
+
+      DO INTERNAL DESENGAGER_MONTANTS
+
+      RETURN
+
+END
+
+
+BUILD

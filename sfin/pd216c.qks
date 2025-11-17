@@ -1,0 +1,716 @@
+;/T/ 2.5.1 Enregistrer les caissons. (Produit de dimension)
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1995-04-24
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   la liste d'emblalage.
+;
+;
+;    *** ATTENTION **** La procédure entry a été codé.
+;
+;
+;/M/ Programmeur..: Claudie Doyon
+;    Date.........: 1999/10/12
+;    Description..: Modification de la procédure préupdate pour empêcher la
+;                   modification de l'enregistrement si caisson expédié.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd216c ACTIONBAR                     &
+              MODE LABEL "" AT 2,80         &
+              NOACTION                      &
+              FIELDMARK RETAIN STARTUP      &
+              HELP POPUP FROM 4,9 TO 20,72  &
+              RECEIVING T_CIECLEMNU,        &
+                        T_CIENOM,           &
+                        PDCAISSON,          &
+                        PDCOMMAN_INTERNE
+
+
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+
+USE ussectmp  NOLIST
+    "PD216C"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+
+USE pd216c.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Sert à valider les codes bilingue et pour les sous-écrans de consultation
+;
+
+DEFINE    D_CAISTU    CHARACTER SIZE 16 = "CAISTU"
+TEMPORARY T_CAISTU    CHARACTER SIZE 04
+DEFINE    D_CAIETA    CHARACTER SIZE 16 = "CAIETA"
+TEMPORARY T_CAIETA    CHARACTER SIZE 04
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire au traitement
+;
+
+TEMPORARY T_TOT_IMP   INTEGER   UNSIGNED SIZE 04
+TEMPORARY T_QTE_IMP   INTEGER   UNSIGNED SIZE 04
+TEMPORARY T_QTE_EMB   INTEGER   SIGNED   SIZE 04
+TEMPORARY T_TYPE_PROD CHARACTER          SIZE 02 INITIAL "PD" RESET AT STARTUP ; Type de produit traiter par l'écran
+TEMPORARY T_TOTSURMC2 FLOAT              SIZE 08              RESET AT STARTUP ; Total surface des pièces de granit
+TEMPORARY T_SILENT    CHARACTER          SIZE 01
+TEMPORARY T_NEWREC    INTEGER   UNSIGNED SIZE 01 INITIAL 0  RESET AT STARTUP ; Nouveau enregistrement
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du volume d'une pièce de granit
+;
+
+USE usvarvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Caisson
+;
+
+FILE PDCAISSON MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Commande interne
+;
+
+FILE PDCOMMAN_INTERNE MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Emballage produit de dimension
+;
+
+FILE PDEMBAL_PROD_DIM PRIMARY &
+                      NOITEM
+
+  ACCESS VIA     CIECLE,          &
+                 CAINUMCAI        &
+         USING   T_CIECLEMNU,     &
+                 CAINUMCAI        OF PDCAISSON
+
+  ITEM CIECLE           OF PDEMBAL_PROD_DIM INITIAL T_CIECLEMNU
+  ITEM PJTABR           OF PDEMBAL_PROD_DIM INITIAL PJTABR           OF PDCOMMAN_INTERNE
+  ITEM PJTANN           OF PDEMBAL_PROD_DIM INITIAL PJTANN           OF PDCOMMAN_INTERNE
+  ITEM PJTNUMSEQ        OF PDEMBAL_PROD_DIM INITIAL PJTNUMSEQ        OF PDCOMMAN_INTERNE
+  ITEM PJTNUMPRO        OF PDEMBAL_PROD_DIM INITIAL PJTNUMPRO        OF PDCOMMAN_INTERNE
+  ITEM COMNUMCOMINT     OF PDEMBAL_PROD_DIM INITIAL COMNUMCOMINT     OF PDCOMMAN_INTERNE
+  ITEM COMNUMCOM        OF PDEMBAL_PROD_DIM INITIAL COMNUMCOM        OF PDCOMMAN_INTERNE
+  ITEM CAINUMCAI        OF PDEMBAL_PROD_DIM INITIAL CAINUMCAI        OF PDCAISSON
+
+
+;-------------------------------------------------------------------------------
+;
+; Emballage produit de dimension (Validation)
+;
+
+FILE PDEMBAL_PROD_DIM DESIGNER &
+                      ALIAS A_EMP_FIC
+
+
+;-------------------------------------------------------------------------------
+;
+; Produit dimension
+;
+
+FILE PDPROD_DIMENSION DESIGNER
+
+  ACCESS VIA     CIECLE,          &
+                 PDILON,          &
+                 PDIHAU,          &
+                 PDIEPA,          &
+                 TGRCODGRA,       &
+                 TYFCODFIN        &
+         USING   T_CIECLEMNU,                          &
+                 PDILON           OF PDEMBAL_PROD_DIM, &
+                 PDIHAU           OF PDEMBAL_PROD_DIM, &
+                 PDIEPA           OF PDEMBAL_PROD_DIM, &
+                 TGRCODGRA        OF PDEMBAL_PROD_DIM, &
+                 TYFCODFIN        OF PDEMBAL_PROD_DIM
+
+
+;-------------------------------------------------------------------------------
+;
+; Code bilingue (Statut)
+;
+
+FILE VCBI_DSC  REFERENCE &
+               ALIAS A_CBI_CAISTU
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_CAISTU,                             &
+               CAISTU              OF PDCAISSON
+
+
+;-------------------------------------------------------------------------------
+;
+; Code bilingue (État)
+;
+
+FILE VCBI_DSC  REFERENCE &
+               ALIAS A_CBI_CAIETA
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_CAIETA,                             &
+               CAIETA              OF PDCAISSON
+
+
+;-------------------------------------------------------------------------------
+;
+; Type de granit
+;
+
+FILE PDTYPE_GRANIT REFERENCE
+
+  ACCESS VIA   CIECLE,           &
+               TGRCODGRA         &
+         USING T_CIECLEMNU,      &
+               TGRCODGRA           OF PDEMBAL_PROD_DIM
+
+
+;-------------------------------------------------------------------------------
+;
+; Type de fini
+;
+
+FILE PDTYPE_FINI REFERENCE
+
+  ACCESS VIA   CIECLE,          &
+               TYFCODFIN        &
+         USING T_CIECLEMNU,     &
+               TYFCODFIN           OF PDEMBAL_PROD_DIM
+
+
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Caisson " &
+@ELSE
+      " %%%Caisson " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+
+ALIGN (,03,19)
+
+
+FIELD CAINUMCAI        OF PDCAISSON        &
+       NUM SIGNIF 9 &
+       DISPLAY                            &
+        FIXED
+
+
+;ALIGN (,03,19) (,,29)
+ALIGN (,03,19) (,21,22) (24,24,25) (,,29)
+
+
+FIELD PJTABR           OF PDCAISSON        &
+        DISPLAY FIXED &
+        LABEL "Num. commande.:"
+
+FIELD PJTANN           OF PDCAISSON        &
+        LABEL "-"                          &
+        DISPLAY FIXED
+
+
+FIELD COMNUMCOMINT     OF PDCAISSON        &
+        LABEL "-"                          &
+        NUMERIC                            &
+        BWZ DISPLAY FIXED
+
+;FIELD COMNUMCOM        OF PDCAISSON        &
+;        DISPLAY                            &
+;        FIXED
+
+FIELD COMNOM           OF PDCOMMAN_INTERNE &
+        DISPLAY                            &
+        FIXED
+
+
+ALIGN (,03,19) (,,22)
+
+
+FIELD CAISTU           OF PDCAISSON        &
+        DISPLAY                            &
+        FIXED
+
+
+FIELD CBIDSC           OF A_CBI_CAISTU     &
+        DISPLAY                            &
+        FIXED
+
+
+ALIGN (,03,19) (,,22) (,48,64)
+
+
+FIELD CAIETA           OF PDCAISSON        &
+        DISPLAY                            &
+        FIXED
+
+
+FIELD CBIDSC           OF A_CBI_CAIETA     &
+        DISPLAY                            &
+        FIXED
+
+
+FIELD CAIMC2           OF PDCAISSON        &
+        DISPLAY                            &
+        FIXED
+
+
+ALIGN (,03,19) (,48,64)
+
+
+FIELD CAIPOIEST        OF PDCAISSON        &
+        DISPLAY                            &
+        FIXED
+
+
+FIELD CAIPOIREE        OF PDCAISSON        &
+        DISPLAY                            &
+        FIXED
+
+
+DRAW 11,01 TO 11,80
+
+
+SKIP TO LINE 11
+
+
+TITLE &
+@IF FRANCAIS
+      " Produit dimension " &
+@ELSE
+      " %%%Produit dimension " &
+@ENDIF
+      CENTERED AT ,1
+
+
+SKIP TO LINE 13
+
+
+ALIGN (02,03,19)
+
+
+FIELD PDILON           OF PDEMBAL_PROD_DIM &
+        HIDDEN                             &
+        REQUIRED
+
+
+FIELD PDIHAU           OF PDEMBAL_PROD_DIM &
+        HIDDEN                             &
+        REQUIRED
+
+
+FIELD PDIEPA           OF PDEMBAL_PROD_DIM &
+        HIDDEN                             &
+        REQUIRED
+
+
+FIELD TGRCODGRA        OF PDEMBAL_PROD_DIM &
+        HIDDEN                             &
+        REQUIRED                           &
+        NUMERIC                            &
+        LOOKUP ON PDTYPE_GRANIT            &
+          MESSAGE 2910 ; Ce type de granit n'existe pas
+
+
+FIELD TYFCODFIN        OF PDEMBAL_PROD_DIM &
+        HIDDEN                             &
+        REQUIRED                           &
+        NUMERIC                            &
+        LOOKUP ON PDTYPE_FINI              &
+          MESSAGE 2911 ; Ce type de fini n'existe pas
+
+
+FIELD EMPQTEPRD        OF PDEMBAL_PROD_DIM &
+        HIDDEN                             &
+        REQUIRED
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation a effectuer lors de la saisi du champ
+;
+
+;PROCEDURE EDIT PDILON OF PDEMBAL_PROD_DIM
+;BEGIN
+  ;IF CAISTU OF PDCAISSON <> "I"
+  ;THEN BEGIN
+  ;  ERROR 3194 ; Le caisson est déjà expédié
+  ;END
+;END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation a effectuer lors de la saisi du champ
+;
+
+;PROCEDURE EDIT PDIHAU OF PDEMBAL_PROD_DIM
+;BEGIN
+;  IF CAISTU OF PDCAISSON <> "I"
+;  THEN BEGIN
+;    ERROR 3194 ; Le caisson est déjà expédié
+;  END
+;END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation a effectuer lors de la saisi du champ
+;
+
+;PROCEDURE EDIT PDIEPA OF PDEMBAL_PROD_DIM
+;BEGIN
+;  IF CAISTU OF PDCAISSON <> "I"
+;  THEN BEGIN
+;    ERROR 3194 ; Le caisson est déjà expédié
+;  END
+;END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation a effectuer lors de la saisi du champ
+;
+
+;PROCEDURE EDIT TGRCODGRA OF PDEMBAL_PROD_DIM
+;BEGIN
+;  IF CAISTU OF PDCAISSON <> "I"
+;  THEN BEGIN
+;    ERROR 3194 ; Le caisson est déjà expédié
+;  END
+;END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation a effectuer lors de la saisi du champ
+;
+
+;PROCEDURE EDIT TYFCODFIN OF PDEMBAL_PROD_DIM
+;BEGIN
+;  IF CAISTU OF PDCAISSON <> "I"
+;  THEN BEGIN
+;    ERROR 3194 ; Le caisson est déjà expédié
+;  END
+;END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation a effectuer lors de la saisi du champ
+;
+
+;PROCEDURE EDIT EMPQTEPRD OF PDEMBAL_PROD_DIM
+;BEGIN
+;  IF CAISTU OF PDCAISSON <> "I"
+;  THEN BEGIN
+;    ERROR 3194 ; Le caisson est déjà expédié
+;  END
+;END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+  ;
+  ; Assigne le type de produit du caisson
+  ;
+  LET TPDTYPPRD OF PDCAISSON = "PD"
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure de saisit
+;
+
+PROCEDURE ENTRY
+BEGIN
+  GET A_EMP_FIC OPTIONAL &
+    VIA   CIECLE,          &
+          CAINUMCAI        &
+    USING T_CIECLEMNU,     &
+          CAINUMCAI OF PDCAISSON
+  IF NOT ACCESSOK
+  THEN BEGIN
+    ACCEPT PDILON OF PDEMBAL_PROD_DIM
+    ACCEPT PDIHAU OF PDEMBAL_PROD_DIM
+    ACCEPT PDIEPA OF PDEMBAL_PROD_DIM
+    ACCEPT TGRCODGRA OF PDEMBAL_PROD_DIM
+    ACCEPT TYFCODFIN OF PDEMBAL_PROD_DIM
+    ACCEPT EMPQTEPRD OF PDEMBAL_PROD_DIM
+  END
+  ELSE BEGIN
+    ;
+    ; Permet de ne pas afficher le message d'erreur indiquant qu'un seul type
+    ; de produit peut être enregistrer dans le caisson.
+    ;
+    IF T_NEWREC >= 2
+    THEN BEGIN
+      ERROR 3189 ; Un produit de dimension à déjà été saisie pour caisson
+    END
+    LET T_NEWREC = T_NEWREC + 1
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Permet de ne pas afficher le message d'erreur indiquant qu'un seul type de
+; produit peut être enregistrer dans le caisson.
+;
+
+PROCEDURE POSTFIND
+BEGIN
+  GET A_EMP_FIC OPTIONAL &
+    VIA   CIECLE,          &
+          CAINUMCAI        &
+    USING T_CIECLEMNU ,    &
+          CAINUMCAI OF PDCAISSON
+  IF ACCESSOK
+  THEN BEGIN
+    LET T_NEWREC = 2
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul du volume d'une pièce de granit
+;
+
+USE uscalvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+
+ IF CAISTU OF PDCAISSON = "E"
+  THEN ERROR "Vous ne pouvez modifier/saisir/d\351truire car caisson expédié"
+
+  IF CAISTU OF PDCAISSON = "A"
+  THEN ERROR "Vous ne pouvez modifier/saisir/détruire car caisson annulé"
+
+
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDEMBAL_PROD_DIM &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDEMBAL_PROD_DIM &
+     AND NOT NEWRECORD     OF PDEMBAL_PROD_DIM &
+     AND NOT DELETEDRECORD OF PDEMBAL_PROD_DIM &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+
+  LET CAIMC2    OF PDCAISSON = 0.00
+  LET CAIPOIEST OF PDCAISSON = 0.00
+
+  ;
+  ; Calcul de poids et de la surface total des prièces du caisson
+  ;
+  GET PDPROD_DIMENSION OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    IF NOT DELETEDRECORD
+    THEN BEGIN
+    ;
+    ; Traitement si de produit de dimension existe déjà
+    ;
+    LET CAIPOIEST OF PDCAISSON = CAIPOIEST OF PDCAISSON + &
+                                 (EMPQTEPRD OF PDEMBAL_PROD_DIM * &
+                                  TGRPOI    OF PDTYPE_GRANIT * &
+                                  PDIVOLMC3 OF PDPROD_DIMENSION)
+
+    LET CAIMC2    OF PDCAISSON = CAIMC2    OF PDCAISSON + &
+                                 (EMPQTEPRD OF PDEMBAL_PROD_DIM * &
+                                  PDISURMC2 OF PDPROD_DIMENSION)
+    END
+  END
+  ELSE BEGIN
+    ;
+    ; Traitement si nouveau produit de dimension
+    ;
+    LET CIECLE           OF PDPROD_DIMENSION = T_CIECLEMNU
+    LET PDILON           OF PDPROD_DIMENSION = PDILON           OF PDEMBAL_PROD_DIM
+    LET PDIHAU           OF PDPROD_DIMENSION = PDIHAU           OF PDEMBAL_PROD_DIM
+    LET PDIEPA           OF PDPROD_DIMENSION = PDIEPA           OF PDEMBAL_PROD_DIM
+    LET PDIQTE           OF PDPROD_DIMENSION = EMPQTEPRD        OF PDEMBAL_PROD_DIM
+    LET TGRCODGRA        OF PDPROD_DIMENSION = TGRCODGRA        OF PDEMBAL_PROD_DIM
+    LET TYFCODFIN        OF PDPROD_DIMENSION = TYFCODFIN        OF PDEMBAL_PROD_DIM
+    LET PDITYPPRD        OF PDPROD_DIMENSION = "PD"
+    ;
+    ; Calcul de la surface et du volume du nouveau produit de dimension
+    ;
+    LET TZ_LARGEUR              = PDILON           OF PDEMBAL_PROD_DIM
+    LET TZ_HAUTEUR              = PDIHAU           OF PDEMBAL_PROD_DIM
+    LET TZ_EPAISSEUR            = PDIEPA           OF PDEMBAL_PROD_DIM
+    DO INTERNAL CALVOL
+    LET PDIVOLMC3        OF PDPROD_DIMENSION = TZ_VOLUME
+    LET PDISURMC2        OF PDPROD_DIMENSION = TZ_MC2
+    ;
+    ; Calcul de la surface total et du poids du caisson
+    ;
+    IF NOT DELETEDRECORD
+    THEN BEGIN
+    LET CAIPOIEST OF PDCAISSON = CAIPOIEST OF PDCAISSON + &
+                                 (EMPQTEPRD OF PDEMBAL_PROD_DIM * &
+                                  TGRPOI    OF PDTYPE_GRANIT * &
+                                  PDIVOLMC3 OF PDPROD_DIMENSION)
+
+    LET CAIMC2    OF PDCAISSON = CAIMC2    OF PDCAISSON + &
+                                 (EMPQTEPRD OF PDEMBAL_PROD_DIM * &
+                                  PDISURMC2        OF PDPROD_DIMENSION)
+    END
+    ;
+    ; Enregistrement du nouveau produit de dimension
+    ;
+    PUT PDPROD_DIMENSION RESET
+  END
+  DISPLAY CAIMC2 OF PDCAISSON
+  DISPLAY CAIPOIEST OF PDCAISSON
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Permet de ne pas afficher le message d'erreur indiquant qu'un seul type
+; de produit peut être enregistrer dans le caisson.
+;
+
+PROCEDURE POSTUPDATE
+BEGIN
+  LET T_NEWREC = T_NEWREC + 1
+END
+
+
+BUILD
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+*********************************** Caisson ************************************
+*                                                                              *
+* Num. caisson..: xxxxxxxxx                                                    *
+* Num. commande.: xxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           *
+* Statut........: x  xxxxxxxxxxxxxxxxxxxxxxxxx                                 *
+* État..........: x  xxxxxxxxxxxxxxxxxxxxxxxxx Surface.......: xxxxxxxxx       *
+* Poids estimer.: xxxxxxxxxxxxx                Poids réel....: xxxxxxxxxxxxx   *
+*                                                                              *
+****************************** Produit dimension *******************************
+*                                                                              *
+* Longueur......: xxxx                                                         *
+* Hauteur.......: xxxx                                                         *
+* Épaisseur.....: xxxx                                                         *
+* Code granit...: xxx                                                          *
+* Code fini.....: xx                                                           *
+* Qte. product..: xxxxx                                                        *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+********************************************************************************
+@ENDIF

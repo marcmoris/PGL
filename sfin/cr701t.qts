@@ -1,0 +1,1095 @@
+;/T/ Journalisation des encaissements/ mauvaise cr ances
+;
+;/M/ Martin Perron / Modifier la MAJ de T_HISCLE_ANN avec T_HISCLE_TMP
+;
+;    Date de modif..: 1 d\351cembre 1999
+;
+;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur...: Alain C t
+;    Date Cr ation.: 5 juillet 1993
+;
+;    Description...: Programme de journalisation des lots d'encaissements et
+;                    de mauvaises cr ances.
+;
+;    Param tres....: Compagnie     1 fois  Compagnie du menu
+;                    Periode CTB   1 fois
+;                    No Lot        n fois
+;                    Type de lot   1 fois ==> EN - encaissements
+;                                             MC - mauvaise cr ance
+;
+;    G n ral.......: Nous avons choisi de mettre a jour les fichiers au fur et
+;                    a mesure du traitement (exemple lot, transaction, etc...)
+;                    plutot que d'attendre d'avoir tout valider et d'ensuite
+;                    tout mettre a jour.
+;                    Ceci est possible d  a STARBASE et nous permet de
+;                    diminuer consid rablement les lectures/ecritures.
+;                    Si un 'TERMINATE REQUEST' est execut , alors un 'ROLLBACK'
+;                    de toutes les transactions sera effectu .
+;
+;    Particularit .: Une bonne partie du programme se retrouve dans un
+;                    use g r ral a toutes les journalisations(US900T.QTS).
+;
+;    Ecriture comptable
+;    ------------------
+;
+;      Pour mieux comprendre le traitement de cette proc dure je vais d tailler
+;      les  critures support es par cette proc dure.
+;
+;      Il y a deux type d'encaissement, soit une ventilation facture(F) ou soit
+;      divers(D).
+;
+;      Il y a deux type de mauvaise cr ance, soit automatique ou soit manuelle.
+;
+;      D finition des diff rentes codes utilis s dans l'explication de
+;      l' criture:
+;
+;      Code      Description               Provenance
+;      --------  ------------------------
+;      MNT_RECU  Montant re u              DPOMNTPAM OF CRDEPOT
+;      MNT_ENC   Montant encaiss           DPOMNTENC OF CRDEPOT
+;      MNT_GP    Montant profit/perte      ( MNT_RECU * TAUx de la devise de
+;                                            r f rence) - MNT_ENC
+;      MNT_CAR   Montant qui diminu la     CRHMNTCAR OF CRCAR_HISTO
+;                facture
+;      MNT_ESC   Montant d'escompte        CRHMNTESC OF CRCAR_HISTO
+;      MNT_IMP   Montant imput             DPIMNT    OF CRDPO_IMPUTATION
+;      MNT_MAC   Montant mauvaise cr ance  DPOMNTPAM OF CRDEPOT
+;      CPT_ENC   Compte d'encaisse         LBQCPTENC OF CRDEPOT
+;      CPT_GP    Compte profit/perte       CPTCLE    OF MCCOMPTE
+;                                          CPTCAT = "GP"
+;      CPT_ESC_n Compte d'escompte         CLCCPTESC OF CRCLI_CIE
+;      CPT_CAR_n Compte   recevoir         CARCPTCAR OF CRCPT_A_REC
+;      CPT_IMP_n Compte de l'imputation    CPTCLE    OF CRDPO_IMPUTATION
+;      CPT_MAC   Compte de mauvaise        CPTCLE    OF MCCOMPTE
+;                cr ance                   CPTCAT = "MC"
+;      UNA_BIL   Unit  de bilan            CIEUNABIL OF MCCOMPAGNIE
+;      UNA_IMP   Unit  de l'imputation     UNACLE    OF CRDPO_IMPUTATION
+;      DEV_REF   Devise de la r f rence    DEVCLE    OF MCREFERENCE
+;      DEV_ENC   Devise du compte d'en-    DEVCLE    OF MCCOMPTE
+;                caisse                    CPT_ENC = CPTCLE
+;
+;      Le petit '_n' indique que ce compte peut ce rep ter plusieur
+;      fois pour une transaction, exemple un encaissement peut avoir
+;      plusieur ligne d'imputation.
+;
+;      Encaissement de type Facture:
+;
+;        Compte     Unit  adm.        D bit              Cr dit
+;        ------     ----------   -----------------   -----------------
+;        CPT_ENC    UNA_BIL      MNT_ENC / DEV_ENC
+;        CPT_GP     UNA_BIL      MNT_GP  / DEV_ENC
+;        CPT_ESC_n  UNA_BIL      MNT_ESC / DEV_REF
+;        CPT_CAR_n  UNA_BIL                          MNT_CAR / DEV_REF
+;        CPT_IMP_n  UNA_IMP                          MNT_IMP / DEV_REF
+;
+;      Encaissement de type Divers:
+;
+;        Compte     Unit  adm.        D bit              Cr dit
+;        ------     ----------   -----------------   -----------------
+;        CPT_ENC    UNA_BIL      MNT_ENC / DEV_ENC
+;        CPT_GP     UNA_BIL      MNT_GP  / DEV_ENC
+;        CPT_IMP_n  UNA_IMP                          MNT_IMP / DEV_REF
+;
+;      Mauvaise cr ance Automatique:
+;
+;        Compte     Unit  adm.        D bit              Cr dit
+;        ------     ----------   -----------------   -----------------
+;        CPT_MAC    UNA_BIL      MNT_MAC / DEV_REF
+;        CPT_CAR_n  UNA_BIL                          MNT_CAR / DEV_REF
+;
+;      Mauvaise cr ance manuel:
+;
+;        Compte     Unit  adm.        D bit              Cr dit
+;        ------     ----------   -----------------   -----------------
+;        CPT_IMP_n  UNA_IMP      MNT_IMP / DEV_REF
+;        CPT_CAR_n  UNA_BIL                          MNT_CAR / DEV_REF
+;
+;      Exemple:
+;
+;      Encaissement de type Facture:
+;
+;      1) MNT_RECU  = 100$ / CAN
+;         MNT_ENC   = 100$ / CAN
+;
+;         MNT_CAR   = 100$ (inclus l'escompte)
+;         MNT_ESC   =   5$
+;
+;         Compte     Unit  adm.        D bit              Cr dit
+;         ------     ----------   -----------------   -----------------
+;         CPT_ENC    UNA_BIL             100$
+;         CPT_ESC_n  UNA_BIL               5$
+;         CPT_CAR_n  UNA_BIL                                105$
+;
+;      2) MNT_RECU  = 100$ / USD
+;         MNT_ENC   = 113$ / CAN
+;
+;         MNT_CAR   =  95$ (inclus l'escompte)
+;         MNT_ESC   =   5$
+;         MNT_IMP   =  10$
+;
+;         Taux de change   1.20
+;
+;         Compte     Unit  adm.        D bit              Cr dit
+;         ------     ----------   -----------------   -----------------
+;         CPT_ENC    UNA_BIL             113$/CAN
+;         CPT_GP     UNA_BIL               7$/CAN
+;         CPT_ESC_n  UNA_BIL               5$/USD
+;         CPT_CAR_n  UNA_BIL                                 95$/USD
+;         CPT_IMP_n  UNA_IMP                                 10$/USD
+;
+;      Encaissement de type Divers:
+;
+;      1) MNT_RECU  = 100$ / CAN
+;         MNT_ENC   = 100$ / CAN
+;
+;         MNT_IMP   = 100$
+;
+;
+;         Compte     Unit  adm.        D bit              Cr dit
+;         ------     ----------   -----------------   -----------------
+;         CPT_ENC    UNA_BIL             100$
+;         CPT_IMP_n  UNA_BIL                                100$
+;
+;
+;/M/ Stephane Jackson, 98-08-21
+;
+;    Ajustement pour le changement de siècle
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST   ; permet de faire les SET PROCESS NOLIMIT....
+
+RUN cr701t
+
+;
+; Pour arr ter la proc dure en cas d'erreur
+;
+GLOBAL TEMPORARY G_ERREUR       CHARACTER SIZE 5
+;
+; Pour toujours avoir la p riode   journaliser.
+;
+GLOBAL TEMPORARY G_PECCLE       CHARACTER SIZE 4
+;
+; Pour garder la date et l'heure du jour tout le long du traitement.
+;
+GLOBAL TEMPORARY G_DATJOU       DATE
+GLOBAL TEMPORARY G_HREJOU       INTEGER SIZE 4
+;
+; Pour avoir l'ann e selon la date du jour
+;
+GLOBAL TEMPORARY G_ANN          CHARACTER SIZE 2
+;
+; Identifie le module.
+;
+GLOBAL TEMPORARY G_CODMOD       CHARACTER SIZE 2
+;
+; Parametres de holding pour relation de compte.
+;
+GLOBAL TEMPORARY G_HLDCHTCPTRLT CHARACTER SIZE 1
+;
+; Param tres du holding, si notion de projet Oui/Non.
+;
+GLOBAL TEMPORARY G_HLDNTNPRO    CHARACTER SIZE 1
+;
+; Pour savoir s'il y a eu une convertion de montant.
+;
+GLOBAL TEMPORARY G_FLGDEV       CHARACTER SIZE 1
+;
+; On conserve la devise du Holding
+;
+GLOBAL TEMPORARY G_DEVCLE       CHARACTER SIZE 3
+;
+; Compte comptable de profit/perte.
+;
+GLOBAL TEMPORARY G_CPT_GP       CHARACTER SIZE 6
+;
+; Compte comptable de mauvaise cr ance.
+;
+GLOBAL TEMPORARY G_CPT_MC       CHARACTER SIZE 6
+;
+; Unit  administrative de bilan de la compagnie du lot(menu).
+;
+GLOBAL TEMPORARY G_UNABIL       CHARACTER SIZE 8
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Affectation des variables globales selon les param tres du holding.
+; On va chercher le compte de profit/perte et de mauvaise cr ance d fini
+; dans le plan comptable.
+;
+;
+REQUEST TRAITE_GENERAL
+
+ACCESS MCHOLDING &
+
+  LINK "GP" &
+    TO CPTCAT OF MCCOMPTE ALIAS A_CPT_GP OPTIONAL &
+
+  LINK "MC" &
+    TO CPTCAT OF MCCOMPTE ALIAS A_CPT_MC OPTIONAL
+
+SELECT IF CIENMC OF MCHOLDING = "1"
+
+
+
+
+ITEM G_CODMOD       = "CR"
+ITEM G_HLDCHTCPTRLT = HLDCHTCPTRLT OF MCHOLDING
+ITEM G_HLDNTNPRO    = HLDNTNPRO    OF MCHOLDING
+ITEM G_FLGDEV       = "0"
+ITEM G_DEVCLE       = DEVCLE       OF MCHOLDING
+
+ITEM G_DATJOU RESET AT INITIAL TO SYSDATE
+ITEM G_HREJOU RESET AT INITIAL TO SYSTIME / 10000
+ITEM G_ANN    RESET AT INITIAL TO ASCII(MOD(FLOOR(G_DATJOU / 10000), 100),2)
+
+ITEM G_CPT_GP = CPTCLE OF A_CPT_GP
+ITEM G_CPT_MC = CPTCLE OF A_CPT_MC
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; S lection des lots selon les parametres saisies par l'usager. Le type de lot
+; est re u par les param tres du programme(prog_code), c'est que la journali-
+; sation des encaissements et des mauvaises cr ances sont d finis comme deux
+; options dans le menu Proc dures.
+;
+; On s lectionne que les lots autoris s   la journalisation
+; et pas encore journalis s.
+;
+; On va chercher l'unit  administrative de bilan de la compagnie du lot, va
+; servir   la g n ration des  critures comptables.
+;
+; On met a jour la date et l'heure de journalisation dans le lot.
+;
+;
+REQUEST SELECTION_ET_MAJ_DU_LOT
+
+ACCESS CRLOT &
+
+  LINK CIECLE OF CRLOT &
+    TO CIECLE OF MCCOMPAGNIE
+
+
+
+
+CHOOSE CIECLE    PARM , &
+       PECCLE    PARM ,&
+       LCRCLE    PARM , &
+       LCRTYPECR PARM    ; EN - encaissement
+                         ; MC - mauvaise cr eance
+
+
+
+
+SELECT CRLOT IF  (LCRDATJOU OF CRLOT = 0   & ; ne doit pas etre journalis
+             AND LCRATRJOU OF CRLOT = "1")   ; doit  tre autoris  a journalis
+
+;
+; Affectation de la p riode trait e.
+;
+ITEM G_PECCLE = PECCLE OF CRLOT
+
+;
+; Affectation de l'unit  administrative de bilan.
+;
+ITEM G_UNABIL = CIEUNABIL OF MCCOMPAGNIE
+
+;
+; On conserve les lots   traiter.
+;
+SUBFILE WCR701LO &
+  INCLUDE CIECLE    OF CRLOT , &
+          PECCLE    OF CRLOT , &
+          LCRCLE    OF CRLOT , &
+          LCRTYPECR OF CRLOT , &
+          LCRDSC    OF CRLOT
+
+;
+; Mise   jour du lot.
+;
+OUTPUT CRLOT UPDATE
+  ITEM LCRDATJOU OF CRLOT FINAL G_DATJOU
+  ITEM LCRHREJOU OF CRLOT FINAL G_HREJOU
+  ITEM LCRUSRJOU OF CRLOT FINAL LOGONID
+
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; S lection et mise   jour des  critures.
+;
+; On valide si les transactions balancent.
+;
+; On g n re un num ro d'historique pour chaque pi ce.
+;
+; Ajout de l' criture pour: - l'encaisse(cpt banque), d bit
+;                           - Gain/perte, d bit
+;                           - l'escompte, d bit
+;                           - mauvaise cr ance, d bit
+;                           - imputations, cr dit
+;
+; On met   jour la date de journalisation, l'heure de journalisation et le
+; num ro d'historique dans l' criture de journal.
+;
+;
+REQUEST SELECTION_ET_MAJ_DES_DEPOT
+
+ACCESS *WCR701LO &
+  ;
+  ; Num ro d'historique.
+  ;
+  LINK "1", &
+       G_ANN &
+    TO CIENMC, &
+       HSSCLEANN OF  MCHIS_SEQ OPTIONAL &
+  ;
+  ; Encaissement / mauvaise cr ances.
+  ;
+  LINK CIECLE OF WCR701LO, &
+       PECCLE OF WCR701LO, &
+       LCRCLE OF WCR701LO  &
+    TO CIECLE, &
+       PECCLE, &
+       LCRCLE    OF CRDEPOT &
+  ;
+  ; R f rence, pour avoir la devise.
+  ;
+  LINK REFCIECLE OF CRDEPOT, &
+       REFCLETYP OF CRDEPOT, &
+       REFCLENUM OF CRDEPOT  &
+    TO REFCIECLE, &
+       REFCLETYP, &
+       REFCLENUM OF MCREFERENCE &
+  ;
+  ; Client, pour avoir la compagnie d'inter.
+  ;
+  LINK REFCIECLE OF CRDEPOT, &
+       REFCLENUM OF CRDEPOT, &
+       CIECLE    OF CRDEPOT, &
+       REFCLETYP OF CRDEPOT  &
+    TO CLICIECLE, &
+       CLICLE   , &
+       CIECLE   , &
+       CLIREFTYP OF VCLC_CLI OPTIONAL &
+  ;
+  ; Compagnie d'inter, pour avoir l'unit  de bilan.
+  ;
+  LINK CLICIEINT OF VCLC_CLI &
+    TO CIECLE OF MCCOMPAGNIE OPTIONAL &
+  ;
+  ; Compte d'encaisse, pour avoir la devise du compte.
+  ;
+  LINK LBQCPTENC OF CRDEPOT &
+    TO CPTCLE OF MCCOMPTE OPTIONAL &
+  ;
+  ; Devise de la r f rence, pour avoir le taux de la devise.
+  ;
+  LINK DEVCLE OF MCREFERENCE &
+    TO DEVCLE OF MCDEVISE &
+  ;
+  ; Imputation, transfert des imputations en  critures comptable.
+  ;
+  LINK CIECLE OF CRDEPOT, &
+       DPOCLE OF CRDEPOT  &
+    TO CIECLE, &
+       DPOCLE    OF CRDPO_IMPUTATION OPTIONAL
+
+
+TEMPORARY T_MESERR CHARACTER SIZE 80 ; Pour les erreurs.
+;
+; pour la g n ration des num ro d'historique
+;
+TEMPORARY T_HISCLE INTEGER UNSIGNED SIZE 4
+TEMPORARY T_HISCLE_SIE INTEGER UNSIGNED SIZE 4
+TEMPORARY T_NUMSEQ INTEGER UNSIGNED SIZE 4
+TEMPORARY T_HISCLE_TMP CHARACTER SIZE 09
+
+TEMPORARY T_HECCIEINT  CHARACTER SIZE 4  ; Pour compagnie d'inter
+TEMPORARY T_HECUNAINT  CHARACTER SIZE 8  ; Unit  adm. de bilan de la cie d'inter
+TEMPORARY T_HECNUMDOC2 CHARACTER SIZE 6  ; Pour num ro de document-2(= BLANC)
+TEMPORARY T_HECFLGINT  CHARACTER SIZE 1  ; Pour flag d'inter compagnie
+TEMPORARY T_HISDSCGEN  CHARACTER SIZE 40 ; Description g n rale
+TEMPORARY T_HISCLE1    CHARACTER SIZE 4  ; Cl  d'acc s 1, de l'histo.
+TEMPORARY T_HISCLE2    CHARACTER SIZE 15 ; Cl  d'acc s 2, de l'histo.
+TEMPORARY T_HISCLE3    CHARACTER SIZE 15 ; Cl  d'acc s 3, de l'histo(= blanc)
+TEMPORARY T_CODDCD     CHARACTER SIZE  1 ; Code de d bit
+TEMPORARY T_MNTENC     FLOAT     SIZE  8 ; Montant de l'encaisse
+TEMPORARY T_MNTGL      FLOAT     SIZE  8 ; Montant de l'imputation
+TEMPORARY T_PRJCLE     CHARACTER SIZE  8 ; Projet de l'imputation.
+TEMPORARY T_PRACLE     CHARACTER SIZE  3 ; Activit  de l'imputation.
+TEMPORARY T_IMMCLE     CHARACTER SIZE  12
+
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE CHARACTER SIZE 5 = "1" + PECCLE OF CRDEPOT &
+         IF PECCLE OF CRDEPOT[1:1] < "8" &
+         ELSE "0" + PECCLE OF CRDEPOT
+
+; Ajustement pour le changement de siècle
+DEFINE D_DPOCLE_TRI CHARACTER SIZE 13 = "1" + DPOCLE OF CRDEPOT &
+    IF DPOCLE OF CRDEPOT[1:1] < "8" &
+    ELSE "0" + DPOCLE OF CRDEPOT 
+ 
+SORT   ON CIECLE    OF CRDEPOT &
+       ON D_PECCLE_SIE &
+       ON LCRCLE    OF CRDEPOT &
+       ON D_DPOCLE_TRI
+
+ITEM T_CODDCD RESET AT INITIAL TO "D"
+
+;
+; On v rifie que l'encaissement balance avec la ventilation factures et
+; l'imputation.
+;
+; On v rifie que la mauvaise cr ance de type manuel balance avec l'imputation.
+; Les mauvaises cr ance automatique balancent tout le temps, car l'usager
+; n'a pas acc s au montant total de la mauvaise cr ance.
+;
+ITEM T_MESERR = &
+@IF FRANCAIS
+  "Ventilation hors balance; lot: " + LCRCLE OF CRDEPOT + &
+                                "(" + LCRTYPECR OF WCR701LO + ")" + &
+                     " ,document: " + DPOCLE OF CRDEPOT + &
+                    " ,r f rence: " + REFCLENUM OF CRDEPOT &
+@ELSE
+  "Breakdown out of balance; Batch: " + LCRCLE OF CRDEPOT + &
+                                "(" + LCRTYPECR OF WCR701LO + ")" + &
+                     " ,document: " + DPOCLE OF CRDEPOT + &
+                    " ,reference: " + REFCLENUM OF CRDEPOT &
+@ENDIF
+  IF (     DPOMNTPAM OF CRDEPOT <> (DPOCUMMNT OF CRDEPOT + DPOMNTFAC OF CRDEPOT) &
+       AND DPOTYPECR OF CRDEPOT = "EN" &
+     ) &
+     OR &
+     (     DPOMNTPAM OF CRDEPOT <> DPOCUMMNT OF CRDEPOT &
+       AND DPOTYPECR OF CRDEPOT = "MC" &
+       AND DPOTYPMAC OF CRDEPOT = "M" ) &
+  AT D_DPOCLE_TRI &
+  RESET AT D_DPOCLE_TRI
+
+
+ITEM G_ERREUR = "ARRET" IF T_MESERR <> "" AT D_DPOCLE_TRI
+
+;
+; Affectation du num ro d'historique
+;
+; Ajustement pour le changement de siècle
+ITEM T_NUMSEQ INITIAL 0 & ;NCONVERT( G_ANN ) * 10000000 &
+                        IF NOT RECORD MCHIS_SEQ EXIST &
+                 ELSE HSSNUMSEQ OF MCHIS_SEQ
+
+ITEM T_HISCLE RESET AT INITIAL TO (T_NUMSEQ + 1)
+
+;
+; On incr mente le num ro d'historique   chaque transaction(d p t).
+;
+ITEM T_HISCLE COUNT AT D_DPOCLE_TRI
+
+ITEM T_HISCLE_TMP = ASCII(T_HISCLE,9)
+ITEM T_HISCLE_SIE = NCONVERT((G_ANN + T_HISCLE_TMP[3:7]))
+
+; Ajustement pour le changement de siècle
+;ITEM T_HISCLE_SIE = NCONVERT(G_ANN + ASCII(T_HISCLE,7))
+
+;
+; Compagnie d'inter, si c'est un client d'inter, on prend la compagnie d fini
+; dans le client, sinon on prend la compagnie de la transaction.
+;
+ITEM T_HECCIEINT = CIECLE OF CRDEPOT IF CLITYP OF VCLC_CLI <> "I" &
+              ELSE CLICIEINT OF VCLC_CLI
+
+;
+; Unit  administrative de bilan de la compagnie d'inter.
+;
+ITEM T_HECUNAINT = G_UNABIL          IF CLITYP OF VCLC_CLI <> "I" &
+              ELSE CIEUNABIL OF MCCOMPAGNIE
+
+;
+; Identifie si c'est une transaction d'inter.
+;
+ITEM T_HECFLGINT = "0" IF CLITYP OF VCLC_CLI <> "I" &
+              ELSE "1"
+
+
+;
+; Description g n ral, on prend le nom dans le d p t si c'est
+; un client divers, sinon on la laisse   blanc.
+;
+ITEM T_HISDSCGEN = DPONOM OF CRDEPOT IF CLITYP OF VCLC_CLI = "D" &
+              ELSE " "
+
+;
+; On assigne la cl  du d p t   l'historique, le d p t a seulement deux segments
+; dans sa cl , donc le troisi me segment est laisser vide.
+;
+ITEM T_HISCLE1 = CIECLE OF CRDEPOT
+ITEM T_HISCLE2 = DPOCLE OF CRDEPOT
+
+;
+; Montant de l'encaisse, on utilise une variable temporaire pour avoir
+; une variable de type FLOAT dans la d finition du sous-fichier, si on
+; met directement la variable DPOMNTEnc dans le sous-fichier, alors la
+; d finition sera G_FLOAT et cela cause un BUG entre les programmes de
+; journalisation.
+;
+ITEM T_MNTENC = DPOMNTENC OF CRDEPOT
+
+
+;
+; Sous-fichier des erreurs
+;
+SUBFILE WUS900ER KEEP &
+                 AT D_DPOCLE_TRI &
+                 IF T_MESERR <> "" &
+  INCLUDE CIECLE OF WCR701LO ALIAS CIECLE, &
+          G_PECCLE           ALIAS PECCLE, &
+          T_MESERR
+
+
+;
+;
+; Sous fichier commun   toutes les journalisations, sert   mettre   jour la
+; table MCHISTO.
+;
+;
+SUBFILE WUS900H AT D_DPOCLE_TRI &
+  INCLUDE T_HISCLE_SIE             ALIAS HISCLE    , &
+          CIECLE    OF CRDEPOT     ALIAS HISCIECLE , &
+          REFCIECLE OF CRDEPOT                     , &
+          REFCLETYP OF CRDEPOT                     , &
+          REFCLENUM OF CRDEPOT                     , &
+          DPOCLE    OF CRDEPOT     ALIAS HISNUMDOC , &
+          PECCLE    OF CRDEPOT                     , &
+          LCRCLE    OF CRDEPOT     ALIAS HISNUMLOT , &
+          DPODAT    OF CRDEPOT     ALIAS HISDAT    , &
+          G_DATJOU                 ALIAS HISDATJOU , &
+          DPOTYPECR OF CRDEPOT     ALIAS HISTYPECR , &
+          T_HISDSCGEN              ALIAS HISDSCGEN , &
+          DPODSC1   OF CRDEPOT     ALIAS HISDSCSAI , &
+          DPODSC2   OF CRDEPOT     ALIAS HISDSCSAI2, &
+          DPOUSRCRE OF CRDEPOT     ALIAS HISUSRCRE , &
+          DEVCLE    OF MCREFERENCE                 , &
+          T_HISCLE1                ALIAS HISCLE1   , &
+          T_HISCLE2                ALIAS HISCLE2   , &
+          T_HISCLE3                ALIAS HISCLE3
+
+;
+; Sous-fichier contenant les transactions   journaliser, sert au traitement
+; des ventilations facture(CAR, Escompte).
+;
+SUBFILE WCR701TR AT D_DPOCLE_TRI &
+  INCLUDE CIECLE       OF CRDEPOT    , &
+          DPOCLE       OF CRDEPOT    , &
+          PECCLE       OF CRDEPOT    , &
+          LCRCLE       OF CRDEPOT    , &
+          DPOTYPECR    OF CRDEPOT    , &
+          DPODAT       OF CRDEPOT    , &
+          DEVCLE       OF MCREFERENCE, &
+          T_HISCLE_SIE ALIAS T_HISCLE, &
+          T_HECCIEINT                , &
+          T_HECUNAINT                , &
+          T_HECFLGINT                , &
+          T_HECNUMDOC2
+
+;
+; Mise   jour de la date de journalisation dans le d p t.
+;
+OUTPUT CRDEPOT UPDATE AT D_DPOCLE_TRI
+  ITEM DPODATJOU OF CRDEPOT FINAL G_DATJOU
+  ITEM DPOHREJOU OF CRDEPOT FINAL G_HREJOU
+  ITEM HISCLE    OF CRDEPOT FINAL T_HISCLE_SIE
+
+
+
+;
+; Sous fichier utilis  dans le traitement g n ral des journalisations
+; et servant a mettre a jour GLHIS_ECR.
+;
+; Ajout du compte d'encaisse pour les encaissements.
+;
+SUBFILE WUS900HE KEEP AT D_DPOCLE_TRI &
+                 IF     DPOMNTENC OF CRDEPOT <> 0 &
+                    AND DPOTYPECR OF CRDEPOT = "EN" &
+  INCLUDE T_HISCLE_SIE                  ALIAS HISCLE    , &
+          CIECLE       OF CRDEPOT       ALIAS HISCIECLE , &
+          LBQCPTENC    OF CRDEPOT       ALIAS CPTCLE    , &
+          T_HECCIEINT                   ALIAS HECCIEINT , &
+          T_HECUNAINT                   ALIAS HECUNAINT , &
+          CIECLE       OF CRDEPOT                       , &
+          G_UNABIL                      ALIAS UNACLE    , &
+          T_PRJCLE                      ALIAS PRJCLE    , &
+          T_PRACLE                      ALIAS PRACLE    , &
+          T_IMMCLE                      ALIAS IMMCLE    , &
+          PECCLE       OF CRDEPOT                       , &
+          T_HECNUMDOC2                  ALIAS HECNUMDOC2, &
+          T_CODDCD                      ALIAS T_CODDC   , &
+          T_MNTENC                      ALIAS T_MNTGL   , &
+          T_MNTENC                      ALIAS T_MNTORI  , &
+          T_HECFLGINT                   ALIAS HECFLGINT , &
+          DEVCLE       OF MCCOMPTE                      , &
+          G_CODMOD                      ALIAS HISCODMOD , &
+          DPOTYPECR    OF CRDEPOT       ALIAS HISTYPECR , &
+          LCRCLE       OF CRDEPOT       ALIAS HISNUMLOT
+
+;
+; Ajout du compte Profit / Perte sur taux change.
+;
+OUTPUT *WUS900HE ALIAS A_WUS900HE_GP &
+                 ADD AT D_DPOCLE_TRI &
+                 IF     DPOTYPECR OF CRDEPOT = "EN" &
+                    AND DEVCLE OF MCREFERENCE <> DEVCLE OF MCCOMPTE
+  ITEM HISCLE     OF A_WUS900HE_GP FINAL T_HISCLE_SIE
+  ITEM HISCIECLE  OF A_WUS900HE_GP FINAL CIECLE       OF CRDEPOT
+  ITEM CPTCLE     OF A_WUS900HE_GP FINAL G_CPT_GP
+  ITEM HECCIEINT  OF A_WUS900HE_GP FINAL T_HECCIEINT
+  ITEM HECUNAINT  OF A_WUS900HE_GP FINAL T_HECUNAINT
+  ITEM CIECLE     OF A_WUS900HE_GP FINAL CIECLE       OF CRDEPOT
+  ITEM UNACLE     OF A_WUS900HE_GP FINAL G_UNABIL
+  ITEM PRJCLE     OF A_WUS900HE_GP FINAL " "
+  ITEM PRACLE     OF A_WUS900HE_GP FINAL " "
+  ITEM IMMCLE     OF A_WUS900HE_GP FINAL " "
+  ITEM PECCLE     OF A_WUS900HE_GP FINAL PECCLE       OF CRDEPOT
+  ITEM HECNUMDOC2 OF A_WUS900HE_GP FINAL T_HECNUMDOC2
+  ITEM T_CODDC    OF A_WUS900HE_GP FINAL "D"
+  ITEM T_MNTGL    OF A_WUS900HE_GP FINAL &
+                                 ( DPOMNTPAM OF CRDEPOT * DEVTAU OF MCDEVISE ) &
+                                 - DPOMNTENC OF CRDEPOT
+  ITEM T_MNTORI   OF A_WUS900HE_GP FINAL T_MNTGL
+  ITEM HECFLGINT  OF A_WUS900HE_GP FINAL T_HECFLGINT
+  ITEM DEVCLE     OF A_WUS900HE_GP FINAL DEVCLE       OF MCCOMPTE
+  ITEM HISCODMOD  OF A_WUS900HE_GP FINAL G_CODMOD
+  ITEM HISTYPECR  OF A_WUS900HE_GP FINAL DPOTYPECR    OF CRDEPOT
+  ITEM HISNUMLOT  OF A_WUS900HE_GP FINAL LCRCLE       OF CRDEPOT
+
+;
+; Ajout du compte de mauvaise cr ance.
+;
+OUTPUT *WUS900HE ALIAS A_WUS900HE_MC &
+                 ADD AT D_DPOCLE_TRI &
+                 IF     DPOTYPECR OF CRDEPOT = "MC" &
+                    AND DPOTYPMAC OF CRDEPOT = "A"  &
+                    AND DPOMNTPAM OF CRDEPOT <> 0
+  ITEM HISCLE     OF A_WUS900HE_MC FINAL T_HISCLE_SIE
+  ITEM HISCIECLE  OF A_WUS900HE_MC FINAL CIECLE       OF CRDEPOT
+  ITEM CPTCLE     OF A_WUS900HE_MC FINAL G_CPT_MC
+  ITEM HECCIEINT  OF A_WUS900HE_MC FINAL T_HECCIEINT
+  ITEM HECUNAINT  OF A_WUS900HE_MC FINAL T_HECUNAINT
+  ITEM CIECLE     OF A_WUS900HE_MC FINAL CIECLE       OF CRDEPOT
+  ITEM UNACLE     OF A_WUS900HE_MC FINAL G_UNABIL
+  ITEM PRJCLE     OF A_WUS900HE_MC FINAL " "
+  ITEM PRACLE     OF A_WUS900HE_MC FINAL " "
+  ITEM IMMCLE     OF A_WUS900HE_MC FINAL " "
+  ITEM PECCLE     OF A_WUS900HE_MC FINAL PECCLE       OF CRDEPOT
+  ITEM HECNUMDOC2 OF A_WUS900HE_MC FINAL T_HECNUMDOC2
+  ITEM T_CODDC    OF A_WUS900HE_MC FINAL "D"
+  ITEM T_MNTGL    OF A_WUS900HE_MC FINAL DPOMNTPAM    OF CRDEPOT
+  ITEM T_MNTORI   OF A_WUS900HE_MC FINAL T_MNTGL
+  ITEM HECFLGINT  OF A_WUS900HE_MC FINAL T_HECFLGINT
+  ITEM DEVCLE     OF A_WUS900HE_MC FINAL DEVCLE       OF MCREFERENCE
+  ITEM HISCODMOD  OF A_WUS900HE_MC FINAL G_CODMOD
+  ITEM HISTYPECR  OF A_WUS900HE_MC FINAL DPOTYPECR    OF CRDEPOT
+  ITEM HISNUMLOT  OF A_WUS900HE_MC FINAL LCRCLE       OF CRDEPOT
+
+;
+; Transfert de l'imputation.
+;
+OUTPUT *WUS900HE ALIAS A_WUS900HE_IMP &
+                 ADD &
+                 IF DPIMNT OF CRDPO_IMPUTATION <> 0
+  ITEM HISCLE     OF A_WUS900HE_IMP FINAL T_HISCLE_SIE
+  ITEM HISCIECLE  OF A_WUS900HE_IMP FINAL CIECLE       OF CRDEPOT
+  ITEM CPTCLE     OF A_WUS900HE_IMP FINAL CPTCLE       OF CRDPO_IMPUTATION
+  ITEM HECCIEINT  OF A_WUS900HE_IMP FINAL T_HECCIEINT
+  ITEM HECUNAINT  OF A_WUS900HE_IMP FINAL T_HECUNAINT
+  ITEM CIECLE     OF A_WUS900HE_IMP FINAL CIECLE       OF CRDEPOT
+  ITEM UNACLE     OF A_WUS900HE_IMP FINAL UNACLE       OF CRDPO_IMPUTATION
+  ITEM PRJCLE     OF A_WUS900HE_IMP FINAL PRJCLE       OF CRDPO_IMPUTATION
+  ITEM PRACLE     OF A_WUS900HE_IMP FINAL PRACLE       OF CRDPO_IMPUTATION
+  ITEM IMMCLE     OF A_WUS900HE_IMP FINAL IMMCLE       OF CRDPO_IMPUTATION
+  ITEM PECCLE     OF A_WUS900HE_IMP FINAL PECCLE       OF CRDEPOT
+  ITEM HECNUMDOC2 OF A_WUS900HE_IMP FINAL T_HECNUMDOC2
+  ITEM T_CODDC    OF A_WUS900HE_IMP FINAL DPICODDC     OF CRDPO_IMPUTATION
+  ITEM T_MNTGL    OF A_WUS900HE_IMP FINAL DPIMNT       OF CRDPO_IMPUTATION
+  ITEM T_MNTORI   OF A_WUS900HE_IMP FINAL T_MNTGL
+  ITEM HECFLGINT  OF A_WUS900HE_IMP FINAL T_HECFLGINT
+  ITEM DEVCLE     OF A_WUS900HE_IMP FINAL DEVCLE       OF MCREFERENCE
+  ITEM HISCODMOD  OF A_WUS900HE_IMP FINAL G_CODMOD
+  ITEM HISTYPECR  OF A_WUS900HE_IMP FINAL DPOTYPECR    OF CRDEPOT
+  ITEM HISNUMLOT  OF A_WUS900HE_IMP FINAL LCRCLE       OF CRDEPOT
+
+
+;
+; Mise   jour du fichier des num ros d'historique
+;
+OUTPUT MCHIS_SEQ ADD UPDATE AT FINAL
+  ITEM CIENMC    OF MCHIS_SEQ INITIAL "1"
+  ITEM HSSCLEANN OF MCHIS_SEQ INITIAL G_ANN
+  ITEM HSSNUMSEQ OF MCHIS_SEQ FINAL   ( T_HISCLE  - 1 )
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Ajout de l' criture du compte   recevoir et du compte d'escompte.
+;
+;
+REQUEST AJOUT_CAR_ESCOMPTE_MAJ_STAT     TERMINATE IF G_ERREUR = "ARRET"
+
+ACCESS *WCR701TR &
+  ;
+  ; Ventilation de factures
+  ;
+  LINK CIECLE    OF WCR701TR, &
+       DPOCLE    OF WCR701TR, &
+       DPOTYPECR OF WCR701TR  &
+    TO CRHCLE1, &
+       CRHCLE2, &
+       CRHTYPECR OF CRCAR_HISTO &
+  ;
+  ; Factures, pour avoir le compte   recevoir...
+  ;
+  LINK CIECLE OF CRCAR_HISTO, &
+       CARCLE OF CRCAR_HISTO  &
+    TO CIECLE, &
+       CARCLE OF CRCPT_A_REC  &
+  ;
+  ; Client-compagnie, pour avoir le compte comptable de l'escompte.
+  ;
+  LINK CIECLE    OF CRCPT_A_REC , &
+       REFCIECLE OF CRCPT_A_REC , &
+       REFCLENUM OF CRCPT_A_REC   &
+    TO CIECLE    , &
+       CLICIECLE , &
+       CLICLE OF CRCLI_CIE OPTIONAL
+
+
+TEMPORARY T_MNTCAR FLOAT     SIZE 8 ; Montant total affectant le C.A.R.
+TEMPORARY T_MNTESC FLOAT     SIZE 8 ; Montant total d'escompte.
+
+
+;
+; En g n ral les clients utilise un seul compte   recevoir et d'escompte,
+; donc pour minimiser le nombre de record dans le sous-fichier
+; WUS900HE, on fait le tri suivant.
+;
+
+; Ajustement pour le changement de siècle
+DEFINE D_DPOCLE_TRI CHARACTER SIZE 13 = "1" + DPOCLE OF WCR701TR &
+   IF DPOCLE OF WCR701TR[1:1] < "8" &
+   ELSE "0" + DPOCLE OF WCR701TR
+ 
+SORTED ON CIECLE    OF WCR701TR &
+       ON D_DPOCLE_TRI &
+       ON CARCPTCAR OF CRCPT_A_REC &
+       ON CLCCPTESC OF CRCLI_CIE
+
+
+
+ITEM T_MNTCAR SUBTOTAL CRHMNTCAR OF CRCAR_HISTO RESET AT CARCPTCAR
+ITEM T_MNTESC SUBTOTAL CRHMNTESC OF CRCAR_HISTO RESET AT CLCCPTESC
+
+;
+; Ajout du compte   recevoir.
+;
+OUTPUT *WUS900HE ALIAS A_WUS900HE_CAR &
+                 ADD &
+                 AT CARCPTCAR &
+                 IF T_MNTCAR <> 0
+  ITEM HISCLE     OF A_WUS900HE_CAR FINAL T_HISCLE     OF WCR701TR
+  ITEM HISCIECLE  OF A_WUS900HE_CAR FINAL CIECLE       OF WCR701TR
+  ITEM CPTCLE     OF A_WUS900HE_CAR FINAL CARCPTCAR    OF CRCPT_A_REC
+  ITEM HECCIEINT  OF A_WUS900HE_CAR FINAL T_HECCIEINT  OF WCR701TR
+  ITEM HECUNAINT  OF A_WUS900HE_CAR FINAL T_HECUNAINT  OF WCR701TR
+  ITEM CIECLE     OF A_WUS900HE_CAR FINAL CIECLE       OF WCR701TR
+  ITEM UNACLE     OF A_WUS900HE_CAR FINAL G_UNABIL
+  ITEM PRJCLE     OF A_WUS900HE_CAR FINAL " "
+  ITEM PRACLE     OF A_WUS900HE_CAR FINAL " "
+  ITEM IMMCLE     OF A_WUS900HE_CAR FINAL " "
+  ITEM PECCLE     OF A_WUS900HE_CAR FINAL PECCLE       OF WCR701TR
+  ITEM HECNUMDOC2 OF A_WUS900HE_CAR FINAL T_HECNUMDOC2 OF WCR701TR
+  ITEM T_CODDC    OF A_WUS900HE_CAR FINAL "C"
+  ITEM T_MNTGL    OF A_WUS900HE_CAR FINAL T_MNTCAR
+  ITEM T_MNTORI   OF A_WUS900HE_CAR FINAL T_MNTGL
+  ITEM HECFLGINT  OF A_WUS900HE_CAR FINAL T_HECFLGINT  OF WCR701TR
+  ITEM DEVCLE     OF A_WUS900HE_CAR FINAL DEVCLE       OF WCR701TR
+  ITEM HISCODMOD  OF A_WUS900HE_CAR FINAL G_CODMOD
+  ITEM HISTYPECR  OF A_WUS900HE_CAR FINAL DPOTYPECR    OF WCR701TR
+  ITEM HISNUMLOT  OF A_WUS900HE_CAR FINAL LCRCLE       OF WCR701TR
+
+;
+; Ajout du compte d'escompte.
+;
+OUTPUT *WUS900HE ALIAS A_WUS900HE_ESC &
+                 ADD &
+                 AT CLCCPTESC &
+                 IF T_MNTESC <> 0
+  ITEM HISCLE     OF A_WUS900HE_ESC FINAL T_HISCLE     OF WCR701TR
+  ITEM HISCIECLE  OF A_WUS900HE_ESC FINAL CIECLE       OF WCR701TR
+  ITEM CPTCLE     OF A_WUS900HE_ESC FINAL CLCCPTESC    OF CRCLI_CIE
+  ITEM HECCIEINT  OF A_WUS900HE_ESC FINAL T_HECCIEINT  OF WCR701TR
+  ITEM HECUNAINT  OF A_WUS900HE_ESC FINAL T_HECUNAINT  OF WCR701TR
+  ITEM CIECLE     OF A_WUS900HE_ESC FINAL CIECLE       OF WCR701TR
+  ITEM UNACLE     OF A_WUS900HE_ESC FINAL G_UNABIL
+  ITEM PRJCLE     OF A_WUS900HE_ESC FINAL " "
+  ITEM PRACLE     OF A_WUS900HE_ESC FINAL " "
+  ITEM IMMCLE     OF A_WUS900HE_ESC FINAL " "
+  ITEM PECCLE     OF A_WUS900HE_ESC FINAL PECCLE       OF WCR701TR
+  ITEM HECNUMDOC2 OF A_WUS900HE_ESC FINAL T_HECNUMDOC2 OF WCR701TR
+  ITEM T_CODDC    OF A_WUS900HE_ESC FINAL "D"
+  ITEM T_MNTGL    OF A_WUS900HE_ESC FINAL T_MNTESC
+  ITEM T_MNTORI   OF A_WUS900HE_ESC FINAL T_MNTGL
+  ITEM HECFLGINT  OF A_WUS900HE_ESC FINAL T_HECFLGINT  OF WCR701TR
+  ITEM DEVCLE     OF A_WUS900HE_ESC FINAL DEVCLE       OF WCR701TR
+  ITEM HISCODMOD  OF A_WUS900HE_ESC FINAL G_CODMOD
+  ITEM HISTYPECR  OF A_WUS900HE_ESC FINAL DPOTYPECR    OF WCR701TR
+  ITEM HISNUMLOT  OF A_WUS900HE_ESC FINAL LCRCLE       OF WCR701TR
+
+;
+; Mise   jour de la date de journalistion dans la ventilation de factures
+; pour rendre officiel les l'historiques de la facture.
+;
+OUTPUT CRCAR_HISTO UPDATE
+  ITEM CRHDATJOU OF CRCAR_HISTO FINAL G_DATJOU
+
+;
+; Mise   jour de la date de journalisation des paiements non-appliqu  qui ne
+; sont pas encore journalis . Si un paiement non-appliqu  n'a pas de date
+; de journalisation, cela indique que c'est l'encaissement actuel qui a cr
+; ce paiement non-appliqu .
+;
+OUTPUT CRCPT_A_REC UPDATE IF CARDATJOU OF CRCPT_A_REC = 0
+  ITEM CARDATJOU OF CRCPT_A_REC FINAL G_DATJOU
+
+;
+; Mise   jour des statistiques du client de la facture r f r e.
+;
+OUTPUT CRCLI_STAT ADD UPDATE &
+                  VIA CLICIECLE, &
+                      CLICLE   , &
+                      CIECLE   , &
+                      CLSANN     &
+                  USING REFCIECLE OF CRCPT_A_REC, &
+                        REFCLENUM OF CRCPT_A_REC, &
+                        CIECLE    OF WCR701TR   , &
+                        PECCLE    OF WCR701TR[1:2]
+  ITEM CLICIECLE OF CRCLI_STAT INITIAL REFCIECLE OF CRCPT_A_REC
+  ITEM CLICLE    OF CRCLI_STAT INITIAL REFCLENUM OF CRCPT_A_REC
+  ITEM CIECLE    OF CRCLI_STAT INITIAL CIECLE    OF WCR701TR
+  ITEM CLSANN    OF CRCLI_STAT INITIAL PECCLE    OF WCR701TR[1:2]
+
+  ITEM CLSCUMESC01 OF CRCLI_STAT  = CLSCUMESC01 OF CRCLI_STAT + &
+                                    CRHMNTESC OF CRCAR_HISTO &
+                                    IF    "01" = PECCLE OF WCR701TR[3:2] &
+                                      AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSCUMESC02 OF CRCLI_STAT  = CLSCUMESC02 OF CRCLI_STAT + &
+                                    CRHMNTESC OF CRCAR_HISTO &
+                                    IF    "02" = PECCLE OF WCR701TR[3:2] &
+                                      AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSCUMESC03 OF CRCLI_STAT  = CLSCUMESC03 OF CRCLI_STAT + &
+                                    CRHMNTESC OF CRCAR_HISTO &
+                                    IF    "03" = PECCLE OF WCR701TR[3:2] &
+                                      AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSCUMESC04 OF CRCLI_STAT  = CLSCUMESC04 OF CRCLI_STAT + &
+                                    CRHMNTESC OF CRCAR_HISTO &
+                                    IF    "04" = PECCLE OF WCR701TR[3:2] &
+                                      AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSCUMESC05 OF CRCLI_STAT  = CLSCUMESC05 OF CRCLI_STAT + &
+                                    CRHMNTESC OF CRCAR_HISTO &
+                                    IF    "05" = PECCLE OF WCR701TR[3:2] &
+                                      AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSCUMESC06 OF CRCLI_STAT  = CLSCUMESC06 OF CRCLI_STAT + &
+                                    CRHMNTESC OF CRCAR_HISTO &
+                                    IF    "06" = PECCLE OF WCR701TR[3:2] &
+                                      AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSCUMESC07 OF CRCLI_STAT  = CLSCUMESC07 OF CRCLI_STAT + &
+                                    CRHMNTESC OF CRCAR_HISTO &
+                                    IF    "07" = PECCLE OF WCR701TR[3:2] &
+                                      AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSCUMESC08 OF CRCLI_STAT  = CLSCUMESC08 OF CRCLI_STAT + &
+                                    CRHMNTESC OF CRCAR_HISTO &
+                                    IF    "08" = PECCLE OF WCR701TR[3:2] &
+                                      AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSCUMESC09 OF CRCLI_STAT  = CLSCUMESC09 OF CRCLI_STAT + &
+                                    CRHMNTESC OF CRCAR_HISTO &
+                                    IF    "09" = PECCLE OF WCR701TR[3:2] &
+                                      AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSCUMESC10 OF CRCLI_STAT  = CLSCUMESC10 OF CRCLI_STAT + &
+                                    CRHMNTESC OF CRCAR_HISTO &
+                                    IF    "10" = PECCLE OF WCR701TR[3:2] &
+                                      AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSCUMESC11 OF CRCLI_STAT  = CLSCUMESC11 OF CRCLI_STAT + &
+                                    CRHMNTESC OF CRCAR_HISTO &
+                                    IF    "11" = PECCLE OF WCR701TR[3:2] &
+                                      AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSCUMESC12 OF CRCLI_STAT  = CLSCUMESC12 OF CRCLI_STAT + &
+                                    CRHMNTESC OF CRCAR_HISTO &
+                                    IF    "12" = PECCLE OF WCR701TR[3:2] &
+                                      AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSCUMESC13 OF CRCLI_STAT  = CLSCUMESC13 OF CRCLI_STAT + &
+                                    CRHMNTESC OF CRCAR_HISTO &
+                                    IF    "13" = PECCLE OF WCR701TR[3:2] &
+                                      AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSNBRJRSDPO01 OF CRCLI_STAT = CLSNBRJRSDPO01 OF CRCLI_STAT + &
+                                      DAYS( DPODAT OF WCR701TR ) - &
+                                      DAYS( CARDAT OF CRCPT_A_REC ) &
+                                      IF    "01" = PECCLE OF WCR701TR[3:2] &
+                                        AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSNBRJRSDPO02 OF CRCLI_STAT = CLSNBRJRSDPO02 OF CRCLI_STAT + &
+                                      DAYS( DPODAT OF WCR701TR ) - &
+                                      DAYS( CARDAT OF CRCPT_A_REC ) &
+                                      IF    "02" = PECCLE OF WCR701TR[3:2] &
+                                        AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSNBRJRSDPO03 OF CRCLI_STAT = CLSNBRJRSDPO03 OF CRCLI_STAT + &
+                                      DAYS( DPODAT OF WCR701TR ) - &
+                                      DAYS( CARDAT OF CRCPT_A_REC ) &
+                                      IF    "03" = PECCLE OF WCR701TR[3:2] &
+                                        AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSNBRJRSDPO04 OF CRCLI_STAT = CLSNBRJRSDPO04 OF CRCLI_STAT + &
+                                      DAYS( DPODAT OF WCR701TR ) - &
+                                      DAYS( CARDAT OF CRCPT_A_REC ) &
+                                      IF    "04" = PECCLE OF WCR701TR[3:2] &
+                                        AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSNBRJRSDPO05 OF CRCLI_STAT = CLSNBRJRSDPO05 OF CRCLI_STAT + &
+                                      DAYS( DPODAT OF WCR701TR ) - &
+                                      DAYS( CARDAT OF CRCPT_A_REC ) &
+                                      IF    "05" = PECCLE OF WCR701TR[3:2] &
+                                        AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSNBRJRSDPO06 OF CRCLI_STAT = CLSNBRJRSDPO06 OF CRCLI_STAT + &
+                                      DAYS( DPODAT OF WCR701TR ) - &
+                                      DAYS( CARDAT OF CRCPT_A_REC ) &
+                                      IF    "06" = PECCLE OF WCR701TR[3:2] &
+                                        AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSNBRJRSDPO07 OF CRCLI_STAT = CLSNBRJRSDPO07 OF CRCLI_STAT + &
+                                      DAYS( DPODAT OF WCR701TR ) - &
+                                      DAYS( CARDAT OF CRCPT_A_REC ) &
+                                      IF    "07" = PECCLE OF WCR701TR[3:2] &
+                                        AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSNBRJRSDPO08 OF CRCLI_STAT = CLSNBRJRSDPO08 OF CRCLI_STAT + &
+                                      DAYS( DPODAT OF WCR701TR ) - &
+                                      DAYS( CARDAT OF CRCPT_A_REC ) &
+                                      IF    "08" = PECCLE OF WCR701TR[3:2] &
+                                        AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSNBRJRSDPO09 OF CRCLI_STAT = CLSNBRJRSDPO09 OF CRCLI_STAT + &
+                                      DAYS( DPODAT OF WCR701TR ) - &
+                                      DAYS( CARDAT OF CRCPT_A_REC ) &
+                                      IF    "09" = PECCLE OF WCR701TR[3:2] &
+                                        AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSNBRJRSDPO10 OF CRCLI_STAT = CLSNBRJRSDPO10 OF CRCLI_STAT + &
+                                      DAYS( DPODAT OF WCR701TR ) - &
+                                      DAYS( CARDAT OF CRCPT_A_REC ) &
+                                      IF    "10" = PECCLE OF WCR701TR[3:2] &
+                                        AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSNBRJRSDPO11 OF CRCLI_STAT = CLSNBRJRSDPO11 OF CRCLI_STAT + &
+                                      DAYS( DPODAT OF WCR701TR ) - &
+                                      DAYS( CARDAT OF CRCPT_A_REC ) &
+                                      IF    "11" = PECCLE OF WCR701TR[3:2] &
+                                        AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSNBRJRSDPO12 OF CRCLI_STAT = CLSNBRJRSDPO12 OF CRCLI_STAT + &
+                                      DAYS( DPODAT OF WCR701TR ) - &
+                                      DAYS( CARDAT OF CRCPT_A_REC ) &
+                                      IF    "12" = PECCLE OF WCR701TR[3:2] &
+                                        AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSNBRJRSDPO13 OF CRCLI_STAT = CLSNBRJRSDPO13 OF CRCLI_STAT + &
+                                      DAYS( DPODAT OF WCR701TR ) - &
+                                      DAYS( CARDAT OF CRCPT_A_REC ) &
+                                      IF    "13" = PECCLE OF WCR701TR[3:2] &
+                                        AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSNBRDPO01 OF CRCLI_STAT = CLSNBRDPO01 OF CRCLI_STAT + 1 &
+                                   IF    "01" = PECCLE OF WCR701TR[3:2] &
+                                     AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSNBRDPO02 OF CRCLI_STAT = CLSNBRDPO02 OF CRCLI_STAT + 1 &
+                                   IF    "02" = PECCLE OF WCR701TR[3:2] &
+                                     AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSNBRDPO03 OF CRCLI_STAT = CLSNBRDPO03 OF CRCLI_STAT + 1 &
+                                   IF    "03" = PECCLE OF WCR701TR[3:2] &
+                                     AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSNBRDPO04 OF CRCLI_STAT = CLSNBRDPO04 OF CRCLI_STAT + 1 &
+                                   IF    "04" = PECCLE OF WCR701TR[3:2] &
+                                     AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSNBRDPO05 OF CRCLI_STAT = CLSNBRDPO05 OF CRCLI_STAT + 1 &
+                                   IF    "05" = PECCLE OF WCR701TR[3:2] &
+                                     AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSNBRDPO06 OF CRCLI_STAT = CLSNBRDPO06 OF CRCLI_STAT + 1 &
+                                   IF    "06" = PECCLE OF WCR701TR[3:2] &
+                                     AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSNBRDPO07 OF CRCLI_STAT = CLSNBRDPO07 OF CRCLI_STAT + 1 &
+                                   IF    "07" = PECCLE OF WCR701TR[3:2] &
+                                     AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSNBRDPO08 OF CRCLI_STAT = CLSNBRDPO08 OF CRCLI_STAT + 1 &
+                                   IF    "08" = PECCLE OF WCR701TR[3:2] &
+                                     AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSNBRDPO09 OF CRCLI_STAT = CLSNBRDPO09 OF CRCLI_STAT + 1 &
+                                   IF    "09" = PECCLE OF WCR701TR[3:2] &
+                                     AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSNBRDPO10 OF CRCLI_STAT = CLSNBRDPO10 OF CRCLI_STAT + 1 &
+                                   IF    "10" = PECCLE OF WCR701TR[3:2] &
+                                     AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSNBRDPO11 OF CRCLI_STAT = CLSNBRDPO11 OF CRCLI_STAT + 1 &
+                                   IF    "11" = PECCLE OF WCR701TR[3:2] &
+                                     AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSNBRDPO12 OF CRCLI_STAT = CLSNBRDPO12 OF CRCLI_STAT + 1 &
+                                   IF    "12" = PECCLE OF WCR701TR[3:2] &
+                                     AND DPOTYPECR OF WCR701TR = "EN"
+
+  ITEM CLSNBRDPO13 OF CRCLI_STAT = CLSNBRDPO13 OF CRCLI_STAT + 1 &
+                                   IF    "13" = PECCLE OF WCR701TR[3:2] &
+                                     AND DPOTYPECR OF WCR701TR = "EN"
+
+;-------------------------------------------------------------------------------
+;
+; TRAITEMENTS GENERAUX A TOUTES LES JOURNALISATION
+;
+
+USE us-900t NOLIST
+
+BUILD

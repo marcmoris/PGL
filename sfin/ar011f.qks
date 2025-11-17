@@ -1,0 +1,1791 @@
+;/T/ Crédit sur achat
+;
+;/P/ Programmeur..: Guy Chabot
+;    Date Création: 1 décembre 1994
+;
+;    Description..: Cet écran permet de faire un crédit sur un produit dans
+;                   le but d'en affecter le prix moyen du produit.
+;
+;/M/ Modification.: Pierre Routhier
+;                   02 Mai 1997
+;
+;                   Si notion de projet (HLDNTNPRO OF MCHOLDING) = Oui et
+;                   que le compte (CPTCLE) inscrit est un compte de nature
+;                   revenu (NACCLE = 4) ou dépense (NACCLE = 5) de la table
+;                   mcnature_ctb :
+;                      - On demande les projets et ce, de façon obligatoire.
+;
+;                   Si notion de projet (HLDNTNPRO OF MCHOLDING) = Non ou
+;                   que le compte (CPTCLE) inscrit est un compte de bilan
+;                   (actif, passif ou capital - NACCLE = 1 ou 2 ou 3) de la
+;                   table mcnature_ctb:
+;                      - On ne les demande pas du tout.
+;-------------------------------------------------------------------------------
+;/M/ Pascal Tremblay, 98-01-26
+;
+;    Ajustement pour le changement de siècle
+;
+;/M/ Programmeur.......: Francois Richard
+;    Date modification.: 15 Juin 1999
+;    Description.......: Migration Achat/Réception/Inventaire de l'environnement
+;                        BOC
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+;
+;-------------------------------------------------------------------------------
+;/M/ Programmeur.......: Sylvie Chouinard
+;    Debut modification: 26 mai 1998
+;    Fin   modification: 26 mai 1998
+;    Etat..............: Termine
+;    Description.......: Changer le OR pour un AND dans la condition de
+;                        reinitialisation du projet/sous-projet de la
+;                        procdure process cptcle.
+;                        (SOS 159)
+;
+;/M/ Programmeur.......: Francois Richard
+;    Date modification : 19 juillet 1999
+;    Description.......: Aid\351 la saisie de prdcle
+;
+;/M/ Programmeur.......: Remy Demers
+;    Date modification.: 13 oct 1999
+;    Description.......: ne pas permettre les code de taxe null
+;
+;/M/ Programmeur.......: Nicolas Groleau
+;    Date modification : Octobre 1999
+;    Description.......: Permettre la jounalisation en demandant le no de reception.
+;
+;-------------------------------------------------------------------------------
+
+
+SCREEN ar011f ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU,  &
+                       T_CIENOM,     &
+                       ARFACTURE_REC, &
+                       MCREF_ADRESSE
+
+TEMPORARY T_CCUPECDEBI_MCCHARTE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CCUPECDEBA_MCCHARTE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CCUPECDEBA_VCPT CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_PECCLE_ARFAC CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CPTPECDEBI_VCPT CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CPTPECDEBA_VCPT CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_PECCLE_ARFACTURE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+
+USE ustrasse NOLIST ; Transaction QUERY pour les sous-écrans
+
+USE ussectmp NOLIST     ; Variable pour la sécurité
+    "AR011F"             ; Nom de l'écran
+
+USE ar011f.hlp NOLIST ; Use servant à la documentation de l'écran
+
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-écran
+
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE MCRAD_SEQ IN DICT
+
+
+;-------------------------------------------------------------------------------
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de la compagnie
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie
+;-------------------------------------------------------------------------------
+
+FILE ARFACTURE_REC  MASTER  NOITEM
+
+FILE MCREF_ADRESSE  MASTER  NOITEM
+
+FILE ARFAC_DETAIL   PRIMARY NOITEM NEED 1
+
+  ACCESS VIA   FOUCIECLE, &
+               FOUCLE   , &
+               FACCLE   , &
+               FACCIECLE  &
+         USING FOUCIECLE OF ARFACTURE_REC, &
+               FOUCLE    OF ARFACTURE_REC, &
+               FACCLE    OF ARFACTURE_REC, &
+               FACCIECLE OF ARFACTURE_REC
+
+ ITEM FOUCIECLE OF ARFAC_DETAIL INITIAL FOUCIECLE OF ARFACTURE_REC
+ ITEM FOUCLE    OF ARFAC_DETAIL INITIAL FOUCLE    OF ARFACTURE_REC
+ ITEM FACCLE    OF ARFAC_DETAIL INITIAL FACCLE    OF ARFACTURE_REC
+ ITEM FACCIECLE OF ARFAC_DETAIL INITIAL FACCIECLE OF ARFACTURE_REC
+ ITEM RECCLE    OF ARFAC_DETAIL INITIAL "000000000000"
+
+FILE ARDER_ITEM     DETAIL  NOITEM
+  ACCESS VIA   FOUCIECLE,             &
+               FOUCLE,                &
+               FACCLE,                &
+               FACCIECLE,             &
+               RECCLE                 &
+         USING FOUCIECLE OF ARFAC_DETAIL, &
+               FOUCLE    OF ARFAC_DETAIL, &
+               FACCLE    OF ARFAC_DETAIL, &
+               FACCIECLE OF ARFAC_DETAIL, &
+               RECCLE    OF ARFAC_DETAIL  &
+         ORDERBY FOUCIECLE,   &
+                 FOUCLE,      &
+                 FACCLE,      &
+                 FACCIECLE,   &
+                 RECCLE,   &
+                 DEICLE
+
+  ITEM FOUCIECLE    OF ARDER_ITEM INITIAL FOUCIECLE OF ARFAC_DETAIL
+  ITEM FOUCLE       OF ARDER_ITEM INITIAL FOUCLE    OF ARFAC_DETAIL
+  ITEM FACCLE       OF ARDER_ITEM INITIAL FACCLE    OF ARFAC_DETAIL
+  ITEM FACCIECLE    OF ARDER_ITEM INITIAL FACCIECLE OF ARFAC_DETAIL
+  ITEM RECCLE       OF ARDER_ITEM INITIAL RECCLE    OF ARFAC_DETAIL
+  ITEM DEIFLGCOM    OF ARDER_ITEM INITIAL "1"
+  ITEM DEIQTEFAC    OF ARDER_ITEM INITIAL 1000
+
+
+
+FILE ARRECEPTION  DESIGNER
+ACC VIA CIECLE, &
+        RECCLE  &
+USING   FACCIECLE OF ARDER_ITEM, &
+        RECCLE    OF ARDER_ITEM     
+
+FILE ARREC_DETAIL DESIGNER
+ACC VIA CIECLE, &
+        RECCLE, &
+        REDCLE  &
+USING   FACCIECLE OF ARDER_ITEM, &
+        RECCLE    OF ARDER_ITEM, &
+        DEICLE    OF ARDER_ITEM
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation du projet et affichage de sa description.
+;
+FILE GPPROJETS          REFERENCE
+
+  ACCESS VIA CIECLE, &
+             PRJCLE  &
+         USING T_CIECLEMNU, &
+               PRJCLE OF ARDER_ITEM
+
+;-------------------------------------------------------------------------------
+;
+; Validation de l'activité et affichage de sa description.
+;
+FILE GPPRO_ACTIVITE        REFERENCE
+
+  ACCESS VIA CIECLE, &
+             PRJCLE, &
+             PRACLE  &
+         USING T_CIECLEMNU, &
+               PRJCLE OF ARDER_ITEM, &
+               PRACLE OF ARDER_ITEM
+
+;-------------------------------------------------------------------------------
+;
+; Valide l'immobilisation et affiche la description.
+;
+TEMPORARY T_IMMCLE CHARACTER SIZE 12 ; Popup sur les immobilisations.
+
+FILE IMIMMOBILISATION REFERENCE
+
+  ACCESS  VIA   CIECLE, &
+                IMMCLE &
+          USING T_CIECLEMNU,           &
+                IMMCLE OF ARDER_ITEM
+
+  SELECT IF IMMSTU OF IMIMMOBILISATION = "A"
+
+;-------------------------------------------------------------------------------
+;
+; Validation de la charte de compte.
+;
+FILE MCCHARTE_UNA      REFERENCE
+
+  ACCESS  VIA   CPTCLE, &
+                CIECLE, &
+                UNACLE &
+          USING CPTCLE OF ARDER_ITEM, &
+                T_CIECLEMNU               , &
+                UNACLE OF ARDER_ITEM
+
+
+;-------------------------------------------------------------------------------
+; Validation du code de taxe fédéral.
+;
+FILE MCTAXE            REFERENCE &
+                      ALIAS A_TAX_TPS
+  ACCESS VIA   TAXCLETYP, &
+               TAXCLECOD &
+         USING DEITAXTYPTPS OF ARDER_ITEM, &
+               DEITAXCODTPS OF ARDER_ITEM
+
+;-------------------------------------------------------------------------------
+; Validation du code de taxe provincial.
+;
+FILE MCTAXE            REFERENCE &
+                      ALIAS A_TAX_TVP
+  ACCESS VIA   TAXCLETYP, &
+               TAXCLECOD &
+         USING DEITAXTYPTVQ OF ARDER_ITEM, &
+               DEITAXCODTVQ OF ARDER_ITEM
+
+
+
+;-------------------------------------------------------------------------------
+; Pour valider le compte et afficher la description lors de la
+; saisie.
+;
+
+FILE VCPT_DSC  REFERENCE
+  ACCESS VIA   CPTCLE    &
+         USING CPTCLE OF ARDER_ITEM
+
+
+
+;-------------------------------------------------------------------------------
+; Pour valider l'unité administrative et afficher la description lors de la
+; saisie.
+;
+
+FILE MCUNITE_ADM  REFERENCE
+  ACCESS VIA   CIECLE, &
+               UNACLE  &
+         USING FACCIECLE OF ARDER_ITEM, &
+               UNACLE    OF ARDER_ITEM
+
+;-------------------------------------------------------------------------------
+; Fichier permettant de prendre par défaut le terme d'escompte sur achat
+; du fournisseur.
+;
+FILE VFOC_FOU  REFERENCE
+  ACCESS VIA   FOUCIECLE, &
+               FOUCLE,    &
+               FOCCIECLE  &
+         USING FOUCIECLE OF ARFAC_DETAIL, &
+               FOUCLE    OF ARFAC_DETAIL, &
+               FACCIECLE OF ARFAC_DETAIL
+
+
+
+;-------------------------------------------------------------------------------
+FILE VPRE_PRD  REFERENCE
+  ACCESS VIA   CIECLE, &
+               PRDCLE, &
+               ENTCLE  &
+         USING T_CIECLEMNU,          &
+               PRDCLE OF ARDER_ITEM, &
+               ENTCLE OF ARFACTURE_REC
+
+;
+; Numéro de séquence des adresses pour les clients divers.
+;
+FILE MCRAD_SEQ         DESIGNER TRANSACTION GEN_NUM_SEQ
+
+
+
+;
+; Paramètres pour la compagnie consolidée(holding)
+;
+FILE MCHOLDING  REFERENCE
+  ACCESS VIA CIENMC USING "1"
+
+FILE MCCOMPTE            REFERENCE
+  ACCESS VIA   CPTCLE &
+         USING CPTCLE OF ARDER_ITEM
+
+FILE MCNATURE_CTB        REFERENCE
+  ACCESS VIA   NACCLE &
+         USING NACCLE OF MCCOMPTE
+
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLE    CHARACTER SIZE 4  ; Compagnie pour écran dépisteur.
+TEMPORARY T_RECCLE    CHARACTER SIZE 12 ; Numéro commande écran dépisteur.
+TEMPORARY T_DEICLE    CHARACTER SIZE 7  ; Numéro d'item écran dépisteur.
+TEMPORARY T_ENTCLE    CHARACTER SIZE 4  ; Entrepôt pour écran dépisteur.
+TEMPORARY T_PRDCLE    CHARACTER SIZE 12 ; Produit pour écran dépisteur.
+
+TEMPORARY T_TAXCLETYP CHARACTER SIZE 1 ; Popup sur les codes de taxes
+TEMPORARY T_TAXCLECOD CHARACTER SIZE 2 ; Popup sur les codes de taxes
+TEMPORARY T_TAXMODPAT CHARACTER SIZE 5 ; Popup sur les codes de taxes
+
+TEMPORARY T_CPTCLE    CHARACTER SIZE 6 ; Popup sur les comptes.
+TEMPORARY T_PECCLE    CHARACTER SIZE 4 ; Popup sur les comptes.
+TEMPORARY T_CPTTYPPAT CHARACTER SIZE 1 ; Popup sur les comptes.
+TEMPORARY T_CPTCATPAT CHARACTER SIZE 8 ; Popup sur les comptes.
+
+TEMPORARY T_UNACLE    CHARACTER SIZE 8 ; Popup sur unités administratives.
+
+TEMPORARY T_PRJCLE    CHARACTER SIZE 8 ; Popup sur les projets.
+TEMPORARY T_PRJSTUPAT CHARACTER SIZE 8 ; Popup sur les projets.
+
+TEMPORARY T_PRACLE    CHARACTER SIZE 3 ; Popup sur les activités.
+TEMPORARY T_PRASTUPAT CHARACTER SIZE 5 ; Popup sur les activités.
+
+;
+; Pour le calcul des taxes.
+;
+
+TEMPORARY T_FLGMOD       CHARACTER SIZE 1 ; Flag pour déceler s'il y eu modif.
+TEMPORARY T_TAXMODTPSOLD CHARACTER SIZE 1 ; Pour diminuer le bon cumul de taxe.
+TEMPORARY T_TAXMODTVQOLD CHARACTER SIZE 1 ; Pour diminuer le bon cumul de taxe.
+TEMPORARY T_FLAG_ALT     CHARACTER SIZE 1 ; Flag pour un record en modification
+TEMPORARY T_FLAG_ENT     CHARACTER SIZE 1 ; Flag pour un record en entrée
+
+
+TEMPORARY T_FOUCLE    CHARACTER SIZE 6  ; Fournisseur réception écran dépisteur.
+TEMPORARY T_FOUCIECLE CHARACTER SIZE 4  ; Compagnie fournisseur écran dépisteur.
+
+;
+; Temporaires nécessaires au calcul des taxes
+;
+USE ustaxtmp NOLIST
+
+USE usvarprd NOLIST ; Use servant à la saisie de prdcle
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4  = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+DEFINE    D_DEVCLE    CHARACTER SIZE 04 = " " &
+          IF DEVCLE OF VFOC_FOU = DEVCLE OF MCHOLDING OR &
+             0 = SIZE(TRUNCATE(FOUCLE OF ARFACTURE_REC)) &
+          ELSE "/" + DEVCLE OF VFOC_FOU
+
+
+;-------------------------------------------------------------------------------
+USE usdrwecr NOLIST     ; Draw pour les écrans
+USE ustitstd NOLIST     ; En-tête pour les écrans
+USE ushilite NOLIST     ; Hilite pour tous les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Détail de la facture " &
+@ELSE
+      " %%%Détail de la facture " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+;-------------------------------------------------------------------------------
+
+SKIP
+ALIGN (,3,19) (,32,48) (,,55)
+
+
+FIELD FACCLE OF ARFAC_DETAIL &
+        DISPLAY PREDISPLAY
+
+FIELD FOUCLE OF ARFAC_DETAIL &
+        DISPLAY PREDISPLAY
+
+FIELD RADNOM OF MCREF_ADRESSE  &
+        DISPLAY PREDISPLAY &
+        SIZE 25
+
+
+SKIP
+ALIGN (,3,19) (,,34) (,48,64)
+
+FIELD FADMNTTOT OF ARFAC_DETAIL &
+        DISPLAY PREDISPLAY
+
+FIELD D_DEVCLE &
+        DISPLAY PREDISPLAY
+
+FIELD FADMNTNET OF ARFAC_DETAIL &
+        DISPLAY PREDISPLAY
+
+
+SKIP
+ALIGN (,3,19) (,48,64)
+
+FIELD FADMNTTPS OF ARFAC_DETAIL &
+        DISPLAY PREDISPLAY
+
+FIELD FADMNTCTI OF ARFAC_DETAIL &
+        DISPLAY PREDISPLAY
+
+
+SKIP
+ALIGN (,3,19) (,48,64)
+
+FIELD FADMNTTVQ OF ARFAC_DETAIL &
+        DISPLAY PREDISPLAY
+
+FIELD FADMNTRTI OF ARFAC_DETAIL &
+        DISPLAY PREDISPLAY
+
+
+SKIP
+ALIGN (2,3,19)
+FIELD RECCLE OF ARDER_ITEM &
+        HIDDEN &
+        REQUIRED     &
+        LOOKUP ON ARRECEPTION &
+          MESSAGE 1393, & ; Cette réception n'existe pas.
+        NOTON ARFAC_DETAIL &
+          VIA   FOUCIECLE, &
+                FOUCLE,    &
+                FACCLE,    &
+                FACCIECLE, &
+                RECCLE     &
+          USING FOUCIECLE OF ARFACTURE_REC, &
+                FOUCLE    OF ARFACTURE_REC, &
+                FACCLE    OF ARFACTURE_REC, &
+                FACCIECLE OF ARFACTURE_REC, &
+                RECCLE    OF ARFAC_DETAIL   &
+          MESSAGE 1466 ; Cette réception a déjà été facturée par cette facture.
+
+
+SKIP
+ALIGN (2,3,19)(,41,57)(,,59)
+FIELD DEICLE OF ARDER_ITEM &
+        HIDDEN ID 5            &
+        REQUIRED NOCHANGE      &
+        LOOKUP NOTON ARDER_ITEM &
+          VIA   FOUCIECLE,              &
+                FOUCLE,                 &
+                FACCLE,                 &
+                FACCIECLE,              &
+                RECCLE,                 &
+                DEICLE                  &
+          USING FOUCIECLE OF ARFAC_DETAIL, &
+                FOUCLE    OF ARFAC_DETAIL, &
+                FACCLE    OF ARFAC_DETAIL, &
+                FACCIECLE OF ARFAC_DETAIL, &
+                RECCLE    OF ARFAC_DETAIL, &
+                DEICLE    OF ARDER_ITEM  &
+          MESSAGE 1442   ,&       ; Cet item de la facture existe déjà.
+        
+        ON ARREC_DETAIL &
+          MESSAGE 1444             ; Cet item de la réception n'existe pas.
+
+
+ALIGN (2,3,19)(,,32)
+FIELD PRDCLE    OF ARDER_ITEM &
+        HIDDEN ID 10       &
+        REQUIRED NOCHANGE  &
+        LOOKUP ON VPRE_PRD &
+          MESSAGE 1373 ; Ce produit n'existe pas pour l'entrepôt de la commande.
+
+FIELD DEIDSC OF ARDER_ITEM &
+        IF PRDTYP OF VPRE_PRD = "D"
+
+SKIP 1
+ALIGN (2,3,19)
+FIELD DEIFLGCOM OF ARDER_ITEM &
+        REQUIRED &
+        HIDDEN ID 15            &
+        SIZE 3
+
+SKIP 1
+ALIGN (2,3,19)(,,28)(,41,57)(,,66)
+
+FIELD CPTCLE OF ARDER_ITEM &
+        HIDDEN ID 20            &
+        REQUIRED &
+        LOOKUP ON VCPT_DSC &
+          MESSAGE 1313 ; Ce compte n'existe pas.
+
+FIELD CPTDSCABR OF VCPT_DSC &
+        DISPLAY &
+        SIZE 12
+
+FIELD UNACLE OF ARDER_ITEM &
+        REQUIRED &
+        LOOKUP ON MCUNITE_ADM &
+          MESSAGE 1314 ; Cette unité administrative n'existe pas dans la charte.
+
+FIELD UNANOMABR OF MCUNITE_ADM &
+        DISPLAY &
+        SIZE 12
+
+FIELD PRJCLE OF ARDER_ITEM &
+        HIDDEN ID 25
+
+FIELD PRJDSC1 OF GPPROJETS &
+        DISPLAY &
+        SIZE 12
+
+FIELD PRACLE OF ARDER_ITEM
+
+FIELD PRADSC1 OF GPPRO_ACTIVITE &
+        DISPLAY &
+        SIZE 12
+
+FIELD IMMCLE       OF ARDER_ITEM &
+      HIDDEN &
+      REQUIRED &
+        LOOKUP ON IMIMMOBILISATION &
+            MESSAGE 491 ; Cette immobilisation n'existe pas ou est inactive.
+SKIP 1
+
+FIELD DEIPRIUNI OF ARDER_ITEM &
+        HIDDEN ID 35            &
+        NOENTRY
+
+SKIP 1
+
+ALIGN (2,3,19)(,,22)(,41,57)
+
+FIELD DEITAXCODTPS OF ARDER_ITEM &
+        HIDDEN ID 40
+
+@IF FRANCAIS
+FIELD TAXDSCFRA OF A_TAX_TPS &
+@ELSE
+FIELD TAXDSCANG OF A_TAX_TPS &
+@ENDIF
+        DISPLAY &
+        SIZE 18
+
+
+FIELD DEIMNTTPS OF ARDER_ITEM &
+        DISPLAY
+
+FIELD DEITAXCODTVQ OF ARDER_ITEM &
+        HIDDEN ID 45
+
+@IF FRANCAIS
+FIELD TAXDSCFRA OF A_TAX_TVP &
+@ELSE
+FIELD TAXDSCANG OF A_TAX_TVP &
+@ENDIF
+        DISPLAY &
+        SIZE 18
+
+FIELD DEIMNTTVQ OF ARDER_ITEM &
+        DISPLAY
+
+
+ALIGN (,3,19)(,41,57)
+
+FIELD DEIMNTTOT OF ARDER_ITEM &
+        DISPLAY
+
+FIELD DEIMNTNET OF ARDER_ITEM &
+        DISPLAY
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du CTI = remboursement de TPS.
+;
+PROCEDURE INTERNAL CALCUL_CTI
+BEGIN
+  ;
+  ; Il faut diminuer le cumulatif de taxe de la facture.
+  ;
+  LET FADMNTCTI OF ARFAC_DETAIL  = FADMNTCTI OF ARFAC_DETAIL - &
+                                   DEIMNTCTI OF ARDER_ITEM
+
+  LET FACMNTCTI OF ARFACTURE_REC = FACMNTCTI OF ARFACTURE_REC - &
+                                   DEIMNTCTI OF ARDER_ITEM
+  ;
+  LET DEIMNTCTI OF ARDER_ITEM = 0
+
+  ;
+  ; Calcul du remboursement fédéral.
+  ;
+  LET DEIMNTCTI OF ARDER_ITEM = &
+                ROUND( DEIMNTTPS OF ARDER_ITEM * TAXPCTCTI OF A_TAX_TPS )
+  ;
+  ; Il faut augmenter le cumulatif de taxe de la facture.
+  ;
+  LET FADMNTCTI OF ARFAC_DETAIL  = FADMNTCTI OF ARFAC_DETAIL + &
+                                   DEIMNTCTI OF ARDER_ITEM
+  LET FACMNTCTI OF ARFACTURE_REC = FACMNTCTI OF ARFACTURE_REC + &
+                                   DEIMNTCTI OF ARDER_ITEM
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du RTI = remboursement de TVQ.
+;
+PROCEDURE INTERNAL CALCUL_RTI
+BEGIN
+  ;
+  ; Il faut diminuer le cumulatif de taxe de la facture.
+  ;
+  LET FADMNTRTI OF ARFAC_DETAIL  = FADMNTRTI OF ARFAC_DETAIL - &
+                                   DEIMNTRTI OF ARDER_ITEM
+  LET FACMNTRTI OF ARFACTURE_REC = FACMNTRTI OF ARFACTURE_REC - &
+                                   DEIMNTRTI OF ARDER_ITEM
+
+  ;
+  LET DEIMNTRTI OF ARDER_ITEM = 0
+
+  ;
+  ; Calcul du remboursement fédéral.
+  ;
+  LET DEIMNTRTI OF ARDER_ITEM = &
+                ROUND( DEIMNTTVQ OF ARDER_ITEM * TAXPCTCTI OF A_TAX_TVP )
+  ;
+  ; Il faut augmenter le cumulatif de taxe de la facture.
+  ;
+  LET FADMNTRTI OF ARFAC_DETAIL  = FADMNTRTI OF ARFAC_DETAIL + &
+                                   DEIMNTRTI OF ARDER_ITEM
+  LET FACMNTRTI OF ARFACTURE_REC = FACMNTRTI OF ARFACTURE_REC + &
+                                   DEIMNTRTI OF ARDER_ITEM
+
+END
+
+
+
+;-------------------------------------------------------------------------------
+; Calcul des taxes (provinciale et fédérale)
+;
+PROCEDURE INTERNAL CALCUL_TAXES
+BEGIN
+  ;
+  ; Enlève les anciennes valeurs des totaux
+  ;
+  LET FADMNTTPS OF ARFAC_DETAIL = FADMNTTPS OF ARFAC_DETAIL - &
+                                  DEIMNTTPS OF ARDER_ITEM
+
+  LET FADMNTTVQ OF ARFAC_DETAIL = FADMNTTVQ OF ARFAC_DETAIL - &
+                                  DEIMNTTVQ OF ARDER_ITEM
+
+  LET FACMNTTPS OF ARFACTURE_REC = FACMNTTPS OF ARFACTURE_REC - &
+                                   DEIMNTTPS OF ARDER_ITEM
+
+  LET FACMNTTVQ OF ARFACTURE_REC = FACMNTTVQ OF ARFACTURE_REC - &
+                                   DEIMNTTVQ OF ARDER_ITEM
+
+  ;
+  LET DEIMNTTPS OF ARDER_ITEM = 0
+  LET DEIMNTTVQ OF ARDER_ITEM = 0
+  ;
+  ; On prend le montant brut de la ligne de facture pour le calcul des taxes.
+  ;
+  LET TZ_MNTTXB = DEIMNTTOT OF ARDER_ITEM
+  ;
+  ; Use standard pour le calcul des taxes
+  ;
+  USE ustaxcal NOLIST
+
+  LET DEIMNTTPS OF ARDER_ITEM = TZ_MNTTPS
+  LET DEIMNTTVQ OF ARDER_ITEM = TZ_MNTTVP
+
+  LET FADMNTTPS OF ARFAC_DETAIL = FADMNTTPS OF ARFAC_DETAIL + &
+                                  DEIMNTTPS OF ARDER_ITEM
+
+  LET FADMNTTVQ OF ARFAC_DETAIL = FADMNTTVQ OF ARFAC_DETAIL + &
+                                  DEIMNTTVQ OF ARDER_ITEM
+
+  LET FACMNTTPS OF ARFACTURE_REC = FACMNTTPS OF ARFACTURE_REC + &
+                                   DEIMNTTPS OF ARDER_ITEM
+
+  LET FACMNTTVQ OF ARFACTURE_REC = FACMNTTVQ OF ARFACTURE_REC + &
+                                   DEIMNTTVQ OF ARDER_ITEM
+
+  ;
+  ; Si le mode de taxation est "EN SUS", il faut mettre à jour le cumulatif brut
+  ; de la facture.
+  ;
+  IF TAXMOD OF A_TAX_TPS = "S"
+  THEN BEGIN
+    LET FADMNTTOT OF ARFAC_DETAIL = FADMNTTOT OF ARFAC_DETAIL + &
+                                    DEIMNTTPS OF ARDER_ITEM
+
+    LET FACMNTTOT OF ARFACTURE_REC = FACMNTTOT OF ARFACTURE_REC + &
+                                     DEIMNTTPS OF ARDER_ITEM
+
+
+    LET DEIMNTTOT OF ARDER_ITEM = DEIMNTTOT OF ARDER_ITEM + &
+                                  DEIMNTTPS OF ARDER_ITEM
+
+  END
+
+
+  IF TAXMOD OF A_TAX_TVP = "S"
+  THEN BEGIN
+     LET FADMNTTOT OF ARFAC_DETAIL = FADMNTTOT OF ARFAC_DETAIL + &
+                                     DEIMNTTVQ OF ARDER_ITEM
+
+     LET FACMNTTOT OF ARFACTURE_REC = FACMNTTOT OF ARFACTURE_REC + &
+                                      DEIMNTTVQ OF ARDER_ITEM
+
+
+     LET DEIMNTTOT OF ARDER_ITEM = DEIMNTTOT OF ARDER_ITEM + &
+                                   DEIMNTTVQ OF ARDER_ITEM
+
+  END
+
+  ;
+  ; Calcul des montants de taxe remboursables (CTI & RTI)
+  ;
+  DO INTERNAL CALCUL_CTI
+  DO INTERNAL CALCUL_RTI
+
+  LET DEIMNTNET    OF ARDER_ITEM =  DEIMNTTOT OF ARDER_ITEM - &
+                                    DEIMNTTPS OF ARDER_ITEM - &
+                                    DEIMNTTVQ OF ARDER_ITEM
+
+  LET FADMNTNET    OF ARFAC_DETAIL =  FADMNTTOT OF ARFAC_DETAIL - &
+                                      FADMNTTPS OF ARFAC_DETAIL - &
+                                      FADMNTTVQ OF ARFAC_DETAIL
+
+  LET FACMNTNET    OF ARFACTURE_REC =  FACMNTTOT OF ARFACTURE_REC - &
+                                       FACMNTTPS OF ARFACTURE_REC - &
+                                       FACMNTTVQ OF ARFACTURE_REC
+
+
+END
+;-------------------------------------------------------------------------------
+;
+; Calcul des montants et des taxes.
+;
+PROCEDURE INTERNAL CALCUL_MONTANT
+BEGIN
+
+  ;
+  ; Calcul du montant brut du produit
+  ;
+  LET FADMNTTOT OF ARFAC_DETAIL = FADMNTTOT OF ARFAC_DETAIL - &
+                                  DEIMNTTOT OF ARDER_ITEM
+
+  LET FACMNTTOT OF ARFACTURE_REC = FACMNTTOT OF ARFACTURE_REC - &
+                                   DEIMNTTOT OF ARDER_ITEM
+  ;
+  ; La division par 100000 représente les 3 chiffres après le point pour
+  ; les qtes et 2 chiffres pour les décimales 3 et 4 du prix unitaire.
+  ;
+  LET DEIMNTTOT OF ARDER_ITEM = &
+    ROUND ( DEIQTEFAC OF ARDER_ITEM * &
+            DEIPRIUNI  OF ARDER_ITEM /100000 )
+
+  LET FADMNTTOT OF ARFAC_DETAIL = FADMNTTOT OF ARFAC_DETAIL + &
+                                  DEIMNTTOT OF ARDER_ITEM
+
+
+  LET FACMNTTOT OF ARFACTURE_REC = FACMNTTOT OF ARFACTURE_REC + &
+                                   DEIMNTTOT OF ARDER_ITEM
+
+
+
+
+
+  ; Cette procédure calcule les montants de taxe ainsi que les montants de
+  ; CTI et RTI.
+
+  DO INTERNAL CALCUL_TAXES
+
+
+  ; On affiche les variables modifiées par les calculs.
+  ;
+  DISPLAY DEIMNTTPS OF ARDER_ITEM
+  DISPLAY DEIMNTTVQ OF ARDER_ITEM
+  DISPLAY DEIMNTTOT OF ARDER_ITEM
+  DISPLAY FADMNTTPS OF ARFAC_DETAIL
+  DISPLAY FADMNTTVQ OF ARFAC_DETAIL
+  DISPLAY FADMNTTOT OF ARFAC_DETAIL
+  DISPLAY FADMNTNET OF ARFAC_DETAIL
+  DISPLAY FADMNTCTI OF ARFAC_DETAIL
+  DISPLAY FADMNTRTI OF ARFAC_DETAIL
+END
+
+
+PROCEDURE INPUT RECCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE    = T_CIECLEMNU
+    LET T_FOUCIECLE = FOUCIECLE OF ARFACTURE_REC
+    LET T_FOUCLE    = FOUCLE OF ARFACTURE_REC
+    LET T_RECCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN ar110 MODE F PASSING T_CIECLE, T_FOUCIECLE, T_FOUCLE, T_RECCLE
+    LET FIELDTEXT = TRUNCATE(T_RECCLE)
+  END
+END
+
+
+;------------------------------------------------------------------------------
+; Cette procédure permet de faire un écran dépisteur pour les produits
+; de l'entrepôt.
+;
+PROCEDURE INPUT PRDCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = FACCIECLE OF ARFACTURE_REC
+    LET T_ENTCLE = ENTCLE    OF ARFACTURE_REC
+    LET T_PRDCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN ar103 MODE F PASSING T_CIECLE, T_ENTCLE, T_PRDCLE  &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_PRDCLE)
+  END
+  ELSE BEGIN
+    USE usinpprd NOLIST
+  END
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de valider que le statut du produit est actif
+;
+PROCEDURE EDIT PRDCLE
+BEGIN
+  IF PRDSTU OF VPRE_PRD = "I"
+  THEN ERROR 1374 ; Ce produit est inactif.
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet d'affecter la première ligne de description du produit
+; sur la ligne de commande si le type de produit n'est pas divers. Elle permet
+; aussi de prendre le prix unitaire par défaut de l'entrepôt.
+;
+PROCEDURE PROCESS PRDCLE
+BEGIN
+  IF PRDTYP OF VPRE_PRD <> "D"
+  THEN LET DEIDSC OF ARDER_ITEM = PRDDSC1 OF VPRE_PRD
+  ELSE LET DEIDSC OF ARDER_ITEM = ""
+  DISPLAY DEIDSC OF ARDER_ITEM
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT DEIFLGCOM
+BEGIN
+  USE usflginp NOLIST
+END
+
+PROCEDURE OUTPUT DEIFLGCOM
+BEGIN
+  USE usflgout3 NOLIST
+END
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran de consultation des codes de taxe.
+;
+;
+PROCEDURE INPUT DEITAXCODTPS
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TAXCLETYP = DEITAXTYPTPS OF ARDER_ITEM
+    LET T_TAXCLECOD = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    LET T_TAXMODPAT = "@"
+    RUN SCREEN mc111 MODE F PASSING T_TAXCLETYP, &
+                                    T_TAXCLECOD, &
+                                    T_TAXMODPAT &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNC(T_TAXCLECOD)
+  END
+  ; code de tax not null
+  IF 0 = SIZE(TRUNCATE(DEITAXCODTPS)) AND 0 = SIZE(TRUNCATE(FIELDTEXT))
+  THEN ERROR 1376 ;ce code de taxe n'existe pas
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du code de taxe fédéral.
+;
+;
+PROCEDURE EDIT DEITAXCODTPS
+BEGIN
+  GET A_TAX_TPS OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 1376 ; Ce code de taxe n'existe pas.
+
+  ;
+  ; Initialise le flag à Oui dans la procédure EDIT. Car si l'usager saisi
+  ; une valeur la procédure EDIT est exécutée.
+  ;
+  LET T_FLGMOD = "1"
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran de consultation des codes de taxe.
+;
+;
+PROCEDURE INPUT DEITAXCODTVQ
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TAXCLETYP = DEITAXTYPTVQ OF ARDER_ITEM
+    LET T_TAXCLECOD = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    LET T_TAXMODPAT = "@"
+    RUN SCREEN mc111 MODE F PASSING T_TAXCLETYP, &
+                                    T_TAXCLECOD, &
+                                    T_TAXMODPAT &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNC(T_TAXCLECOD)
+  END
+
+  ;
+  ; Force l'éxécution de la procédure edit, car il y a une relation entre
+  ; deux champs(taxe).
+  ;
+  IF    NOT FINDMODE  &
+    AND 0 = SIZE(FIELDTEXT) &
+    AND T_FLGMOD = "1"
+  THEN LET FIELDTEXT = DEITAXCODTVQ OF ARDER_ITEM
+  ; code de tax not null
+  IF 0 = SIZE(TRUNCATE(DEITAXCODTVQ)) AND 0 = SIZE(TRUNCATE(FIELDTEXT))
+  THEN ERROR 1376 ;ce code de taxe n'existe pas
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du code de taxe provincial
+;
+;
+PROCEDURE EDIT DEITAXCODTVQ
+BEGIN
+  GET A_TAX_TVP OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 1376 ; Ce code de taxe n'existe pas.
+
+  IF    TAXMOD    OF A_TAX_TVP = "I" &
+    AND TAXFLGNET OF A_TAX_TVP = "2" &
+    AND TAXMOD    OF A_TAX_TPS = "S"
+  THEN ERROR 1379 ; Codes de taxe TVQ inclus et TPS en sus sont incompatibles.
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de faire l'appel de la procédure de calcul des montants.
+;
+;
+PROCEDURE PROCESS DEITAXCODTVQ
+BEGIN
+  DO INTERNAL CALCUL_MONTANT
+END
+
+
+;------------------------------------------------------------------------------
+;
+; Modification des montants de taxes.
+;
+PROCEDURE EDIT DEIMNTTPS
+BEGIN
+
+  IF FIELDVALUE >= 0
+  THEN ERROR 1482 ; Seul les valeurs négatives sont permises.
+
+  DO INTERNAL CALCUL_CTI
+
+  LET FADMNTTPS OF ARFAC_DETAIL = &
+      FADMNTTPS OF ARFAC_DETAIL - OLDVALUE(DEIMNTTPS OF ARDER_ITEM) + FIELDVALUE
+
+  LET FACMNTTPS OF ARFACTURE_REC = &
+      FACMNTTPS OF ARFACTURE_REC - OLDVALUE(DEIMNTTPS OF ARDER_ITEM) + FIELDVALUE
+
+  IF TAXMOD OF A_TAX_TPS = "S"
+  THEN BEGIN
+
+    LET FADMNTTOT OF ARFAC_DETAIL = &
+        FADMNTTOT OF ARFAC_DETAIL - OLDVALUE(DEIMNTTPS OF ARDER_ITEM) + FIELDVALUE
+
+    LET FACMNTTOT OF ARFACTURE_REC = &
+        FACMNTTOT OF ARFACTURE_REC - OLDVALUE(DEIMNTTPS OF ARDER_ITEM) + FIELDVALUE
+
+    LET DEIMNTTOT OF ARDER_ITEM = &
+        DEIMNTTOT OF ARDER_ITEM - OLDVALUE(DEIMNTTPS OF ARDER_ITEM) + FIELDVALUE
+
+  END
+
+END
+;------------------------------------------------------------------------------
+;
+; Modification des montants de taxes.
+;
+PROCEDURE EDIT DEIMNTTVQ
+BEGIN
+
+  IF FIELDVALUE >= 0
+  THEN ERROR 1482 ; Seul les valeurs négatives sont permises.
+
+  DO INTERNAL CALCUL_RTI
+
+  LET FADMNTTVQ OF ARFAC_DETAIL = &
+      FADMNTTVQ OF ARFAC_DETAIL - OLDVALUE(DEIMNTTVQ OF ARDER_ITEM) + FIELDVALUE
+
+  LET FACMNTTVQ OF ARFACTURE_REC = &
+      FACMNTTVQ OF ARFACTURE_REC - OLDVALUE(DEIMNTTVQ OF ARDER_ITEM) + FIELDVALUE
+
+  IF TAXMOD OF A_TAX_TVP = "S"
+  THEN BEGIN
+
+    LET FADMNTTOT OF ARFAC_DETAIL = &
+        FADMNTTOT OF ARFAC_DETAIL - OLDVALUE(DEIMNTTVQ OF ARDER_ITEM) + FIELDVALUE
+
+    LET FACMNTTOT OF ARFACTURE_REC = &
+        FACMNTTOT OF ARFACTURE_REC - OLDVALUE(DEIMNTTVQ OF ARDER_ITEM) + FIELDVALUE
+
+    LET DEIMNTTOT OF ARDER_ITEM = &
+        DEIMNTTOT OF ARDER_ITEM - OLDVALUE(DEIMNTTVQ OF ARDER_ITEM) + FIELDVALUE
+
+  END
+
+END
+
+;-------------------------------------------------------------------------------
+; Procédure pour le dépisteur du numéro de compte.
+;
+PROCEDURE INPUT CPTCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_PECCLE    = " "
+    LET T_CPTTYPPAT = "@"
+    LET T_CPTCATPAT = "@"
+    RUN SCREEN mc103 MODE F PASSING T_CPTCLE   , &
+                                    T_CPTTYPPAT, &
+                                    T_CPTCATPAT, &
+                                    T_PECCLE     &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_CPTCLE)
+  END
+
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation si le compte est actif.
+;
+;
+PROCEDURE EDIT CPTCLE
+BEGIN
+  ;
+  ; Note: La période de fin, est la première période d'inactivité.
+  ;
+  ; Ajustement pour le changement de siècle
+  IF PECCLE OF ARFACTURE_REC[1:1] < "8"
+  THEN LET T_PECCLE_ARFACTURE = "1" + PECCLE OF ARFACTURE_REC
+  ELSE LET T_PECCLE_ARFACTURE = "0" + PECCLE OF ARFACTURE_REC
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBA OF VCPT_DSC[1:1] < "8"
+  THEN LET T_CPTPECDEBA_VCPT = "1" + CPTPECDEBA OF VCPT_DSC
+  ELSE LET T_CPTPECDEBA_VCPT = "0" + CPTPECDEBA OF VCPT_DSC
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBI OF VCPT_DSC[1:1] < "8"
+  THEN LET T_CPTPECDEBI_VCPT = "1" + CPTPECDEBI OF VCPT_DSC
+  ELSE LET T_CPTPECDEBI_VCPT = "0" + CPTPECDEBI OF VCPT_DSC
+
+  IF T_PECCLE_ARFACTURE >= T_CPTPECDEBA_VCPT AND &
+     ( &
+       T_PECCLE_ARFACTURE < T_CPTPECDEBI_VCPT OR &
+       CPTPECDEBI OF VCPT_DSC = "" &
+     )
+  THEN NULL
+  ELSE ERROR 1380 ; Ce compte est inactif.
+
+  IF CPTTYP OF VCPT_DSC <> "R"
+  THEN ERROR 1417 ; On ne peut pas utiliser ce compte dans une réception.
+
+  IF     DEVCLE OF VCPT_DSC <> DEVCLE OF VFOC_FOU  &
+     AND DEVCLE OF VCPT_DSC <> DEVCLE OF MCHOLDING
+  THEN ERROR 1382 ; On ne peut pas utiliser ce compte à cause de la devise.
+END
+
+PROCEDURE PROCESS CPTCLE
+BEGIN
+  IF NACCLE OF MCNATURE_CTB <> 4 AND &
+     NACCLE OF MCNATURE_CTB <> 5
+  THEN BEGIN
+    LET PRJCLE OF ARDER_ITEM = ""
+    LET PRACLE OF ARDER_ITEM = ""
+    DISPLAY PRJCLE  OF ARDER_ITEM
+    DISPLAY PRJDSC1 OF GPPROJETS
+    DISPLAY PRACLE  OF ARDER_ITEM
+    DISPLAY PRADSC1 OF GPPRO_ACTIVITE
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT UNACLE
+BEGIN
+  ;
+  ; Popup sur les unités administratives.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE = CPTCLE OF ARDER_ITEM
+    LET T_PECCLE = PECCLE OF ARFACTURE_REC
+    LET T_UNACLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    ;
+    ; Il y a trois popup possible:
+    ;  1) sur les unités administrative par compagnie(MCUNITE_ADM).
+    ;  2) sur les unités administrative d'une charte de compte(MCCHARTE_UNA).
+    ;  3) sur les unités administrative qui ne sont pas définis dans la charte
+    ;     de compte(MCUNITE_ADM, MCCHARTE_UNA).
+    ;
+    IF HLDCHTCPT OF MCHOLDING = "0"
+    THEN RUN SCREEN mc104 MODE F PASSING T_CIECLEMNU, T_UNACLE
+    ELSE BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN RUN SCREEN mc115 MODE F PASSING T_CIECLEMNU, T_CPTCLE, T_UNACLE, &
+                                           T_PECCLE
+      ELSE RUN SCREEN mc116 MODE F PASSING T_CIECLEMNU, T_CPTCLE, T_UNACLE, &
+                                           T_PECCLE
+    END
+    LET FIELDTEXT = TRUNCATE(T_UNACLE)
+  END
+  ;
+  ; Force le lookup de l'unité pour la charte.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(UNACLE OF ARDER_ITEM))
+  THEN LET FIELDTEXT = UNACLE OF ARDER_ITEM
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation si l'unité administrative est active.
+;
+;
+PROCEDURE EDIT UNACLE
+BEGIN
+  IF HLDCHTCPT OF MCHOLDING = "1"
+  THEN BEGIN
+    GET MCCHARTE_UNA OPTIONAL
+    ;
+    ; Si la charte est incluse, le lien est obligatoire.
+    ;
+    IF NOT ACCESSOK
+    THEN BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN ERROR 1314 ; La combinaison compte/unité administrative n'existe pas.
+    END
+    ELSE BEGIN
+      ;
+      ; Si la charte est Exclusive et que la période fait partie de
+      ; l'intervalle de périodes de la charte alors c'est une erreur.
+      ;
+      ; Si la charte est inclusive et que la période ne fait pas partie de
+      ; l'intervalle de périodes de la charte alors c'est une erreur.
+      ;
+      ; Ajustement pour le changement de siècle
+      IF PECCLE OF ARFACTURE_REC[1:1] < "8"
+      THEN LET T_PECCLE_ARFAC = "1" + PECCLE OF ARFACTURE_REC
+      ELSE LET T_PECCLE_ARFAC = "0" + PECCLE OF ARFACTURE_REC
+
+      ; Ajustement pour le changement de siècle
+      IF CCUPECDEBA OF MCCHARTE_UNA[1:1] < "8"
+      THEN LET T_CCUPECDEBA_MCCHARTE = "1" + CCUPECDEBA OF MCCHARTE_UNA
+      ELSE LET T_CCUPECDEBA_MCCHARTE = "0" + CCUPECDEBA OF MCCHARTE_UNA
+
+      ; Ajustement pour le changement de siècle
+      IF CCUPECDEBI OF MCCHARTE_UNA[1:1] < "8"
+      THEN LET T_CCUPECDEBI_MCCHARTE = "1" + CCUPECDEBI OF MCCHARTE_UNA
+      ELSE LET T_CCUPECDEBI_MCCHARTE = "0" + CCUPECDEBI OF MCCHARTE_UNA
+
+      IF ( &
+           T_PECCLE_ARFAC >= T_CCUPECDEBA_MCCHARTE AND &
+           ( &
+             T_PECCLE_ARFAC < T_CCUPECDEBI_MCCHARTE OR &
+             CCUPECDEBI OF MCCHARTE_UNA = " " &
+           ) &
+         )
+      THEN BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "E"
+        THEN ERROR 1384 ; La combinaison compte/unité administrative est inactive.
+      END
+      ELSE BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "I"
+        THEN ERROR 1384 ; La combinaison compte/unité administrative est inactive.
+      END
+    END
+  END
+
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les projets.
+;
+;
+PROCEDURE INPUT PRJCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PRJSTUPAT = "A"
+    LET T_PRJCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gp104 MODE F PASSING T_CIECLEMNU, &
+                                    T_PRJCLE   , &
+                                    T_PRJSTUPAT WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_PRJCLE)
+  END
+
+   ; Pour forcer la procédure EDIT
+   ;
+  IF      NOT FINDMODE &
+    AND 0  = SIZE (TRUNCATE(FIELDTEXT)) &
+    AND "" <> TRUNCATE (PRJCLE OF ARDER_ITEM)
+  THEN LET FIELDTEXT = PRJCLE OF ARDER_ITEM
+
+  IF (HLDNTNPRO OF MCHOLDING    = "1" AND &
+      NACCLE    OF MCNATURE_CTB = 4   AND &
+      FIELDTEXT                 = "" ) OR &
+     (HLDNTNPRO OF MCHOLDING    = "1" AND &
+      NACCLE    OF MCNATURE_CTB = 5   AND &
+      FIELDTEXT                 = "" )
+  THEN ERROR 889
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du projet, le projet est optionnel dans la ligne de réception.
+;
+;
+PROCEDURE EDIT PRJCLE
+BEGIN
+  GET GPPROJETS  OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 1385 ; Ce projet n'existe pas.
+
+  IF PRJSTU OF GPPROJETS <> "A"
+  THEN ERROR 1386 ; Ce projet n'est pas actif.
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT PRACLE
+BEGIN
+  IF PRJCLE OF ARDER_ITEM = ""
+  THEN ERROR 889
+  ;
+  ; Popup sur les activités.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PRJCLE    = PRJCLE OF ARDER_ITEM
+    LET T_PRASTUPAT = "A"
+    LET T_PRACLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gp108 MODE F PASSING T_CIECLEMNU, &
+                                    T_PRJCLE   , &
+                                    T_PRACLE   , &
+                                    T_PRASTUPAT WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_PRACLE)
+  END
+
+  ;
+  ; Force le lookup de l'activité car il est en liaison avec le projet
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(PRJCLE OF ARDER_ITEM))
+  THEN LET FIELDTEXT = PRACLE OF ARDER_ITEM
+
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation de l'activité, l'activité est optionnelle dans la ligne de commande.
+;
+;
+PROCEDURE EDIT PRACLE
+BEGIN
+  GET GPPRO_ACTIVITE  OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 1387 ; Cette activité n'existe pas.
+
+  IF PRASTU OF GPPRO_ACTIVITE <> "A"
+  THEN ERROR 1388 ; Cette activité est inactive.
+END
+
+;-------------------------------------------------------------------------------
+; Pop up pour la catégorie d'équipement
+;
+PROCEDURE INPUT IMMCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_IMMCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN im102 MODE F &
+                     PASSING T_CIECLEMNU, &
+                             T_IMMCLE  WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE( T_IMMCLE )
+  END
+
+  ;
+  ; Par défaut on utilise la catégorie définie dans GPPROJETS S'il n'y en a pas
+  ; on force la validation.
+  ;
+  IF     0 = SIZE(FIELDTEXT) &
+     AND 0 = SIZE(TRUNCATE(IMMCLE OF ARDER_ITEM))
+  THEN BEGIN
+     IF 0 <> SIZE(TRUNCATE(PRAIMMCLE OF GPPRO_ACTIVITE))
+     THEN LET FIELDTEXT = PRAIMMCLE OF GPPRO_ACTIVITE
+     ELSE LET FIELDTEXT = IMMCLE OF ARDER_ITEM
+  END
+END
+
+
+PROCEDURE EDIT IMMCLE
+BEGIN
+   IF IMMTYP OF IMIMMOBILISATION <> "E"
+   THEN ERROR 1503
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de faire l'appel de la procédure de calcul des taxes.
+;
+;
+PROCEDURE EDIT DEIPRIUNI
+BEGIN
+  IF FIELDVALUE >= 0
+  THEN ERROR 1482 ; Seul les valeurs négatives sont permises.
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de faire l'appel de la procédure de calcul des taxes.
+;
+;
+PROCEDURE PROCESS DEIPRIUNI
+BEGIN
+  DO INTERNAL CALCUL_MONTANT
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE DETAIL POSTFIND
+BEGIN
+  FOR ARDER_ITEM
+  BEGIN
+    ;
+    ; Il faut conserver l'ancienne valeur qui a servi à incrémenter le cumulatif
+    ; des montants bruts(incluant taxe). Il faut prendre les informations du
+    ; code de taxe précédemment saisi, c'est pour cette raison que le traitement
+    ; est fait dans cette procédure.
+    ;
+    LET T_TAXMODTPSOLD = TAXMOD OF A_TAX_TPS
+    LET T_TAXMODTVQOLD = TAXMOD OF A_TAX_TVP
+  END
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Cette procédure permet de mettre à jour les totaux.
+;
+
+PROCEDURE DETAIL DELETE
+BEGIN
+  IF NOT DELETEDRECORD OF ARDER_ITEM
+  THEN BEGIN
+
+    ;
+    ; Enlève les anciennes valeurs.
+    ;
+    LET FADMNTTPS OF ARFAC_DETAIL = FADMNTTPS OF ARFAC_DETAIL - &
+                                    DEIMNTTPS OF ARDER_ITEM
+
+    LET FACMNTTPS OF ARFACTURE_REC = FACMNTTPS OF ARFACTURE_REC - &
+                                     DEIMNTTPS OF ARDER_ITEM
+
+    LET FADMNTTVQ OF ARFAC_DETAIL = FADMNTTVQ OF ARFAC_DETAIL - &
+                                    DEIMNTTVQ OF ARDER_ITEM
+
+    LET FACMNTTVQ OF ARFACTURE_REC = FACMNTTVQ OF ARFACTURE_REC - &
+                                     DEIMNTTVQ OF ARDER_ITEM
+
+    LET FADMNTCTI OF ARFAC_DETAIL = FADMNTCTI OF ARFAC_DETAIL - &
+                                    DEIMNTCTI OF ARDER_ITEM
+
+    LET FACMNTCTI OF ARFACTURE_REC = FACMNTCTI OF ARFACTURE_REC - &
+                                     DEIMNTCTI OF ARDER_ITEM
+
+    LET FADMNTRTI OF ARFAC_DETAIL = FADMNTRTI OF ARFAC_DETAIL - &
+                                    DEIMNTRTI OF ARDER_ITEM
+
+    LET FACMNTRTI OF ARFACTURE_REC = FACMNTRTI OF ARFACTURE_REC - &
+                                     DEIMNTRTI OF ARDER_ITEM
+
+    LET FADMNTESC OF ARFAC_DETAIL = FADMNTESC OF ARFAC_DETAIL - &
+                                    DEIMNTESC OF ARDER_ITEM
+
+    LET FACMNTESC OF ARFACTURE_REC = FACMNTESC OF ARFACTURE_REC - &
+                                     DEIMNTESC OF ARDER_ITEM
+
+    LET FADMNTTOT OF ARFAC_DETAIL = FADMNTTOT OF ARFAC_DETAIL - &
+                                    DEIMNTTOT OF ARDER_ITEM
+
+    LET FACMNTTOT OF ARFACTURE_REC = FACMNTTOT OF ARFACTURE_REC - &
+                                     DEIMNTTOT OF ARDER_ITEM
+
+
+    LET FADMNTNET OF ARFAC_DETAIL = FADMNTNET OF ARFAC_DETAIL - &
+                                    DEIMNTNET OF ARDER_ITEM
+
+    LET FACMNTNET OF ARFACTURE_REC= FACMNTNET OF ARFACTURE_REC - &
+                                    DEIMNTNET OF ARDER_ITEM
+
+  END
+  DELETE ARDER_ITEM
+
+  DISPLAY FADMNTTPS OF ARFAC_DETAIL
+  DISPLAY FADMNTTVQ OF ARFAC_DETAIL
+  DISPLAY FADMNTRTI OF ARFAC_DETAIL
+  DISPLAY FADMNTCTI OF ARFAC_DETAIL
+  DISPLAY FADMNTTOT OF ARFAC_DETAIL
+  DISPLAY FADMNTNET OF ARFAC_DETAIL
+
+END
+
+PROCEDURE DELETE
+BEGIN
+  FOR ARDER_ITEM
+  BEGIN
+    IF NOT DELETEDRECORD OF ARDER_ITEM
+    THEN BEGIN
+
+      ;
+      ; Enlève les anciennes valeurs.
+      ;
+      LET FADMNTTPS OF ARFAC_DETAIL = FADMNTTPS OF ARFAC_DETAIL - &
+                                      DEIMNTTPS OF ARDER_ITEM
+
+      LET FACMNTTPS OF ARFACTURE_REC = FACMNTTPS OF ARFACTURE_REC - &
+                                       DEIMNTTPS OF ARDER_ITEM
+
+      LET FADMNTTVQ OF ARFAC_DETAIL = FADMNTTVQ OF ARFAC_DETAIL - &
+                                      DEIMNTTVQ OF ARDER_ITEM
+
+      LET FACMNTTVQ OF ARFACTURE_REC = FACMNTTVQ OF ARFACTURE_REC - &
+                                       DEIMNTTVQ OF ARDER_ITEM
+
+      LET FADMNTCTI OF ARFAC_DETAIL = FADMNTCTI OF ARFAC_DETAIL - &
+                                      DEIMNTCTI OF ARDER_ITEM
+
+      LET FACMNTCTI OF ARFACTURE_REC = FACMNTCTI OF ARFACTURE_REC - &
+                                       DEIMNTCTI OF ARDER_ITEM
+
+      LET FADMNTRTI OF ARFAC_DETAIL = FADMNTRTI OF ARFAC_DETAIL - &
+                                      DEIMNTRTI OF ARDER_ITEM
+
+      LET FACMNTRTI OF ARFACTURE_REC = FACMNTRTI OF ARFACTURE_REC - &
+                                       DEIMNTRTI OF ARDER_ITEM
+
+      LET FADMNTESC OF ARFAC_DETAIL = FADMNTESC OF ARFAC_DETAIL - &
+                                      DEIMNTESC OF ARDER_ITEM
+
+      LET FACMNTESC OF ARFACTURE_REC = FACMNTESC OF ARFACTURE_REC - &
+                                       DEIMNTESC OF ARDER_ITEM
+
+      LET FADMNTTOT OF ARFAC_DETAIL = FADMNTTOT OF ARFAC_DETAIL - &
+                                      DEIMNTTOT OF ARDER_ITEM
+
+      LET FACMNTTOT OF ARFACTURE_REC = FACMNTTOT OF ARFACTURE_REC - &
+                                       DEIMNTTOT OF ARDER_ITEM
+
+
+      LET FADMNTNET OF ARFAC_DETAIL = FADMNTNET OF ARFAC_DETAIL - &
+                                      DEIMNTNET OF ARDER_ITEM
+
+      LET FACMNTNET OF ARFACTURE_REC= FACMNTNET OF ARFACTURE_REC - &
+                                      DEIMNTNET OF ARDER_ITEM
+
+    END
+    DELETE ARDER_ITEM
+
+    DISPLAY FADMNTTPS OF ARFAC_DETAIL
+    DISPLAY FADMNTTVQ OF ARFAC_DETAIL
+    DISPLAY FADMNTRTI OF ARFAC_DETAIL
+    DISPLAY FADMNTCTI OF ARFAC_DETAIL
+    DISPLAY FADMNTTOT OF ARFAC_DETAIL
+    DISPLAY FADMNTNET OF ARFAC_DETAIL
+  END
+END
+
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+PROCEDURE ENTRY
+BEGIN
+  DISPLAY FACCLE OF ARFAC_DETAIL
+  DISPLAY FOUCLE OF ARFAC_DETAIL
+  DISPLAY RADNOM OF MCREF_ADRESSE
+  DISPLAY FADMNTTOT OF ARFAC_DETAIL
+  DISPLAY D_DEVCLE
+  DISPLAY FADMNTNET OF ARFAC_DETAIL
+  DISPLAY FADMNTTPS OF ARFAC_DETAIL
+  DISPLAY FADMNTCTI OF ARFAC_DETAIL
+  DISPLAY FADMNTTVQ OF ARFAC_DETAIL
+  DISPLAY FADMNTRTI OF ARFAC_DETAIL
+  ACCEPT RECCLE OF ARDER_ITEM
+  LET RECCLE OF ARFAC_DETAIL = RECCLE OF ARDER_ITEM
+  
+  ACCEPT DEICLE OF ARDER_ITEM
+  ACCEPT PRDCLE OF ARDER_ITEM
+  IF PRDTYP OF VPRE_PRD = "D"
+  THEN ACCEPT DEIDSC OF ARDER_ITEM
+  ACCEPT DEIFLGCOM OF ARDER_ITEM
+  ACCEPT CPTCLE OF ARDER_ITEM
+  DISPLAY CPTDSCABR OF VCPT_DSC
+  INFORMATION = CPTDSC OF VCPT_DSC
+  ACCEPT UNACLE OF ARDER_ITEM
+  DISPLAY UNANOMABR OF MCUNITE_ADM
+  INFORMATION = UNANOM OF MCUNITE_ADM
+  ;
+  ; Si notion de projet.
+  ;
+  IF (HLDNTNPRO OF MCHOLDING = "1" AND NACCLE OF MCNATURE_CTB = 4) OR &
+     (HLDNTNPRO OF MCHOLDING = "1" AND NACCLE OF MCNATURE_CTB = 5)
+  THEN BEGIN
+    WHILE 0 = SIZE(TRUNCATE(PRJCLE OF ARDER_ITEM))
+    BEGIN
+      ACCEPT  PRJCLE OF ARDER_ITEM
+      DISPLAY PRJDSC1 OF GPPROJETS
+      IF 0 <> SIZE(TRUNCATE(PRJCLE OF ARDER_ITEM))
+      THEN BEGIN
+        INFORMATION = PRJDSC1 OF GPPROJETS
+        ACCEPT  PRACLE OF ARDER_ITEM
+        DISPLAY PRADSC1 OF GPPRO_ACTIVITE
+        INFORMATION = PRADSC1 OF GPPRO_ACTIVITE
+        ACCEPT IMMCLE OF ARDER_ITEM
+        INFORMATION = IMMDSC  OF IMIMMOBILISATION
+
+        LET T_FLAG_ENT = "1"
+      END
+    END
+  END
+  ELSE BEGIN
+    LET PRJCLE OF ARDER_ITEM = " "
+    LET PRACLE OF ARDER_ITEM = " "
+  END
+
+  ACCEPT DEIPRIUNI OF ARDER_ITEM 
+
+  ACCEPT DEITAXCODTPS OF ARDER_ITEM
+  DISPLAY TAXDSCFRA OF A_TAX_TPS
+  DISPLAY DEIMNTTPS OF ARDER_ITEM
+  ACCEPT DEITAXCODTVQ OF ARDER_ITEM
+  DISPLAY TAXDSCFRA OF A_TAX_TVP
+  DISPLAY DEIMNTTVQ OF ARDER_ITEM
+  DISPLAY DEIMNTTOT OF ARDER_ITEM
+  DISPLAY DEIMNTNET OF ARDER_ITEM
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE DESIGNER 10
+BEGIN
+  ACCEPT PRDCLE OF ARDER_ITEM
+  IF PRDTYP OF VPRE_PRD = "D"
+  THEN ACCEPT DEIDSC OF ARDER_ITEM
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE DESIGNER 25
+BEGIN
+  ;
+  ; Si notion de projet.
+  ;
+  IF (HLDNTNPRO OF MCHOLDING = "1" AND NACCLE OF MCNATURE_CTB = 4) OR &
+     (HLDNTNPRO OF MCHOLDING = "1" AND NACCLE OF MCNATURE_CTB = 5)
+  THEN BEGIN
+    WHILE 0 = SIZE(TRUNCATE(PRJCLE OF ARDER_ITEM))
+    BEGIN
+      ACCEPT  PRJCLE OF ARDER_ITEM
+      DISPLAY PRJDSC1 OF GPPROJETS
+      IF 0 <> SIZE(TRUNCATE(PRJCLE OF ARDER_ITEM))
+      THEN BEGIN
+        INFORMATION = PRJDSC1 OF GPPROJETS
+        ACCEPT  PRACLE OF ARDER_ITEM
+        DISPLAY PRADSC1 OF GPPRO_ACTIVITE
+        INFORMATION = PRADSC1 OF GPPRO_ACTIVITE
+        LET T_FLAG_ALT = "1"
+      END
+      ACCEPT IMMCLE OF ARDER_ITEM
+      INFORMATION = IMMDSC  OF IMIMMOBILISATION
+
+    END
+    IF T_FLAG_ALT <> "1"
+    THEN BEGIN
+      ACCEPT  PRJCLE OF ARDER_ITEM
+      DISPLAY PRJDSC1 OF GPPROJETS
+      IF 0 <> SIZE(TRUNCATE(PRJCLE OF ARDER_ITEM))
+      THEN BEGIN
+       INFORMATION = PRJDSC1 OF GPPROJETS
+        ACCEPT  PRACLE OF ARDER_ITEM
+        DISPLAY PRADSC1 OF GPPRO_ACTIVITE
+        INFORMATION = PRADSC1 OF GPPRO_ACTIVITE
+      END
+      ACCEPT IMMCLE OF ARDER_ITEM
+      INFORMATION = IMMDSC  OF IMIMMOBILISATION
+
+    END
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR ARDER_ITEM
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF ARDER_ITEM &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF ARDER_ITEM &
+       AND NOT NEWRECORD     OF ARDER_ITEM &
+       AND NOT DELETEDRECORD OF ARDER_ITEM &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+
+    IF (HLDNTNPRO OF MCHOLDING = "1" AND (NACCLE OF MCNATURE_CTB = 4  OR &
+                                          NACCLE OF MCNATURE_CTB = 5) AND &
+        PRJCLE OF ARDER_ITEM = "")
+    THEN ERROR 889
+
+    IF FACDATTRF OF ARFACTURE_REC <> 0
+    THEN ERROR 1452 ; Impossible de modifier la facture, elle est transférée.
+
+
+    ;
+    ; On incrémente le numéro d'adresse pour les clients divers.
+    ;
+    IF     FOUTYP OF VFOC_FOU = "D" &
+       AND RADCLE OF ARFACTURE_REC = 0
+    THEN BEGIN
+      START TRANSACTION GEN_NUM_SEQ
+      GET MCRAD_SEQ VIA REFCIECLE, &
+                        REFCLETYP, &
+                        REFCLENUM  &
+                    USING FOUCIECLE OF ARFACTURE_REC, &
+                          REFCLETYP OF ARFACTURE_REC, &
+                          FOUCLE    OF ARFACTURE_REC &
+                    OPTIONAL
+      LET REFCIECLE OF MCRAD_SEQ = FOUCIECLE OF ARFACTURE_REC
+      LET REFCLETYP OF MCRAD_SEQ = REFCLETYP OF ARFACTURE_REC
+      LET REFCLENUM OF MCRAD_SEQ = FOUCLE    OF ARFACTURE_REC
+      LET RASNUMSEQ OF MCRAD_SEQ = RASNUMSEQ OF MCRAD_SEQ + 1
+      LET RADCLE    OF ARFACTURE_REC = RASNUMSEQ OF MCRAD_SEQ
+      PUT MCRAD_SEQ
+      COMMIT TRANSACTION GEN_NUM_SEQ
+    END
+    ;
+    ; Mise à jour du timbre de modification si l'usager change la réception.
+    ;
+    IF    NOT NEWRECORD OF ARFACTURE_REC &
+      AND ALTEREDRECORD OF ARDER_ITEM
+    THEN BEGIN
+      LET FACDATMOD OF ARFACTURE_REC = SYSDATE
+      LET FACHREMOD OF ARFACTURE_REC = SYSTIME / 10000
+      LET FACUSRMOD OF ARFACTURE_REC = TZ_LOGONID
+    END
+
+
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE POSTUPDATE
+BEGIN
+  FOR ARDER_ITEM
+  BEGIN
+    ;
+    ; Il faut conserver l'ancienne valeur qui a servi à incrémenter le cumulatif
+    ; des montants bruts(incluant taxe). Il faut prendre les informations du
+    ; code de taxe précédemment saisi, c'est pour cette raison que le traitement
+    ; est fait dans cette procédure.
+    ;
+    LET T_TAXMODTPSOLD = TAXMOD OF A_TAX_TPS
+    LET T_TAXMODTVQOLD = TAXMOD OF A_TAX_TVP
+  END
+END
+
+BUILD
+@IF FORMAT
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+***************************** Détail de la facture *****************************
+* Facture.......: xxxxxxxxxxxx Fournisseur...: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxx*
+* Montant brut..: xxxxxxxxxxxxxxxxxxx          Montant net...: xxxxxxxxxxxxxxx *
+* Montant TPS...: xxxxxxxxxxxxxxx              Montant CTI...: xxxxxxxxxxxxxxx *
+* Montant TVQ...: xxxxxxxxxxxxxxx              Montant RTI...: xxxxxxxxxxxxxxx *
+*                                                                              *
+* Item..........: xxxxxxx                                                      *
+* Code produit..: xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        *
+*                                                                              *
+* Complet.......: xxx                                                          *
+*                                                                              *
+* Compte........: xxxxxx xxxxxxxxxxxxxx Unité adm.....: xxxxxxxx xxxxxxxxxxxxxx*
+* Projet........: xxxxx  xxxxxxxxxxxxxx Activité......: xxxxxx   xxxxxxxxxxxxxx*
+*                                                                              *
+* Prix unitaire.: xxxxxxxxxxxxxxx                                              *
+*                                                                              *
+* Code taxe féd.: xx xxxxxxxxxxxxxxxxxx Montant TPS...: xxxxxxxxxxxxxxx        *
+* Code taxe prov: xx xxxxxxxxxxxxxxxxxx Montant TVQ...: xxxxxxxxxxxxxxx        *
+* Montant brut..: xxxxxxxxxxxxxxx       Montant net...: xxxxxxxxxxxxxxx        *
+*                                                                              *
+********************************************************************************
+@ENDIF

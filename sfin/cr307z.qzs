@@ -1,0 +1,357 @@
+;/T/ Validation sommaire des factures / Notes de crédit / Crédits / Ajustements
+;
+;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur...: Nancy Marceau
+;    Date Création.: 4 février 1994
+;
+;    Description...: Permet de faire une liste de validation des factures,
+;                    des notes de crédit et des ajustements.
+;
+;/M/ Marie-Josée Hamel, 96.02.13, remplacer élément par produit/élém. tarif.
+;
+;------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST   ; permet de faire les SET REPORT DEV....
+SET NOBLANK           ; Empêche l'impression de ligne blanche
+
+ACCESS *WCR307 &
+  LINK REFCIECLE OF WCR307, &
+       REFCLETYP OF WCR307, &
+       REFCLENUM OF WCR307, &
+       RADCLE    OF WCR307  &
+    TO REFCIECLE          , &
+       REFCLETYP          , &
+       REFCLENUM          , &
+       RADCLE             OF MCREF_ADRESSE OPTIONAL &
+
+  LINK REFCIECLE OF WCR307, &
+       REFCLETYP OF WCR307, &
+       REFCLENUM OF WCR307  &
+    TO REFCIECLE          , &
+       REFCLETYP          , &
+       REFCLENUM          OF MCREFERENCE OPTIONAL &
+
+  LINK CPTCLE   OF WCR307   &
+    TO CPTCLE             OF VCPT_DSC    OPTIONAL &
+
+  LINK CIECLE   OF WCR307 , &
+       UNACLE   OF WCR307   &
+    TO CIECLE             , &
+       UNACLE             OF MCUNITE_ADM OPTIONAL &
+
+  LINK CIECLE OF WCR307   , &
+       PRJCLE OF WCR307     &
+    TO CIECLE             , &
+       PRJCLE             OF GPPROJETS    OPTIONAL &
+
+  LINK CIECLE OF WCR307   , &
+       PRJCLE OF WCR307   , &
+       PRACLE OF WCR307     &
+    TO CIECLE             , &
+       PRJCLE             , &
+       PRACLE             OF GPPRO_ACTIVITE  OPTIONAL &
+
+  LINK CIECLE OF WCR307  , &
+       IMMCLE OF WCR307    &
+    TO CIECLE             , &
+       IMMCLE             OF IMIMMOBILISATION OPTIONAL &
+
+  LINK REFCIECLE OF WCR307  , &
+       REFCLENUM OF WCR307  &
+    TO CLICIECLE , &
+       CLICLE             OF CRCLIENT OPTIONAL
+
+
+ DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = & ; titre1  du rapport
+@IF FRANCAIS
+                   "Validation des factures/Notes de crédit/Crédits/Ajustements"
+@ELSE
+                   "%%%Validation des factures/Notes de crédit/Crédits/Ajustements"
+@ENDIF
+ DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = "Sommaire" ; titre2  du rapport
+
+ DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "CR307Z"       ; numéro du rapport
+ DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM           ; nom de la compagnie
+
+
+USE usflgdet NOLIST                    ;Flag Bilingue (O/N)
+
+DEFINE D_HRSBLC    CHARACTER SIZE 3 =  DZ_FLGAFFO IF 0 <> LCRNBRTRSERR OF WCR307 &
+                                       ELSE DZ_FLGAFFN IF LCRNBRTRSERR OF WCR307 = 0
+
+DEFINE D_JOURNALISE CHAR SIZE 12 = &                                    ;Indique si Journalisé
+@IF FRANCAIS
+                            "Journalisé" &
+@ELSE
+                            "Posted" &
+@ENDIF
+                            IF LCRDATJOU OF WCR307 <> 0 ELSE " "
+
+
+DEFINE D_LCRNBRTRSDIF INTEGER SIZE 4 = LCRNBRTRSVER - LCRNBRTRS          ;Différence nbre transactions réel et nbre transactions évalué
+DEFINE D_LCRCUMMNTDIF FLOAT SIZE 8   = LCRCUMMNTVER - LCRCUMMNT           ;Différence Montant transaction réel et Montant transaction évalué
+;
+; Vérification si montant entré par l'usager balance avec le total imputation si
+; ne balance imprimer un "*"
+;
+DEFINE D_BALANCE  CHARACTER SIZE 1 = "*" IF CARMNT    OF WCR307 <> &
+                                            CARCUMMNT OF WCR307 ELSE " "
+
+SORT ON LCRCLE    OF WCR307 &          ; No lot
+     ON REFCLENUM OF WCR307 &          ; No Client
+     ON RADCLE    OF WCR307 &          ; Adresse du client
+     ON CARDAT    OF WCR307 &          ; Date de facture
+     ON CARCLE    OF WCR307 &          ; Numéro de facture
+     ON CRITIMSTP OF WCR307            ; Date et heure imputation
+
+USE ustit220 NOLIST  ; Titre standard pour l'application à 220
+SKIP 2&
+@IF FRANCAIS
+ TAB 001 "Lot....: "   &
+@ELSE
+ TAB 001 "Batch..: "   &
+@ENDIF
+ TAB 011 LCRCLE OF WCR307  &
+ TAB 016 LCRDSC OF WCR307  &
+ TAB 061 "Hors balance = " &
+ TAB 076 D_HRSBLC          &
+SKIP &
+@IF FRANCAIS
+ TAB 001 "Période: " &
+@ELSE
+ TAB 001 "Period.: " &
+@ENDIF
+ TAB 010 PECCLE OF WCR307 &
+ TAB 061 D_JOURNALISE     &
+SKIP 2 &
+  TAB 001 "                              Numéro          Ty  Date     Facture         Date                                                                            Ss-              Unité                                     Co Co " &
+SKIP &
+  TAB 001 "* Client                      facture         fa  facture  référée         due          Montant brut Dev  Montant tps Montant tvp     Montant net Projet   prj Immobilis.   admin.   Prd/Elém Compte   Montant imputé TF TP " &
+SKIP &
+  TAB 001 "- --------------------------- --------------- --  -------- --------------- --------  --------------- ---  ----------- ----------- --------------- -------- --- ------------ -------- -------- ------ ---------------- -- -- " &
+SKIP 2
+
+
+REPORT &
+  TAB 001  D_BALANCE                  PRINT AT CARCLE &
+  TAB 003  REFCLENUM OF WCR307        PRINT AT REFCLENUM &
+  TAB 010  RADNOMABR OF MCREF_ADRESSE PRINT AT RADCLE    &
+  TAB 051  CARDSC1   OF WCR307        PRINT AT CARCLE    &
+  TAB 092  CARDSC2   OF WCR307        PRINT AT CARCLE    &
+SKIP 1 &
+  TAB 031  CARCLE      OF WCR307      PRINT AT CARCLE &
+  TAB 047  CARTYPECR   OF WCR307      PRINT AT CARCLE &
+  TAB 051  CARDAT      OF WCR307      PRINT AT CARCLE &
+  TAB 060  T_CARCLEREF OF WCR307      PRINT AT CARCLE &
+  TAB 076  CARDATNET   OF WCR307      PRINT AT CARCLE &
+  TAB 086  CARMNT      OF WCR307  &
+    PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 PRINT AT CARCLE &
+  TAB 102  DEVCLE      OF MCREFERENCE      PRINT AT CARCLE &
+  TAB 107  CARMNTTPS   OF WCR307           PRINT AT CARCLE &
+    PICTURE "^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 119  CARMNTTVP   OF WCR307           PRINT AT CARCLE &
+    PICTURE "^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 131  CARMNTNET   OF WCR307  &
+    PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 PRINT AT CARCLE &
+
+  TAB 147 PRJCLE       OF WCR307           &
+  TAB 156 PRACLE       OF WCR307           &
+  TAB 160 IMMCLE       OF WCR307           &
+  TAB 173 UNACLE       OF WCR307           &
+  TAB 182 TRPCLE       OF WCR307           &
+  TAB 186 ETACLE       OF WCR307           &
+  TAB 191 CPTCLE       OF WCR307           &
+  TAB 199 CRIMNT       OF WCR307 PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 215 CRITAXCODTPS OF WCR307           &
+  TAB 218 CRITAXCODTVP OF WCR307
+
+FOOTING AT LCRCLE &
+SKIP 2 &
+  TAB 069 " Montant cumulé         Montant brut      Montant tps Montant tvp     Montant net                                          Montant imputé" &
+SKIP &
+  TAB 069 "---------------      ---------------      ----------- ----------- ---------------                                         ---------------" &
+SKIP &
+@IF FRANCAIS
+  TAB 011 "Total du Lot" &
+@ELSE
+  TAB 011 "Batch Total" &
+@ENDIF
+  TAB 024 LCRCLE      OF WCR307          &
+  TAB 069 LCRCUMMNT   OF WCR307 SUBTOTAL AT LCRCLE PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 090 CARMNT      OF WCR307 SUBTOTAL AT CARCLE PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 111 CARMNTTPS   OF WCR307 SUBTOTAL AT CARCLE PICTURE "^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 123 CARMNTTVP   OF WCR307 SUBTOTAL AT CARCLE PICTURE "^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 135 CARMNTNET   OF WCR307 SUBTOTAL AT CARCLE PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 192 CRIMNT      OF WCR307 SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+SKIP &
+  TAB 069 "---------------      ---------------      ----------- ----------- ---------------                                         ---------------" &
+SKIP PAGE
+
+FINAL FOOTING &
+SKIP 2 &
+  TAB 069 " Montant cumulé         Montant brut      Montant tps Montant tvp     Montant net                                          Montant imputé" &
+SKIP &
+  TAB 069 "---------------      ---------------      ----------- ----------- ---------------                                         ---------------" &
+SKIP &
+@IF FRANCAIS
+  TAB 011 "Total pour tous les lots" &
+@ELSE
+  TAB 011 "Batch Total For All" &
+@ENDIF
+  TAB 069 LCRCUMMNT   OF WCR307 SUBTOTAL AT LCRCLE PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 090 CARMNT      OF WCR307 SUBTOTAL AT CARCLE PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 111 CARMNTTPS   OF WCR307 SUBTOTAL AT CARCLE PICTURE "^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 123 CARMNTTVP   OF WCR307 SUBTOTAL AT CARCLE PICTURE "^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 135 CARMNTNET   OF WCR307 SUBTOTAL AT CARCLE PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 192 CRIMNT      OF WCR307 SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+SKIP &
+  TAB 069 "---------------      ---------------      ----------- ----------- ---------------                                         ---------------" &
+SKIP PAGE
+
+BUILD cr307z
+
+@IF FORMAT
+                              Numéro          Ty  Date     Facture         Date                                                                            Ss-              Unité                                     Co Co " &
+* Client                      facture         fa  facture  référée         due          Montant brut Dev  Montant tps Montant tvp     Montant net Projet   prj Immobilis.   admin.   Prd/Elém Compte   Montant imputé TF TP " &
+- --------------------------- --------------- --  -------- --------------- --------  --------------- ---  ----------- ----------- --------------- -------- --- ------------ -------- -------- ------ ---------------- -- -- " &
+
+
+@ENDIF
+
+;
+;/M/ Nancy Breton, 98/11/18, Correction pour convertir les taxes en US s'il y a
+;                            lieu.
+;
+;-----------------------------------------------------------------------------
+
+USE ussetqzs NOLIST   ; permet de faire les SET REPORT DEV....
+SET NOBLANK           ; Empêche l'impression de ligne blanche
+
+
+ACCESS *WCR307 &
+  LINK REFCIECLE OF WCR307, &
+       REFCLETYP OF WCR307, &
+       REFCLENUM OF WCR307  &
+    TO REFCIECLE          , &
+       REFCLETYP          , &
+       REFCLENUM          OF MCREFERENCE OPTIONAL &
+  LINK DEVCLE OF MCREFERENCE &
+    TO DEVCLE             OF MCDEVISE OPTIONAL
+
+
+
+ DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = & ; titre1  du rapport
+@IF FRANCAIS
+                   "Validation des factures/Notes de crédit/Crédits/Ajustements"
+@ELSE
+                   "%%%Validation des factures/Notes de crédit/Crédits/Ajustements"
+@ENDIF
+ DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = "Sommaire" ; titre2  du rapport
+
+ DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "CR307ZB"       ; numéro du rapport
+ DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM           ; nom de la compagnie
+
+
+USE usflgdet NOLIST                    ;Flag Bilingue (O/N)
+
+
+DEFINE D_MNTCAN FLOAT SIZE 8 = ROUND(CARMNTNET OF WCR307 * DEVTAU OF MCDEVISE)
+DEFINE D_MNTTPS FLOAT SIZE 8 = ROUND(CARMNTTPS OF WCR307 * DEVTAU OF MCDEVISE)
+DEFINE D_MNTTVP FLOAT SIZE 8 = ROUND(CARMNTTVP OF WCR307 * DEVTAU OF MCDEVISE)
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE3 CHARACTER SIZE 5 = "1" + PECCLE OF WCR307 &
+         IF PECCLE OF WCR307[1:1] < "8" &
+         ELSE "0" + PECCLE OF WCR307
+
+SORT ON D_PECCLE_SIE3 &                ; No lot
+     ON LCRCLE    OF WCR307 &          ; No lot
+     ON DEVCLE    OF MCREFERENCE &     ; Devise
+     ON REFCLENUM OF WCR307 &          ; No Client
+     ON RADCLE    OF WCR307 &          ; Adresse du client
+     ON CARDAT    OF WCR307 &          ; Date de facture
+     ON CARCLE    OF WCR307 &          ; Numéro de facture
+     ON CRITIMSTP OF WCR307            ; Date et heure imputation
+
+
+
+USE ustitstd NOLIST  ; Titre standard pour l'application
+SKIP &
+@IF FRANCAIS
+ TAB 001 "Période: " &
+@ELSE
+ TAB 001 "Period.: " &
+@ENDIF
+ TAB 010 PECCLE OF WCR307 &
+SKIP 2 &
+  TAB 007 "Lot      Devise        Montant brut                TPS         TVP     Montant net Montant net can nbr" &
+SKIP &
+  TAB 007 "---- ---------------  ---------------      ----------- ----------- --------------- --------------- ---" &
+SKIP 2
+
+HEADING AT D_PECCLE_SIE3 &
+SKIP PAGE
+
+
+FOOTING AT DEVCLE &
+  TAB 007 LCRCLE OF WCR307 &
+  TAB 012 DEVDSCFRA OF MCDEVISE PICTURE "^^^^^^^^^^^^^^^" &
+  TAB 029 CARMNT      OF WCR307 SUBTOTAL AT CARCLE PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 050 D_MNTTPS              SUBTOTAL AT CARCLE PICTURE "^^^,^^^.^^ "     SIGNIFICANCE 4 &
+  TAB 062 D_MNTTVP              SUBTOTAL AT CARCLE PICTURE "^^^,^^^.^^ "     SIGNIFICANCE 4 &
+  TAB 074 CARMNTNET   OF WCR307 SUBTOTAL AT CARCLE PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 090 D_MNTCAN              SUBTOTAL AT CARCLE PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 106 COUNT                          AT CARCLE PICTURE "^^^"
+
+
+FOOTING AT LCRCLE &
+SKIP 2 &
+  TAB 029 "---------------      ----------- ----------- ---------------  --------------- ---" &
+SKIP &
+@IF FRANCAIS
+  TAB 001 "Total Lot" LCRCLE OF WCR307 &
+@ELSE
+  TAB 001 "Batch total" LCRCLE OF WCR307 &
+@ENDIF
+  TAB 029 CARMNT      OF WCR307 SUBTOTAL AT CARCLE PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 050 D_MNTTPS              SUBTOTAL AT CARCLE PICTURE "^^^,^^^.^^ "     SIGNIFICANCE 4 &
+  TAB 062 D_MNTTVP              SUBTOTAL AT CARCLE PICTURE "^^^,^^^.^^ "     SIGNIFICANCE 4 &
+  TAB 074 CARMNTNET   OF WCR307 SUBTOTAL AT CARCLE PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 090 D_MNTCAN              SUBTOTAL AT CARCLE PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 106 COUNT                          AT CARCLE PICTURE "^^^" &
+SKIP 3
+
+FINAL FOOTING &
+SKIP 2 &
+  TAB 029 "---------------      ----------- ----------- ---------------  --------------- ---" &
+SKIP &
+@IF FRANCAIS
+  TAB 001 "Total pour tous les lots" &
+@ELSE
+  TAB 001 "Batch Total For All" &
+@ENDIF
+  TAB 029 CARMNT      OF WCR307 SUBTOTAL AT CARCLE PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 050 D_MNTTPS              SUBTOTAL AT CARCLE PICTURE "^^^,^^^.^^ "     SIGNIFICANCE 4 &
+  TAB 062 D_MNTTVP              SUBTOTAL AT CARCLE PICTURE "^^^,^^^.^^ "     SIGNIFICANCE 4 &
+  TAB 074 CARMNTNET   OF WCR307 SUBTOTAL AT CARCLE PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 090 D_MNTCAN              SUBTOTAL AT CARCLE PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 106 COUNT                          AT CARCLE PICTURE "^^^^" &
+SKIP &
+TAB 029 "===============      =========== =========== ===============  =============== ==="
+
+
+BUILD cr307zb
+
+@IF FORMAT
+                              Numéro          Ty  Date     Facture         Date                                                                            Ss-              Unité                                     Co Co " &
+* Client                      facture         fa  facture  référée         due          Montant brut Dev  Montant tps Montant tvp     Montant net Projet   prj Immobilis.   admin.   Prd/Elém Compte   Montant imputé TF TP " &
+- --------------------------- --------------- --  -------- --------------- --------  --------------- ---  ----------- ----------- --------------- -------- --- ------------ -------- -------- ------ ---------------- -- -- " &
+
+
+@ENDIF

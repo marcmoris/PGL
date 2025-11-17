@@ -1,0 +1,304 @@
+;/T/ Journalisation des mouvements.
+;
+;/M/ Martin Perron / Modifier la MAJ de T_HENCLE_ANN avec T_HENCLE_TMP
+;
+;/P/ Programmeur...: Guy Chabot
+;    Date création.: 23-Juin-1994
+;
+;    Description...: Programme de journalisation des mouvements approuvées
+;                    pour une période donnée.
+;
+;    Paramètres....: Compagnie     1 fois  Compagnie du menu
+;                    Periode CTB   1 fois
+;
+;    Particularité.: La partie spécifique au grand-livre se trouve dans un
+;                    "USE" commun pour toutes les journalisations (US900T.QTS).
+;
+;------------------------------------------------------------------------------
+
+USE ussetqts NOLIST   ; permet de faire les SET PROCESS NOLIMIT....
+
+RUN ar710t
+
+GLOBAL TEMPORARY G_ERREUR CHARACTER SIZE 05 ; Termine la procédure en erreur.
+GLOBAL TEMPORARY G_PECCLE CHARACTER SIZE 04 ; Conserve la période en
+                                            ; journalisation.
+GLOBAL TEMPORARY G_DATJOU DATE              ; Permet d'avoir la même date et
+GLOBAL TEMPORARY G_HREJOU INTEGER   SIZE 04 ; heure de journalisation.
+GLOBAL TEMPORARY G_ANN    CHARACTER SIZE 02 ; Permet d'avoir l'année de la date
+                                            ; du jour pour le # de séquence.
+GLOBAL TEMPORARY G_CODMOD CHARACTER SIZE 02 ; Pour identifier le module.
+
+GLOBAL TEMPORARY G_HLDCHTCPTRLT CHARACTER SIZE 01
+                                            ; Pour savoir si la relation de
+                                            ; la charte du consolidé est incluse.
+GLOBAL TEMPORARY G_HLDNTNPRO CHARACTER SIZE 01
+                                            ; Valide si on utilise la notion de
+                                            ; projet.
+GLOBAL TEMPORARY G_DEVCLE CHARACTER SIZE 03 ; Devise de consolidé.
+GLOBAL TEMPORARY G_FLGDEV CHARACTER SIZE 01 ; Permet de savoir s'il y a eu une
+                                            ; convertion de montant lors de
+                                            ; devise étrangère.
+;-------------------------------------------------------------------------------
+;
+; Affectation des variables globales selon les paramètres du consolidé.
+;
+REQUEST TRAITE_GENERAL
+
+ACCESS MCHOLDING
+
+SELECT IF CIENMC OF MCHOLDING = "1"
+
+ITEM G_CODMOD       = "AR"
+ITEM G_HLDCHTCPTRLT = HLDCHTCPTRLT OF MCHOLDING
+ITEM G_HLDNTNPRO    = HLDNTNPRO    OF MCHOLDING
+ITEM G_DEVCLE       = DEVCLE       OF MCHOLDING
+ITEM G_FLGDEV       = "0"
+
+ITEM G_DATJOU RESET AT INITIAL TO SYSDATE
+ITEM G_HREJOU RESET AT INITIAL TO SYSTIME
+ITEM G_ANN    RESET AT INITIAL TO ASCII(MOD(FLOOR(G_DATJOU / 10000), 100),2)
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+REQUEST SELECTION_PIECE
+
+
+ACCESS ARMOUVEMENT   &
+
+  LINK CIECLE OF ARMOUVEMENT, &         ; Pour avoir les imputations.
+       MOUCLE OF ARMOUVEMENT  &         ;
+    TO CIECLE, &
+       MOUCLE OF ARMOU_IMPUTATION   OPTIONAL &
+
+  LINK "1", &                           ;
+       G_ANN &                          ; Pour le numéro d'écriture.
+    TO CIENMC, &                        ;
+       HSSCLEANN OF  MCHIS_SEQ   OPTIONAL &
+
+  LINK  CIECLE OF ARMOUVEMENT, &        ;
+        PECCLE OF ARMOUVEMENT  &        ; Pour obtenir le # de lot.
+    TO  CIECLE, &                       ;
+        PECCLE OF ARLAR_SEQ   OPTIONAL &
+
+  LINK CIECLE OF ARMOUVEMENT &
+    TO CIECLE OF MCCOMPAGNIE    ALIAS A_MCCIE_INTER
+
+CHOOSE  CIECLE PARM, &                  ;
+        ENTCLE PARM, &                  ; Pour les mouvemetns d'une période
+        PECCLE PARM, &                  ; quelquonque qui ne sont pas encore
+        MOUDATJOU 0, &                  ; journalisées et ont un statut A.
+        MOUSTU "A"
+
+TEMPORARY T_NUMLOT    INTEGER   SIZE 02
+TEMPORARY T_NBRTRS    INTEGER   SIZE 02
+TEMPORARY T_NUMLOTCHR CHARACTER SIZE 04
+TEMPORARY T_MNTTRS    FLOAT     SIZE 08
+
+TEMPORARY T_MESERR CHARACTER SIZE 80 ; Pour les erreurs.
+
+;
+; Pour la génération des numéro d'historique.
+;
+TEMPORARY T_HISCLE_ANN INTEGER UNSIGNED SIZE 04
+TEMPORARY T_HISCLE_TMP CHARACTER SIZE 09
+TEMPORARY T_HISCLE INTEGER UNSIGNED SIZE 04
+TEMPORARY T_NUMSEQ INTEGER UNSIGNED SIZE 04
+
+TEMPORARY T_HECCIEINT  CHARACTER SIZE 04 ; Pour compagnie d'inter.
+TEMPORARY T_HECNUMDOC2 CHARACTER SIZE 06 ; Pour numéro de document-2(= BLANC).
+TEMPORARY T_HECFLGINT  CHARACTER SIZE 01 ; Pour flag d'inter compagnie.
+TEMPORARY T_HISDSCGEN  CHARACTER SIZE 40 ; Description générale.
+TEMPORARY T_HISCLE1    CHARACTER SIZE 04 ; Clé d'accès 1 pour l'historique.
+TEMPORARY T_HISCLE2    CHARACTER SIZE 15 ; Clé d'accès 2 pour l'historique.
+TEMPORARY T_HISCLE3    CHARACTER SIZE 15 ; Clé d'accès 3 pour l'historique.
+TEMPORARY T_TYPECR     CHARACTER SIZE 02 ; Code pour le type d'écriture
+TEMPORARY T_REFCIECLE  CHARACTER SIZE 04 ; Compagnie de la référence.
+TEMPORARY T_REFCLETYP  CHARACTER SIZE 01 ; Type de référence.
+TEMPORARY T_REFCLENUM  CHARACTER SIZE 06 ; Numéro de la référence.
+TEMPORARY T_DEVTAU     FLOAT     SIZE 8
+TEMPORARY T_IMMCLE     CHARACTER SIZE 12 ; Pour us-900t initialisé à blanc
+
+SORTED ON CIECLE OF ARMOUVEMENT &
+       ON MOUCLE OF ARMOUVEMENT
+
+ITEM T_MNTTRS SUBTOTAL  MOUMNTNET OF ARMOUVEMENT AT MOUCLE
+ITEM T_NBRTRS COUNT                              AT MOUCLE
+
+ITEM G_PECCLE = PECCLE OF ARMOUVEMENT ; On conserve la période traitée.
+
+ITEM T_NUMLOT    RESET AT INITIAL TO LASNUMSEQ OF ARLAR_SEQ + 1
+ITEM T_NUMLOTCHR RESET AT INITIAL TO ASCII((LASNUMSEQ OF ARLAR_SEQ + 1),4)
+ITEM T_TYPECR    RESET AT INITIAL TO "MV"
+
+;
+; Si il n'y a pas de journalisation le numéro de séquence du lot sera
+; quand même utilisé car c'est un fichier RMS et pas de ROLLBACK.
+;
+OUTPUT ARLAR_SEQ  ADD UPDATE NOITEM AT FINAL
+
+  ITEM CIECLE    OF ARLAR_SEQ INITIAL CIECLE OF ARMOUVEMENT
+  ITEM PECCLE    OF ARLAR_SEQ INITIAL PECCLE OF ARMOUVEMENT
+  ITEM LASNUMSEQ OF ARLAR_SEQ FINAL   T_NUMLOT
+
+
+OUTPUT ARLOT  ADD NOITEM AT FINAL
+
+  ITEM CIECLE       OF ARLOT INITIAL CIECLE OF ARMOUVEMENT
+  ITEM PECCLE       OF ARLOT INITIAL PECCLE OF ARMOUVEMENT
+  ITEM LARCLE       OF ARLOT INITIAL ASCII(T_NUMLOT,LASLONNUM OF ARLAR_SEQ)
+  ITEM LARTYPECR    OF ARLOT INITIAL T_TYPECR
+  ITEM LARDSC       OF ARLOT INITIAL "Mouvement"
+  ITEM LARUSR       OF ARLOT INITIAL LOGONID
+  ITEM LARUSRVAL    OF ARLOT INITIAL LOGONID
+  ITEM LARUSRJOU    OF ARLOT INITIAL LOGONID
+  ITEM LARUSRATR    OF ARLOT INITIAL LOGONID
+  ITEM LARUSRCRE    OF ARLOT INITIAL LOGONID
+  ITEM LARDATVAL    OF ARLOT INITIAL G_DATJOU
+  ITEM LARDATJOU    OF ARLOT INITIAL G_DATJOU
+  ITEM LARDATCRE    OF ARLOT INITIAL G_DATJOU
+  ITEM LARHREJOU    OF ARLOT INITIAL G_HREJOU
+  ITEM LARHRECRE    OF ARLOT INITIAL G_HREJOU / 10000
+  ITEM LARATRJOU    OF ARLOT INITIAL "1"
+  ITEM LARCUMMNT    OF ARLOT FINAL T_MNTTRS
+  ITEM LARNBRTRS    OF ARLOT FINAL T_NBRTRS
+  ITEM LARCUMMNTVER OF ARLOT FINAL T_MNTTRS
+  ITEM LARNBRTRSVER OF ARLOT FINAL T_NBRTRS
+  ITEM LARNBRTRSERR OF ARLOT INITIAL 0
+
+;
+; On vérifie que l'imputation balance.
+;
+ITEM T_MESERR = &
+@IF FRANCAIS
+  "Ventilation hors balance; Document: " + MOUCLE OF ARMOUVEMENT + &
+                    " ,référence: " + MOUTYP OF ARMOUVEMENT + "(" + &
+                                      CIECLE OF ARMOUVEMENT + "-" + &
+                                      ENTCLE OF ARMOUVEMENT + ")" &
+@ELSE
+  "%%%tilation hors balance; Document: " + MOUCLE OF ARMOUVEMENT + &
+                    " ,référence: " + MOUTYP OF ARMOUVEMENT + "(" + &
+                                      CIECLE OF ARMOUVEMENT + "-" + &
+                                      ENTCLE OF ARMOUVEMENT + ")" &
+@ENDIF
+  IF MOUMNTDBT OF ARMOUVEMENT <> MOUMNTCRT OF ARMOUVEMENT OR &
+     MOUMNTDBT OF ARMOUVEMENT <> MOUMNTNET OF ARMOUVEMENT OR &
+     MOUMNTNET OF ARMOUVEMENT <> MOUMNTCRT OF ARMOUVEMENT AT MOUCLE &
+     RESET AT MOUCLE
+
+ITEM G_ERREUR = "ARRET" IF T_MESERR <> "" AT MOUCLE
+
+;
+; affectation du numéro d'historique
+;
+ITEM T_NUMSEQ INITIAL 0 & ;NCONVERT( G_ANN ) * 10000000 &
+                        IF NOT RECORD MCHIS_SEQ EXIST &
+                 ELSE HSSNUMSEQ OF MCHIS_SEQ
+
+ITEM T_HISCLE RESET AT INITIAL TO (T_NUMSEQ + 1)
+
+;
+; On incr\351mente le num\351ro d'historique \340 chaque transaction(mouvement).
+;
+ITEM T_HISCLE COUNT AT MOUCLE
+
+ITEM T_HISCLE_TMP = ASCII(T_HISCLE,9)
+ITEM T_HISCLE_ANN = NCONVERT((G_ANN + T_HISCLE_TMP[3:7]))
+
+ITEM T_HECCIEINT = CIECLE OF ARMOUVEMENT
+ITEM T_HECFLGINT = "0"
+ITEM T_HISDSCGEN = " "
+
+;
+; On assigne la clé du compte couru l'historique.
+;
+ITEM T_HISCLE1 = CIECLE OF ARMOUVEMENT
+ITEM T_HISCLE2 = MOUCLE OF ARMOUVEMENT
+ITEM T_HISCLE3 = ENTCLE OF ARMOUVEMENT
+;
+; Sous-fichier des erreurs
+;
+SUBFILE WUS900ER KEEP &
+                 AT MOUCLE &
+                 IF T_MESERR <> "" &
+  INCLUDE CIECLE OF ARMOUVEMENT ALIAS CIECLE, &
+          G_PECCLE              ALIAS PECCLE, &
+          T_MESERR
+
+;
+; Sous fichier commun à toutes les journalisations, sert à mettre à jour la
+; table MCHISTO.
+;
+SUBFILE WUS900H AT MOUCLE &
+  INCLUDE T_HISCLE_ANN                     ALIAS HISCLE    , &
+          CIECLE      OF ARMOUVEMENT   ALIAS HISCIECLE , &
+          T_REFCIECLE                  ALIAS REFCIECLE , &
+          T_REFCLETYP                  ALIAS REFCLETYP , &
+          T_REFCLENUM                  ALIAS REFCLENUM , &
+          MOUCLE      OF ARMOUVEMENT   ALIAS HISNUMDOC , &
+          PECCLE      OF ARMOUVEMENT                   , &
+          T_NUMLOTCHR                  ALIAS HISNUMLOT , &
+          MOUDAT      OF ARMOUVEMENT   ALIAS HISDAT    , &
+          G_DATJOU                     ALIAS HISDATJOU , &
+          T_TYPECR                     ALIAS HISTYPECR , &
+          T_HISDSCGEN                  ALIAS HISDSCGEN , &
+          MOUDSC1     OF ARMOUVEMENT   ALIAS HISDSCSAI , &
+          MOUDSC2     OF ARMOUVEMENT   ALIAS HISDSCSAI2, &
+          MOUUSRCRE   OF ARMOUVEMENT   ALIAS HISUSRCRE , &
+          G_DEVCLE                     ALIAS DEVCLE    , &
+          T_HISCLE1                    ALIAS HISCLE1   , &
+          T_HISCLE2                    ALIAS HISCLE2   , &
+          T_HISCLE3                    ALIAS HISCLE3
+
+SUBFILE WUS900HE KEEP &
+  INCLUDE T_HISCLE_ANN                         ALIAS HISCLE    , &
+          CIECLE       OF ARMOUVEMENT      ALIAS HISCIECLE , &
+          CPTCLE       OF ARMOU_IMPUTATION                 , &
+          T_HECCIEINT                      ALIAS HECCIEINT , &
+          CIEUNABIL    OF A_MCCIE_INTER    ALIAS HECUNAINT , &
+          CIECLE       OF ARMOU_IMPUTATION ALIAS CIECLE    , &
+          UNACLE       OF ARMOU_IMPUTATION                 , &
+          PRJCLE       OF ARMOU_IMPUTATION                 , &
+          PRACLE       OF ARMOU_IMPUTATION                 , & 
+          T_IMMCLE                         ALIAS IMMCLE    , &
+          PECCLE       OF ARMOUVEMENT                      , &
+          T_HECNUMDOC2                     ALIAS HECNUMDOC2, &
+          MIMCODDC     OF ARMOU_IMPUTATION ALIAS T_CODDC   , &
+          MIMMNT       OF ARMOU_IMPUTATION ALIAS T_MNTGL   , &
+          MIMMNT       OF ARMOU_IMPUTATION ALIAS T_MNTORI  , &
+          T_HECFLGINT                      ALIAS HECFLGINT , &
+          G_DEVCLE                         ALIAS DEVCLE    , &
+          G_CODMOD                         ALIAS HISCODMOD , &
+          T_TYPECR                         ALIAS HISTYPECR , &
+          T_NUMLOTCHR                      ALIAS HISNUMLOT , &
+          T_DEVTAU
+
+;
+; On enregistre la date & heure de journalisation dans le mouvement.
+;
+OUTPUT ARMOUVEMENT   UPDATE AT MOUCLE
+
+  ITEM MOUDATJOU OF ARMOUVEMENT FINAL G_DATJOU
+  ITEM MOUHREJOU OF ARMOUVEMENT FINAL G_HREJOU
+  ITEM LARCLE    OF ARMOUVEMENT FINAL LARCLE OF ARLOT
+  ITEM HISCLE    OF ARMOUVEMENT FINAL T_HISCLE_ANN
+
+
+;
+; mise a jour du fichier des num ro d'historique
+;
+OUTPUT MCHIS_SEQ  ADD UPDATE AT FINAL
+  ITEM CIENMC    OF MCHIS_SEQ INITIAL "1"
+  ITEM HSSCLEANN OF MCHIS_SEQ INITIAL G_ANN
+  ITEM HSSNUMSEQ OF MCHIS_SEQ FINAL   ( T_HISCLE  - 1 )
+
+;-------------------------------------------------------------------------------
+;
+; TRAITEMENTS GENERAUX A TOUTES LES JOURNALISATION
+;
+
+USE us-900t NOLIST
+
+BUILD

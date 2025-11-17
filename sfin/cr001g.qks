@@ -1,0 +1,314 @@
+;/T/ Clients - Consultation des factures
+;
+;/P/ Programmeur..: Alain Côté
+;    Date Création: 21 mai 1993
+;
+;    Description..: Consultation des factures du client.
+;                   On utilise la vue qui nous donne les soldes des
+;                   facture. Cette vue sélection que les types FA et NA.
+;
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cr001g ACTIONBAR &
+              MODE LABEL "" AT 2,80 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              ACTIVITIES FIND, CHANGE        &
+              RECEIVING T_CLICIECLE, &
+                        T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        T_PECCLEMNU, &
+                        T_PECCLECOU, &
+                        CRCLIENT
+
+USE ussectmp NOLIST
+    "CR001G"
+
+USE cr001g.hlp NOLIST
+
+USE usactecr NOLIST
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_CLICIECLE CHARACTER SIZE  4 ; Compagnie du client.
+TEMPORARY T_CIECLEMNU CHARACTER SIZE  4 ; Numéro de compagnie du menu
+TEMPORARY T_PECCLEMNU CHARACTER SIZE  4 ; Période du menu.
+TEMPORARY T_PECCLECOU CHARACTER SIZE  4 ; Période courante.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie du menu.
+
+;
+; Date de sélection.
+;
+TEMPORARY T_DATDEB    DATE
+
+;
+; Inclure facture payé (o/n)
+;
+TEMPORARY T_INCFACPYE CHARACTER SIZE 1 INITIAL "0"
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Client.
+;
+FILE CRCLIENT         MASTER
+
+;
+; Factures
+;
+FILE VCAR_SLD_FA      PRIMARY &
+                      NOITEM  &
+                      OCCURS 13
+  ACCESS REQUEST T_DATDEB, &
+                 T_INCFACPYE &
+         VIA     REFCIECLE, &
+                 REFCLENUM, &
+                 CIECLE     &
+         USING   CLICIECLE OF CRCLIENT, &
+                 CLICLE    OF CRCLIENT, &
+                 T_CIECLEMNU            &
+         ORDERBY CARDAT DESCENDING
+
+  ACCESS REQUEST T_INCFACPYE &
+         VIA     REFCIECLE, &
+                 REFCLENUM, &
+                 CIECLE     &
+         USING   CLICIECLE OF CRCLIENT, &
+                 CLICLE    OF CRCLIENT, &
+                 T_CIECLEMNU            &
+         ORDERBY CARDAT DESCENDING
+
+  ACCESS VIA     REFCIECLE, &
+                 REFCLENUM, &
+                 CIECLE     &
+         USING   CLICIECLE OF CRCLIENT, &
+                 CLICLE    OF CRCLIENT, &
+                 T_CIECLEMNU            &
+         ORDERBY CARDAT DESCENDING
+
+;
+; 1 - La date de la facture doit être inférieur ou égale à la date
+;     demandée.
+; 2 - Selection des factures payés selon le demande de l'usager.
+;
+;
+SELECT IF     ( CARDAT OF VCAR_SLD_FA <= T_DATDEB &
+                OR T_DATDEB = 0 ) &
+          AND &
+              ( ( T_INCFACPYE = "0" &
+                  AND 0 <> ( CARMNT        OF VCAR_SLD_FA &
+                             + V_CARMNTAUG OF VCAR_SLD_FA &
+                             - V_CARMNTDIM OF VCAR_SLD_FA ) &
+                ) &
+                OR &
+               T_INCFACPYE = "1" &
+              )
+
+
+;-------------------------------------------------------------------------------
+;
+
+TEMPORARY T_CARCLEFND CHARACTER SIZE 15 ; # de facture de recherche
+
+;
+; Montant du compte à recevoir.
+;
+DEFINE D_MNTFAC FLOAT SIZE 8 =   CARMNT      OF VCAR_SLD_FA &
+                               + V_CARMNTAUG OF VCAR_SLD_FA
+
+;
+; Solde à recevoir.
+;
+DEFINE D_SLDFAC FLOAT SIZE 8 =  D_MNTFAC - V_CARMNTDIM OF VCAR_SLD_FA
+
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Consultation des factures " &
+@ELSE
+      " Invoices " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST
+
+SKIP 1
+
+ALIGN (,3,19) (,,27)
+
+FIELD CLICLE OF CRCLIENT &
+label "Client.....:"&
+        FIXED
+
+FIELD CLINOM OF CRCLIENT &
+        FIXED
+
+ALIGN (,3,26) (,47,76)
+
+FIELD T_DATDEB &
+ FORMAT YYYYMMDD PATTERN "####/##/##"        DISPLAY &
+@IF FRANCAIS
+        LABEL "Sélectionner jusqu'au:"
+@ELSE
+        LABEL "%%Sélectionner jusqu'au....:"
+@ENDIF
+
+FIELD T_INCFACPYE &
+        DISPLAY   &
+        UPSHIFT   &
+        SIZE 3    &
+@IF FRANCAIS
+  LABEL "Inclure factures payé (o/n):"
+@ELSE
+  LABEL "Include paid invoice (y/n).:"
+@ENDIF
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+     "   No           Date          Montant                             Solde" &
+@ELSE
+     "Invoice       Invoice         Invoice          Receipt          Balance" &
+@ENDIF
+     AT ,5
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+     "Facture       Facture         Facture     Montant reçu       à recevoir" &
+@ELSE
+     "   No           Date           Amount           Amount           Amount" &
+@ENDIF
+     AT ,5
+
+SKIP
+
+ALIGN (3,2,3) (,,17) (,,29) (,,46) (,,63)
+
+CLUSTER OCCURS WITH VCAR_SLD_FA ID BASE 10
+
+FIELD CARCLE    OF VCAR_SLD_FA  LABEL " " HIDDEN &
+        SIZE 12
+
+FIELD CARDAT    OF VCAR_SLD_FA  FORMAT YYYYMMDD PATTERN "####/##/##" &
+        DISPLAY
+
+FIELD D_MNTFAC  &
+        DISPLAY  &
+        PICTURE "^^,^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5
+
+FIELD V_CARMNTDIM &
+        DISPLAY &
+        PICTURE "^^,^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE  5
+
+FIELD D_SLDFAC  &
+        DISPLAY &
+        PICTURE "^^,^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE  5
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Traitement pour les indicateurs dont la valeur est Oui ou Non.
+; Le procédure INPUT transpose les valeurs sous un code universel soit 1 et 0.
+;
+;
+PROCEDURE INPUT T_INCFACPYE
+BEGIN
+  USE usflginp NOLIST
+END
+
+;
+; La procédure OUTPUT affiche les valeurs sous la forme O/N.
+;
+PROCEDURE OUTPUT T_INCFACPYE
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Appel de l'écran des factures.
+;
+;
+PROCEDURE INPUT CARCLE
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CARCLEFND = CARCLE    OF VCAR_SLD_FA
+    RUN SCREEN cr003 MODE F PASSING T_CLICIECLE, &
+                                    T_CIECLEMNU, &
+                                    T_CIENOM   , &
+                                    T_PECCLEMNU, &
+                                    T_PECCLECOU, &
+                                    T_CARCLEFND
+
+  END
+  LET FIELDTEXT = ""
+END
+
+BUILD
+
+;
+;xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+;************************** Consultation des factures ***************************
+;*                                                                              *
+;* Client........: xxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             *
+;* Sélectionner jusqu'au: xxxxxxxx             Inclure factures payé (o/n): xxx *
+;*                                                                              *
+;*      No           Date          Montant                             Solde    *
+;*   Facture       Facture         Facture     Montant reçu       à recevoir    *
+;* xxxxxxxxxxxx   xxxxxxxx   xxxxxxxxxxxxxx   xxxxxxxxxxxxxx   xxxxxxxxxxxxxx   *
+;* xxxxxxxxxxxx   xxxxxxxx   xxxxxxxxxxxxxx   xxxxxxxxxxxxxx   xxxxxxxxxxxxxx   *
+;* xxxxxxxxxxxx   xxxxxxxx   xxxxxxxxxxxxxx   xxxxxxxxxxxxxx   xxxxxxxxxxxxxx   *
+;* xxxxxxxxxxxx   xxxxxxxx   xxxxxxxxxxxxxx   xxxxxxxxxxxxxx   xxxxxxxxxxxxxx   *
+;* xxxxxxxxxxxx   xxxxxxxx   xxxxxxxxxxxxxx   xxxxxxxxxxxxxx   xxxxxxxxxxxxxx   *
+;* xxxxxxxxxxxx   xxxxxxxx   xxxxxxxxxxxxxx   xxxxxxxxxxxxxx   xxxxxxxxxxxxxx   *
+;* xxxxxxxxxxxx   xxxxxxxx   xxxxxxxxxxxxxx   xxxxxxxxxxxxxx   xxxxxxxxxxxxxx   *
+;* xxxxxxxxxxxx   xxxxxxxx   xxxxxxxxxxxxxx   xxxxxxxxxxxxxx   xxxxxxxxxxxxxx   *
+;* xxxxxxxxxxxx   xxxxxxxx   xxxxxxxxxxxxxx   xxxxxxxxxxxxxx   xxxxxxxxxxxxxx   *
+;* xxxxxxxxxxxx   xxxxxxxx   xxxxxxxxxxxxxx   xxxxxxxxxxxxxx   xxxxxxxxxxxxxx   *
+;* xxxxxxxxxxxx   xxxxxxxx   xxxxxxxxxxxxxx   xxxxxxxxxxxxxx   xxxxxxxxxxxxxx   *
+;* xxxxxxxxxxxx   xxxxxxxx   xxxxxxxxxxxxxx   xxxxxxxxxxxxxx   xxxxxxxxxxxxxx   *
+;* xxxxxxxxxxxx   xxxxxxxx   xxxxxxxxxxxxxx   xxxxxxxxxxxxxx   xxxxxxxxxxxxxx   *
+;********************************************************************************

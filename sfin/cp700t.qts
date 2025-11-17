@@ -1,0 +1,1537 @@
+;/T/ Journalisation des payables - Factures - Cr dits - Note de cr dit - Ajustements
+;
+; /M/ Martin Perron / Modifier les 2 MAJ de T_HISCLE_ANN avec T_HISCLE_TMP
+;
+;//M/GRA01/Francois Richard/1999-06-22
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur...: Micheline B langer
+;    Date Cr ation.: 18-Aout-1992
+;
+;    Date de modif.: 10 juin 1993 par Alain C t
+;                    Adaptation du source pour le module PGL, le source
+;                    venait do projet FINANCE.
+;
+;                    16 juin 1993 par Thomas BRENNEUR
+;                    Adaptation du source pour les comptes   payer
+;
+;    Description...: Programme de journalisation des lots de factures, cr dits,
+;                    notes de cr dits et ajustements de comptes   payer.
+;
+;    Param tres....: Compagnie     1 fois  Compagnie du menu
+;                    Periode CTB   1 fois
+;                    No Lot        n fois
+;
+;    G n ral.......: Nous avons choisi de mettre a jour les fichiers au fur et
+;                    a mesure du traitement (exemple lot, transaction, etc...)
+;                    plutot que d'attendre d'avoir tout valider et d'ensuite
+;                    tout mettre a jour.
+;                    Ceci est possible d    INTERBASE et nous permet de
+;                    diminuer consid rablement les lectures/ecritures.
+;                    Si un 'TERMINATE REQUEST' est execut , alors un 'ROLLBACK'
+;                    de toutes les transactions sera effectu .
+;
+;    Particularit .: La partie sp cifique au grand-livre se trouve dans un
+;                    "USE" commun pour toutes les journalisations (US900T.QTS).
+;
+;/M/ François Déry, 4 mai 1999
+;       Lors de la migration sur unix, il y avait trop de fichier dans ce QTP.
+;       fait un vue avec fournisseur, ref adresse.
+;
+;/M/ Marie-Josée Hamel, 96.03.25, ajouter le renversement du couru (qui ira
+;                                 se placer sous la facture des achats.
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST   ; permet de faire les SET PROCESS NOLIMIT....
+
+RUN cp700t
+
+;
+; Pour arr ter la proc dure en cas d'erreur
+;
+GLOBAL TEMPORARY G_ERREUR       CHARACTER SIZE 5
+;
+; Pour toujours avoir la p riode   journaliser.
+;
+GLOBAL TEMPORARY G_PECCLE       CHARACTER SIZE 4
+;
+; Pour garder la date et l'heure du jour tout le long du traitement.
+;
+GLOBAL TEMPORARY G_DATJOU       DATE
+GLOBAL TEMPORARY G_HREJOU       INTEGER SIZE 4
+;
+; Pour avoir l'annee selon date du jour
+;
+GLOBAL TEMPORARY G_ANN          CHARACTER SIZE 2
+;
+; Identifie le module.
+;
+GLOBAL TEMPORARY G_CODMOD       CHARACTER SIZE 2
+;
+; Parametres de holding pour relation de compte.
+;
+GLOBAL TEMPORARY G_HLDCHTCPTRLT CHARACTER SIZE 1
+;
+; Param tres du holding, si notion de projet Oui/Non.
+;
+GLOBAL TEMPORARY G_HLDNTNPRO    CHARACTER SIZE 1
+;
+; Parametre de holding - devise du grand-livre.
+;
+GLOBAL TEMPORARY G_DEVCLE       CHARACTER SIZE 3
+;
+; Pour savoir s'il y a eu une convertion de montant (dans le cas de
+; pi ces en devises).
+;
+GLOBAL TEMPORARY G_FLGDEV       CHARACTER SIZE 1
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Affectation des variables globales selon les param tres du holding.
+;
+;
+REQUEST TRAITE_GENERAL
+
+ACCESS MCHOLDING
+
+SELECT IF CIENMC OF MCHOLDING = "1"
+
+ITEM G_CODMOD       = "CP"
+ITEM G_HLDCHTCPTRLT = HLDCHTCPTRLT OF MCHOLDING
+ITEM G_HLDNTNPRO    = HLDNTNPRO    OF MCHOLDING
+ITEM G_DEVCLE       = DEVCLE       OF MCHOLDING
+ITEM G_FLGDEV       = "0"
+
+ITEM G_DATJOU RESET AT INITIAL TO SYSDATE
+ITEM G_HREJOU RESET AT INITIAL TO SYSTIME / 10000
+ITEM G_ANN    RESET AT INITIAL TO ASCII(MOD(FLOOR(G_DATJOU / 10000), 100),2)
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; S lection des lots selon les parametres saisies par l'usager.
+;
+; On ne s lectionne que les lots autoris s   la journalisation
+; et qui ne sont pas encore journalis s.
+;
+; On met a jour la date et l'heure de journalisation dans le lot.
+;
+;
+REQUEST SELECTION_ET_MAJ_DU_LOT
+
+ACCESS CPLOT
+
+CHOOSE CIECLE PARM    , &
+       PECCLE PARM    , &
+       LCPCLE PARM    , &
+       LCPDATJOU     0, & ; ne doit pas etre journalis
+       LCPATRJOU   "1", & ; doit  tre autoris    journaliser
+       LCPTYPECR  "FA"    ; Lot de factures, cr dits, note de cr dit, ajustement
+
+
+;
+; On garde la p riode trait e.
+;
+ITEM G_PECCLE = PECCLE OF CPLOT
+
+;
+; On conserve les lots   traiter.
+;
+SUBFILE WCP700LO &
+  INCLUDE CIECLE    OF CPLOT , &
+          PECCLE    OF CPLOT , &
+          LCPCLE    OF CPLOT , &
+          LCPTYPECR OF CPLOT , &
+          LCPDSC    OF CPLOT
+
+;
+; Mise   jour du lot.
+;
+OUTPUT CPLOT UPDATE
+  ITEM LCPDATJOU OF CPLOT FINAL G_DATJOU
+  ITEM LCPHREJOU OF CPLOT FINAL G_HREJOU
+  ITEM LCPUSRJOU OF CPLOT FINAL LOGONID
+
+
+
+;-------------------------------------------------------------------------------
+;
+; On va chercher toutes les pi ces contenus dans les lots   traiter.
+;
+; Et pour chaque pi ce trouv e on :
+;
+;      .Valide que l'imputation balance avec le montant total de la pi ce.
+;      .Se r serve un num ro d' criture.
+;      .Pr pare une  criture comptable (avec le subfile WUS900H)
+;      .Transfert l'imputation dans un subfile (WCP700VE) pour pouvoir
+;       l' clater.
+;      .Va mettre la date & heure de journalisation dans la pi ce
+;      .Cr e la ligne de c dule si celle-ci n'a pas  t  cr  e par l'usager
+;      .Met   jour les statistiques du fournisseur
+;
+;
+REQUEST SELECTION_ET_MAJ_DES_FACTURES
+
+ACCESS *WCP700LO &                    ; Liste des lots   traiter
+  LINK CIECLE OF WCP700LO, &
+       PECCLE OF WCP700LO, &
+       LCPCLE OF WCP700LO  &
+    TO CAPCIECLE, &
+       PECCLE   , &
+       LCPCLE    OF CPCPT_A_PAYER &   ; Pi ces contenues dans ces lots
+
+  LINK REFCIECLE OF CPCPT_A_PAYER, &
+       REFCLENUM OF CPCPT_A_PAYER, &
+       CAPCIECLE OF CPCPT_A_PAYER, &
+       RADCLE    OF CPCPT_A_PAYER  &
+    TO FOUCIECLE, &
+       FOUCLE   , &
+       FOCCIECLE, &
+       RADCLE                      OF VFOC_FOUREF & ; Fournisseur du compte   payer
+
+  LINK FOUCIECLE OF CPCPT_A_PAYER, &
+       FOUCLE    OF CPCPT_A_PAYER, &
+       CAPCLE    OF CPCPT_A_PAYER  &
+    TO FOUCIECLE, &
+       FOUCLE, &
+       CAPCLE    OF CPCAP_IMPUTATION OPTIONAL &
+                                      ; Imputation de la pi ce
+  LINK "1", &
+       G_ANN &
+    TO CIENMC, &
+       HSSCLEANN OF  MCHIS_SEQ OPTIONAL
+                                      ; Pour avoir des num ros d' critures
+
+TEMPORARY T_MESERR CHARACTER SIZE 80 ; Pour les erreurs.
+TEMPORARY T_CPTCAP CHARACTER SIZE 06 ; pour le compte   payer
+
+;
+; pour la g n ration des num ro d'historique
+;
+TEMPORARY T_HISCLE_ANN INTEGER UNSIGNED SIZE 4
+TEMPORARY T_HISCLE INTEGER UNSIGNED SIZE 4
+TEMPORARY T_NUMSEQ INTEGER UNSIGNED SIZE 4
+TEMPORARY T_HISCLE_TMP CHARACTER SIZE 09 
+
+TEMPORARY T_HECCIEINT  CHARACTER SIZE 4  ; Pour compagnie d'inter
+TEMPORARY T_HECNUMDOC2 CHARACTER SIZE 6  ; Pour num ro de document-2(= BLANC)
+TEMPORARY T_HECFLGINT  CHARACTER SIZE 1  ; Pour flag d'inter compagnie
+TEMPORARY T_HISDSCGEN  CHARACTER SIZE 40 ; Description g n rale
+TEMPORARY T_HISCLE1    CHARACTER SIZE 4  ; Cl  d'acc s 1, de l'histo.
+TEMPORARY T_HISCLE2    CHARACTER SIZE 15 ; Cl  d'acc s 2, de l'histo.
+TEMPORARY T_HISCLE3    CHARACTER SIZE 15 ; Cl  d'acc s 3, de l'histo
+
+
+SORTED ON FOUCIECLE OF CPCPT_A_PAYER &
+       ON FOUCLE    OF CPCPT_A_PAYER &
+       ON CAPCLE    OF CPCPT_A_PAYER
+
+;
+; On v rifie que le compte   payer balance avec l'imputation.
+;
+ITEM T_MESERR = &
+@IF FRANCAIS
+  "Ventilation hors balance; lot: " + LCPCLE OF CPCPT_A_PAYER + &
+                                "(" + LCPTYPECR OF WCP700LO + ")" + &
+                     " ,document: " + CAPCLE OF CPCPT_A_PAYER + &
+                    " ,r f rence: " + REFCIECLE OF CPCPT_A_PAYER &
+@ELSE
+  "Breakdown out of balance; Batch: " + LCPCLE OF CPCPT_A_PAYER + &
+                                "(" + LCPTYPECR OF WCP700LO + ")" + &
+                     " ,document: " + CAPCLE OF CPCPT_A_PAYER + &
+                    " ,reference: " + REFCIECLE OF CPCPT_A_PAYER &
+@ENDIF
+  IF CAPCUMMNT OF CPCPT_A_PAYER <> CAPMNT OF CPCPT_A_PAYER AT CAPCLE &
+     RESET AT CAPCLE
+
+ITEM G_ERREUR = "ARRET" IF T_MESERR < "" AT CAPCLE
+
+;
+; affectation du num ro d'historique
+;
+; Ajustement pour le changement de siècle
+ITEM T_NUMSEQ INITIAL 0  &;NCONVERT( G_ANN ) * 10000000 &
+                        IF NOT RECORD MCHIS_SEQ EXIST &
+                 ELSE HSSNUMSEQ OF MCHIS_SEQ
+
+ITEM T_HISCLE RESET AT INITIAL TO (T_NUMSEQ + 1)
+
+;
+; On incr mente le num ro d'historique   chaque transaction(facture).
+;
+ITEM T_HISCLE COUNT AT CAPCLE
+
+ITEM T_HISCLE_TMP = ASCII(T_HISCLE,9)
+ITEM T_HISCLE_ANN = NCONVERT((G_ANN + T_HISCLE_TMP[3:7]))
+
+; Ajustement pour le changement de siècle
+;ITEM T_HISCLE_SIE = NCONVERT(G_ANN + ASCII(T_HISCLE,7))
+
+;
+; Compte   payer du fournisseur, le compte est initialis  dans la
+; relation CPCPT_A_PAYER lors de la saisie( cran). Si c'est un ajustement ou
+; une note de cr dit le compte vient de la pi ce r f r e.
+;
+ITEM T_CPTCAP = CAPCPTCAP OF CPCPT_A_PAYER
+;
+; Compagnie d'inter, si c'est un fournisseur interne, on prend la compagnie
+; d finie dans le fournisseur, sinon on prend la compagnie de la transaction.
+;
+ITEM T_HECCIEINT = CAPCIECLE OF CPCPT_A_PAYER IF FOUTYP OF VFOC_FOUREF <> "I" &
+                   ELSE FOUCIEINT OF VFOC_FOUREF
+;
+; Identifie si c'est une transaction d'inter.
+;
+ITEM T_HECFLGINT = "0" IF FOUTYP OF VFOC_FOUREF <> "I" &
+              ELSE "1"
+
+;
+; Description g n rale, on prend le nom dans l'adresse de la pi ce si c'est
+; un client divers, sinon on la laisse   blanc.
+;
+ITEM T_HISDSCGEN = " " IF FOUTYP OF VFOC_FOUREF <> "D" &
+              ELSE RADNOM OF VFOC_FOUREF
+
+;
+; On assigne la cl  du compte   payer   l'historique.
+;
+ITEM T_HISCLE1 = FOUCIECLE OF CPCPT_A_PAYER
+ITEM T_HISCLE2 = FOUCLE    OF CPCPT_A_PAYER
+ITEM T_HISCLE3 = CAPCLE    OF CPCPT_A_PAYER
+
+;
+; Sous-fichier des erreurs
+;
+SUBFILE WUS900ER KEEP &
+                 AT CAPCLE &
+                 IF T_MESERR <> "" &
+  INCLUDE CIECLE OF WCP700LO ALIAS CIECLE, &
+          G_PECCLE           ALIAS PECCLE, &
+          T_MESERR
+
+
+;
+;
+; Sous fichier commun   toutes les journalisations, sert   mettre   jour la
+; table MCHISTO.
+;
+;
+SUBFILE WUS900H KEEP AT CAPCLE &
+  INCLUDE T_HISCLE_ANN                  ALIAS HISCLE    , &
+          CAPCIECLE OF CPCPT_A_PAYER    ALIAS HISCIECLE , &
+          REFCIECLE OF CPCPT_A_PAYER                    , &
+          REFCLETYP OF CPCPT_A_PAYER                    , &
+          REFCLENUM OF CPCPT_A_PAYER                    , &
+          CAPCLE    OF CPCPT_A_PAYER    ALIAS HISNUMDOC , &
+          PECCLE    OF CPCPT_A_PAYER                    , &
+          LCPCLE    OF CPCPT_A_PAYER    ALIAS HISNUMLOT , &
+          CAPDAT    OF CPCPT_A_PAYER    ALIAS HISDAT    , &
+          G_DATJOU                      ALIAS HISDATJOU , &
+          CAPTYPECR OF CPCPT_A_PAYER    ALIAS HISTYPECR , &
+          T_HISDSCGEN                   ALIAS HISDSCGEN , &
+          CAPDSC1   OF CPCPT_A_PAYER    ALIAS HISDSCSAI , &
+          CAPDSC2   OF CPCPT_A_PAYER    ALIAS HISDSCSAI2, &
+          CAPUSRCRE OF CPCPT_A_PAYER    ALIAS HISUSRCRE , &
+          DEVCLE    OF VFOC_FOUREF      ALIAS DEVCLE    , &
+          T_HISCLE1                     ALIAS HISCLE1   , &
+          T_HISCLE2                     ALIAS HISCLE2   , &
+          T_HISCLE3                     ALIAS HISCLE3
+
+;
+; Sous-fichier des imputations comptables utilis  tout au long du traitement
+; servant   g n rer les ventilations comptables compl tes.
+;
+SUBFILE WCP700VE &
+  INCLUDE FOUCIECLE    OF CPCPT_A_PAYER, &
+          FOUCLE       OF CPCPT_A_PAYER, &
+          CAPCLE       OF CPCPT_A_PAYER, &
+          CAPCIECLE    OF CPCPT_A_PAYER, &
+          CAPTYPECR    OF CPCPT_A_PAYER, &
+          PECCLE       OF CPCPT_A_PAYER, &
+          LCPCLE       OF CPCPT_A_PAYER, &
+          REFCIECLE    OF CPCPT_A_PAYER, &
+          REFCLETYP    OF CPCPT_A_PAYER, &
+          REFCLENUM    OF CPCPT_A_PAYER, &
+          CAPDAT       OF CPCPT_A_PAYER, &
+          DEVCLE       OF VFOC_FOUREF  , &
+          CAPDSC1      OF CPCPT_A_PAYER, &
+          CAPDSC2      OF CPCPT_A_PAYER, &
+          T_HISCLE_ANN ALIAS T_HISCLE     , &
+          PRJCLE       OF CPCAP_IMPUTATION, &
+          PRACLE       OF CPCAP_IMPUTATION, &
+          IMMCLE       OF CPCAP_IMPUTATION, &
+          CPTCLE       OF CPCAP_IMPUTATION, &
+          UNACLE       OF CPCAP_IMPUTATION, &
+          CCICODDC     OF CPCAP_IMPUTATION, &
+          CCIMNT       OF CPCAP_IMPUTATION, &
+          CCITAXTYPTPS OF CPCAP_IMPUTATION, &
+          CCITAXCODTPS OF CPCAP_IMPUTATION, &
+          CCITAXTYPTVQ OF CPCAP_IMPUTATION, &
+          CCITAXCODTVQ OF CPCAP_IMPUTATION, &
+          CCIMNTTPS    OF CPCAP_IMPUTATION, &
+          CCIMNTTVQ    OF CPCAP_IMPUTATION, &
+          CCIMNTCTI    OF CPCAP_IMPUTATION, &
+          CCIMNTRTI    OF CPCAP_IMPUTATION, &
+          T_HECCIEINT                     , &
+          T_HECNUMDOC2                    , &
+          T_HECFLGINT                     , &
+          T_CPTCAP
+
+
+;
+; On enregistre la date & heure de journalisation dans le
+; compte   payer
+;
+OUTPUT CPCPT_A_PAYER UPDATE AT CAPCLE
+  ITEM CAPDATJOU OF CPCPT_A_PAYER FINAL G_DATJOU
+  ITEM CAPHREJOU OF CPCPT_A_PAYER FINAL G_HREJOU
+  ITEM HISCLE    OF CPCPT_A_PAYER FINAL T_HISCLE_ANN
+  ;
+  ; Le cumulatif de la c dule pour les factures, et cr dits est  gal au
+  ; montant de la pi ce si la c dule n'  pas  t  modifi  par l'usager. Et il
+  ; faut aussi initialiser le compteur du nombre de c dules   1
+  ;
+  ITEM CAPCUMCED OF CPCPT_A_PAYER FINAL CAPMNT OF CPCPT_A_PAYER &
+                                  IF    CAPFLGCED OF CPCPT_A_PAYER = "0" &
+                                    AND (    CAPTYPECR OF CPCPT_A_PAYER = "FA" &
+                                          OR CAPTYPECR OF CPCPT_A_PAYER = "CR")
+
+  ITEM CAPNUMLIGCED OF CPCPT_A_PAYER FINAL 1 &
+                                  IF    CAPFLGCED OF CPCPT_A_PAYER <> "1"      &
+                                    AND (    CAPTYPECR OF CPCPT_A_PAYER = "FA" &
+                                          OR CAPTYPECR OF CPCPT_A_PAYER = "CR")
+
+;
+; Ajout de la ligne de c dule pour les factures et les cr dits dont la
+; c dule n'a pas  t  modifi e par l'usager.
+;
+OUTPUT CPCAP_CEDULE ADD AT CAPCLE &
+                        IF    CAPFLGCED OF CPCPT_A_PAYER <> "1"      &
+                          AND (    CAPTYPECR OF CPCPT_A_PAYER = "FA" &
+                                OR CAPTYPECR OF CPCPT_A_PAYER = "CR")
+
+
+  ITEM FOUCIECLE OF CPCAP_CEDULE FINAL FOUCIECLE OF CPCPT_A_PAYER
+  ITEM FOUCLE    OF CPCAP_CEDULE FINAL FOUCLE    OF CPCPT_A_PAYER
+  ITEM CAPCLE    OF CPCAP_CEDULE FINAL CAPCLE    OF CPCPT_A_PAYER
+  ITEM CPCCLELIG OF CPCAP_CEDULE FINAL 1
+  ITEM CPCDATDUE OF CPCAP_CEDULE FINAL CAPDATNET OF CPCPT_A_PAYER
+  ITEM CPCMNT    OF CPCAP_CEDULE FINAL CAPMNT    OF CPCPT_A_PAYER
+
+
+;
+; Mise   jour des achats total par p riode pour le fournisseur.
+;
+; NOTE : dans le montant d'achat, on englobe la taxe non remboursable.
+;        c'est pour cela que :
+;
+;                 Montant d'achat = Montant Brut - CTI - RTI
+;       au lieu de
+;                 Montant d'achat = Montant Brut - TVQ - TVP
+;
+;
+
+OUTPUT CPFOU_STAT ADD UPDATE &
+                  AT CAPCLE  &
+                  VIA FOUCIECLE, &
+                      FOUCLE   , &
+                      FOCCIECLE, &
+                      FOSANN     &
+                  USING REFCIECLE OF CPCPT_A_PAYER, &
+                        REFCLENUM OF CPCPT_A_PAYER, &
+                        CAPCIECLE OF CPCPT_A_PAYER, &
+                        PECCLE    OF CPCPT_A_PAYER[1:2]
+  ITEM FOUCIECLE   OF CPFOU_STAT INITIAL REFCIECLE OF CPCPT_A_PAYER
+  ITEM FOUCLE      OF CPFOU_STAT INITIAL REFCLENUM OF CPCPT_A_PAYER
+  ITEM FOCCIECLE   OF CPFOU_STAT INITIAL CAPCIECLE OF CPCPT_A_PAYER
+  ITEM FOSANN      OF CPFOU_STAT INITIAL PECCLE    OF CPCPT_A_PAYER[1:2]
+
+  ITEM FOSCUMACH01 OF CPFOU_STAT =    FOSCUMACH01 OF CPFOU_STAT + &
+                                      ( CAPMNT OF CPCPT_A_PAYER &
+                                        - CAPMNTCTI OF CPCPT_A_PAYER &
+                                        - CAPMNTRTI OF CPCPT_A_PAYER ) &
+                                      IF "01" = PECCLE OF CPCPT_A_PAYER[3:2] &
+                                      AT CAPCLE
+
+  ITEM FOSCUMACH02 OF CPFOU_STAT =    FOSCUMACH02 OF CPFOU_STAT + &
+                                      ( CAPMNT OF CPCPT_A_PAYER &
+                                        - CAPMNTCTI OF CPCPT_A_PAYER &
+                                        - CAPMNTRTI OF CPCPT_A_PAYER ) &
+                                      IF "02" = PECCLE OF CPCPT_A_PAYER[3:2] &
+                                      AT CAPCLE
+
+  ITEM FOSCUMACH03 OF CPFOU_STAT =    FOSCUMACH03 OF CPFOU_STAT + &
+                                      ( CAPMNT OF CPCPT_A_PAYER &
+                                        - CAPMNTCTI OF CPCPT_A_PAYER &
+                                        - CAPMNTRTI OF CPCPT_A_PAYER ) &
+                                      IF "03" = PECCLE OF CPCPT_A_PAYER[3:2] &
+                                      AT CAPCLE
+
+  ITEM FOSCUMACH04 OF CPFOU_STAT =    FOSCUMACH04 OF CPFOU_STAT + &
+                                      ( CAPMNT OF CPCPT_A_PAYER &
+                                        - CAPMNTCTI OF CPCPT_A_PAYER &
+                                        - CAPMNTRTI OF CPCPT_A_PAYER ) &
+                                      IF "04" = PECCLE OF CPCPT_A_PAYER[3:2] &
+                                      AT CAPCLE
+
+  ITEM FOSCUMACH05 OF CPFOU_STAT =    FOSCUMACH05 OF CPFOU_STAT + &
+                                      ( CAPMNT OF CPCPT_A_PAYER &
+                                        - CAPMNTCTI OF CPCPT_A_PAYER &
+                                        - CAPMNTRTI OF CPCPT_A_PAYER ) &
+                                      IF "05" = PECCLE OF CPCPT_A_PAYER[3:2] &
+                                      AT CAPCLE
+
+  ITEM FOSCUMACH06 OF CPFOU_STAT =    FOSCUMACH06 OF CPFOU_STAT + &
+                                      ( CAPMNT OF CPCPT_A_PAYER &
+                                        - CAPMNTCTI OF CPCPT_A_PAYER &
+                                        - CAPMNTRTI OF CPCPT_A_PAYER ) &
+                                      IF "06" = PECCLE OF CPCPT_A_PAYER[3:2] &
+                                      AT CAPCLE
+
+  ITEM FOSCUMACH07 OF CPFOU_STAT =    FOSCUMACH07 OF CPFOU_STAT + &
+                                      ( CAPMNT OF CPCPT_A_PAYER &
+                                        - CAPMNTCTI OF CPCPT_A_PAYER &
+                                        - CAPMNTRTI OF CPCPT_A_PAYER ) &
+                                      IF "07" = PECCLE OF CPCPT_A_PAYER[3:2] &
+                                      AT CAPCLE
+
+  ITEM FOSCUMACH08 OF CPFOU_STAT =    FOSCUMACH08 OF CPFOU_STAT + &
+                                      ( CAPMNT OF CPCPT_A_PAYER &
+                                        - CAPMNTCTI OF CPCPT_A_PAYER &
+                                        - CAPMNTRTI OF CPCPT_A_PAYER ) &
+                                      IF "08" = PECCLE OF CPCPT_A_PAYER[3:2] &
+                                      AT CAPCLE
+
+  ITEM FOSCUMACH09 OF CPFOU_STAT =    FOSCUMACH09 OF CPFOU_STAT + &
+                                      ( CAPMNT OF CPCPT_A_PAYER &
+                                        - CAPMNTCTI OF CPCPT_A_PAYER &
+                                        - CAPMNTRTI OF CPCPT_A_PAYER ) &
+                                      IF "09" = PECCLE OF CPCPT_A_PAYER[3:2] &
+                                      AT CAPCLE
+
+  ITEM FOSCUMACH10 OF CPFOU_STAT =    FOSCUMACH10 OF CPFOU_STAT + &
+                                      ( CAPMNT OF CPCPT_A_PAYER &
+                                        - CAPMNTCTI OF CPCPT_A_PAYER &
+                                        - CAPMNTRTI OF CPCPT_A_PAYER ) &
+                                      IF "10" = PECCLE OF CPCPT_A_PAYER[3:2] &
+                                      AT CAPCLE
+
+  ITEM FOSCUMACH11 OF CPFOU_STAT =    FOSCUMACH11 OF CPFOU_STAT + &
+                                      ( CAPMNT OF CPCPT_A_PAYER &
+                                        - CAPMNTCTI OF CPCPT_A_PAYER &
+                                        - CAPMNTRTI OF CPCPT_A_PAYER ) &
+                                      IF "11" = PECCLE OF CPCPT_A_PAYER[3:2] &
+                                      AT CAPCLE
+
+  ITEM FOSCUMACH12 OF CPFOU_STAT =    FOSCUMACH12 OF CPFOU_STAT + &
+                                      ( CAPMNT OF CPCPT_A_PAYER &
+                                        - CAPMNTCTI OF CPCPT_A_PAYER &
+                                        - CAPMNTRTI OF CPCPT_A_PAYER ) &
+                                      IF "12" = PECCLE OF CPCPT_A_PAYER[3:2] &
+                                      AT CAPCLE
+
+  ITEM FOSCUMACH13 OF CPFOU_STAT =    FOSCUMACH13 OF CPFOU_STAT + &
+                                      ( CAPMNT OF CPCPT_A_PAYER &
+                                        - CAPMNTCTI OF CPCPT_A_PAYER &
+                                        - CAPMNTRTI OF CPCPT_A_PAYER ) &
+                                      IF "13" = PECCLE OF CPCPT_A_PAYER[3:2] &
+                                      AT CAPCLE
+
+;
+; mise a jour du fichier des num ro d'historique
+;
+OUTPUT MCHIS_SEQ ADD UPDATE AT FINAL
+  ITEM CIENMC    OF MCHIS_SEQ INITIAL "1"
+  ITEM HSSCLEANN OF MCHIS_SEQ INITIAL G_ANN
+  ITEM HSSNUMSEQ OF MCHIS_SEQ FINAL   ( T_HISCLE  - 1 )
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Mise   jour de la date de journalisation dans l'historique de la pi ce
+; r f r e pour les ajustements et les notes de cr dits.
+;
+;
+REQUEST MAJ_CAP_HISTO   TERMINATE IF G_ERREUR = "ARRET"
+
+ACCESS *WUS900H &
+  LINK REFCIECLE OF WUS900H, &
+       REFCLENUM OF WUS900H, &
+       HISNUMDOC OF WUS900H  &
+    TO CPHCLE1  , &
+       CPHCLE2  , &
+       CPHCLE3  OF CPCAP_HISTO
+
+SELECT WUS900H IF   HISTYPECR OF WUS900H = "AJ" &
+                 OR HISTYPECR OF WUS900H = "NC"
+
+OUTPUT CPCAP_HISTO UPDATE
+  ITEM CPHDATJOU OF CPCAP_HISTO FINAL HISDATJOU OF WUS900H
+
+
+;-------------------------------------------------------------------------------
+;
+; On relis toutes les lignes d'imputations de tous les comptes   payer
+; traiter. Et chaque ligne est trait e de fa on ind pendante.
+;
+; Chaque ligne d'imputation est compos e de :
+;
+;         Un compte/        = compte/unit  imput  par l'usager
+;         Un montant net    = Montant de l'imputation moins les taxes
+;                             remboursables (CTI & RTI)
+;         Un montant de CTI = Montant remboursable de la taxe f d rale
+;         Un montant de RTI = Montant remboursable de la taxe provinciale
+;
+; Et chaque ligne d'imputation est " clat e" en plusieurs lignes
+; d' critures qui contiennent chacune un compte/unit  et un montant :
+;
+;
+;         Compte                              Montant           D bit/Cr dit
+;         ------                              -------           ------------
+;        -Compte/unit  imput  par l'usager    Montant net            D
+;
+;        -Compte de taxe f d rale   recevoir  Montant CTI            D
+;         (unit  de bilan)
+;        -Compte de taxe provinciale          Montant RTI            D
+;         recevoir (unit  de bilan)
+;        -Compte de compte   payer du         Montant brut           C
+;         fournisseur (unit  de bilan)
+;
+;
+REQUEST ECLATEMENT_IMPUTATION
+
+ACCESS *WCP700VE &
+  LINK CCITAXTYPTPS OF WCP700VE, &
+       CCITAXCODTPS OF WCP700VE &
+    TO TAXCLETYP, &
+       TAXCLECOD OF MCTAXE ALIAS A_TAX_TPS OPTIONAL &
+
+  LINK CCITAXTYPTVQ OF WCP700VE, &
+       CCITAXCODTVQ OF WCP700VE &
+    TO TAXCLETYP, &
+       TAXCLECOD OF MCTAXE ALIAS A_TAX_TVP OPTIONAL &
+
+  LINK CAPCIECLE OF WCP700VE &
+    TO CIECLE    OF MCCOMPAGNIE &
+
+  LINK T_HECCIEINT OF WCP700VE &
+    TO CIECLE OF MCCOMPAGNIE  ALIAS A_MCCIE_INTER
+
+
+TEMPORARY T_CCIMNT    FLOAT     SIZE 8  ; Calcul du montant brut de l'imputation
+TEMPORARY T_MNTDEP    FLOAT     SIZE 8  ; pour les montants de d penses
+TEMPORARY T_MNTCTI    FLOAT     SIZE 8  ; Pour les montants de CTI
+TEMPORARY T_MNTRTI    FLOAT     SIZE 8  ; pour les montants de RTI
+TEMPORARY T_MNTCAP    FLOAT     SIZE 8  ; pour les montants payable
+TEMPORARY T_CODDCD    CHARACTER SIZE 1  ; pour le code cr dit pour le C.A.P.
+TEMPORARY T_PRJCLE    CHARACTER SIZE 8  ; Projet de l'imputation.
+TEMPORARY T_PRACLE    CHARACTER SIZE 3  ; Activit  de l'imputation.
+TEMPORARY T_IMMCLE    CHARACTER SIZE 12 ; catégorie de l'équipement
+
+;
+; Calcul du montant brut (avec taxe) pour le compte   payer
+;
+ITEM T_MNTCAP = CCIMNT OF WCP700VE
+ITEM T_MNTCAP = T_MNTCAP + CCIMNTTPS OF WCP700VE IF TAXMOD OF A_TAX_TPS = "S"
+ITEM T_MNTCAP = T_MNTCAP + CCIMNTTVQ OF WCP700VE IF TAXMOD OF A_TAX_TVP = "S"
+;
+; Le compte de d pense est comptabilis  sans les taxes remboursables.
+;
+ITEM T_MNTDEP = T_MNTCAP - CCIMNTCTI OF WCP700VE &
+                         - CCIMNTRTI OF WCP700VE
+
+ITEM T_CODDCD    RESET AT INITIAL TO "C"
+
+
+;
+; sous fichier utilis  dans le traitement g n ral des journalisations
+; et servant a mettre a jour GLHIS_ECR.
+;
+
+;
+; Ajout du COMPTE A PAYER
+;
+SUBFILE WUS900HE KEEP IF T_MNTCAP <> 0 &
+  INCLUDE T_HISCLE     OF WCP700VE      ALIAS HISCLE    , &
+          CAPCIECLE    OF WCP700VE      ALIAS HISCIECLE , &
+          T_CPTCAP     OF WCP700VE      ALIAS CPTCLE    , &
+          T_HECCIEINT  OF WCP700VE      ALIAS HECCIEINT , &
+          CIEUNABIL    OF A_MCCIE_INTER ALIAS HECUNAINT , &
+          CAPCIECLE    OF WCP700VE      ALIAS CIECLE    , &
+          CIEUNABIL    OF MCCOMPAGNIE   ALIAS UNACLE    , &
+          T_PRJCLE                      ALIAS PRJCLE    , &
+          T_PRACLE                      ALIAS PRACLE    , &
+          T_IMMCLE                      ALIAS IMMCLE    , &
+          PECCLE       OF WCP700VE                      , &
+          T_HECNUMDOC2 OF WCP700VE      ALIAS HECNUMDOC2, &
+          T_CODDCD                      ALIAS T_CODDC   , &
+          T_MNTCAP                      ALIAS T_MNTGL   , &
+          T_MNTCAP                      ALIAS T_MNTORI  , &
+          T_HECFLGINT  OF WCP700VE      ALIAS HECFLGINT , &
+          DEVCLE       OF WCP700VE                      , &
+          G_CODMOD                      ALIAS HISCODMOD , &
+          CAPTYPECR    OF WCP700VE      ALIAS HISTYPECR , &
+          LCPCLE       OF WCP700VE      ALIAS HISNUMLOT
+
+
+;
+; Ajout du montant de TPS   recevoir.
+;
+OUTPUT *WUS900HE ALIAS A_WUS900HE_TPS ADD IF CCIMNTCTI OF WCP700VE <> 0
+  ITEM HISCLE     OF A_WUS900HE_TPS FINAL T_HISCLE     OF WCP700VE
+  ITEM HISCIECLE  OF A_WUS900HE_TPS FINAL CAPCIECLE    OF WCP700VE
+  ITEM CPTCLE     OF A_WUS900HE_TPS FINAL TAXCPTCTICAP OF A_TAX_TPS
+  ITEM HECCIEINT  OF A_WUS900HE_TPS FINAL T_HECCIEINT  OF WCP700VE
+  ITEM HECUNAINT  OF A_WUS900HE_TPS FINAL CIEUNABIL    OF A_MCCIE_INTER
+  ITEM CIECLE     OF A_WUS900HE_TPS FINAL CAPCIECLE    OF WCP700VE
+  ITEM UNACLE     OF A_WUS900HE_TPS FINAL CIEUNABIL    OF MCCOMPAGNIE
+  ITEM PRJCLE     OF A_WUS900HE_TPS FINAL " "
+  ITEM PRACLE     OF A_WUS900HE_TPS FINAL " "
+  ITEM IMMCLE     OF A_WUS900HE_TPS FINAL " "
+  ITEM PECCLE     OF A_WUS900HE_TPS FINAL PECCLE       OF WCP700VE
+  ITEM HECNUMDOC2 OF A_WUS900HE_TPS FINAL T_HECNUMDOC2 OF WCP700VE
+  ITEM T_CODDC    OF A_WUS900HE_TPS FINAL "D"
+  ITEM T_MNTGL    OF A_WUS900HE_TPS FINAL CCIMNTCTI    OF WCP700VE
+  ITEM T_MNTORI   OF A_WUS900HE_TPS FINAL CCIMNTCTI    OF WCP700VE
+  ITEM HECFLGINT  OF A_WUS900HE_TPS FINAL T_HECFLGINT  OF WCP700VE
+  ITEM DEVCLE     OF A_WUS900HE_TPS FINAL DEVCLE       OF WCP700VE
+  ITEM HISCODMOD  OF A_WUS900HE_TPS FINAL G_CODMOD
+  ITEM HISTYPECR  OF A_WUS900HE_TPS FINAL CAPTYPECR    OF WCP700VE
+  ITEM HISNUMLOT  OF A_WUS900HE_TPS FINAL LCPCLE       OF WCP700VE
+
+
+;
+; Ajout du montant de TVP   recevoir.
+;
+OUTPUT *WUS900HE ALIAS A_WUS900HE_TVP ADD IF CCIMNTRTI OF WCP700VE <> 0
+  ITEM HISCLE     OF A_WUS900HE_TVP FINAL T_HISCLE     OF WCP700VE
+  ITEM HISCIECLE  OF A_WUS900HE_TVP FINAL CAPCIECLE    OF WCP700VE
+  ITEM CPTCLE     OF A_WUS900HE_TVP FINAL TAXCPTCTICAP OF A_TAX_TVP
+  ITEM HECCIEINT  OF A_WUS900HE_TVP FINAL T_HECCIEINT  OF WCP700VE
+  ITEM HECUNAINT  OF A_WUS900HE_TVP FINAL CIEUNABIL    OF A_MCCIE_INTER
+  ITEM CIECLE     OF A_WUS900HE_TVP FINAL CAPCIECLE    OF WCP700VE
+  ITEM UNACLE     OF A_WUS900HE_TVP FINAL CIEUNABIL    OF MCCOMPAGNIE
+  ITEM PRJCLE     OF A_WUS900HE_TVP FINAL " "
+  ITEM PRACLE     OF A_WUS900HE_TVP FINAL " "
+  ITEM IMMCLE     OF A_WUS900HE_TVP FINAL " "
+  ITEM PECCLE     OF A_WUS900HE_TVP FINAL PECCLE       OF WCP700VE
+  ITEM HECNUMDOC2 OF A_WUS900HE_TVP FINAL T_HECNUMDOC2 OF WCP700VE
+  ITEM T_CODDC    OF A_WUS900HE_TVP FINAL "D"
+  ITEM T_MNTGL    OF A_WUS900HE_TVP FINAL CCIMNTRTI    OF WCP700VE
+  ITEM T_MNTORI   OF A_WUS900HE_TVP FINAL CCIMNTRTI    OF WCP700VE
+  ITEM HECFLGINT  OF A_WUS900HE_TVP FINAL T_HECFLGINT  OF WCP700VE
+  ITEM DEVCLE     OF A_WUS900HE_TVP FINAL DEVCLE       OF WCP700VE
+  ITEM HISCODMOD  OF A_WUS900HE_TVP FINAL G_CODMOD
+  ITEM HISTYPECR  OF A_WUS900HE_TVP FINAL CAPTYPECR    OF WCP700VE
+  ITEM HISNUMLOT  OF A_WUS900HE_TVP FINAL LCPCLE       OF WCP700VE
+
+
+;
+; Ajout du compte de D PENSE.
+;
+OUTPUT *WUS900HE ALIAS A_WUS900HE_REV ADD IF T_MNTDEP <> 0
+  ITEM HISCLE     OF A_WUS900HE_REV FINAL T_HISCLE     OF WCP700VE
+  ITEM HISCIECLE  OF A_WUS900HE_REV FINAL CAPCIECLE    OF WCP700VE
+  ITEM CPTCLE     OF A_WUS900HE_REV FINAL CPTCLE       OF WCP700VE
+  ITEM HECCIEINT  OF A_WUS900HE_REV FINAL T_HECCIEINT  OF WCP700VE
+  ITEM HECUNAINT  OF A_WUS900HE_REV FINAL CIEUNABIL    OF A_MCCIE_INTER
+  ITEM CIECLE     OF A_WUS900HE_REV FINAL CAPCIECLE    OF WCP700VE
+  ITEM UNACLE     OF A_WUS900HE_REV FINAL UNACLE       OF WCP700VE
+  ITEM PRJCLE     OF A_WUS900HE_REV FINAL PRJCLE       OF WCP700VE
+  ITEM PRACLE     OF A_WUS900HE_REV FINAL PRACLE       OF WCP700VE
+  ITEM IMMCLE     OF A_WUS900HE_REV FINAL IMMCLE       OF WCP700VE
+  ITEM PECCLE     OF A_WUS900HE_REV FINAL PECCLE       OF WCP700VE
+  ITEM HECNUMDOC2 OF A_WUS900HE_REV FINAL T_HECNUMDOC2 OF WCP700VE
+  ITEM T_CODDC    OF A_WUS900HE_REV FINAL CCICODDC     OF WCP700VE
+  ITEM T_MNTGL    OF A_WUS900HE_REV FINAL T_MNTDEP
+  ITEM T_MNTORI   OF A_WUS900HE_REV FINAL T_MNTDEP
+  ITEM HECFLGINT  OF A_WUS900HE_REV FINAL T_HECFLGINT  OF WCP700VE
+  ITEM DEVCLE     OF A_WUS900HE_REV FINAL DEVCLE       OF WCP700VE
+  ITEM HISCODMOD  OF A_WUS900HE_REV FINAL G_CODMOD
+  ITEM HISTYPECR  OF A_WUS900HE_REV FINAL CAPTYPECR    OF WCP700VE
+  ITEM HISNUMLOT  OF A_WUS900HE_REV FINAL LCPCLE       OF WCP700VE
+
+
+
+;-------------------------------------------------------------------------------
+;
+; On renverse le couru lorsqu'il s'agit d'une facture provenant de la consolidation
+; de facture.  Ces lignes seront reliées a la facture de consolidation plutot
+; qu'a la facture des payables pour que l'on puisse voir la dépense sur la facture.
+;
+;
+REQUEST RENVERSE_COURU   TERMINATE IF G_ERREUR = "ARRET"
+
+ACCESS *WUS900H &
+  LINK REFCIECLE OF WUS900H, &
+       REFCLENUM OF WUS900H, &
+       HISNUMDOC OF WUS900H  &
+    TO FOUCIECLE, &
+       FOUCLE   , &
+       FACCLE                OF ARFACTURE_REC &
+
+  LINK REFCIECLE OF WUS900H, &
+       REFCLENUM OF WUS900H, &
+       FACCIECLE OF ARFACTURE_REC &
+   TO  FOUCIECLE, &
+       FOUCLE,    &
+       FOCCIECLE OF VFOC_FOU  &
+
+  LINK  FACCIECLE OF ARFACTURE_REC &
+    TO  CIECLE OF MCCOMPAGNIE &
+
+  LINK  FOUCIECLE OF ARFACTURE_REC, &
+        FOUCLE    OF ARFACTURE_REC, &
+        FACCLE    OF ARFACTURE_REC, &
+        FACCIECLE OF ARFACTURE_REC  &
+    TO  FOUCIECLE, &
+        FOUCLE,    &
+        FACCLE,    &
+        FACCIECLE  OF ARDER_ITEM &
+
+  LINK  FACCIECLE OF ARFACTURE_REC, &
+        RECCLE    OF ARDER_ITEM &
+    TO  CIECLE, &
+        RECCLE OF ARRECEPTION  OPTIONAL &
+
+  LINK  CIECLE OF ARRECEPTION, &
+        ENTCLE OF ARRECEPTION  &
+    TO  CIECLE, &
+        ENTCLE OF ARENTREPOT OPTIONAL &
+
+  LINK  FACCIECLE OF ARDER_ITEM, &
+        RECCLE    OF ARDER_ITEM, &
+        DEICLE    OF ARDER_ITEM  &
+    TO  CIECLE, &
+        RECCLE, &
+        REDCLE OF ARREC_DETAIL OPTIONAL &
+
+  LINK  REDTAXTYPTPS OF ARREC_DETAIL, &
+        REDTAXCODTPS OF ARREC_DETAIL  &
+    TO  TAXCLETYP, &
+        TAXCLECOD OF MCTAXE ALIAS A_TAX_TPS OPTIONAL &
+
+  LINK  REDTAXTYPTVQ OF ARREC_DETAIL, &
+        REDTAXCODTVQ OF ARREC_DETAIL  &
+    TO  TAXCLETYP, &
+        TAXCLECOD OF MCTAXE ALIAS A_TAX_TVQ OPTIONAL &
+
+  LINK FOUCIEINT OF VFOC_FOU &
+    TO CIECLE OF MCCOMPAGNIE  ALIAS A_MCCIE_FOU OPTIONAL &
+
+  LINK "1", &
+       G_ANN &
+    TO CIENMC, &
+       HSSCLEANN OF  MCHIS_SEQ OPTIONAL
+                                      ; Pour avoir des num ros d' critures
+
+SORT   ON FOUCIECLE OF ARFACTURE_REC &
+       ON FOUCLE    OF ARFACTURE_REC &
+       ON FACCLE    OF ARFACTURE_REC &
+       ON FACCIECLE OF ARDER_ITEM &
+       ON RECCLE    OF ARDER_ITEM
+
+;
+; pour la g n ration des num ro d'historique
+;
+
+TEMPORARY T_HISCLE_ANN INTEGER UNSIGNED SIZE 4
+TEMPORARY T_HISCLE_TMP CHARACTER SIZE 09
+TEMPORARY T_HISCLE INTEGER UNSIGNED SIZE 4
+TEMPORARY T_NUMSEQ INTEGER UNSIGNED SIZE 4
+
+;
+; affectation du num ro d'historique
+;
+
+; Ajustement pour le changement de siècle
+ITEM T_NUMSEQ INITIAL 0 & ;NCONVERT( G_ANN ) * 10000000 &
+                        IF NOT RECORD MCHIS_SEQ EXIST &
+                 ELSE HSSNUMSEQ OF MCHIS_SEQ
+
+ITEM T_HISCLE RESET AT INITIAL TO (T_NUMSEQ + 1)
+
+;
+; On incr mente le num ro d'historique   chaque transaction(facture).
+;
+ITEM T_HISCLE COUNT AT FACCLE
+
+ITEM T_HISCLE_TMP = ASCII(T_HISCLE,9)
+ITEM T_HISCLE_ANN = NCONVERT((G_ANN + T_HISCLE_TMP[3:7]))
+
+; Ajustement pour le changement de siècle
+;ITEM T_HISCLE_SIE = NCONVERT(G_ANN + ASCII(T_HISCLE,7))
+
+;
+;
+; Sous fichier commun   toutes les journalisations, sert   mettre   jour la
+; table MCHISTO.
+;
+;
+OUTPUT *WUS900H ALIAS A_FAC_900H ADD AT FACCLE
+  ITEM HISCLE     OF A_FAC_900H FINAL T_HISCLE_ANN
+  ITEM HISCIECLE  OF A_FAC_900H FINAL HISCIECLE  OF WUS900H
+  ITEM REFCIECLE  OF A_FAC_900H FINAL REFCIECLE  OF WUS900H
+  ITEM REFCLETYP  OF A_FAC_900H FINAL REFCLETYP  OF WUS900H
+  ITEM REFCLENUM  OF A_FAC_900H FINAL REFCLENUM  OF WUS900H
+  ITEM HISNUMDOC  OF A_FAC_900H FINAL HISNUMDOC  OF WUS900H
+  ITEM PECCLE     OF A_FAC_900H FINAL PECCLE     OF WUS900H
+  ITEM HISNUMLOT  OF A_FAC_900H FINAL HISNUMLOT  OF WUS900H
+  ITEM HISDAT     OF A_FAC_900H FINAL HISDAT     OF WUS900H
+  ITEM HISDATJOU  OF A_FAC_900H FINAL HISDATJOU  OF WUS900H
+  ITEM HISTYPECR  OF A_FAC_900H FINAL "FR" IF FACTYPECR OF ARFACTURE_REC = "FA" &
+                                  ELSE FACTYPECR OF ARFACTURE_REC
+  ITEM HISDSCGEN  OF A_FAC_900H FINAL HISDSCGEN  OF WUS900H
+  ITEM HISDSCSAI  OF A_FAC_900H FINAL HISDSCSAI  OF WUS900H
+  ITEM HISDSCSAI2 OF A_FAC_900H FINAL HISDSCSAI2 OF WUS900H
+  ITEM HISUSRCRE  OF A_FAC_900H FINAL HISUSRCRE  OF WUS900H
+  ITEM DEVCLE     OF A_FAC_900H FINAL DEVCLE     OF WUS900H
+  ITEM HISCLE1    OF A_FAC_900H FINAL HISCLE1    OF WUS900H
+  ITEM HISCLE2    OF A_FAC_900H FINAL HISCLE2    OF WUS900H
+  ITEM HISCLE3    OF A_FAC_900H FINAL HISCLE3    OF WUS900H
+
+;
+;
+OUTPUT ARFACTURE_REC UPDATE AT FACCLE NOITEM
+  ITEM HISCLE OF ARFACTURE_REC FINAL T_HISCLE_ANN
+
+
+TEMPORARY T_HECCIEINT  CHARACTER SIZE 4  ; Pour compagnie d'inter
+TEMPORARY T_HECNUMDOC2 CHARACTER SIZE 6  ; Pour num ro de document-2(= BLANC)
+TEMPORARY T_HECFLGINT  CHARACTER SIZE 1  ; Pour flag d'inter compagnie
+TEMPORARY T_ENTCPTCOU  CHARACTER SIZE 6
+TEMPORARY T_ENTUNACOU  CHARACTER SIZE 8
+TEMPORARY T_HECUNAINT  CHARACTER SIZE 8
+
+TEMPORARY TZ_MNTTXB FLOAT SIZE 08
+TEMPORARY TZ_MNTTPS FLOAT SIZE 08
+TEMPORARY TZ_MNTTVQ FLOAT SIZE 08
+
+TEMPORARY T_MNTIMP  FLOAT SIZE 08
+TEMPORARY T_MNTTOT  FLOAT SIZE 08
+TEMPORARY T_MNTTPS  FLOAT SIZE 08
+TEMPORARY T_MNTTVQ  FLOAT SIZE 08
+TEMPORARY T_MNTCTI  FLOAT SIZE 08
+TEMPORARY T_MNTRTI  FLOAT SIZE 08
+
+TEMPORARY T_CODDC   CHARACTER SIZE 01
+
+TEMPORARY T_ESCUNI  FLOAT SIZE 8
+
+ITEM T_CODDC RESET AT INITIAL TO "D"
+
+;
+; Compagnie d'inter, si c'est un fournisseur interne, on prend la compagnie
+; d finie dans le fournisseur, sinon on prend la compagnie de la transaction.
+;
+ITEM T_HECCIEINT = FACCIECLE OF ARFACTURE_REC IF FOUTYP OF VFOC_FOU <> "I" &
+                   ELSE FOUCIEINT OF VFOC_FOU
+;
+; Identifie si c'est une transaction d'inter.
+;
+ITEM T_HECFLGINT = "0" IF FOUTYP OF VFOC_FOU <> "I" &
+              ELSE "1"
+
+ITEM TZ_MNTTPS = 0
+ITEM TZ_MNTTVQ = 0
+
+ITEM T_ESCUNI  = ROUND( DEIMNTESC OF ARDER_ITEM / &
+                       (DEIQTEFAC OF ARDER_ITEM / 1000) * 100)
+
+ITEM TZ_MNTTXB = ROUND( (DEIQTEFAC    OF ARDER_ITEM + &
+                         REDQTERECREJ OF ARREC_DETAIL) * &
+                        (REDPRIUNI    OF ARREC_DETAIL - T_ESCUNI) / 100000) &
+     IF     DEIFLGCOM OF ARDER_ITEM = "1" &
+        AND FACTYPECR OF ARFACTURE_REC <> "CR" &
+     ELSE ROUND(DEIQTEFAC OF ARDER_ITEM * &
+                (REDPRIUNI OF ARREC_DETAIL - T_ESCUNI) / 100000) &
+     IF     FACTYPECR OF ARFACTURE_REC <> "CR" &
+     ELSE DEIMNTTOT OF ARDER_ITEM
+
+ITEM T_MNTTOT  = TZ_MNTTXB
+
+;------------------------------------------------------------------------------
+ITEM TZ_MNTTPS = TZ_MNTTXB - &
+                 ROUND( TZ_MNTTXB / (1 + TAXPCT OF A_TAX_TPS) ) &
+     IF  TAXMOD    OF A_TAX_TPS = "I" AND &
+        (TAXFLGNET OF A_TAX_TPS = "1" OR TAXFLGNET OF A_TAX_TPS = "3") AND &
+         TAXMOD    OF A_TAX_TVQ = "S" &
+     ELSE TZ_MNTTPS
+
+;------------------------------------------------------------------------------
+ITEM TZ_MNTTXB = TZ_MNTTXB - TZ_MNTTPS &
+     IF TAXMOD OF A_TAX_TPS = "I" AND TAXMOD OF A_TAX_TVQ = "S" &
+     ELSE TZ_MNTTXB
+
+;------------------------------------------------------------------------------
+ITEM TZ_MNTTPS = ROUND( TZ_MNTTXB * TAXPCT OF A_TAX_TPS ) &
+     IF TAXMOD OF A_TAX_TPS = "S" AND TAXMOD OF A_TAX_TVQ = "S" &
+     ELSE TZ_MNTTPS
+
+;------------------------------------------------------------------------------
+ITEM TZ_MNTTXB = TZ_MNTTXB + TZ_MNTTPS &
+     IF (TAXMOD    OF A_TAX_TPS = "I" OR TAXMOD OF A_TAX_TPS = "S") AND &
+         TAXFLGNET OF A_TAX_TVQ = "2" AND &
+         TAXMOD    OF A_TAX_TVQ = "S" &
+     ELSE TZ_MNTTXB
+
+;------------------------------------------------------------------------------
+ITEM TZ_MNTTVQ = ROUND(TZ_MNTTXB * TAXPCT OF A_TAX_TVQ) &
+     IF (TAXMOD    OF A_TAX_TPS = "I" OR TAXMOD OF A_TAX_TPS = "S") AND &
+         TAXMOD    OF A_TAX_TVQ = "S" &
+     ELSE TZ_MNTTVQ
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTVQ = ROUND( TZ_MNTTXB * TAXPCT OF A_TAX_TVQ ) &
+     IF (TAXMOD    OF A_TAX_TPS <> "I" AND TAXMOD OF A_TAX_TPS <> "S") AND &
+         TAXMOD    OF A_TAX_TVQ = "S" &
+     ELSE TZ_MNTTVQ
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTVQ = ROUND( ROUND ( TZ_MNTTXB / (1 + TAXPCT OF A_TAX_TVQ + &
+                                                 TAXPCT OF A_TAX_TPS) ) &
+                 * TAXPCT OF A_TAX_TVQ) &
+     IF TAXMOD    OF A_TAX_TVQ = "I" AND TAXMOD OF A_TAX_TPS = "I" AND &
+        TAXFLGNET OF A_TAX_TVQ = "1" &
+     ELSE TZ_MNTTVQ
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTVQ = TZ_MNTTXB - &
+                 ROUND( TZ_MNTTXB / (1 + TAXPCT OF A_TAX_TVQ) ) &
+     IF  TAXMOD OF A_TAX_TVQ = "I" AND &
+        (TAXMOD OF A_TAX_TPS <> "I" OR TAXFLGNET OF A_TAX_TVQ <> "1") &
+     ELSE TZ_MNTTVQ
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTXB = TZ_MNTTXB - TZ_MNTTVQ &
+     IF TAXMOD OF A_TAX_TPS = "S" AND TAXMOD OF A_TAX_TVQ = "I" &
+     ELSE TZ_MNTTXB
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTPS = ROUND( TZ_MNTTXB * TAXPCT OF A_TAX_TPS ) &
+     IF TAXMOD OF A_TAX_TPS = "S" AND TAXMOD OF A_TAX_TVQ <> "S" &
+     ELSE TZ_MNTTPS
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTXB = TZ_MNTTXB - TZ_MNTTVQ &
+     IF TAXMOD OF A_TAX_TVQ = "I" AND TAXFLGNET OF A_TAX_TPS = "1" AND &
+        TAXMOD OF A_TAX_TPS = "I" &
+     ELSE TZ_MNTTXB
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTPS = TZ_MNTTXB - &
+                 ROUND( TZ_MNTTXB / (1 + TAXPCT OF A_TAX_TPS) ) &
+     IF TAXMOD OF A_TAX_TPS  = "I" AND TAXFLGNET OF A_TAX_TPS = "1" AND &
+        TAXMOD OF A_TAX_TVQ <> "S" &
+     ELSE TZ_MNTTPS
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTPS = TZ_MNTTXB - &
+                 ROUND( TZ_MNTTXB / (1 + TAXPCT OF A_TAX_TPS) ) &
+     IF TAXMOD OF A_TAX_TPS  = "I" AND TAXFLGNET OF A_TAX_TPS <> "1" AND &
+        TAXMOD OF A_TAX_TVQ <> "S" &
+     ELSE TZ_MNTTPS
+
+;-------------------------------------------------------------------------------
+ITEM T_MNTIMP = 0 - (T_MNTTOT + TZ_MNTTPS + TZ_MNTTVQ) &
+     IF TAXMOD OF A_TAX_TPS = "S" AND TAXMOD OF A_TAX_TVQ = "S" &
+     ELSE 0 - (T_MNTTOT + TZ_MNTTPS) &
+          IF TAXMOD OF A_TAX_TPS = "S" &
+          ELSE 0 - (T_MNTTOT + TZ_MNTTVQ) &
+               IF TAXMOD OF A_TAX_TVQ = "S" &
+               ELSE 0 - T_MNTTOT
+
+ITEM T_MNTTPS = 0 - TZ_MNTTPS
+ITEM T_MNTTVQ = 0 - TZ_MNTTVQ
+ITEM T_MNTCTI = ROUND( T_MNTTPS * TAXPCTCTI OF A_TAX_TPS )
+ITEM T_MNTRTI = ROUND( T_MNTTVQ * TAXPCTCTI OF A_TAX_TVQ )
+
+ITEM T_MNTIMP = T_MNTIMP - T_MNTCTI - T_MNTRTI
+
+ITEM T_ENTCPTCOU = ENTCPTCOU    OF ARENTREPOT &
+                 IF FACTYPECR OF ARFACTURE_REC <> "CR" &
+                 ELSE FOCCPTCAP OF VFOC_FOU
+ITEM T_ENTUNACOU = ENTUNACOU    OF ARENTREPOT &
+                 IF FACTYPECR OF ARFACTURE_REC <> "CR" &
+                 ELSE CIEUNABIL OF MCCOMPAGNIE
+ITEM T_HECUNAINT = CIEUNABIL    OF A_MCCIE_FOU &
+                 IF CIECLE OF A_MCCIE_FOU = T_HECCIEINT &
+                 ELSE CIEUNABIL    OF MCCOMPAGNIE
+
+;
+; mise a jour du fichier des num ro d'historique
+;
+OUTPUT MCHIS_SEQ ADD UPDATE AT FINAL
+  ITEM CIENMC    OF MCHIS_SEQ INITIAL "1"
+  ITEM HSSCLEANN OF MCHIS_SEQ INITIAL G_ANN
+  ITEM HSSNUMSEQ OF MCHIS_SEQ FINAL   ( T_HISCLE  - 1 )
+
+;
+; On doit garder les renversements pour s'assurer qu'on ne "découre" pas trop
+;
+SUBFILE WCP700RV &
+  INCLUDE &
+       FACCIECLE OF ARFACTURE_REC , &
+       FACCLE    OF ARFACTURE_REC , &
+       FOUCIECLE OF ARFACTURE_REC , &
+       FOUCLE    OF ARFACTURE_REC , &
+       PECCLE    OF ARFACTURE_REC , &
+       FACTYPECR OF ARFACTURE_REC , &
+       LCPCLE    OF ARFACTURE_REC , &
+       RECCLE    OF ARDER_ITEM  , &
+       REDCLE    OF ARREC_DETAIL  , &
+       CPTCLE    OF ARREC_DETAIL  , &
+       UNACLE    OF ARREC_DETAIL  , &
+       PRJCLE    OF ARREC_DETAIL  , &
+       PRACLE    OF ARREC_DETAIL  , &
+       IMMCLE    OF ARREC_DETAIL  , &
+       REDMNTTOT OF ARREC_DETAIL  , &
+       REDMNTCTI OF ARREC_DETAIL  , &
+       REDMNTRTI OF ARREC_DETAIL  , &
+       REDMNTTVQ OF ARREC_DETAIL  , &
+       REDMNTTPS OF ARREC_DETAIL  , &
+       REDPRIUNI OF ARREC_DETAIL  , &
+       REDQTERECREJ OF ARREC_DETAIL  , &
+       DEVCLE    OF WUS900H       , &
+       DEVTAU    OF ARRECEPTION   , &
+       TAXCPTCOUCAR OF A_TAX_TPS ALIAS TAXCPTCOUTPS , &
+       TAXCPTCOUCAR OF A_TAX_TVQ ALIAS TAXCPTCOUTVQ , &
+       TAXPCT       OF A_TAX_TPS ALIAS TAXPCTTPS , &
+       TAXPCT       OF A_TAX_TVQ ALIAS TAXPCTTVQ , &
+       TAXMOD       OF A_TAX_TPS ALIAS TAXMODTPS , &
+       TAXMOD       OF A_TAX_TVQ ALIAS TAXMODTVQ , &
+       TAXFLGNET    OF A_TAX_TPS ALIAS TAXFLGNETTPS , &
+       TAXFLGNET    OF A_TAX_TVQ ALIAS TAXFLGNETTVQ , &
+       TAXPCTCTI    OF A_TAX_TPS ALIAS TAXPCTCTITPS , &
+       TAXPCTCTI    OF A_TAX_TVQ ALIAS TAXPCTCTITVQ , &
+       ENTCPTCOU OF ARENTREPOT    , &
+       ENTUNACOU OF ARENTREPOT    , &
+       CIEUNABIL OF MCCOMPAGNIE   , &
+       T_HECCIEINT , &
+       T_HECUNAINT , &
+       T_HECFLGINT , &
+       T_HISCLE_ANN ALIAS T_HISCLE, &
+       T_MNTIMP ALIAS T_MNTIMPORI , &
+       T_MNTCTI ALIAS T_MNTCTIORI , &
+       T_MNTRTI ALIAS T_MNTRTIORI , &
+       DEIFLGCOM OF ARDER_ITEM
+
+
+;------------------------------------------------------------------------------
+;
+; On retrouve toutes les factures qui ont touché cette réception et on cumule
+; les montants que l'on a généré pour s'assurer que l'on n'a pas renversé
+; plus que l'on a couru.  si c'est le cas, on garde les montants en erreur pour
+; regenerer une ligne d'ajustement.
+;
+REQUEST VERIFIE_DEPASS
+
+ACCESS *WCP700RV &
+  LINK FOUCIECLE OF WCP700RV , &
+       FOUCLE    OF WCP700RV , &
+       FACCIECLE OF WCP700RV , &
+       RECCLE    OF WCP700RV , &
+       REDCLE    OF WCP700RV   &
+    TO FOUCIECLE , &
+       FOUCLE    , &
+       FACCIECLE , &
+       RECCLE    , &
+       DEICLE                  OF ARDER_ITEM OPTIONAL
+
+;
+; On fait le traitement seulement pour les lignes que l'on complete,
+; les autres gardent les montants d'origine, c'est tout.
+;
+SELECT ARDER_ITEM IF    DEIFLGCOM OF WCP700RV = "1" &
+                    AND FACTYPECR OF WCP700RV <> "CR"
+
+
+SORT ON FOUCIECLE OF WCP700RV &
+     ON FOUCLE    OF WCP700RV &
+     ON FACCLE    OF WCP700RV &
+     ON FACCIECLE OF WCP700RV &
+     ON RECCLE    OF WCP700RV &
+     ON REDCLE    OF WCP700RV
+
+TEMPORARY TZ_MNTTXB FLOAT SIZE 08
+TEMPORARY TZ_MNTTPS FLOAT SIZE 08
+TEMPORARY TZ_MNTTVQ FLOAT SIZE 08
+TEMPORARY T_MNTIMP  FLOAT SIZE 08
+TEMPORARY T_MNTTOT  FLOAT SIZE 08
+TEMPORARY T_MNTTPS  FLOAT SIZE 08
+TEMPORARY T_MNTTVQ  FLOAT SIZE 08
+TEMPORARY T_MNTCTI  FLOAT SIZE 08
+TEMPORARY T_MNTRTI  FLOAT SIZE 08
+TEMPORARY T_ESCUNI  FLOAT SIZE 8
+
+ITEM TZ_MNTTPS = 0
+ITEM TZ_MNTTVQ = 0
+
+ITEM T_ESCUNI  = ROUND( DEIMNTESC OF ARDER_ITEM / &
+                       (DEIQTEFAC OF ARDER_ITEM / 1000) * 100)
+
+ITEM TZ_MNTTXB = ROUND( (DEIQTEFAC    OF ARDER_ITEM + &
+                         REDQTERECREJ OF WCP700RV) * &
+                        (REDPRIUNI    OF WCP700RV - T_ESCUNI) / 100000) &
+     IF     DEIFLGCOM OF ARDER_ITEM = "1" &
+        AND FACTYPECR OF WCP700RV <> "CR" &
+     ELSE ROUND(DEIQTEFAC OF ARDER_ITEM * &
+                (REDPRIUNI OF WCP700RV - T_ESCUNI) / 100000) &
+     IF     FACTYPECR OF WCP700RV <> "CR" &
+     ELSE DEIMNTTOT OF ARDER_ITEM
+
+ITEM T_MNTTOT  = TZ_MNTTXB
+
+;------------------------------------------------------------------------------
+ITEM TZ_MNTTPS = TZ_MNTTXB - &
+                 ROUND( TZ_MNTTXB / (1 + TAXPCTTPS OF WCP700RV) ) &
+     IF  TAXMODTPS    OF WCP700RV = "I" AND &
+        (TAXFLGNETTPS OF WCP700RV = "1" OR TAXFLGNETTPS OF WCP700RV = "3") AND &
+         TAXMODTVQ    OF WCP700RV = "S" &
+     ELSE TZ_MNTTPS
+
+;------------------------------------------------------------------------------
+ITEM TZ_MNTTXB = TZ_MNTTXB - TZ_MNTTPS &
+     IF TAXMODTPS OF WCP700RV = "I" AND TAXMODTVQ OF WCP700RV = "S" &
+     ELSE TZ_MNTTXB
+
+;------------------------------------------------------------------------------
+ITEM TZ_MNTTPS = ROUND( TZ_MNTTXB * TAXPCTTPS OF WCP700RV ) &
+     IF TAXMODTPS OF WCP700RV = "S" AND TAXMODTVQ OF WCP700RV = "S" &
+     ELSE TZ_MNTTPS
+
+;------------------------------------------------------------------------------
+ITEM TZ_MNTTXB = TZ_MNTTXB + TZ_MNTTPS &
+     IF (TAXMODTPS    OF WCP700RV = "I" OR TAXMODTPS OF WCP700RV = "S") AND &
+         TAXFLGNETTVQ OF WCP700RV = "2" AND &
+         TAXMODTVQ    OF WCP700RV = "S" &
+     ELSE TZ_MNTTXB
+
+;------------------------------------------------------------------------------
+ITEM TZ_MNTTVQ = ROUND(TZ_MNTTXB * TAXPCTTVQ OF WCP700RV) &
+     IF (TAXMODTPS OF WCP700RV = "I" OR TAXMODTPS OF WCP700RV = "S") AND &
+         TAXMODTVQ OF WCP700RV = "S" &
+     ELSE TZ_MNTTVQ
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTVQ = ROUND( TZ_MNTTXB * TAXPCTTVQ OF WCP700RV ) &
+     IF (TAXMODTPS OF WCP700RV <> "I" AND TAXMODTPS OF WCP700RV <> "S") AND &
+         TAXMODTVQ OF WCP700RV = "S" &
+     ELSE TZ_MNTTVQ
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTVQ = ROUND( ROUND ( TZ_MNTTXB / (1 + TAXPCTTVQ OF WCP700RV + &
+                                                 TAXPCTTPS OF WCP700RV) ) &
+                 * TAXPCTTVQ OF WCP700RV) &
+     IF TAXMODTVQ    OF WCP700RV = "I" AND TAXMODTPS OF WCP700RV = "I" AND &
+        TAXFLGNETTVQ OF WCP700RV = "1" &
+     ELSE TZ_MNTTVQ
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTVQ = TZ_MNTTXB - &
+                 ROUND( TZ_MNTTXB / (1 + TAXPCTTVQ OF WCP700RV) ) &
+     IF  TAXMODTVQ OF WCP700RV = "I" AND &
+        (TAXMODTPS OF WCP700RV <> "I" OR TAXFLGNETTVQ OF WCP700RV <> "1") &
+     ELSE TZ_MNTTVQ
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTXB = TZ_MNTTXB - TZ_MNTTVQ &
+     IF TAXMODTPS OF WCP700RV = "S" AND TAXMODTVQ OF WCP700RV = "I" &
+     ELSE TZ_MNTTXB
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTPS = ROUND( TZ_MNTTXB * TAXPCTTPS OF WCP700RV ) &
+     IF TAXMODTPS OF WCP700RV = "S" AND TAXMODTVQ OF WCP700RV <> "S" &
+     ELSE TZ_MNTTPS
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTXB = TZ_MNTTXB - TZ_MNTTVQ &
+     IF TAXMODTVQ OF WCP700RV = "I" AND TAXFLGNETTPS OF WCP700RV = "1" AND &
+        TAXMODTPS OF WCP700RV = "I" &
+     ELSE TZ_MNTTXB
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTPS = TZ_MNTTXB - &
+                 ROUND( TZ_MNTTXB / (1 + TAXPCTTPS OF WCP700RV) ) &
+     IF TAXMODTPS OF WCP700RV  = "I" AND TAXFLGNETTPS OF WCP700RV = "1" AND &
+        TAXMODTVQ OF WCP700RV <> "S" &
+     ELSE TZ_MNTTPS
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTPS = TZ_MNTTXB - &
+                 ROUND( TZ_MNTTXB / (1 + TAXPCTTPS OF WCP700RV) ) &
+     IF TAXMODTPS OF WCP700RV  = "I" AND TAXFLGNETTPS OF WCP700RV <> "1" AND &
+        TAXMODTVQ OF WCP700RV <> "S" &
+     ELSE TZ_MNTTPS
+
+;-------------------------------------------------------------------------------
+ITEM T_MNTIMP = 0 - (T_MNTTOT + TZ_MNTTPS + TZ_MNTTVQ) &
+     IF TAXMODTPS OF WCP700RV = "S" AND TAXMODTVQ OF WCP700RV = "S" &
+     ELSE 0 - (T_MNTTOT + TZ_MNTTPS) &
+          IF TAXMODTPS OF WCP700RV = "S" &
+          ELSE 0 - (T_MNTTOT + TZ_MNTTVQ) &
+               IF TAXMODTVQ OF WCP700RV = "S" &
+               ELSE 0 - T_MNTTOT
+
+ITEM T_MNTTPS = 0 - TZ_MNTTPS
+ITEM T_MNTTVQ = 0 - TZ_MNTTVQ
+ITEM T_MNTCTI = ROUND( T_MNTTPS * TAXPCTCTITPS OF WCP700RV )
+ITEM T_MNTRTI = ROUND( T_MNTTVQ * TAXPCTCTITVQ OF WCP700RV )
+
+ITEM T_MNTIMP = T_MNTIMP - T_MNTCTI - T_MNTRTI
+
+TEMPORARY T_TOTDEP  FLOAT SIZE 8
+TEMPORARY T_TOTCTI  FLOAT SIZE 8
+TEMPORARY T_TOTRTI  FLOAT SIZE 8
+
+  ITEM T_TOTDEP SUBTOTAL T_MNTIMP RESET AT REDCLE
+  ITEM T_TOTCTI SUBTOTAL T_MNTCTI RESET AT REDCLE
+  ITEM T_TOTRTI SUBTOTAL T_MNTRTI RESET AT REDCLE
+
+;
+; Calcul des montants de la réception pour les comparer avec les factures
+;
+TEMPORARY T_MNTDEP  FLOAT SIZE 8
+
+  ITEM T_MNTDEP = REDMNTTOT OF WCP700RV
+  ITEM T_MNTDEP = T_MNTDEP - REDMNTCTI OF WCP700RV - REDMNTRTI OF WCP700RV
+
+TEMPORARY T_DIFDEP  FLOAT SIZE 8
+TEMPORARY T_DIFRTI  FLOAT SIZE 8
+TEMPORARY T_DIFCTI  FLOAT SIZE 8
+
+  ITEM T_DIFDEP = T_MNTDEP + T_TOTDEP &
+                    IF    DEIFLGCOM OF WCP700RV = "1" &
+                      AND FACTYPECR OF WCP700RV <> "CR" &
+               ELSE 0
+  ITEM T_DIFRTI = REDMNTRTI OF WCP700RV + T_TOTRTI &
+                    IF    DEIFLGCOM OF WCP700RV = "1" &
+                      AND FACTYPECR OF WCP700RV <> "CR" &
+               ELSE 0
+  ITEM T_DIFCTI = REDMNTCTI OF WCP700RV + T_TOTCTI &
+                    IF    DEIFLGCOM OF WCP700RV = "1" &
+                      AND FACTYPECR OF WCP700RV <> "CR" &
+               ELSE 0
+
+SUBFILE WCP700TF AT REDCLE &
+  INCLUDE &
+       FACCIECLE OF WCP700RV , &
+       FACCLE    OF WCP700RV , &
+       FOUCIECLE OF WCP700RV , &
+       FOUCLE    OF WCP700RV , &
+       PECCLE    OF WCP700RV , &
+       FACTYPECR OF WCP700RV , &
+       LCPCLE    OF WCP700RV , &
+       RECCLE    OF WCP700RV , &
+       REDCLE    OF WCP700RV , &
+       CPTCLE    OF WCP700RV , &
+       UNACLE    OF WCP700RV , &
+       PRJCLE    OF WCP700RV , &
+       PRACLE    OF WCP700RV , &
+       IMMCLE    OF WCP700RV , &
+       DEVCLE    OF WCP700RV , &
+       DEVTAU    OF WCP700RV , &
+       TAXCPTCOUTPS OF WCP700RV , &
+       TAXCPTCOUTVQ OF WCP700RV , &
+       ENTCPTCOU    OF WCP700RV , &
+       ENTUNACOU    OF WCP700RV , &
+       CIEUNABIL    OF WCP700RV , &
+       T_HECCIEINT OF WCP700RV , &
+       T_HECUNAINT OF WCP700RV , &
+       T_HECFLGINT OF WCP700RV , &
+       T_HISCLE OF WCP700RV , &
+       T_MNTIMPORI , &
+       T_MNTCTIORI , &
+       T_MNTRTIORI , &
+       T_DIFDEP , &
+       T_DIFRTI , &
+       T_DIFCTI
+
+
+;------------------------------------------------------------------------------
+;
+; On génere les lignes d'ajustement si on a eu des renversements trop élevés
+;
+;
+REQUEST AJUSTE_COURU
+
+ACCESS *WCP700TF &
+
+  LINK  FACCIECLE OF WCP700TF, &
+        RECCLE    OF WCP700TF  &
+    TO  CIECLE, &
+        RECCLE OF ARRECEPTION  OPTIONAL
+
+
+SORT   ON FACCIECLE OF WCP700TF &
+       ON RECCLE    OF WCP700TF &
+       ON FOUCIECLE OF WCP700TF &
+       ON FOUCLE    OF WCP700TF &
+       ON FACCLE    OF WCP700TF
+
+
+TEMPORARY T_MNTDEP    FLOAT SIZE 8
+TEMPORARY T_MNTCTI    FLOAT SIZE 8
+TEMPORARY T_MNTRTI    FLOAT SIZE 8
+TEMPORARY T_MNTCOU    FLOAT SIZE 8
+TEMPORARY T_TOTCOU    FLOAT SIZE 8
+TEMPORARY T_MNTCOUREC FLOAT SIZE 08 ; Montant total du courus par réc.
+
+
+  ITEM T_MNTDEP = T_MNTIMPORI OF WCP700TF &
+                - T_DIFDEP    OF WCP700TF
+  ITEM T_MNTCTI = T_MNTCTIORI OF WCP700TF &
+                - T_DIFCTI    OF WCP700TF
+  ITEM T_MNTRTI = T_MNTRTIORI OF WCP700TF &
+                - T_DIFRTI    OF WCP700TF
+
+  ITEM T_MNTCOU = T_MNTDEP &
+                + T_MNTCTI &
+                + T_MNTRTI
+
+  ITEM T_TOTCOU    SUBTOTAL T_MNTCOU RESET AT FACCLE
+  ITEM T_MNTCOUREC SUBTOTAL T_MNTCOU RESET AT RECCLE
+
+;
+; Création du subfile pour l'imputation inversée de la dépense ou de l'inventaire.
+;
+OUTPUT *WUS900HE ALIAS A_WUS900HE_REV ADD IF FACTYPECR OF WCP700TF <> "CR"
+  ITEM HISCLE     OF A_WUS900HE_REV FINAL T_HISCLE     OF WCP700TF
+  ITEM HISCIECLE  OF A_WUS900HE_REV FINAL FACCIECLE    OF WCP700TF
+  ITEM CPTCLE     OF A_WUS900HE_REV FINAL CPTCLE       OF WCP700TF
+  ITEM HECCIEINT  OF A_WUS900HE_REV FINAL T_HECCIEINT  OF WCP700TF
+  ITEM HECUNAINT  OF A_WUS900HE_REV FINAL T_HECUNAINT  OF WCP700TF
+  ITEM CIECLE     OF A_WUS900HE_REV FINAL FACCIECLE    OF WCP700TF
+  ITEM UNACLE     OF A_WUS900HE_REV FINAL UNACLE       OF WCP700TF
+  ITEM PRJCLE     OF A_WUS900HE_REV FINAL PRJCLE       OF WCP700TF
+  ITEM PRACLE     OF A_WUS900HE_REV FINAL PRACLE       OF WCP700TF
+  ITEM IMMCLE     OF A_WUS900HE_REV FINAL IMMCLE       OF WCP700TF
+  ITEM PECCLE     OF A_WUS900HE_REV FINAL PECCLE       OF WCP700TF
+  ITEM HECNUMDOC2 OF A_WUS900HE_REV FINAL ""
+  ITEM T_CODDC    OF A_WUS900HE_REV FINAL "D"
+  ITEM T_MNTGL    OF A_WUS900HE_REV FINAL T_MNTDEP
+  ITEM T_MNTORI   OF A_WUS900HE_REV FINAL T_MNTDEP
+  ITEM HECFLGINT  OF A_WUS900HE_REV FINAL T_HECFLGINT  OF WCP700TF
+  ITEM DEVCLE     OF A_WUS900HE_REV FINAL DEVCLE       OF WCP700TF
+  ITEM HISCODMOD  OF A_WUS900HE_REV FINAL G_CODMOD
+  ITEM HISTYPECR  OF A_WUS900HE_REV FINAL "FR" IF FACTYPECR OF WCP700TF = "FA" &
+                                     ELSE FACTYPECR    OF WCP700TF
+  ITEM HISNUMLOT  OF A_WUS900HE_REV FINAL LCPCLE       OF WCP700TF
+
+;
+; Ajout au subfile pour l'imputation inversée le couru de TPS
+;
+OUTPUT *WUS900HE ALIAS A_WUS900HE_TPS ADD IF FACTYPECR OF WCP700TF <> "CR"
+  ITEM HISCLE     OF A_WUS900HE_TPS FINAL T_HISCLE     OF WCP700TF
+  ITEM HISCIECLE  OF A_WUS900HE_TPS FINAL FACCIECLE    OF WCP700TF
+  ITEM CPTCLE     OF A_WUS900HE_TPS FINAL TAXCPTCOUTPS OF WCP700TF
+  ITEM HECCIEINT  OF A_WUS900HE_TPS FINAL T_HECCIEINT  OF WCP700TF
+  ITEM HECUNAINT  OF A_WUS900HE_TPS FINAL T_HECUNAINT  OF WCP700TF
+  ITEM CIECLE     OF A_WUS900HE_TPS FINAL FACCIECLE    OF WCP700TF
+  ITEM UNACLE     OF A_WUS900HE_TPS FINAL CIEUNABIL    OF WCP700TF
+  ITEM PRJCLE     OF A_WUS900HE_TPS FINAL " "
+  ITEM PRACLE     OF A_WUS900HE_TPS FINAL " "
+  ITEM IMMCLE     OF A_WUS900HE_TPS FINAL " "
+  ITEM PECCLE     OF A_WUS900HE_TPS FINAL PECCLE       OF WCP700TF
+  ITEM HECNUMDOC2 OF A_WUS900HE_TPS FINAL ""
+  ITEM T_CODDC    OF A_WUS900HE_TPS FINAL "D"
+  ITEM T_MNTGL    OF A_WUS900HE_TPS FINAL T_MNTCTI
+  ITEM T_MNTORI   OF A_WUS900HE_TPS FINAL T_MNTCTI
+  ITEM HECFLGINT  OF A_WUS900HE_TPS FINAL T_HECFLGINT  OF WCP700TF
+  ITEM DEVCLE     OF A_WUS900HE_TPS FINAL DEVCLE       OF WCP700TF
+  ITEM HISCODMOD  OF A_WUS900HE_TPS FINAL G_CODMOD
+  ITEM HISTYPECR  OF A_WUS900HE_TPS FINAL "FR" IF FACTYPECR OF WCP700TF = "FA" &
+                                     ELSE FACTYPECR    OF WCP700TF
+  ITEM HISNUMLOT  OF A_WUS900HE_TPS FINAL LCPCLE       OF WCP700TF
+
+;
+; Ajout au subfile pour l'imputation inversée le couru de TVQ
+;
+OUTPUT *WUS900HE ALIAS A_WUS900HE_TVQ ADD IF FACTYPECR OF WCP700TF <> "CR"
+  ITEM HISCLE     OF A_WUS900HE_TVQ FINAL T_HISCLE     OF WCP700TF
+  ITEM HISCIECLE  OF A_WUS900HE_TVQ FINAL FACCIECLE    OF WCP700TF
+  ITEM CPTCLE     OF A_WUS900HE_TVQ FINAL TAXCPTCOUTVQ OF WCP700TF
+  ITEM HECCIEINT  OF A_WUS900HE_TVQ FINAL T_HECCIEINT  OF WCP700TF
+  ITEM HECUNAINT  OF A_WUS900HE_TVQ FINAL T_HECUNAINT  OF WCP700TF
+  ITEM CIECLE     OF A_WUS900HE_TVQ FINAL FACCIECLE    OF WCP700TF
+  ITEM UNACLE     OF A_WUS900HE_TVQ FINAL CIEUNABIL    OF WCP700TF
+  ITEM PRJCLE     OF A_WUS900HE_TVQ FINAL " "
+  ITEM PRACLE     OF A_WUS900HE_TVQ FINAL " "
+  ITEM IMMCLE     OF A_WUS900HE_TVQ FINAL " "
+  ITEM PECCLE     OF A_WUS900HE_TVQ FINAL PECCLE       OF WCP700TF
+  ITEM HECNUMDOC2 OF A_WUS900HE_TVQ FINAL ""
+  ITEM T_CODDC    OF A_WUS900HE_TVQ FINAL "D"
+  ITEM T_MNTGL    OF A_WUS900HE_TVQ FINAL T_MNTRTI
+  ITEM T_MNTORI   OF A_WUS900HE_TVQ FINAL T_MNTRTI
+  ITEM HECFLGINT  OF A_WUS900HE_TVQ FINAL T_HECFLGINT  OF WCP700TF
+  ITEM DEVCLE     OF A_WUS900HE_TVQ FINAL DEVCLE       OF WCP700TF
+  ITEM HISCODMOD  OF A_WUS900HE_TVQ FINAL G_CODMOD
+  ITEM HISTYPECR  OF A_WUS900HE_TVQ FINAL "FR" IF FACTYPECR OF WCP700TF = "FA" &
+                                     ELSE FACTYPECR    OF WCP700TF
+  ITEM HISNUMLOT  OF A_WUS900HE_TVQ FINAL LCPCLE       OF WCP700TF
+
+;
+; Inversement du compte de couru.
+;
+OUTPUT *WUS900HE ALIAS A_WUS900HE_COU ADD AT FACCLE
+  ITEM HISCLE     OF A_WUS900HE_COU FINAL T_HISCLE     OF WCP700TF
+  ITEM HISCIECLE  OF A_WUS900HE_COU FINAL FACCIECLE    OF WCP700TF
+  ITEM CPTCLE     OF A_WUS900HE_COU FINAL ENTCPTCOU    OF WCP700TF
+  ITEM HECCIEINT  OF A_WUS900HE_COU FINAL T_HECCIEINT  OF WCP700TF
+  ITEM HECUNAINT  OF A_WUS900HE_COU FINAL T_HECUNAINT  OF WCP700TF
+  ITEM CIECLE     OF A_WUS900HE_COU FINAL FACCIECLE    OF WCP700TF
+  ITEM UNACLE     OF A_WUS900HE_COU FINAL ENTUNACOU    OF WCP700TF
+  ITEM PRJCLE     OF A_WUS900HE_COU FINAL " "
+  ITEM PRACLE     OF A_WUS900HE_COU FINAL " "
+  ITEM IMMCLE     OF A_WUS900HE_COU FINAL " "
+  ITEM PECCLE     OF A_WUS900HE_COU FINAL PECCLE       OF WCP700TF
+  ITEM HECNUMDOC2 OF A_WUS900HE_COU FINAL ""
+  ITEM T_CODDC    OF A_WUS900HE_COU FINAL "C"
+  ITEM T_MNTGL    OF A_WUS900HE_COU FINAL T_TOTCOU
+  ITEM T_MNTORI   OF A_WUS900HE_COU FINAL T_TOTCOU
+  ITEM HECFLGINT  OF A_WUS900HE_COU FINAL T_HECFLGINT  OF WCP700TF
+  ITEM DEVCLE     OF A_WUS900HE_COU FINAL DEVCLE       OF WCP700TF
+  ITEM HISCODMOD  OF A_WUS900HE_COU FINAL G_CODMOD
+  ITEM HISTYPECR  OF A_WUS900HE_COU FINAL "FR" IF FACTYPECR OF WCP700TF = "FA" &
+                                     ELSE FACTYPECR    OF WCP700TF
+  ITEM HISNUMLOT  OF A_WUS900HE_COU FINAL LCPCLE       OF WCP700TF
+
+;
+; Mise à jour du courus inversé par facture réception.
+;
+@if toto
+OUTPUT ARFAC_DETAIL UPDATE AT FACCLE &
+                       VIA   FOUCIECLE, &
+                             FOUCLE   , &
+                             FACCLE   , &
+                             FACCIECLE, &
+                             RECCLE     &
+                       USING FOUCIECLE OF WCP700TF , &
+                             FOUCLE    OF WCP700TF , &
+                             FACCLE    OF WCP700TF , &
+                             FACCIECLE OF WCP700TF , &
+                             RECCLE    OF WCP700TF
+  ITEM FADMNTCOU OF ARFAC_DETAIL = FADMNTCOU OF ARFAC_DETAIL &
+                                 + (0 - ROUND(T_MNTCOU * DEVTAU OF ARRECEPTION))
+@endif
+OUTPUT ARRECEPTION UPDATE AT RECCLE IF RECORD ARRECEPTION EXISTS
+  ITEM RECMNTFAC OF ARRECEPTION = RECMNTFAC OF ARRECEPTION + &
+                                (0 - ROUND(T_MNTCOUREC * DEVTAU OF ARRECEPTION))
+
+;-------------------------------------------------------------------------------
+;
+; TRAITEMENTS GENERAUX A TOUTES LES JOURNALISATION
+;
+
+USE us-900t NOLIST
+
+BUILD

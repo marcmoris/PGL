@@ -1,0 +1,560 @@
+;/T/ Conciliation des paiements
+;
+;/P/ Programmeur..: Thomas BRENNEUR
+;    Date Création: 22 Juillet 1993
+;
+;    Description..: Conciliation des chèques.
+;
+;-------------------------------------------------------------------------------
+;/V/ 3.00.02    Guy Chabot 12-mai-1994 (197,220).
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cp011  ACTIONBAR &
+              MODE LABEL "" AT 2,80 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU, &
+                        T_CIENOM
+
+USE ussectmp  NOLIST
+    "CP011"
+
+USE cp011.hlp NOLIST
+
+USE usactecr NOLIST
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-Ecrans"
+  MENUITEM LABEL "Vérification                    " ACTION DESIGNER D001
+@ELSE
+ACTIONMENU LABEL "Subscreens"
+  MENUITEM LABEL "Verification                    " ACTION DESIGNER D001
+@ENDIF
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP
+
+;-------------------------------------------------------------------------------
+;
+; RELEVÉ DE CONCILIATION
+;
+;
+FILE CPCONCIL_CHQ   PRIMARY &
+                    NOITEM &
+                    NODELETE
+
+  ACCESS  VIA     CIECLE   , &
+                  LBQCPTENC, &
+                  CCLDAT     &
+          USING   T_CIECLEMNU              , &
+                  LBQCPTENC OF CPCONCIL_CHQ, &
+                  CCLDAT OF CPCONCIL_CHQ     &
+          REQUEST LBQCPTENC OF CPCONCIL_CHQ, &
+                  CCLDAT OF CPCONCIL_CHQ
+
+  ACCESS  VIA     CIECLE   , &
+                  LBQCPTENC  &
+          USING   T_CIECLEMNU              , &
+                  LBQCPTENC OF CPCONCIL_CHQ  &
+          REQUEST LBQCPTENC OF CPCONCIL_CHQ  &
+          ORDERBY CIECLE   , &
+                  LBQCPTENC, &
+                  CCLDAT
+
+  ACCESS  VIA     CIECLE &
+          USING   T_CIECLEMNU &
+          ORDERBY CIECLE   , &
+                  LBQCPTENC, &
+                  CCLDAT
+
+  ITEM CIECLE     OF CPCONCIL_CHQ INITIAL T_CIECLEMNU
+  ITEM CCLDATCRE  OF CPCONCIL_CHQ INITIAL SYSDATE
+  ITEM CCLHRECRE  OF CPCONCIL_CHQ INITIAL SYSTIME / 10000
+  ITEM CCLUSRCRE  OF CPCONCIL_CHQ INITIAL LOGONID
+
+;-------------------------------------------------------------------------------
+;
+; LISTE DES CHÈQUES CONCILIÉS
+;
+;
+FILE CPCCL_DETAIL DETAIL &
+                  OCCURS 14 &
+                  NOITEM
+
+  ACCESS  VIA     CIECLE   , &
+                  LBQCPTENC, &
+                  CCLDAT     &
+          USING   CIECLE    OF CPCONCIL_CHQ, &
+                  LBQCPTENC OF CPCONCIL_CHQ, &
+                  CCLDAT    OF CPCONCIL_CHQ  &
+          ORDERBY CIECLE, &
+                  LBQCPTENC, &
+                  CCLDAT, &
+                  PAMCLE
+
+  ITEM  CIECLE    OF CPCCL_DETAIL   INITIAL CIECLE     OF CPCONCIL_CHQ
+  ITEM  LBQCPTENC OF CPCCL_DETAIL   INITIAL LBQCPTENC  OF CPCONCIL_CHQ
+  ITEM  CCLDAT    OF CPCCL_DETAIL   INITIAL CCLDAT     OF CPCONCIL_CHQ
+
+  ITEM CCLDATMOD  OF CPCONCIL_CHQ   INITIAL SYSDATE &
+                                    IF    NOT NEWRECORD OF CPCONCIL_CHQ &
+                                      AND ALTEREDRECORD OF CPCCL_DETAIL
+  ITEM CCLHREMOD  OF CPCONCIL_CHQ   INITIAL SYSTIME / 10000 &
+                                    IF    NOT NEWRECORD OF CPCONCIL_CHQ &
+                                      AND ALTEREDRECORD OF CPCCL_DETAIL
+  ITEM CCLUSRMOD  OF CPCONCIL_CHQ   INITIAL LOGONID &
+                                    IF    NOT NEWRECORD OF CPCONCIL_CHQ &
+                                      AND ALTEREDRECORD OF CPCCL_DETAIL
+
+;-------------------------------------------------------------------------------
+;
+;
+; PAIEMENT À CONCILIER
+;
+;
+FILE CPPAIEMENT   SECONDARY &
+                  NOITEM &
+                  NODELETE &
+                  OCCURS WITH CPCCL_DETAIL
+
+  ACCESS  VIA   CIECLE   , &
+                LBQCPTENC, &
+                PAMCLE     &
+          USING CIECLE    OF CPCCL_DETAIL, &
+                LBQCPTENC OF CPCCL_DETAIL, &
+                PAMCLE    OF CPCCL_DETAIL
+
+
+  ITEM  PAMCCLDAT OF CPPAIEMENT FINAL CPDDAT OF CPCCL_DETAIL
+  ITEM  PAMCCLDAT OF CPPAIEMENT FINAL 0 IF DELETEDRECORD OF CPCCL_DETAIL
+
+
+;
+; Paiements, pour avoir le numéro de paiement interne.
+;
+FILE CPPAIEMENT   DESIGNER &
+                  ALIAS A_PAM_EXISTE &
+                  OPEN READ
+
+;-------------------------------------------------------------------------------
+;
+; Validation et recherche de la description du compte d'encaisse
+;
+FILE MCLIVRET_BQ REFERENCE
+
+  ACCESS  VIA   CIECLE, &
+                LBQCPTENC &
+          USING T_CIECLEMNU, &
+                LBQCPTENC OF CPCONCIL_CHQ
+
+FILE VCPT_DSC REFERENCE &
+              ALIAS A_VCPT_DSC_LBQCPTENC
+
+  ACCESS  VIA   CPTCLE &
+          USING LBQCPTENC OF MCLIVRET_BQ
+
+
+;------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLE      CHARACTER SIZE 4
+TEMPORARY T_LBQCPTENC   CHARACTER SIZE 6
+TEMPORARY T_PAMCLE      CHARACTER SIZE 7
+TEMPORARY T_PAMNUMPIM   CHARACTER SIZE 8
+TEMPORARY T_PAMFLGJOU   CHARACTER SIZE 1
+TEMPORARY T_PAMFLGIMP   CHARACTER SIZE 1
+TEMPORARY T_PAMCODANN   CHARACTER SIZE 1
+TEMPORARY T_PAMCLEDEB   CHARACTER SIZE 7
+TEMPORARY T_PAMCLEFIN   CHARACTER SIZE 7
+TEMPORARY T_SILENT      CHARACTER SIZE 1
+
+
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;------------------------------------------------------------------------------
+
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Conciliation des chèques " &
+@ELSE
+      " Check Reconciliation " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST
+
+
+ALIGN (3,3,19) (,,26) (,49,65)
+
+FIELD LBQCPTENC     OF CPCONCIL_CHQ &
+      HIDDEN &
+      REQUIRED &
+      NOCHANGE &
+      NOCORRECT &
+      LOOKUP &
+        ON A_VCPT_DSC_LBQCPTENC &
+          MESSAGE 411, & ; Ce compte est inexistant
+        ON MCLIVRET_BQ &
+          MESSAGE 569    ; Ce compte n'est pas un compte d'encaisse
+
+FIELD CPTDSC OF A_VCPT_DSC_LBQCPTENC &
+      DISPLAY &
+      SIZE 20
+
+FIELD CCLMNTTOT     OF CPCONCIL_CHQ &
+      DISPLAY
+
+FIELD CCLDAT        OF CPCONCIL_CHQ  FORMAT YYYYMMDD PATTERN "####/##/##"&
+      HIDDEN &
+      REQUIRED &
+      NOCHANGE &
+      NOCORRECT &
+      LOOKUP NOTON CPCONCIL_CHQ &
+        VIA   CIECLE   , &
+              LBQCPTENC, &
+              CCLDAT     &
+        USING CIECLE    OF CPCONCIL_CHQ, &
+              LBQCPTENC OF CPCONCIL_CHQ, &
+              CCLDAT    OF CPCONCIL_CHQ  &
+        MESSAGE 513 ; Ce relevé de conciliation existe déja.
+
+SKIP
+DRAW  6,1  TO  6,80
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+      "       Date de                                            Montant du         " &
+@ELSE
+      "       %%%%%%%                                            %%%%%%%%%%         " &
+@ENDIF
+      AT ,2
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      "       conciliation    No pré-imprimé  No informatique          chèque         " &
+@ELSE
+      "     %%%%%%%%%%%%    %%%%%%%%%%%%%%  %%%%%%%%%%%%%%%          %%%%%%         " &
+@ENDIF
+      AT ,2
+
+ALIGN (8,8,9) (,,26) (,,43) (,,57)
+
+CLUSTER OCCURS WITH CPCCL_DETAIL ID BASE 10
+
+FIELD CPDDAT        OF CPCCL_DETAIL  FORMAT YYYYMMDD PATTERN "####/##/##"&
+      LABEL " " &
+      HIDDEN &
+      DEFAULT CCLDAT OF CPCONCIL_CHQ
+
+FIELD PAMNUMPIM     OF CPCCL_DETAIL &
+      NOCHANGE
+
+FIELD PAMCLE        OF CPCCL_DETAIL &
+      NOCHANGE &
+      IF PAMNUMPIM OF CPCCL_DETAIL = ""
+
+FIELD T_SILENT &
+      SILENT &
+      LOOKUP &
+        NOTON CPCCL_DETAIL &
+          VIA   CIECLE   , &
+                LBQCPTENC, &
+                PAMCLE     &
+          USING CIECLE OF CPCCL_DETAIL   , &
+                LBQCPTENC OF CPCCL_DETAIL, &
+                PAMCLE OF CPCCL_DETAIL     &
+          MESSAGE 563 ; Ce paiement à déja été concilié.
+
+FIELD PAMMNT        OF CPPAIEMENT &
+      DISPLAY
+
+CLUSTER
+
+;------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès pour l'écran par son code.
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Popup sur les comptes d'encaisse disponibles
+;
+PROCEDURE INPUT LBQCPTENC
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE    = T_CIECLEMNU
+    LET T_LBQCPTENC = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc110 PASSING T_CIECLE, T_LBQCPTENC MODE F
+    LET FIELDTEXT = TRUNCATE(T_LBQCPTENC)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Consultation & validation du chèque à concilier
+;
+;
+
+;
+; Acces par le numéro pré-imprimé
+;
+
+PROCEDURE INPUT PAMNUMPIM
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE    = T_CIECLEMNU
+    LET T_LBQCPTENC = LBQCPTENC OF CPCONCIL_CHQ
+    LET T_PAMCLE    = "@"
+    LET T_PAMNUMPIM = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_PAMFLGJOU = "1"
+    LET T_PAMFLGIMP = "1"
+    LET T_PAMCODANN = "0"
+    RUN SCREEN cp101 PASSING  T_CIECLE   , &
+                              T_LBQCPTENC, &
+                              T_PAMCLE   , &
+                              T_PAMNUMPIM, &
+                              T_PAMFLGJOU, &
+                              T_PAMFLGIMP, &
+                              T_PAMCODANN, &
+                              T_PAMCLEDEB, &
+                              T_PAMCLEFIN  &
+                     MODE F
+    LET FIELDTEXT = TRUNCATE(T_PAMNUMPIM)
+  END
+END
+
+
+PROCEDURE EDIT PAMNUMPIM
+BEGIN
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    GET A_PAM_EXISTE VIA CIECLE    , &
+                         LBQCPTENC , &
+                         PAMNUMPIM   &
+                     USING CIECLE    OF CPCCL_DETAIL , &
+                           LBQCPTENC OF CPCCL_DETAIL , &
+                           FIELDTEXT                   &
+                     OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 462 ; Ce paiement n'existe pas.
+
+    LET PAMCLE OF CPCCL_DETAIL = PAMCLE OF A_PAM_EXISTE
+  END
+END
+
+
+;
+; Acces par le numéro physique
+;
+
+PROCEDURE INPUT PAMCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE    = T_CIECLEMNU
+    LET T_LBQCPTENC = LBQCPTENC OF CPCONCIL_CHQ
+    LET T_PAMCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_PAMNUMPIM = "@"
+    LET T_PAMFLGJOU = "1"
+    LET T_PAMFLGIMP = "1"
+    LET T_PAMCODANN = "0"
+    RUN SCREEN cp101 PASSING  T_CIECLE   , &
+                              T_LBQCPTENC, &
+                              T_PAMCLE   , &
+                              T_PAMNUMPIM, &
+                              T_PAMFLGJOU, &
+                              T_PAMFLGIMP, &
+                              T_PAMCODANN, &
+                              T_PAMCLEDEB, &
+                              T_PAMCLEFIN  &
+                     MODE F
+    LET FIELDTEXT = TRUNCATE(T_PAMCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Validation de la sécurité en entrée de donnée
+;
+PROCEDURE INPUT CPDDAT
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+PROCEDURE EDIT T_SILENT
+BEGIN
+  LET CCLMNTTOT OF CPCONCIL_CHQ = CCLMNTTOT OF CPCONCIL_CHQ &
+                                  - PAMMNT OF CPPAIEMENT
+  GET CPPAIEMENT VIA CIECLE    , &
+                     LBQCPTENC , &
+                     PAMCLE      &
+                 USING CIECLE    OF CPCCL_DETAIL , &
+                       LBQCPTENC OF CPCCL_DETAIL , &
+                       PAMCLE    OF CPCCL_DETAIL   &
+                 OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 462 ; Ce paiement n'existe pas.
+  ELSE BEGIN
+
+    LET CCLMNTTOT OF CPCONCIL_CHQ = CCLMNTTOT OF CPCONCIL_CHQ &
+                                    + PAMMNT OF CPPAIEMENT
+
+    IF PAMCODANN OF CPPAIEMENT = "1"
+    THEN ERROR 470 ; Ce paiement est annulé.
+
+    IF PAMDATJOU OF CPPAIEMENT = 0
+    THEN ERROR 463 ; Le paiement n'est pas journalisé.
+
+    IF PAMCCLDAT OF CPPAIEMENT <> 0
+    THEN ERROR 563 ; Ce paiement à déja été concilié.
+
+    LET PAMNUMPIM OF CPCCL_DETAIL = PAMNUMPIM OF CPPAIEMENT
+  END
+END
+
+
+PROCEDURE PROCESS T_SILENT
+BEGIN
+  DISPLAY PAMCLE    OF CPCCL_DETAIL
+  DISPLAY PAMNUMPIM OF CPCCL_DETAIL
+  DISPLAY CCLMNTTOT OF CPCONCIL_CHQ
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Pour éviter que le montant du paiement reste affiché lors de la destruction
+; d'une ligne de conciliation, j'ai mis le fieldtext à blanc.
+;
+;
+PROCEDURE OUTPUT PAMMNT
+BEGIN
+  IF DELETEDRECORD OF CPCCL_DETAIL
+  THEN LET FIELDTEXT = " "
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation de la sécurité en entrée de donnée
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Vérification
+;
+;
+PROCEDURE DESIGNER D001
+BEGIN
+  RUN SCREEN cp011a MODE F PASSING CPCONCIL_CHQ
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF CPCONCIL_CHQ &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF CPCONCIL_CHQ &
+     AND NOT NEWRECORD     OF CPCONCIL_CHQ &
+     AND NOT DELETEDRECORD OF CPCONCIL_CHQ &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  FOR CPCCL_DETAIL
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF CPCCL_DETAIL &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF CPCCL_DETAIL &
+       AND NOT NEWRECORD     OF CPCCL_DETAIL &
+       AND NOT DELETEDRECORD OF CPCCL_DETAIL &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Maintenance du montant total concilié si on déconcilie un paiement
+;
+;
+PROCEDURE DETAIL DELETE
+BEGIN
+  IF NOT DELETEDRECORD OF CPCCL_DETAIL
+  THEN BEGIN
+    LET CCLMNTTOT OF CPCONCIL_CHQ = CCLMNTTOT OF CPCONCIL_CHQ &
+                                    - PAMMNT OF CPPAIEMENT
+    DISPLAY CCLMNTTOT OF CPCONCIL_CHQ
+    DELETE CPCCL_DETAIL
+    DISPLAY PAMMNT OF CPPAIEMENT
+  END
+END
+
+BUILD  DETAIL LIST
+;
+;xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+;*************************** Conciliation des chèques ***************************
+;* Cpt encaisse..: xxxxxx xxxxxxxxxxxxxxxxxxxx   Mnt. concilié.: xxxxxxxxxxxxxx *
+;* Relevé du.....: xxxxxxxx                                                     *
+;********************************************************************************
+;*       Date de                                            Montant du          *
+;*     conciliation    No pré-imprimé  No informatique          chèque          *
+;*       xxxxxxxx         xxxxxxxx         xxxxxxx       xxxxxxxxxxxxxx         *
+;*       xxxxxxxx         xxxxxxxx         xxxxxxx       xxxxxxxxxxxxxx         *
+;*       xxxxxxxx         xxxxxxxx         xxxxxxx       xxxxxxxxxxxxxx         *
+;*       xxxxxxxx         xxxxxxxx         xxxxxxx       xxxxxxxxxxxxxx         *
+;*       xxxxxxxx         xxxxxxxx         xxxxxxx       xxxxxxxxxxxxxx         *
+;*       xxxxxxxx         xxxxxxxx         xxxxxxx       xxxxxxxxxxxxxx         *
+;*       xxxxxxxx         xxxxxxxx         xxxxxxx       xxxxxxxxxxxxxx         *
+;*       xxxxxxxx         xxxxxxxx         xxxxxxx       xxxxxxxxxxxxxx         *
+;*       xxxxxxxx         xxxxxxxx         xxxxxxx       xxxxxxxxxxxxxx         *
+;*       xxxxxxxx         xxxxxxxx         xxxxxxx       xxxxxxxxxxxxxx         *
+;*       xxxxxxxx         xxxxxxxx         xxxxxxx       xxxxxxxxxxxxxx         *
+;*       xxxxxxxx         xxxxxxxx         xxxxxxx       xxxxxxxxxxxxxx         *
+;*       xxxxxxxx         xxxxxxxx         xxxxxxx       xxxxxxxxxxxxxx         *
+;*       xxxxxxxx         xxxxxxxx         xxxxxxx       xxxxxxxxxxxxxx         *
+;********************************************************************************

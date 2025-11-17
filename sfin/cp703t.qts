@@ -1,0 +1,662 @@
+;/T/ Journalisation des payables - Rapports de d penses et ajustements
+;
+;/M/ Martin Perron / Modifier la MAJ de T_HISCLE_ANN avec T_HISCLE_TMP
+;
+;    Date de modif..: 1 décembre 1999
+;
+;//M/GRA01/Francois Richard/1999-06-23
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur...: Micheline B langer
+;    Date Cr ation.: 18-Aout-1992
+;
+;    Date de modif.: 10 juin 1993 par Alain C t
+;                    Adaptation du source pour le module PGL, le source
+;                    venait do projet FINANCE.
+;
+;                    17 juin 1993 par Thomas BRENNEUR
+;                    Adaptation du source pour les comptes   payer
+;
+;    Description...: Programme de journalisation des lots rapports de
+;                    d penses et ajustements de rapports de d penses.
+;
+;    Param tres....: Compagnie     1 fois  Compagnie du menu
+;                    Periode CTB   1 fois
+;                    No Lot        n fois
+;
+;    G n ral.......: Nous avons choisi de mettre a jour les fichiers au fur et
+;                    a mesure du traitement (exemple lot, transaction, etc...)
+;                    plutot que d'attendre d'avoir tout valid  et d'ensuite
+;                    tout mettre a jour.
+;                    Ceci est possible gr ce   INTERBASE et nous permet de
+;                    diminuer consid rablement les lectures/ecritures.
+;                    Si un 'TERMINATE REQUEST' est execut , alors un 'ROLLBACK'
+;                    de toutes les transactions sera effectu .
+;
+;    Particularit .: La partie sp cifique au grand-livre se trouve dans un
+;                    "USE" commun pour toutes les journalisations (US900T.QTS).
+;
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST   ; permet de faire les SET PROCESS NOLIMIT....
+
+RUN cp703t
+
+;
+; Pour arr ter la proc dure en cas d'erreur
+;
+GLOBAL TEMPORARY G_ERREUR       CHARACTER SIZE 5
+;
+; Pour toujours avoir la p riode   journaliser.
+;
+GLOBAL TEMPORARY G_PECCLE       CHARACTER SIZE 4
+;
+; Pour garder la date et l'heure du jour tout le long du traitement.
+;
+GLOBAL TEMPORARY G_DATJOU       DATE
+GLOBAL TEMPORARY G_HREJOU       INTEGER SIZE 4
+;
+; Pour avoir l'annee selon date du jour
+;
+GLOBAL TEMPORARY G_ANN          CHARACTER SIZE 2
+;
+; Identifie le module.
+;
+GLOBAL TEMPORARY G_CODMOD       CHARACTER SIZE 2
+;
+; Parametres de holding pour relation de compte.
+;
+GLOBAL TEMPORARY G_HLDCHTCPTRLT CHARACTER SIZE 1
+;
+; Param tres du holding, si notion de projet Oui/Non.
+;
+GLOBAL TEMPORARY G_HLDNTNPRO    CHARACTER SIZE 1
+;
+; Parametre de holding - devise du grand-livre.
+;
+GLOBAL TEMPORARY G_DEVCLE       CHARACTER SIZE 3
+;
+; Pour savoir s'il y a eu une convertion de montant (dans le cas de
+; pi ces en devises).
+;
+GLOBAL TEMPORARY G_FLGDEV       CHARACTER SIZE 1
+
+;
+; Compte de compte   payer pour les relev s de d penses
+; (ce compte est identifi  dans la charte de compte par le code "RD"
+; dans CPTCAT)
+;
+GLOBAL TEMPORARY G_CPTRD        CHARACTER SIZE 6
+
+;-------------------------------------------------------------------------------
+;
+;
+; Affectation des variables globales selon les param tres du holding.
+;
+;
+REQUEST TRAITE_GENERAL
+
+ACCESS MCHOLDING &
+
+  LINK  "RD" &
+    TO  CPTCAT OF MCCOMPTE
+
+
+SELECT IF CIENMC OF MCHOLDING = "1"
+
+ITEM G_CODMOD       = "CP"
+ITEM G_HLDCHTCPTRLT = HLDCHTCPTRLT OF MCHOLDING
+ITEM G_HLDNTNPRO    = HLDNTNPRO    OF MCHOLDING
+ITEM G_DEVCLE       = DEVCLE       OF MCHOLDING
+ITEM G_FLGDEV       = "0"
+ITEM G_CPTRD        = CPTCLE OF MCCOMPTE
+
+ITEM G_DATJOU RESET AT INITIAL TO SYSDATE
+ITEM G_HREJOU RESET AT INITIAL TO SYSTIME / 10000
+ITEM G_ANN    RESET AT INITIAL TO ASCII(MOD(FLOOR(G_DATJOU / 10000), 100),2)
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; S lection des lots selon les parametres saisies par l'usager.
+;
+; On ne s lectionne que les lots autoris s   la journalisation
+; et qui ne sont pas encore journalis s.
+;
+; On met a jour la date et l'heure de journalisation dans le lot.
+;
+;
+REQUEST SELECTION_ET_MAJ_DU_LOT
+
+ACCESS CPLOT
+
+CHOOSE CIECLE PARM    , &
+       PECCLE PARM    , &
+       LCPCLE PARM    , &
+       LCPDATJOU     0, & ; ne doit pas etre journalis
+       LCPATRJOU   "1", & ; doit  tre autoris    journaliser
+       LCPTYPECR  "RD"    ; Lot de rapports de d penses & ajustements
+
+;
+; On garde la p riode trait e.
+;
+ITEM G_PECCLE = PECCLE OF CPLOT
+
+;
+; On conserve les lots   traiter.
+;
+SUBFILE WCP703LO &
+  INCLUDE CIECLE    OF CPLOT , &
+          PECCLE    OF CPLOT , &
+          LCPCLE    OF CPLOT , &
+          LCPTYPECR OF CPLOT , &
+          LCPDSC    OF CPLOT
+
+;
+; Mise   jour du lot.
+;
+OUTPUT CPLOT UPDATE
+  ITEM LCPDATJOU OF CPLOT FINAL G_DATJOU
+  ITEM LCPHREJOU OF CPLOT FINAL G_HREJOU
+  ITEM LCPUSRJOU OF CPLOT FINAL LOGONID
+
+
+
+;-------------------------------------------------------------------------------
+;
+; On va chercher toutes les pi ces contenus dans les lots   traiter.
+;
+; Et pour chaque pi ce trouv e on :
+;
+;      .Valide que l'imputation balance avec le montant total de la pi ce.
+;      .Se r serve un num ro d' criture.
+;      .Pr pare une  criture comptable (avec le subfile WUS900H)
+;      .Transfert l'imputation dans un subfile (WCP703VE) pour pouvoir
+;       l' clater.
+;      .Va mettre la date & heure de journalisation dans la pi ce
+;      .Cr e la ligne de c dule
+;
+;
+REQUEST SELECTION_ET_MAJ_DES_RAPPORTS
+
+ACCESS *WCP703LO &                    ; Liste des lots   traiter
+  LINK CIECLE OF WCP703LO, &
+       PECCLE OF WCP703LO, &
+       LCPCLE OF WCP703LO  &
+    TO CAPCIECLE, &
+       PECCLE   , &
+       LCPCLE    OF CPCPT_A_PAYER &   ; Pi ces contenues dans ces lots
+
+  LINK REFCIECLE OF CPCPT_A_PAYER, &
+       REFCLETYP OF CPCPT_A_PAYER, &
+       REFCLENUM OF CPCPT_A_PAYER  &
+    TO REFCIECLE, &
+       REFCLETYP, &
+       REFCLENUM OF MCREFERENCE &     ; Employ  qui   fait le rapport de d pense
+                                      ; Pour avoir le nom et la devise
+  LINK FOUCIECLE OF CPCPT_A_PAYER, &
+       FOUCLE    OF CPCPT_A_PAYER, &
+       CAPCLE    OF CPCPT_A_PAYER  &
+    TO FOUCIECLE, &
+       FOUCLE, &
+       CAPCLE    OF CPCAP_IMPUTATION OPTIONAL &
+                                      ; Imputation de la pièce
+  LINK CPTCLE OF CPCAP_IMPUTATION &
+    TO CPTCLE OF MCCOMPTE OPTIONAL & ; Compte comptable
+
+  LINK "1", &
+       G_ANN &
+    TO CIENMC, &
+       HSSCLEANN OF  MCHIS_SEQ OPTIONAL
+                                      ; Pour avoir des num ros d' critures
+
+TEMPORARY T_MESERR CHARACTER SIZE 80 ; Pour les erreurs.
+TEMPORARY T_CPTCAP CHARACTER SIZE 06 ; pour le compte   payer
+
+;
+; pour la g n ration des num ro d'historique
+;
+TEMPORARY T_HISCLE INTEGER UNSIGNED SIZE 4
+TEMPORARY T_HISCLE_SIE INTEGER UNSIGNED SIZE 4
+TEMPORARY T_NUMSEQ INTEGER UNSIGNED SIZE 4
+TEMPORARY T_HISCLE_TMP CHARACTER SIZE 09
+
+TEMPORARY T_HECCIEINT  CHARACTER SIZE 4  ; Pour compagnie d'inter
+TEMPORARY T_HECNUMDOC2 CHARACTER SIZE 6  ; Pour num ro de document-2(= BLANC)
+TEMPORARY T_HECFLGINT  CHARACTER SIZE 1  ; Pour flag d'inter compagnie
+TEMPORARY T_HISDSCGEN  CHARACTER SIZE 40 ; Description g n rale
+TEMPORARY T_HISCLE1    CHARACTER SIZE 4  ; Cl  d'acc s 1, de l'histo.
+TEMPORARY T_HISCLE2    CHARACTER SIZE 15 ; Cl  d'acc s 2, de l'histo.
+TEMPORARY T_HISCLE3    CHARACTER SIZE 15 ; Cl  d'acc s 3, de l'histo.
+TEMPORARY T_MNTAVACUM  FLOAT SIZE 8      ; Pour la validation du montant
+                                         ; d'avance.
+
+
+SORTED ON FOUCIECLE OF CPCPT_A_PAYER &
+       ON FOUCLE    OF CPCPT_A_PAYER &
+       ON CAPCLE    OF CPCPT_A_PAYER
+
+ITEM T_MNTAVACUM SUBTOTAL CCIMNT OF CPCAP_IMPUTATION &
+                            IF CPTCAT OF MCCOMPTE = "AV" &
+                            RESET AT CAPCLE
+
+;
+; On v rifie que le compte   payer balance avec l'imputation.
+;
+ITEM T_MESERR = &
+@IF FRANCAIS
+  "Ventilation hors balance; lot: " + LCPCLE OF CPCPT_A_PAYER + &
+                                "(" + LCPTYPECR OF WCP703LO + ")" + &
+                     " ,document: " + CAPCLE OF CPCPT_A_PAYER + &
+                    " ,r f rence: " + REFCIECLE OF CPCPT_A_PAYER &
+@ELSE
+  "Breakdown out of balance; Batch: " + LCPCLE OF CPCPT_A_PAYER + &
+                                "(" + LCPTYPECR OF WCP703LO + ")" + &
+                     " ,document: " + CAPCLE OF CPCPT_A_PAYER + &
+                    " ,reference: " + REFCIECLE OF CPCPT_A_PAYER &
+@ENDIF
+  IF   CAPCUMMNT OF CPCPT_A_PAYER <> ( CAPMNT    OF CPCPT_A_PAYER - &
+                                       CAPMNTAVA OF CPCPT_A_PAYER ) &
+    OR CAPMNTAVA OF CPCPT_A_PAYER <> ( 0 - T_MNTAVACUM )            &
+    AT CAPCLE                                                       &
+    RESET AT CAPCLE
+
+ITEM G_ERREUR = "ARRET" IF T_MESERR <> "" AT CAPCLE
+
+;
+; affectation du num ro d'historique
+;
+; Ajustement pour le changement de siècle
+ITEM T_NUMSEQ INITIAL 0 & ; NCONVERT( G_ANN ) * 10000000 &
+                        IF NOT RECORD MCHIS_SEQ EXIST &
+                 ELSE HSSNUMSEQ OF MCHIS_SEQ
+
+ITEM T_HISCLE RESET AT INITIAL TO (T_NUMSEQ + 1)
+
+;
+; On incr mente le num ro d'historique   chaque transaction(facture).
+;
+ITEM T_HISCLE COUNT AT CAPCLE
+
+ITEM T_HISCLE_TMP = ASCII(T_HISCLE,9)
+ITEM T_HISCLE_SIE = NCONVERT((G_ANN + T_HISCLE_TMP[3:7]))
+
+;ITEM T_HISCLE_SIE = NCONVERT(G_ANN + ASCII(T_HISCLE,7))
+
+;
+; Compte   payer des relev s de d penses. C'est toujours celui du plan
+; comptable.
+;
+ITEM T_CPTCAP = G_CPTRD
+;
+; Il n'y a pas d'intercompagnie avec des relev s de d penses. Donc la
+; compagnie d'inter est toujours la compagnie du relev .
+;
+ITEM T_HECCIEINT = CAPCIECLE OF CPCPT_A_PAYER
+
+;
+; Il n'y a pas d'intercompagnie avec des relev s de d penses.
+;
+ITEM T_HECFLGINT = "0"
+
+;
+; Description g n rale : on prend le nom de l'employ .
+;
+ITEM T_HISDSCGEN = REFNOM OF MCREFERENCE
+
+;
+; On assigne la cl  du rapport de d pense   l'historique.
+;
+ITEM T_HISCLE1 = FOUCIECLE OF CPCPT_A_PAYER
+ITEM T_HISCLE2 = FOUCLE    OF CPCPT_A_PAYER
+ITEM T_HISCLE3 = CAPCLE    OF CPCPT_A_PAYER
+
+
+;
+; Sous-fichier des erreurs
+;
+SUBFILE WUS900ER KEEP &
+                 AT CAPCLE &
+                 IF T_MESERR <> "" &
+  INCLUDE CIECLE OF WCP703LO ALIAS CIECLE, &
+          G_PECCLE           ALIAS PECCLE, &
+          T_MESERR
+
+
+;
+;
+; Sous fichier commun   toutes les journalisations, sert   mettre   jour la
+; table MCHISTO.
+;
+;
+SUBFILE WUS900H AT CAPCLE &
+  INCLUDE T_HISCLE_SIE                  ALIAS HISCLE    , &
+          CAPCIECLE OF CPCPT_A_PAYER    ALIAS HISCIECLE , &
+          REFCIECLE OF CPCPT_A_PAYER                    , &
+          REFCLETYP OF CPCPT_A_PAYER                    , &
+          REFCLENUM OF CPCPT_A_PAYER                    , &
+          CAPCLE    OF CPCPT_A_PAYER    ALIAS HISNUMDOC , &
+          PECCLE    OF CPCPT_A_PAYER                    , &
+          LCPCLE    OF CPCPT_A_PAYER    ALIAS HISNUMLOT , &
+          CAPDAT    OF CPCPT_A_PAYER    ALIAS HISDAT    , &
+          G_DATJOU                      ALIAS HISDATJOU , &
+          CAPTYPECR OF CPCPT_A_PAYER    ALIAS HISTYPECR , &
+          T_HISDSCGEN                   ALIAS HISDSCGEN , &
+          CAPDSC1   OF CPCPT_A_PAYER    ALIAS HISDSCSAI , &
+          CAPDSC2   OF CPCPT_A_PAYER    ALIAS HISDSCSAI2, &
+          CAPUSRCRE OF CPCPT_A_PAYER    ALIAS HISUSRCRE , &
+          DEVCLE    OF MCREFERENCE      ALIAS DEVCLE    , &
+          T_HISCLE1                     ALIAS HISCLE1   , &
+          T_HISCLE2                     ALIAS HISCLE2   , &
+          T_HISCLE3                     ALIAS HISCLE3
+
+
+;
+; Sous-fichier des imputations comptables utilis  tout au long du traitement
+; servant   g n rer les ventilations comptables compl tes.
+;
+SUBFILE WCP703VE &
+  INCLUDE FOUCIECLE    OF CPCPT_A_PAYER, &
+          FOUCLE       OF CPCPT_A_PAYER, &
+          CAPCLE       OF CPCPT_A_PAYER, &
+          CAPCIECLE    OF CPCPT_A_PAYER, &
+          CAPTYPECR    OF CPCPT_A_PAYER, &
+          PECCLE       OF CPCPT_A_PAYER, &
+          LCPCLE       OF CPCPT_A_PAYER, &
+          REFCIECLE    OF CPCPT_A_PAYER, &
+          REFCLETYP    OF CPCPT_A_PAYER, &
+          REFCLENUM    OF CPCPT_A_PAYER, &
+          CAPDAT       OF CPCPT_A_PAYER, &
+          DEVCLE       OF MCREFERENCE  , &
+          CAPDSC1      OF CPCPT_A_PAYER, &
+          CAPDSC2      OF CPCPT_A_PAYER, &
+          T_HISCLE_SIE ALIAS T_HISCLE     , &
+          PRJCLE       OF CPCAP_IMPUTATION, &
+          PRACLE       OF CPCAP_IMPUTATION, &
+          IMMCLE       OF CPCAP_IMPUTATION, &
+          CPTCLE       OF CPCAP_IMPUTATION, &
+          UNACLE       OF CPCAP_IMPUTATION, &
+          CCICODDC     OF CPCAP_IMPUTATION, &
+          CCIMNT       OF CPCAP_IMPUTATION, &
+          CCITAXTYPTPS OF CPCAP_IMPUTATION, &
+          CCITAXCODTPS OF CPCAP_IMPUTATION, &
+          CCITAXTYPTVQ OF CPCAP_IMPUTATION, &
+          CCITAXCODTVQ OF CPCAP_IMPUTATION, &
+          CCIMNTTPS    OF CPCAP_IMPUTATION, &
+          CCIMNTTVQ    OF CPCAP_IMPUTATION, &
+          CCIMNTCTI    OF CPCAP_IMPUTATION, &
+          CCIMNTRTI    OF CPCAP_IMPUTATION, &
+          T_HECCIEINT                     , &
+          T_HECNUMDOC2                    , &
+          T_HECFLGINT                     , &
+          T_CPTCAP
+
+;
+; On enregistre la date & heure de journalisation dans le
+; compte   payer
+;
+OUTPUT CPCPT_A_PAYER UPDATE AT CAPCLE
+  ITEM CAPDATJOU OF CPCPT_A_PAYER FINAL G_DATJOU
+  ITEM CAPHREJOU OF CPCPT_A_PAYER FINAL G_HREJOU
+  ITEM HISCLE    OF CPCPT_A_PAYER FINAL T_HISCLE_SIE
+  ITEM CAPCPTCAP OF CPCPT_A_PAYER FINAL T_CPTCAP
+  ;
+  ; La c dule n'est pas accessible par l'usager pour un rapport de d pense
+  ; donc on va mettre   jour le montant cumul
+  ;
+  ITEM CAPCUMCED OF CPCPT_A_PAYER FINAL CAPMNT    OF CPCPT_A_PAYER - &
+                                        CAPMNTAVA OF CPCPT_A_PAYER   &
+                                  IF    CAPTYPECR OF CPCPT_A_PAYER = "RD"
+
+
+;
+; Ajout de la ligne de c dule. L'usager n'  pas acc s aux c dules de
+; paiement dans les comptes   payer. Mais la ligne de c dule est
+; n c ssaire pour le traitement des paiements.
+;
+OUTPUT CPCAP_CEDULE ADD AT CAPCLE IF CAPTYPECR OF CPCPT_A_PAYER = "RD"
+
+  ITEM FOUCIECLE OF CPCAP_CEDULE FINAL FOUCIECLE OF CPCPT_A_PAYER
+  ITEM FOUCLE    OF CPCAP_CEDULE FINAL FOUCLE    OF CPCPT_A_PAYER
+  ITEM CAPCLE    OF CPCAP_CEDULE FINAL CAPCLE    OF CPCPT_A_PAYER
+  ITEM CPCCLELIG OF CPCAP_CEDULE FINAL 1
+  ITEM CPCDATDUE OF CPCAP_CEDULE FINAL CAPDATNET OF CPCPT_A_PAYER
+  ITEM CPCMNT    OF CPCAP_CEDULE FINAL CAPMNT    OF CPCPT_A_PAYER - &
+                                       CAPMNTAVA OF CPCPT_A_PAYER
+
+
+;
+; mise a jour du fichier des num ro d'historique
+;
+OUTPUT MCHIS_SEQ ADD UPDATE AT FINAL
+  ITEM CIENMC    OF MCHIS_SEQ INITIAL "1"
+  ITEM HSSCLEANN OF MCHIS_SEQ INITIAL G_ANN
+  ITEM HSSNUMSEQ OF MCHIS_SEQ FINAL   ( T_HISCLE  - 1 )
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Mise   jour de la date de journalisation dans l'historique de la pi ce
+; r f r e pour les ajustements de rapports de d penses.
+;
+;
+REQUEST MAJ_CAP_HISTO
+
+ACCESS *WUS900H &
+  LINK REFCIECLE OF WUS900H, &
+       REFCLENUM OF WUS900H, &
+       HISNUMDOC OF WUS900H  &
+    TO CPHCLE1  , &
+       CPHCLE2  , &
+       CPHCLE3  OF CPCAP_HISTO
+
+SELECT WUS900H IF   HISTYPECR OF WUS900H = "AR"
+
+OUTPUT CPCAP_HISTO UPDATE
+  ITEM CPHDATJOU OF CPCAP_HISTO FINAL HISDATJOU OF WUS900H
+
+
+;-------------------------------------------------------------------------------
+;
+; On relis toutes les lignes d'imputations de tous les rapports de d penses
+;   traiter. Et chaque ligne est trait e de fa on ind pendante.
+;
+; Chaque ligne d'imputation est compos e de :
+;
+;         Un compte/unit    = compte/unit  imput  par l'usager
+;         Un montant net    = Montant de l'imputation moins les taxes
+;                             remboursables (CTI & RTI)
+;         Un montant de CTI = Montant remboursable de la taxe f d rale
+;         Un montant de RTI = Montant remboursable de la taxe provinciale
+;
+; Et chaque ligne d'imputation est " clat e" en plusieurs lignes
+; d' critures qui contiennent chacune un compte/unit  et un montant :
+;
+;
+;         Compte                              Montant           D bit/Cr dit
+;         ------                              -------           ------------
+;        -Compte/unit  imput  par l'usager    Montant net            D
+;         (unit  de l'imputation)
+;        -Compte de taxe f d rale   recevoir  Montant CTI            D
+;         (unit  de bilan)
+;        -Compte de taxe provinciale          Montant RTI            D
+;         recevoir (unit  de bilan)
+;        -Compte de compte   payer des        Montant brut           C
+;         rapports de d penses
+;         (unit  de bilan)
+;
+;
+REQUEST ECLATEMENT_IMPUTATION     TERMINATE IF G_ERREUR = "ARRET"
+
+ACCESS *WCP703VE &
+  LINK CCITAXTYPTPS OF WCP703VE, &
+       CCITAXCODTPS OF WCP703VE &
+    TO TAXCLETYP, &
+       TAXCLECOD OF MCTAXE ALIAS A_TAX_TPS OPTIONAL &
+
+  LINK CCITAXTYPTVQ OF WCP703VE, &
+       CCITAXCODTVQ OF WCP703VE &
+    TO TAXCLETYP, &
+       TAXCLECOD OF MCTAXE ALIAS A_TAX_TVP OPTIONAL &
+
+  LINK CAPCIECLE OF WCP703VE, &
+       UNACLE    OF WCP703VE &
+    TO CIECLE, &
+       UNACLE OF MCUNITE_ADM OPTIONAL &
+
+  LINK CAPCIECLE OF WCP703VE &
+    TO CIECLE    OF MCCOMPAGNIE &
+
+  LINK T_HECCIEINT OF WCP703VE &
+    TO CIECLE OF MCCOMPAGNIE  ALIAS A_MCCIE_INTER
+
+
+TEMPORARY T_CCIMNT    FLOAT     SIZE 8  ; Calcul du montant brut de l'imputation
+TEMPORARY T_MNTDEP    FLOAT     SIZE 8  ; pour les montants de d penses
+TEMPORARY T_MNTCTI    FLOAT     SIZE 8  ; Pour les montants de CTI
+TEMPORARY T_MNTRTI    FLOAT     SIZE 8  ; pour les montants de RTI
+TEMPORARY T_MNTCAP    FLOAT     SIZE 8  ; pour les montants payable
+TEMPORARY T_CODDCD    CHARACTER SIZE 1  ; pour le code cr dit pour le C.A.P.
+TEMPORARY T_PRJCLE    CHARACTER SIZE 8  ; Projet de l'imputation.
+TEMPORARY T_PRACLE    CHARACTER SIZE 3  ; Activit  de l'imputation.
+TEMPORARY T_IMMCLE    CHARACTER SIZE 12
+;
+; Calcul du montant brut (avec taxe) pour le compte   payer
+;
+ITEM T_MNTCAP = CCIMNT OF WCP703VE
+ITEM T_MNTCAP = T_MNTCAP + CCIMNTTPS OF WCP703VE IF TAXMOD OF A_TAX_TPS = "S"
+ITEM T_MNTCAP = T_MNTCAP + CCIMNTTVQ OF WCP703VE IF TAXMOD OF A_TAX_TVP = "S"
+;
+; Le compte de d pense est comptabilis  sans les taxes remboursables.
+;
+ITEM T_MNTDEP = T_MNTCAP - CCIMNTCTI OF WCP703VE &
+                         - CCIMNTRTI OF WCP703VE
+
+ITEM T_CODDCD    RESET AT INITIAL TO "C"
+
+
+;
+; sous fichier utilis  dans le traitement g n ral des journalisations
+; et servant a mettre a jour GLHIS_ECR.
+;
+
+;
+; Ajout du COMPTE A PAYER
+;
+SUBFILE WUS900HE KEEP IF T_MNTCAP <> 0 &
+  INCLUDE T_HISCLE     OF WCP703VE      ALIAS HISCLE    , &
+          CAPCIECLE    OF WCP703VE      ALIAS HISCIECLE , &
+          T_CPTCAP     OF WCP703VE      ALIAS CPTCLE    , &
+          T_HECCIEINT  OF WCP703VE      ALIAS HECCIEINT , &
+          CIEUNABIL    OF A_MCCIE_INTER ALIAS HECUNAINT , &
+          CAPCIECLE    OF WCP703VE      ALIAS CIECLE    , &
+          CIEUNABIL    OF MCCOMPAGNIE   ALIAS UNACLE    , &
+          T_PRJCLE                      ALIAS PRJCLE    , &
+          T_PRACLE                      ALIAS PRACLE    , &
+          T_IMMCLE                      ALIAS IMMCLE    , &
+          PECCLE       OF WCP703VE                      , &
+          T_HECNUMDOC2 OF WCP703VE      ALIAS HECNUMDOC2, &
+          T_CODDCD                      ALIAS T_CODDC   , &
+          T_MNTCAP                      ALIAS T_MNTGL   , &
+          T_MNTCAP                      ALIAS T_MNTORI  , &
+          T_HECFLGINT  OF WCP703VE      ALIAS HECFLGINT , &
+          DEVCLE       OF WCP703VE                      , &
+          G_CODMOD                      ALIAS HISCODMOD , &
+          CAPTYPECR    OF WCP703VE      ALIAS HISTYPECR , &
+          LCPCLE       OF WCP703VE      ALIAS HISNUMLOT
+
+
+;
+; Ajout du montant de TPS   recevoir.
+;
+OUTPUT *WUS900HE ALIAS A_WUS900HE_TPS ADD IF CCIMNTCTI OF WCP703VE <> 0
+  ITEM HISCLE     OF A_WUS900HE_TPS FINAL T_HISCLE     OF WCP703VE
+  ITEM HISCIECLE  OF A_WUS900HE_TPS FINAL CAPCIECLE    OF WCP703VE
+  ITEM CPTCLE     OF A_WUS900HE_TPS FINAL TAXCPTCTICAP OF A_TAX_TPS
+  ITEM HECCIEINT  OF A_WUS900HE_TPS FINAL T_HECCIEINT  OF WCP703VE
+  ITEM HECUNAINT  OF A_WUS900HE_TPS FINAL CIEUNABIL    OF A_MCCIE_INTER
+  ITEM CIECLE     OF A_WUS900HE_TPS FINAL CAPCIECLE    OF WCP703VE
+  ITEM UNACLE     OF A_WUS900HE_TPS FINAL CIEUNABIL    OF MCCOMPAGNIE
+  ITEM PRJCLE     OF A_WUS900HE_TPS FINAL " "
+  ITEM PRACLE     OF A_WUS900HE_TPS FINAL " "
+  ITEM IMMCLE     OF A_WUS900HE_TPS FINAL " "
+  ITEM PECCLE     OF A_WUS900HE_TPS FINAL PECCLE       OF WCP703VE
+  ITEM HECNUMDOC2 OF A_WUS900HE_TPS FINAL T_HECNUMDOC2 OF WCP703VE
+  ITEM T_CODDC    OF A_WUS900HE_TPS FINAL "D"
+  ITEM T_MNTGL    OF A_WUS900HE_TPS FINAL CCIMNTCTI    OF WCP703VE
+  ITEM T_MNTORI   OF A_WUS900HE_TPS FINAL CCIMNTCTI    OF WCP703VE
+  ITEM HECFLGINT  OF A_WUS900HE_TPS FINAL T_HECFLGINT  OF WCP703VE
+  ITEM DEVCLE     OF A_WUS900HE_TPS FINAL DEVCLE       OF WCP703VE
+  ITEM HISCODMOD  OF A_WUS900HE_TPS FINAL G_CODMOD
+  ITEM HISTYPECR  OF A_WUS900HE_TPS FINAL CAPTYPECR    OF WCP703VE
+  ITEM HISNUMLOT  OF A_WUS900HE_TPS FINAL LCPCLE       OF WCP703VE
+
+
+;
+; Ajout du montant de TVP   recevoir.
+;
+OUTPUT *WUS900HE ALIAS A_WUS900HE_TVP ADD IF CCIMNTRTI OF WCP703VE <> 0
+  ITEM HISCLE     OF A_WUS900HE_TVP FINAL T_HISCLE     OF WCP703VE
+  ITEM HISCIECLE  OF A_WUS900HE_TVP FINAL CAPCIECLE    OF WCP703VE
+  ITEM CPTCLE     OF A_WUS900HE_TVP FINAL TAXCPTCTICAP OF A_TAX_TVP
+  ITEM HECCIEINT  OF A_WUS900HE_TVP FINAL T_HECCIEINT  OF WCP703VE
+  ITEM HECUNAINT  OF A_WUS900HE_TVP FINAL CIEUNABIL    OF A_MCCIE_INTER
+  ITEM CIECLE     OF A_WUS900HE_TVP FINAL CAPCIECLE    OF WCP703VE
+  ITEM UNACLE     OF A_WUS900HE_TVP FINAL CIEUNABIL    OF MCCOMPAGNIE
+  ITEM PRJCLE     OF A_WUS900HE_TVP FINAL " "
+  ITEM PRACLE     OF A_WUS900HE_TVP FINAL " "
+  ITEM IMMCLE     OF A_WUS900HE_TVP FINAL " "
+  ITEM PECCLE     OF A_WUS900HE_TVP FINAL PECCLE       OF WCP703VE
+  ITEM HECNUMDOC2 OF A_WUS900HE_TVP FINAL T_HECNUMDOC2 OF WCP703VE
+  ITEM T_CODDC    OF A_WUS900HE_TVP FINAL "D"
+  ITEM T_MNTGL    OF A_WUS900HE_TVP FINAL CCIMNTRTI    OF WCP703VE
+  ITEM T_MNTORI   OF A_WUS900HE_TVP FINAL CCIMNTRTI    OF WCP703VE
+  ITEM HECFLGINT  OF A_WUS900HE_TVP FINAL T_HECFLGINT  OF WCP703VE
+  ITEM DEVCLE     OF A_WUS900HE_TVP FINAL DEVCLE       OF WCP703VE
+  ITEM HISCODMOD  OF A_WUS900HE_TVP FINAL G_CODMOD
+  ITEM HISTYPECR  OF A_WUS900HE_TVP FINAL CAPTYPECR    OF WCP703VE
+  ITEM HISNUMLOT  OF A_WUS900HE_TVP FINAL LCPCLE       OF WCP703VE
+
+
+;
+; Ajout du compte de D PENSE.
+;
+OUTPUT *WUS900HE ALIAS A_WUS900HE_REV ADD IF T_MNTDEP <> 0
+  ITEM HISCLE     OF A_WUS900HE_REV FINAL T_HISCLE     OF WCP703VE
+  ITEM HISCIECLE  OF A_WUS900HE_REV FINAL CAPCIECLE    OF WCP703VE
+  ITEM CPTCLE     OF A_WUS900HE_REV FINAL CPTCLE       OF WCP703VE
+  ITEM HECCIEINT  OF A_WUS900HE_REV FINAL T_HECCIEINT  OF WCP703VE
+  ITEM HECUNAINT  OF A_WUS900HE_REV FINAL CIEUNABIL    OF A_MCCIE_INTER
+  ITEM CIECLE     OF A_WUS900HE_REV FINAL CAPCIECLE    OF WCP703VE
+  ITEM UNACLE     OF A_WUS900HE_REV FINAL UNACLE       OF WCP703VE
+  ITEM PRJCLE     OF A_WUS900HE_REV FINAL PRJCLE       OF WCP703VE
+  ITEM PRACLE     OF A_WUS900HE_REV FINAL PRACLE       OF WCP703VE
+  ITEM IMMCLE     OF A_WUS900HE_REV FINAL IMMCLE       OF WCP703VE
+  ITEM PECCLE     OF A_WUS900HE_REV FINAL PECCLE       OF WCP703VE
+  ITEM HECNUMDOC2 OF A_WUS900HE_REV FINAL T_HECNUMDOC2 OF WCP703VE
+  ITEM T_CODDC    OF A_WUS900HE_REV FINAL CCICODDC     OF WCP703VE
+  ITEM T_MNTGL    OF A_WUS900HE_REV FINAL T_MNTDEP
+  ITEM T_MNTORI   OF A_WUS900HE_REV FINAL T_MNTDEP
+  ITEM HECFLGINT  OF A_WUS900HE_REV FINAL T_HECFLGINT  OF WCP703VE
+  ITEM DEVCLE     OF A_WUS900HE_REV FINAL DEVCLE       OF WCP703VE
+  ITEM HISCODMOD  OF A_WUS900HE_REV FINAL G_CODMOD
+  ITEM HISTYPECR  OF A_WUS900HE_REV FINAL CAPTYPECR    OF WCP703VE
+  ITEM HISNUMLOT  OF A_WUS900HE_REV FINAL LCPCLE       OF WCP703VE
+
+
+
+;-------------------------------------------------------------------------------
+;
+; TRAITEMENTS GENERAUX A TOUTES LES JOURNALISATION
+;
+
+USE us-900t NOLIST
+
+BUILD

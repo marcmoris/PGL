@@ -1,0 +1,432 @@
+;/T/ Mauvaise créances - Ventilation de fatures
+;
+;/P/ Programmeur..: Alain Côté
+;    Date Création: 30 juin 1993
+;
+;    Description..: ...
+;
+;-------------------------------------------------------------------------------
+;/V/ 3.00.02    Guy Chabot 12-mai-1994 (197).
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cr009b ACTIONBAR &
+              MODE LABEL "" AT 2,80 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU  , &
+                        T_CIENOM     , &
+                        D_LCRATRJOU  , &
+                        D_DPONOM     , &
+                        CRDEPOT
+
+USE ussectmp   NOLIST
+    "CR009B"
+
+USE cr009b.hlp NOLIST
+
+USE usactecr   NOLIST
+
+;
+; Ouverture d'une transaction QUERY indépendante de l'écran maitre.
+;
+USE ustrasse   NOLIST
+
+;-------------------------------------------------------------------------------
+;
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de compagnie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie du menu.
+DEFINE    D_LCRATRJOU CHARACTER SIZE 1  ; Si le lot est autorisé.
+DEFINE    D_DPONOM    CHARACTER SIZE 40 ; Nom identifiant le dépôt.
+
+;-------------------------------------------------------------------------------
+
+FILE CRDEPOT          MASTER
+
+;
+; Ventilation factures.
+;
+FILE CRCAR_HISTO      PRIMARY &
+                      NOITEM  &
+                      OCCURS 14
+
+  ACCESS VIA CRHCLE1, &
+             CRHCLE2, &
+             CRHTYPECR &
+         USING CIECLE OF CRDEPOT, &
+               DPOCLE OF CRDEPOT, &
+               DPOTYPECR OF CRDEPOT &
+         ORDERBY CIECLE, &
+                 CARCLE
+
+  ITEM CIECLE    OF CRCAR_HISTO INITIAL CIECLE    OF CRDEPOT
+  ITEM CRHCLE1   OF CRCAR_HISTO INITIAL CIECLE    OF CRDEPOT
+  ITEM CRHCLE2   OF CRCAR_HISTO INITIAL DPOCLE    OF CRDEPOT
+  ITEM CRHTYPECR OF CRCAR_HISTO INITIAL DPOTYPECR OF CRDEPOT
+  ITEM CRHTYPTRA OF CRCAR_HISTO INITIAL DPOTYPECR OF CRDEPOT
+  ITEM CRHTIMSTP OF CRCAR_HISTO INITIAL SYSDATE * 1000000 + ROUND(SYSTIME / 100)
+  ITEM CRHDAT    OF CRCAR_HISTO FINAL   DPODAT    OF CRDEPOT
+  ITEM PECCLE    OF CRCAR_HISTO FINAL   PECCLE    OF CRDEPOT
+  ITEM LCRCLE    OF CRCAR_HISTO FINAL   LCRCLE    OF CRDEPOT
+  ITEM CRHMNTREC OF CRCAR_HISTO FINAL   CRHMNTCAR OF CRCAR_HISTO
+  ITEM CRHMNTESC OF CRCAR_HISTO FINAL   0
+
+;
+; Validation de la facture et de la cédule. Pour avoir le montant due...
+;
+FILE VCAR_CCD         DESIGNER &
+                      OPEN READ SHARE &
+                      OCCURS WITH CRCAR_HISTO
+
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_SILENT    CHARACTER SIZE 1  ; Champ silent
+
+TEMPORARY T_REFCIECLE CHARACTER SIZE 4  ; Popup sur le C.A.R./cédule.
+TEMPORARY T_REFCLENUM CHARACTER SIZE 6  ; Popup sur le C.A.R./cédule.
+TEMPORARY T_CARCLE    CHARACTER SIZE 15 ; Popup sur le C.A.R./cédule.
+TEMPORARY T_CCDCLELIG INTEGER   SIZE 2  ; Popup sur le C.A.R./cédule.
+
+;
+; Solde à recevoir(cédule).
+;
+DEFINE D_SLDCED FLOAT SIZE 8 =  CCDMNT      OF VCAR_CCD &
+                               + V_CCDMNTAUG OF VCAR_CCD &
+                               - V_CCDMNTDIM OF VCAR_CCD
+
+
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Ventilation des factures " &
+@ELSE
+      " Invoice Breakdown " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST
+
+SKIP
+
+ALIGN(3,3,19) (,,26)
+
+FIELD REFCLENUM OF CRDEPOT &
+        LABEL "Client........:" &
+        FIXED
+
+FIELD D_DPONOM &
+        FIXED
+
+
+ALIGN(,3,19)
+
+FIELD DPOMNTPAM OF CRDEPOT &
+        FIXED
+
+SKIP
+
+DRAW ,1 TO ,80
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+  "                No          Montant        Montant" &
+@ELSE
+  "              Sched.     To receive      Write-off" &
+@ENDIF
+  AT ,3
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+  "Facture       Cédule     à recevoir          radié" &
+@ELSE
+  "Invoice         No           amount         amount" &
+@ENDIF
+  AT ,3
+
+
+ALIGN (3,2,3) (,,19) (,,25) (,,40)
+
+CLUSTER OCCURS WITH CRCAR_HISTO ID BASE 10
+
+FIELD CARCLE    OF CRCAR_HISTO  HIDDEN LABEL " " &
+        SIZE 12  &
+        REQUIRED &
+        NOCHANGE &
+        ;
+        ; Validation du numéro, la vue VCAR_CCD sélectionne que les types
+        ; FA,CR et NA.
+        ;
+        LOOKUP ON VCAR_CCD &
+          VIA CIECLE, &
+              CARCLE, &
+              REFCLENUM &
+          USING CIECLE    OF CRCAR_HISTO, &
+                CARCLE    OF CRCAR_HISTO, &
+                REFCLENUM OF CRDEPOT      &
+          MESSAGE 634 ; Cette facture n'existe pas.
+
+FIELD CCDCLELIG OF CRCAR_HISTO &
+        REQUIRED  &
+        NOCHANGE
+
+FIELD T_SILENT &
+        SILENT &
+        LOOKUP &
+          ON VCAR_CCD &
+            VIA CIECLE, &
+                CARCLE, &
+                CCDCLELIG &
+            USING CIECLE    OF CRCAR_HISTO, &
+                  CARCLE    OF CRCAR_HISTO, &
+                  CCDCLELIG OF CRCAR_HISTO  &
+            MESSAGE 694, & ; Cette ligne de cédule n'existe pas
+          NOTON CRCAR_HISTO &
+            VIA CIECLE   , &
+                CARCLE   , &
+                CCDCLELIG, &
+                CRHTYPECR, &
+                CRHCLE1  , &
+                CRHCLE2    &
+            USING CIECLE    OF CRCAR_HISTO, &
+                  CARCLE    OF CRCAR_HISTO, &
+                  CCDCLELIG OF CRCAR_HISTO, &
+                  CRHTYPECR OF CRCAR_HISTO, &
+                  CIECLE    OF CRDEPOT    , &
+                  DPOCLE    OF CRDEPOT      &
+            MESSAGE 663 ; Cette facture/cédule est déjà présente.
+
+FIELD D_SLDCED &
+        DISPLAY &
+        PICTURE "^^,^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5
+
+FIELD CRHMNTCAR OF CRCAR_HISTO &
+        DISPLAY
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;------------------------------------------------------------------------------
+;
+;
+; Popup sur les factures/cédule.
+;
+;
+PROCEDURE INPUT CARCLE
+BEGIN
+
+  USE ussecent NOLIST
+
+  LET T_CCDCLELIG = 0
+  ;
+  ; Sous-écran de consultation des factures.
+  ;
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_REFCIECLE = REFCIECLE OF CRDEPOT
+    LET T_REFCLENUM = REFCLENUM OF CRDEPOT
+    LET T_CARCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cr105 MODE F PASSING T_REFCIECLE, &
+                                    T_REFCLENUM, &
+                                    T_CIECLEMNU, &
+                                    T_CARCLE   , &
+                                    T_CCDCLELIG
+    IF 0 <> SIZE( TRUNCATE( T_CARCLE ) )
+    THEN LET FIELDTEXT = T_CARCLE
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du numéro de facture.
+;
+;
+PROCEDURE EDIT CARCLE
+BEGIN
+  IF CARDATJOU OF VCAR_CCD = 0
+  THEN ERROR 636 ; La facture doit être journalisée pour la référer.
+END
+
+
+;------------------------------------------------------------------------------
+;
+;
+; Popup sur la cédule.
+;
+;
+PROCEDURE INPUT CCDCLELIG
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CARCLE    = CARCLE    OF CRCAR_HISTO
+    LET T_CCDCLELIG = 0
+    RUN SCREEN cr107 MODE F PASSING T_CIECLEMNU, &
+                                    T_CARCLE   , &
+                                    T_CCDCLELIG
+    LET FIELDTEXT = ASCII(T_CCDCLELIG)
+  END
+  ;
+  ; On assigne le numéro de cédule choisi par l'usager lors de l'appel
+  ; du popup sur les factures(INPUT CARCLE).
+  ;
+  IF     NOT FINDMODE &
+     AND 0 = SIZE( TRUNCATE( FIELDTEXT ) ) &
+     AND T_CCDCLELIG <> 0
+  THEN LET FIELDTEXT = ASCII( T_CCDCLELIG )
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE PROCESS T_SILENT
+BEGIN
+  IF NEWRECORD OF CRCAR_HISTO
+  THEN BEGIN
+    ;
+    ; Mise à jour du montant de la mauvaise créance.
+    ;
+    LET DPOMNTPAM OF CRDEPOT = DPOMNTPAM OF CRDEPOT - &
+                               CRHMNTCAR OF CRCAR_HISTO
+
+    LET CRHMNTCAR OF CRCAR_HISTO = D_SLDCED
+
+    LET DPOMNTPAM OF CRDEPOT = DPOMNTPAM OF CRDEPOT + &
+                               CRHMNTCAR OF CRCAR_HISTO
+
+    DISPLAY D_SLDCED
+    DISPLAY CRHMNTCAR OF CRCAR_HISTO
+    DISPLAY DPOMNTPAM OF CRDEPOT
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  FOR CRCAR_HISTO
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF CRCAR_HISTO &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF CRCAR_HISTO &
+       AND NOT NEWRECORD     OF CRCAR_HISTO &
+       AND NOT DELETEDRECORD OF CRCAR_HISTO &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+    ;
+    ; La ventilation est non modifiable aprés journalisation.
+    ;
+    IF (    NEWRECORD     OF CRCAR_HISTO &
+         OR ALTEREDRECORD OF CRCAR_HISTO &
+         OR DELETEDRECORD OF CRCAR_HISTO &
+       ) &
+       AND DPODATJOU OF CRDEPOT <> 0
+    THEN ERROR 614 ; Impossible de mettre à jour la transaction est journalisée.
+    ;
+    ; Le timbre de modification est mis à jour si l'usager modifie
+    ; la table CRCAR_HISTO.
+    ;
+    IF        NEWRECORD OF CRCAR_HISTO &
+       OR ALTEREDRECORD OF CRCAR_HISTO &
+       OR DELETEDRECORD OF CRCAR_HISTO
+    THEN BEGIN
+      LET DPODATMOD OF CRDEPOT = SYSDATE
+      LET DPOHREMOD OF CRDEPOT = SYSTIME / 10000
+      LET DPOUSRMOD OF CRDEPOT = LOGONID
+    END
+  END
+  ;
+  ; L'imputation est non modifiable aprés que le lot est été autorisé.
+  ;
+  IF     D_LCRATRJOU = "1" &
+     AND DPODATJOU OF CRDEPOT = 0
+  THEN ERROR 713 ; Impossible de mettre à jour la transaction, lot autorisé.
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Mise à jour du montant de mauvaise créance.
+;
+;
+PROCEDURE DELETE
+BEGIN
+  IF NOT DELETEDRECORD OF CRCAR_HISTO
+  THEN BEGIN
+    LET DPOMNTPAM OF CRDEPOT = DPOMNTPAM OF CRDEPOT        - &
+                               CRHMNTCAR OF CRCAR_HISTO
+    DISPLAY DPOMNTPAM OF CRDEPOT
+    DELETE CRCAR_HISTO
+  END
+END
+
+BUILD
+
+;
+;xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+;*************************** Ventilation de factures ****************************
+;* Client........: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              *
+;* Montant reçu..: xxxxxxxxxxxxxx                                               *
+;********************************************************************************
+;*                 No          Montant        Montant                           *
+;* Facture       Cédule     à recevoir          radié                           *
+;* xxxxxxxxxxxx    xx    xxxxxxxxxxxxxx xxxxxxxxxxxxxx                          *
+;* xxxxxxxxxxxx    xx    xxxxxxxxxxxxxx xxxxxxxxxxxxxx                          *
+;* xxxxxxxxxxxx    xx    xxxxxxxxxxxxxx xxxxxxxxxxxxxx                          *
+;* xxxxxxxxxxxx    xx    xxxxxxxxxxxxxx xxxxxxxxxxxxxx                          *
+;* xxxxxxxxxxxx    xx    xxxxxxxxxxxxxx xxxxxxxxxxxxxx                          *
+;* xxxxxxxxxxxx    xx    xxxxxxxxxxxxxx xxxxxxxxxxxxxx                          *
+;* xxxxxxxxxxxx    xx    xxxxxxxxxxxxxx xxxxxxxxxxxxxx                          *
+;* xxxxxxxxxxxx    xx    xxxxxxxxxxxxxx xxxxxxxxxxxxxx                          *
+;* xxxxxxxxxxxx    xx    xxxxxxxxxxxxxx xxxxxxxxxxxxxx                          *
+;* xxxxxxxxxxxx    xx    xxxxxxxxxxxxxx xxxxxxxxxxxxxx                          *
+;* xxxxxxxxxxxx    xx    xxxxxxxxxxxxxx xxxxxxxxxxxxxx                          *
+;* xxxxxxxxxxxx    xx    xxxxxxxxxxxxxx xxxxxxxxxxxxxx                          *
+;* xxxxxxxxxxxx    xx    xxxxxxxxxxxxxx xxxxxxxxxxxxxx                          *
+;* xxxxxxxxxxxx    xx    xxxxxxxxxxxxxx xxxxxxxxxxxxxx                          *
+;********************************************************************************

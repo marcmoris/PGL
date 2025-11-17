@@ -1,0 +1,2103 @@
+;/T/ Réception - Détail de la réception
+;
+;/P/ Programmeur..: Nancy Marceau
+;    Date Création: 28 mars 1994
+;
+;    Description..: Cet écran permet de consulter le détail de la réception
+;                   qui a été généré par l'approbation de la réception. C'est
+;                   dans cet écran qu'on reçoit les produits commandés.  A
+;                   noter que le numéro d'item doit être le même que lors
+;                   de la saisie de la commande.  Les montants désengagés et
+;                   les quantités des produits sont mis à jour.
+;
+;/M/ Modification.: Pierre Routhier
+;                   02 Mai 1997
+;
+;                   Si notion de projet (HLDNTNPRO OF MCHOLDING) = Oui et
+;                   que le compte (CPTCLE) inscrit est un compte de nature
+;                   revenu (NACCLE = 4) ou dépense (NACCLE = 5) de la table
+;                   mcnature_ctb :
+;                      - On demande les projets et ce, de façon obligatoire.
+;
+;                   Si notion de projet (HLDNTNPRO OF MCHOLDING) = Non ou
+;                   que le compte (CPTCLE) inscrit est un compte de bilan
+;                   (actif, passif ou capital - NACCLE = 1 ou 2 ou 3) de la
+;                   table mcnature_ctb:
+;                      - On ne les demande pas du tout.
+;
+;-------------------------------------------------------------------------------
+;/M/ Pascal Tremblay, 98-01-26
+;
+;    Ajustement pour le changement de siècle
+;
+;/V/ Écran vérifier pour le passage à l'an 2000
+;
+;-------------------------------------------------------------------------------
+;/M/ Programmeur.......: Sylvie Chouinard
+;    Debut modification: 25 mai 1998
+;    Fin   modification: 25 mai 1998
+;    Etat..............: Termine
+;    Description.......: Changer le OR pour un AND dans la condition de
+;                        reinitialisation du projet/sous-projet de la
+;                        procdure process cptcle.
+;                        (SOS 159)
+;
+;/M/ Programmeur.......: Nancy Breton
+;    Debut modification: 09 juillet 1998
+;    Fin   modification: 13 juillet 1998
+;    Etat..............: Terminé
+;    Description.......: Enlever les LET de la table arreception dans la
+;                        procédure preupdate, car cela donnait un duplicate key.
+;                        (SOS #199)
+;
+;/M/ Programmeur.......: Patrick Langlois
+;    Date modification.: 09 Juin 1999
+;    Description.......: Migration Achat/Réception/Inventaire de l'environnement (BOC)
+;
+;/M/ Programmeur.......: Francois Richard
+;    Date modification : 19 juillet 1999
+;    Description.......: Aid\351 la saisie de prdcle
+;
+;/M/ Programmeur.......: Francois Richard
+;    Date modification : 28 juillet 1999
+;    Description.......: Modification de l'écran en y ajoutant un
+;                        deuxième cluster
+;
+;/M/ Programmeur.......: Patrick Langlois
+;    Date modification.: 09 Juin 1999
+;    Description.......: Permettre l'impression interactive de la réception 
+;
+;/M/ Programmeur.......: Remy Demers
+;    Date modification.: 13 oct 1999
+;    Description.......: ne pas permettre de code de tax null
+;
+;/M/ Programmeur.......: Remy Demers
+;    Date modification.: 14 oct 1999
+;    Description.......: permettre de modifier seulement les champs
+;                        complet,code,qte recu 
+;
+;/M/ Programmeur.......: Remy Demers
+;    Date modification.: 15 oct 1999
+;    Description.......: agrandir le champs desc du produit
+;                       
+;
+;------------------------------------------------------------------------------
+
+
+SCREEN ar009a ACTIONBAR &
+             MODE LABEL "" AT 2,132 &
+             FROM 1,1 TO 23,132 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU, &
+                       T_CIENOM,    &
+                       T_RECSTUOLD, &
+                       ARRECEPTION
+
+TEMPORARY D_CCUPECDEBI_MC CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY D_CCUPECDEBA_MC CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY D_PECCLE_ARREC CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY D_CPTPECDEBI_VCPT CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY D_CPTPECDEBA_VCPT CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY D_PECCLE_AR CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+
+USE ustrasse NOLIST ; Transaction QUERY pour les sous-écrans
+
+USE ussectmp NOLIST     ; Variable pour la sécurité
+    "AR009A"            ; Nom de l'écran
+
+USE ar009a.hlp NOLIST ; Use servant à la documentation de l'écran
+
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-écrans
+@IF FRANCAIS
+ACTIONMENU LABEL "Impression"
+  MENUITEM LABEL "Impression détaillée           " ACTION DESIGNER D001
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+@ENDIF
+
+;-------------------------------------------------------------------------------
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de la compagnie
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie
+TEMPORARY T_RECSTUOLD CHARACTER SIZE 1  ; Ancien statut de la réception.
+;-------------------------------------------------------------------------------
+
+FILE ARRECEPTION  MASTER
+
+
+FILE ARREC_DETAIL    PRIMARY NOITEM OCCURS 2
+  ACCESS VIA   CIECLE,                &
+               RECCLE                 &
+         USING CIECLE OF ARRECEPTION,  &
+               RECCLE OF ARRECEPTION   &
+         ORDERBY CIECLE,   &
+                 RECCLE,   &
+                 REDCLE
+
+
+  ITEM CIECLE       OF ARREC_DETAIL INITIAL CIECLE OF ARRECEPTION
+  ITEM RECCLE       OF ARREC_DETAIL INITIAL RECCLE OF ARRECEPTION
+  ITEM REDSTU       OF ARREC_DETAIL INITIAL " "  ; La ligne est saisie
+  ITEM REDFLGCOM    OF ARREC_DETAIL INITIAL "0"
+
+
+;
+; Fichier du détail de la commande.
+;
+FILE ARCMD_DETAIL  SECONDARY NOITEM NODELETE OCCURS WITH ARREC_DETAIL
+  ACCESS VIA   CIECLE                , &
+               CMDCLE                , &
+               CMDAJT                , &
+               CDECLE                  &
+         USING CIECLE OF ARRECEPTION , &
+               CMDCLE OF ARRECEPTION , &
+               CMDAJT OF ARREC_DETAIL, &
+               REDCLE OF ARREC_DETAIL
+
+  ITEM REDMNTDES    OF ARREC_DETAIL FINAL ROUND((CDEMNTENG OF ARCMD_DETAIL /   &
+                                                 CDEQTECOM OF ARCMD_DETAIL ) * &
+                                                 REDQTEREC OF ARREC_DETAIL)
+
+  ;
+  ; Pour référer la bonne pièce.
+  ;
+  ITEM CMDAJT       OF ARREC_DETAIL FINAL CMDAJT OF ARCMD_DETAIL
+
+
+;
+; Fichiers des factures afin de valider que les factures soient transférées,
+; lors d'annulation de ligne de réception.
+;
+FILE ARFAC_DETAIL  DESIGNER &
+                  OPEN READ SHARE
+  ACCESS VIA   FACCIECLE, &
+               RECCLE     &
+         USING CIECLE OF ARRECEPTION, &
+               RECCLE OF ARRECEPTION
+
+FILE ARFACTURE_REC  DESIGNER OCCURS WITH ARREC_DETAIL &
+                   OPEN READ SHARE
+  ACCESS VIA   FOUCIECLE, &
+               FOUCLE,    &
+               FACCLE     &
+         USING FOUCIECLE OF ARFAC_DETAIL, &
+               FOUCLE    OF ARFAC_DETAIL, &
+               FACCLE    OF ARFAC_DETAIL
+
+;-------------------------------------------------------------------------------
+;
+; Validation du projet et affichage de sa description.
+;
+FILE GPPROJETS         REFERENCE OCCURS WITH ARREC_DETAIL
+
+  ACCESS VIA CIECLE, &
+             PRJCLE  &
+         USING T_CIECLEMNU, &
+               PRJCLE OF ARREC_DETAIL
+
+;-------------------------------------------------------------------------------
+;
+; Validation de l'activité et affichage de sa description.
+;
+FILE GPPRO_ACTIVITE    REFERENCE OCCURS WITH ARREC_DETAIL
+
+  ACCESS VIA CIECLE, &
+             PRJCLE, &
+             PRACLE  &
+         USING T_CIECLEMNU, &
+               PRJCLE OF ARREC_DETAIL, &
+               PRACLE OF ARREC_DETAIL
+
+;-------------------------------------------------------------------------------
+;
+; Validation de la charte de compte.
+;
+FILE MCCHARTE_UNA      REFERENCE OCCURS WITH ARREC_DETAIL
+
+  ACCESS  VIA   CPTCLE, &
+                CIECLE, &
+                UNACLE &
+          USING CPTCLE OF ARREC_DETAIL, &
+                T_CIECLEMNU           , &
+                UNACLE OF ARREC_DETAIL
+
+
+;-------------------------------------------------------------------------------
+; Validation du code de taxe fédéral.
+;
+FILE MCTAXE            REFERENCE OCCURS WITH ARREC_DETAIL &
+                      ALIAS A_TAX_TPS
+  ACCESS VIA   TAXCLETYP, &
+               TAXCLECOD &
+         USING REDTAXTYPTPS OF ARREC_DETAIL, &
+               REDTAXCODTPS OF ARREC_DETAIL
+
+;-------------------------------------------------------------------------------
+; Validation du code de taxe provincial.
+;
+FILE MCTAXE            REFERENCE OCCURS WITH ARREC_DETAIL  &
+                      ALIAS A_TAX_TVP
+  ACCESS VIA   TAXCLETYP, &
+               TAXCLECOD &
+         USING REDTAXTYPTVQ OF ARREC_DETAIL, &
+               REDTAXCODTVQ OF ARREC_DETAIL
+
+;-------------------------------------------------------------------------------
+; Pour valider le compte et afficher la description lors de la
+; saisie.
+;
+
+FILE VCPT_DSC  REFERENCE OCCURS WITH ARREC_DETAIL
+  ACCESS VIA   CPTCLE    &
+         USING CPTCLE OF ARREC_DETAIL
+
+
+;-------------------------------------------------------------------------------
+FILE VPRE_PRD  REFERENCE OCCURS WITH ARREC_DETAIL
+  ACCESS VIA   CIECLE, &
+               PRDCLE, &
+               ENTCLE  &
+         USING T_CIECLEMNU,            &
+               PRDCLE OF ARREC_DETAIL, &
+               ENTCLE OF ARRECEPTION
+
+
+;-------------------------------------------------------------------------------
+; Pour valider l'unité administrative et afficher la description lors de la
+; saisie.
+;
+
+FILE MCUNITE_ADM  REFERENCE OCCURS WITH ARREC_DETAIL
+  ACCESS VIA   CIECLE, &
+               UNACLE  &
+         USING CIECLE OF ARREC_DETAIL, &
+               UNACLE OF ARREC_DETAIL
+
+;-------------------------------------------------------------------------------
+; Fichier permettant de prendre par défaut le terme d'escompte sur achat
+; du fournisseur.
+;
+FILE VFOC_FOU  REFERENCE
+  ACCESS VIA   FOUCIECLE, &
+               FOUCLE,    &
+               FOCCIECLE  &
+         USING FOUCIECLE OF ARRECEPTION,&
+               FOUCLE    OF ARRECEPTION, &
+               CIECLE    OF ARRECEPTION
+
+;-------------------------------------------------------------------------------
+; Fichier du terme d'escompte d'achat du fournisseur.
+;
+FILE VTER_DSC  REFERENCE OCCURS WITH ARREC_DETAIL
+  ACCESS VIA    TERCLE  &
+         USING  REDTERESCACH OF ARREC_DETAIL
+
+
+;-------------------------------------------------------------------------------
+; Codes bilingues du statut de la ligne de commande
+;
+DEFINE    D_REDSTU CHARACTER SIZE 16 = "REDSTU"
+TEMPORARY T_REDSTU CHARACTER SIZE 4
+
+FILE VCBI_DSC  REFERENCE ALIAS A_CBI_REDSTU OCCURS WITH ARREC_DETAIL
+  ACCESS  VIA XELNOM, &
+              CBICLE  &
+          USING D_REDSTU, &
+                REDSTU OF ARREC_DETAIL
+
+;-------------------------------------------------------------------------------
+; Codes bilingues de l'état du produit.
+;
+DEFINE    D_REDETA CHARACTER SIZE 16 = "REDETA"
+TEMPORARY T_REDETA CHARACTER SIZE 4
+
+FILE VCBI_DSC  REFERENCE ALIAS A_CBI_REDETA OCCURS WITH ARREC_DETAIL
+  ACCESS  VIA XELNOM, &
+              CBICLE  &
+          USING D_REDETA, &
+                REDETA OF ARREC_DETAIL
+
+;-------------------------------------------------------------------------------
+; Paramètres pour la compagnie consolidée(holding)
+;
+FILE MCHOLDING  REFERENCE
+  ACCESS VIA CIENMC USING "1"
+
+
+FILE MCREF_ADRESSE     REFERENCE
+  ACCESS  VIA   REFCIECLE, &
+                REFCLETYP, &
+                REFCLENUM, &
+                RADCLE &
+          USING FOUCIECLE OF ARRECEPTION,&
+                REFCLETYP OF ARRECEPTION,&
+                FOUCLE    OF ARRECEPTION,&
+                RADCLE    OF ARRECEPTION
+
+FILE MCCOMPTE            REFERENCE OCCURS WITH ARREC_DETAIL
+  ACCESS VIA   CPTCLE &
+         USING CPTCLE OF ARREC_DETAIL
+
+FILE MCNATURE_CTB        REFERENCE OCCURS WITH ARREC_DETAIL
+  ACCESS VIA   NACCLE &
+         USING NACCLE OF MCCOMPTE
+
+;-------------------------------------------------------------------------------
+;
+; Valide l'immobilisation et affiche la description.
+;
+TEMPORARY T_IMMCLE CHARACTER SIZE 12 ; Popup sur les immobilisations.
+
+FILE IMIMMOBILISATION REFERENCE OCCURS WITH ARREC_DETAIL
+
+  ACCESS  VIA   CIECLE, &
+                IMMCLE  &
+          USING CIECLE OF ARREC_DETAIL , &
+                IMMCLE OF ARREC_DETAIL
+
+  SELECT IF IMMSTU OF IMIMMOBILISATION = "A"
+
+
+;-------------------------------------------------------------------------------
+TEMPORARY T_FOUCIECLE CHARACTER SIZE 4  ; Numéro de la compagnie du fournisseur
+TEMPORARY T_CMDCLE    CHARACTER SIZE 9  ; Numéro commande écran dépisteur.
+TEMPORARY T_CMDAJT    CHARACTER SIZE 3  ; Numéro de séquence écran dépisteur.
+TEMPORARY T_REDCLE    CHARACTER SIZE 7  ; Numéro d'item écran dépisteur.
+TEMPORARY T_ENTCLE    CHARACTER SIZE 4  ; Code d'entrepôt.
+TEMPORARY T_RECCLEDES CHARACTER SIZE 12 ; Numéro réception
+
+TEMPORARY T_TAXCLETYP CHARACTER SIZE 1 ; Popup sur les codes de taxes
+TEMPORARY T_TAXCLECOD CHARACTER SIZE 2 ; Popup sur les codes de taxes
+TEMPORARY T_TAXMODPAT CHARACTER SIZE 5 ; Popup sur les codes de taxes
+
+TEMPORARY T_TERCLE    CHARACTER SIZE  4 ; Popup sur terme d'escompte.
+TEMPORARY T_TERCAT    CHARACTER SIZE  4 ; Popup sur terme d'escompte.
+
+TEMPORARY T_CPTCLE    CHARACTER SIZE 6 ; Popup sur les comptes.
+TEMPORARY T_PECCLE    CHARACTER SIZE 4 ; Popup sur les comptes.
+TEMPORARY T_CPTTYPPAT CHARACTER SIZE 1 ; Popup sur les comptes.
+TEMPORARY T_CPTCATPAT CHARACTER SIZE 8 ; Popup sur les comptes.
+
+TEMPORARY T_UNACLE    CHARACTER SIZE 8 ; Popup sur unités administratives.
+
+TEMPORARY T_PRJCLE    CHARACTER SIZE 8 ; Popup sur les projets.
+TEMPORARY T_PRJSTUPAT CHARACTER SIZE 8 ; Popup sur les projets.
+
+TEMPORARY T_PRACLE    CHARACTER SIZE 3 ; Popup sur les activités.
+TEMPORARY T_PRASTUPAT CHARACTER SIZE 5 ; Popup sur les activités.
+
+;
+; Pour le calcul des taxes.
+;
+
+TEMPORARY T_FLGMOD       CHARACTER SIZE 1 ; Flag pour déceler s'il y eu modif.
+TEMPORARY T_TAXMODTPSOLD CHARACTER SIZE 1 &
+   OCCURS WITH ARREC_DETAIL ; Pour diminuer le bon cumul de taxe.
+TEMPORARY T_TAXMODTVQOLD CHARACTER SIZE 1 &
+   OCCURS WITH ARREC_DETAIL ; Pour diminuer le bon cumul de taxe.
+TEMPORARY T_REDSTUOLD    CHARACTER SIZE 1 &
+   OCCURS WITH ARREC_DETAIL ; Pour conserver ancien statut
+TEMPORARY T_FLAG_ALT     CHARACTER SIZE 1 ; Flag pour un record en modification
+
+
+;
+; Temporaires nécessaires au calcul des taxes
+;
+USE ustaxtmp NOLIST
+
+USE usvarprd NOLIST ; Use servant à la saisie de prdcle
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4  = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM)
+
+;-------------------------------------------------------------------------------
+;
+; Liste des paramètres pour l'impression
+;
+DEFINE D_IMPREC CHARACTER SIZE 7   = "AR324A" ; Impression détail réception 
+DEFINE D_LISPAR CHARACTER SIZE 204 = "F_CIECLEMNU     |F_CIENOM        |" + &
+                                     "F_RECCLE        |F_PECCLE        |"
+DEFINE D_INDLON CHARACTER SIZE 112 = "001004|005040|045012|057004"
+DEFINE D_LISVAL CHARACTER SIZE 300 = DZ_CIECLE &
+                                   + DZ_CIENOM &
+                                   + RECCLE OF ARRECEPTION &
+                                   + PECCLE OF ARRECEPTION
+
+
+;-------------------------------------------------------------------------------
+;
+USE usdrw132    NOLIST     ; Draw pour les écrans
+USE ustitstd132 NOLIST     ; En-tête pour les écrans
+USE ushilite    NOLIST     ; Hilite pour tous les écrans
+
+DRAW THIN 5,1 TO 5,132
+DRAW THIN 14,1 TO 14,132
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Détail de réception " &
+@ELSE
+      " %%%Détail de réception " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+;-------------------------------------------------------------------------------
+
+SKIP
+ALIGN (,3,19)(,40,56)(,,64)
+
+
+FIELD RECCLE OF ARRECEPTION &
+        FIXED
+
+FIELD FOUCLE OF ARRECEPTION &
+        FIXED
+
+FIELD RADNOM OF MCREF_ADRESSE  &
+        FIXED &
+        FOR 2,30
+
+ALIGN (2,3,19)(,46,62)(,,64)(,80,96)(,,109)
+
+CLUSTER OCCURS WITH ARREC_DETAIL ID BASE 5
+
+FIELD REDCLE OF ARREC_DETAIL   &
+        HIDDEN ID 5            &
+        REQUIRED NOCHANGE      &
+        LOOKUP NOTON ARREC_DETAIL       &
+          VIA   CIECLE,                 &
+                RECCLE,                 &
+                REDCLE                  &
+          USING CIECLE OF ARRECEPTION,    &
+                RECCLE OF ARRECEPTION,    &
+                REDCLE OF ARREC_DETAIL   &
+          MESSAGE 1411, &          ; Cet item de la réception existe déjà.
+
+        ON ARCMD_DETAIL &
+          MESSAGE 1412            ; Cet item de la commande n'existe pas.
+
+
+FIELD REDSTU OF ARREC_DETAIL &
+        NOENTRY  NOCHANGE &
+        LOOKUP ON A_CBI_REDSTU &
+          MESSAGE 1397 ; Ce statut de réception est invalide.
+
+FIELD CBIDSC OF A_CBI_REDSTU &
+        NOCHANGE &
+        SIZE 15              &
+        DISPLAY
+
+FIELD PRDCLE    OF ARREC_DETAIL &
+        NOCHANGE &
+        DISPLAY
+
+FIELD REDDSC OF ARREC_DETAIL &
+        NOCHANGE &
+        SIZE 22              &
+        NOENTRY
+
+ALIGN (2,3,19)(,46,62)(,,64)
+
+FIELD REDFLGCOM OF ARREC_DETAIL &
+        HIDDEN ID 10 &
+        REQUIRED &
+        SIZE 3
+
+FIELD REDETA OF ARREC_DETAIL
+
+FIELD CBIDSC OF A_CBI_REDETA &
+        DISPLAY
+
+ALIGN (2,3,19)(,46,62)(,80,96)
+
+FIELD REDQTEREC OF ARREC_DETAIL &
+        HIDDEN ID 25  &
+        PICTURE "^^^^^.^^^ " &
+        REQUIRED
+
+FIELD CDEQTECOM OF ARCMD_DETAIL &
+        PICTURE "^^^^^.^^^ " &
+        DISPLAY NOCHANGE
+
+FIELD REDPRIUNI OF ARREC_DETAIL  &
+        NOENTRY NOCHANGE
+
+ALIGN (2,3,19)(,,28)(,46,62)(,,72)
+FIELD CPTCLE OF ARREC_DETAIL &
+        LABEL "Compte........:" &
+        HIDDEN ID 35  &
+        NOENTRY  NOCHANGE &
+        LOOKUP ON VCPT_DSC &
+          MESSAGE 1313 ; Ce compte n'existe pas.
+
+FIELD CPTDSCABR OF VCPT_DSC &
+        DISPLAY &
+        NOCHANGE &
+        SIZE 15
+
+FIELD UNACLE OF ARREC_DETAIL &
+        LABEL "Unité adm.....:" &
+        NOENTRY  NOCHANGE &
+        LOOKUP ON MCUNITE_ADM &
+          MESSAGE 1314 ; Cette unité administrative n'existe pas dans la charte.
+
+FIELD UNANOMABR OF MCUNITE_ADM &
+        DISPLAY &
+        NOCHANGE &
+        SIZE 15
+
+
+FIELD PRJCLE OF ARREC_DETAIL  &
+        HIDDEN ID 37          &
+        LABEL "Projet.......:" &
+        NOENTRY NOCHANGE
+
+FIELD PRJDSC1 OF GPPROJETS &
+        DISPLAY &
+        NOCHANGE &
+        SIZE 15
+
+FIELD PRACLE OF ARREC_DETAIL  &
+        LABEL "Sous-projet...:" &
+        NOENTRY NOCHANGE
+
+FIELD PRADSC1 OF GPPRO_ACTIVITE &
+        DISPLAY &
+        NOCHANGE &
+        SIZE 15
+
+ALIGN (2,3,19)(,,33)
+FIELD IMMCLE       OF ARREC_DETAIL &
+      LABEL "Equipement....:" &
+      HIDDEN ID 43 &
+      NOENTRY  NOCHANGE &
+        LOOKUP ON IMIMMOBILISATION &
+            MESSAGE 491 ; Cette immobilisation n'existe pas ou est inactive.
+
+FIELD IMMDSC OF IMIMMOBILISATION DISPLAY
+
+ALIGN (2,3,19)(,,22)(,39,50)(,66,78)(,,84)(,102,113)
+
+FIELD REDTAXCODTPS OF ARREC_DETAIL &
+        HIDDEN ID 45  &
+        NOENTRY NOCHANGE
+
+@IF FRANCAIS
+FIELD TAXDSCFRA OF A_TAX_TPS &
+@ELSE
+FIELD TAXDSCANG OF A_TAX_TPS &
+@ENDIF
+        DISPLAY &
+        SIZE 15
+
+FIELD REDMNTTPS OF ARREC_DETAIL &
+        LABEL "Mnt tps.:"       &
+        NOCHANGE &
+        DISPLAY
+
+FIELD REDTERESCACH OF ARREC_DETAIL &
+        LABEL "Terme esc.:"        &
+        NOENTRY NOCHANGE
+
+FIELD TERDSCABR    OF VTER_DSC &
+        DISPLAY &
+        SIZE 16
+
+FIELD REDMNTESC OF ARREC_DETAIL &
+        LABEL "Mnt esc.:"       &
+        NOCHANGE &
+        DISPLAY
+
+ALIGN (2,3,19)(,,22)(,39,50)(,66,78)(,102,113)
+
+FIELD REDTAXCODTVQ OF ARREC_DETAIL &
+        HIDDEN ID 50  &
+        NOENTRY NOCHANGE
+
+@IF FRANCAIS
+FIELD TAXDSCFRA OF A_TAX_TVP &
+@ELSE
+FIELD TAXDSCANG OF A_TAX_TVP &
+@ENDIF
+        DISPLAY &
+        SIZE 15
+
+FIELD REDMNTTVQ OF ARREC_DETAIL &
+        LABEL "Mnt tvq.:"       &
+        DISPLAY
+
+FIELD REDMNTTOT OF ARREC_DETAIL &
+        LABEL "Mnt brut..:"      &
+        NOCHANGE &
+        DISPLAY
+
+FIELD REDMNTNET OF ARREC_DETAIL &
+        LABEL "Mnt net.:"       &
+        NOCHANGE &
+        DISPLAY
+
+SKIP 1
+CLUSTER
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du CTI = remboursement de TPS.
+;
+PROCEDURE INTERNAL CALCUL_CTI
+BEGIN
+  ;
+  ; Il faut diminuer le cumulatif de taxe de la réception.
+  ;
+  LET RECMNTCTI OF ARRECEPTION   = RECMNTCTI OF ARRECEPTION - &
+                                   REDMNTCTI OF ARREC_DETAIL
+  ;
+  LET REDMNTCTI OF ARREC_DETAIL = 0
+
+  ;
+  ; Calcul du remboursement fédéral.
+  ;
+  LET REDMNTCTI OF ARREC_DETAIL = &
+                ROUND( REDMNTTPS OF ARREC_DETAIL * TAXPCTCTI OF A_TAX_TPS )
+  ;
+  ; Il faut augmenter le cumulatif de taxe de la réception.
+  ;
+  LET RECMNTCTI OF ARRECEPTION = RECMNTCTI OF ARRECEPTION + &
+                                 REDMNTCTI OF ARREC_DETAIL
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du RTI = remboursement de TVQ.
+;
+PROCEDURE INTERNAL CALCUL_RTI
+BEGIN
+  ;
+  ; Il faut diminuer le cumulatif de taxe de la réception.
+  ;
+  LET RECMNTRTI OF ARRECEPTION = RECMNTRTI OF ARRECEPTION - &
+                                 REDMNTRTI OF ARREC_DETAIL
+  ;
+  LET REDMNTRTI OF ARREC_DETAIL = 0
+
+  ;
+  ; Calcul du remboursement fédéral.
+  ;
+  LET REDMNTRTI OF ARREC_DETAIL = &
+                ROUND( REDMNTTVQ OF ARREC_DETAIL * TAXPCTCTI OF A_TAX_TVP )
+  ;
+  ; Il faut augmenter le cumulatif de taxe de la réception.
+  ;
+  LET RECMNTRTI OF ARRECEPTION = RECMNTRTI OF ARRECEPTION + &
+                                 REDMNTRTI OF ARREC_DETAIL
+END
+
+
+;-------------------------------------------------------------------------------
+; Calcul des taxes (provinciale et fédérale)
+;
+PROCEDURE INTERNAL CALCUL_TAXES
+BEGIN
+  ;
+  ; Enlève les anciennes valeurs des totaux
+  ;
+  LET RECMNTTPS OF ARRECEPTION = RECMNTTPS OF ARRECEPTION - &
+                                 REDMNTTPS OF ARREC_DETAIL
+
+  LET RECMNTTVQ OF ARRECEPTION = RECMNTTVQ OF ARRECEPTION - &
+                                 REDMNTTVQ OF ARREC_DETAIL
+  ;
+  LET REDMNTTPS OF ARREC_DETAIL = 0
+  LET REDMNTTVQ OF ARREC_DETAIL = 0
+  ;
+  ; On prend le montant brut de la ligne de réception pour le calcul des taxes.
+  ;
+  LET TZ_MNTTXB = REDMNTTOT OF ARREC_DETAIL
+  ;
+  ; Use standard pour le calcul des taxes
+  ;
+  USE ustaxcal NOLIST
+
+  LET REDMNTTPS OF ARREC_DETAIL = TZ_MNTTPS
+  LET REDMNTTVQ OF ARREC_DETAIL = TZ_MNTTVP
+
+  LET RECMNTTPS OF ARRECEPTION = RECMNTTPS OF ARRECEPTION + &
+                                 REDMNTTPS OF ARREC_DETAIL
+
+  LET RECMNTTVQ OF ARRECEPTION = RECMNTTVQ OF ARRECEPTION + &
+                                 REDMNTTVQ OF ARREC_DETAIL
+
+  ;
+  ; Si le mode de taxation est "EN SUS", il faut mettre à jour le cumulatif brut
+  ; de la réception.
+  ;
+  IF TAXMOD OF A_TAX_TPS = "S"
+  THEN BEGIN
+    LET RECMNTTOT OF ARRECEPTION   = RECMNTTOT OF ARRECEPTION  + &
+                                     REDMNTTPS OF ARREC_DETAIL
+
+    LET REDMNTTOT OF ARREC_DETAIL = REDMNTTOT OF ARREC_DETAIL  + &
+                                    REDMNTTPS OF ARREC_DETAIL
+
+  END
+
+
+  IF TAXMOD OF A_TAX_TVP = "S"
+  THEN BEGIN
+     LET RECMNTTOT OF ARRECEPTION   = RECMNTTOT OF ARRECEPTION   + &
+                                      REDMNTTVQ OF ARREC_DETAIL
+
+     LET REDMNTTOT OF ARREC_DETAIL = REDMNTTOT OF ARREC_DETAIL + &
+                                     REDMNTTVQ OF ARREC_DETAIL
+
+  END
+
+  ;
+  ; Calcul des montants de taxe remboursables (CTI & RTI)
+  ;
+  DO INTERNAL CALCUL_CTI
+  DO INTERNAL CALCUL_RTI
+
+  LET REDMNTNET    OF ARREC_DETAIL =  REDMNTTOT OF ARREC_DETAIL - &
+                                      REDMNTTPS OF ARREC_DETAIL - &
+                                      REDMNTTVQ OF ARREC_DETAIL
+
+  LET RECMNTNET    OF ARRECEPTION  =  RECMNTTOT OF ARRECEPTION - &
+                                      RECMNTTPS OF ARRECEPTION - &
+                                      RECMNTTVQ OF ARRECEPTION
+
+END
+
+
+;-------------------------------------------------------------------------------
+; Calcul de l'escompte si le terme du fournisseur est spécifié.
+;
+PROCEDURE INTERNAL CALCUL_ESCOMPTE
+BEGIN
+  LET RECMNTESC OF ARRECEPTION = RECMNTESC OF ARRECEPTION - &
+                                 REDMNTESC OF ARREC_DETAIL
+
+  LET REDMNTESC OF ARREC_DETAIL = 0
+
+
+  ; On calcule le montant d'escompte en utilisant le pourcentage d'escompte
+  ; du terme.
+
+  IF REDTERESCACH OF ARREC_DETAIL <> ""
+  THEN BEGIN
+    LET REDMNTESC OF ARREC_DETAIL = ROUND ( REDMNTNET OF ARREC_DETAIL * &
+                                            TERPCT    OF VTER_DSC )
+
+    LET RECMNTESC OF ARRECEPTION  = RECMNTESC OF ARRECEPTION + &
+                                    REDMNTESC OF ARREC_DETAIL
+
+    LET RECMNTTOT OF ARRECEPTION  = RECMNTTOT OF ARRECEPTION - &
+                                    REDMNTESC OF ARREC_DETAIL
+
+    LET REDMNTTOT OF ARREC_DETAIL = REDMNTTOT OF ARREC_DETAIL - &
+                                    REDMNTESC OF ARREC_DETAIL
+
+
+    IF TAXMOD OF A_TAX_TPS = "S"
+    THEN LET REDMNTTOT OF ARREC_DETAIL = REDMNTTOT OF ARREC_DETAIL - &
+                                         REDMNTTPS OF ARREC_DETAIL
+
+    IF TAXMOD OF A_TAX_TVP = "S"
+    THEN LET REDMNTTOT OF ARREC_DETAIL = REDMNTTOT OF ARREC_DETAIL - &
+                                         REDMNTTVQ OF ARREC_DETAIL
+
+    ; On recalcule les taxes pour tenir compte de l'escompte.
+    ;
+    IF 0 <> REDMNTESC OF ARREC_DETAIL
+    THEN BEGIN
+      IF TAXMOD OF A_TAX_TPS = "S"
+      THEN LET RECMNTTOT OF ARRECEPTION = RECMNTTOT OF ARRECEPTION - &
+                                          REDMNTTPS OF ARREC_DETAIL
+
+      IF TAXMOD OF A_TAX_TVP = "S"
+      THEN LET RECMNTTOT OF ARRECEPTION = RECMNTTOT OF ARRECEPTION - &
+                                          REDMNTTVQ OF ARREC_DETAIL
+
+      DO INTERNAL CALCUL_TAXES
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul des montants et des taxes.
+;
+PROCEDURE INTERNAL CALCUL_MONTANT
+BEGIN
+  ;
+  ; Calcul du montant brut du produit
+  ;
+  LET RECMNTTOT OF ARRECEPTION  = RECMNTTOT OF ARRECEPTION - &
+                                  REDMNTTOT OF ARREC_DETAIL
+
+
+  ;
+  ; La division par 100000 représente les 3 chiffres après le point pour
+  ; les qtes et 2 chiffres pour les décimales 3 et 4 du prix unitaire.
+  ;
+  LET REDMNTTOT OF ARREC_DETAIL = &
+    ROUND ( REDQTEREC OF ARREC_DETAIL * &
+            REDPRIUNI OF ARREC_DETAIL /100000 )
+
+  LET RECMNTTOT OF ARRECEPTION = RECMNTTOT OF ARRECEPTION + &
+                                 REDMNTTOT OF ARREC_DETAIL
+
+
+  ; Cette procédure calcule les montants de taxe ainsi que les montants de
+  ; CTI et RTI.
+
+  DO INTERNAL CALCUL_TAXES
+
+
+  ; On calcule l'escompte.
+  ;
+  DO INTERNAL CALCUL_ESCOMPTE
+
+
+  ; On affiche les variables modifiées par les calculs.
+  ;
+  DISPLAY REDMNTTPS OF ARREC_DETAIL
+  DISPLAY REDMNTTVQ OF ARREC_DETAIL
+  DISPLAY REDMNTTOT OF ARREC_DETAIL
+  DISPLAY REDMNTESC OF ARREC_DETAIL
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+; Appel de l'écran dépisteur.
+;
+PROCEDURE INPUT REDCLE
+BEGIN
+  USE ussecent NOLIST
+
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CMDCLE = CMDCLE OF ARRECEPTION
+    LET T_REDCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN ar109 MODE F PASSING T_CIECLEMNU, T_CMDCLE, T_REDCLE  &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_REDCLE)
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de valider que l'item saisi n'est pas annulé ou complet
+; au niveau de la commande.
+;
+PROCEDURE EDIT REDCLE
+BEGIN
+  IF    CDESTU OF ARCMD_DETAIL <> "S" &
+    AND CDESTU OF ARCMD_DETAIL <> ""
+  THEN ERROR 1413 ; Vous devez référer une ligne de commande saisie ou
+                  ; sélectionnée.
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet d'amener les valeurs de ARCMD_DETAIL pour nos champs
+; de la ligne de réception.
+;
+PROCEDURE PROCESS REDCLE
+BEGIN
+  LET PRDCLE        OF ARREC_DETAIL = PRDCLE       OF ARCMD_DETAIL
+  LET REDTERESCACH  OF ARREC_DETAIL = CDETERESCACH OF ARCMD_DETAIL
+  LET CPTCLE        OF ARREC_DETAIL = CPTCLE       OF ARCMD_DETAIL
+  LET UNACLE        OF ARREC_DETAIL = UNACLE       OF ARCMD_DETAIL
+  LET PRJCLE        OF ARREC_DETAIL = PRJCLE       OF ARCMD_DETAIL
+  LET PRACLE        OF ARREC_DETAIL = PRACLE       OF ARCMD_DETAIL
+  LET IMMCLE        OF ARREC_DETAIL = IMMCLE       OF ARCMD_DETAIL
+  LET REDQTEREC     OF ARREC_DETAIL = CDEQTECOM    OF ARCMD_DETAIL - &
+                                      CDEQTEREC    OF ARCMD_DETAIL
+
+  LET REDDSC        OF ARREC_DETAIL = CDEDSCPRD    OF ARCMD_DETAIL
+
+  LET REDPRIUNI     OF ARREC_DETAIL = CDEPRIUNI    OF ARCMD_DETAIL
+
+  LET REDTAXTYPTPS  OF ARREC_DETAIL = CDETAXTYPTPS OF ARCMD_DETAIL
+  LET REDTAXCODTPS  OF ARREC_DETAIL = CDETAXCODTPS OF ARCMD_DETAIL
+  LET REDTAXTYPTVQ  OF ARREC_DETAIL = CDETAXTYPTVQ OF ARCMD_DETAIL
+  LET REDTAXCODTVQ  OF ARREC_DETAIL = CDETAXCODTVQ OF ARCMD_DETAIL
+
+  DISPLAY REDTAXCODTPS OF ARREC_DETAIL
+  DISPLAY REDTAXCODTVQ OF ARREC_DETAIL
+  DISPLAY REDTERESCACH OF ARREC_DETAIL
+  DISPLAY CPTCLE       OF ARREC_DETAIL
+  DISPLAY UNACLE       OF ARREC_DETAIL
+  DISPLAY REDDSC       OF ARREC_DETAIL
+  DISPLAY PRJCLE       OF ARREC_DETAIL
+  DISPLAY PRACLE       OF ARREC_DETAIL
+  DISPLAY IMMCLE       OF ARREC_DETAIL
+  DISPLAY REDPRIUNI    OF ARREC_DETAIL
+
+  DO INTERNAL CALCUL_MONTANT
+
+  LET CDEQTEREC OF ARCMD_DETAIL = CDEQTEREC OF ARCMD_DETAIL + &
+                                  ( CDEQTECOM OF ARCMD_DETAIL - &
+                                    CDEQTEREC OF ARCMD_DETAIL)
+END
+
+;------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT PRDCLE
+BEGIN
+  USE usinpprd NOLIST
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de valider que la quantité reçue n'excède pas la
+; quantité reçue de la ligne de commande. Par défaut, lors de la génération
+; la qté reçue est égale à la qté commandée.
+;
+PROCEDURE EDIT REDQTEREC
+BEGIN
+  IF CDEQTECOM OF ARCMD_DETAIL < &
+     (FIELDVALUE - OLDVALUE(REDQTEREC OF ARREC_DETAIL) + &
+      CDEQTEREC OF ARCMD_DETAIL)
+  THEN ERROR 1414 ;  La quantité reçue dépasse la quantité commandée et déjà
+                  ; reçue.
+
+  LET CDEQTEREC OF ARCMD_DETAIL = CDEQTEREC OF ARCMD_DETAIL - &
+      OLDVALUE(REDQTEREC OF ARREC_DETAIL) + FIELDVALUE
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de calculer les montants de la réception, les taxes
+; ainsi que l'escompte.
+;
+PROCEDURE PROCESS REDQTEREC
+BEGIN
+  DO INTERNAL CALCUL_MONTANT
+END
+
+;------------------------------------------------------------------------------
+;
+; Procédure pour appeler la commande de la réception.
+;
+PROCEDURE INPUT CDEQTECOM
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_FOUCIECLE = FOUCIECLE OF ARRECEPTION
+    LET T_CMDCLE = CMDCLE    OF ARRECEPTION
+    LET T_CMDAJT = CMDAJT    OF ARREC_DETAIL
+    RUN SCREEN ar007 MODE F PASSING     T_CIECLEMNU, &
+                                        T_CIENOM   , &
+                                        T_PECCLE   , &
+                                        T_FOUCIECLE, &
+                                        T_CMDCLE   , &
+                                        T_CMDAJT
+  END
+  LET FIELDTEXT = ""
+END
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran de consultation des codes de taxe.
+;
+;
+PROCEDURE INPUT REDTAXCODTPS
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TAXCLETYP = REDTAXTYPTPS OF ARREC_DETAIL
+    LET T_TAXCLECOD = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_TAXMODPAT = "@"
+    RUN SCREEN mc111 MODE F PASSING T_TAXCLETYP, &
+                                    T_TAXCLECOD, &
+                                    T_TAXMODPAT &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNCATE(T_TAXCLECOD)
+  END
+
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du code de taxe fédéral.
+;
+;
+PROCEDURE EDIT REDTAXCODTPS
+BEGIN
+  IF 0 <> SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    GET A_TAX_TPS OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 1376 ; Ce code de taxe n'existe pas.
+  END
+  ;
+  ; Initialise le flag à Oui dans la procédure EDIT. Car si l'usager saisi
+  ; une valeur la procédure EDIT est exécutée.
+  ;
+  LET T_FLGMOD = "1"
+  ;
+  IF     0 = SIZE(TRUNCATE(FIELDTEXT)) &
+     AND 0 = SIZE(TRUNCATE(REDTAXCODTPS OF ARREC_DETAIL))
+  THEN ERROR 1376 ; code de taxe n'existe pas
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+PROCEDURE PROCESS REDTAXCODTPS
+BEGIN
+  EDIT REDTAXCODTVQ OF ARREC_DETAIL
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran de consultation des codes de taxe.
+;
+;
+PROCEDURE INPUT REDTAXCODTVQ
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TAXCLETYP = REDTAXTYPTVQ OF ARREC_DETAIL
+    LET T_TAXCLECOD = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_TAXMODPAT = "@"
+    RUN SCREEN mc111 MODE F PASSING T_TAXCLETYP, &
+                                    T_TAXCLECOD, &
+                                    T_TAXMODPAT &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNCATE(T_TAXCLECOD)
+  END
+
+  ;
+  ; Force l'éxécution de la procédure edit, car il y a une relation entre
+  ; deux champs(taxe).
+  ;
+  IF    NOT FINDMODE  &
+    AND 0 = SIZE(FIELDTEXT) &
+    AND T_FLGMOD = "1"
+  THEN LET FIELDTEXT = REDTAXCODTVQ OF ARREC_DETAIL
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du code de taxe provincial
+;
+;
+PROCEDURE EDIT REDTAXCODTVQ
+BEGIN
+  IF 0 <> SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    GET A_TAX_TVP OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 1376 ; Ce code de taxe n'existe pas.
+
+  END
+  IF    TAXMOD    OF A_TAX_TVP = "I" &
+    AND TAXFLGNET OF A_TAX_TVP = "2" &
+    AND TAXMOD    OF A_TAX_TPS = "S"
+  THEN ERROR 1379 ; Codes de taxe TVQ inclus et TPS en sus sont incompatibles.
+  ;
+  IF     0 = SIZE(TRUNCATE(FIELDTEXT)) &
+     AND 0 = SIZE(TRUNCATE(REDTAXCODTVQ OF ARREC_DETAIL))
+  THEN ERROR 1376 ; code de taxe n'existe pas
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de faire l'appel de la procédure de calcul des montants.
+;
+;
+PROCEDURE PROCESS REDTAXCODTVQ
+BEGIN
+  DO INTERNAL CALCUL_MONTANT
+END
+
+;-------------------------------------------------------------------------------
+; Consultation des termes d'escompte d'achat.
+;
+;
+PROCEDURE INPUT REDTERESCACH
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TERCAT = "ESC"
+    LET T_TERCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cp102 MODE F PASSING T_TERCLE, T_TERCAT &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_TERCLE)
+  END
+
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de valider que le terme saisi est de type ESC
+; (escompte)
+;
+PROCEDURE EDIT REDTERESCACH
+BEGIN
+  IF 0 <> SIZE (TRUNCATE (FIELDTEXT) )
+  THEN BEGIN
+    GET VTER_DSC  OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 1377 ; Ce terme d'escompte d'achat n'existe pas.
+
+    ELSE BEGIN
+      IF TERCAT OF VTER_DSC <> "ESC"
+      THEN ERROR 1378 ; Ce terme n'est pas de type escompte.
+    END
+  END
+
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de faire l'appel de la procédure de calcul des montants.
+;
+;
+PROCEDURE PROCESS REDTERESCACH
+BEGIN
+  DO INTERNAL CALCUL_MONTANT
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour le code bilingue de l'état du produit.
+;
+;
+PROCEDURE INPUT REDETA
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_REDETA = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_REDETA, T_REDETA &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_REDETA)
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de valider que si l'état de produit est saisi, il
+; existe dans la table des codes bilingues.
+;
+PROCEDURE EDIT REDETA
+BEGIN
+  IF 0 <> SIZE (TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    GET A_CBI_REDETA OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 1415 ; Cet état de produit n'existe pas.
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour le statut de la ligne de réception.
+;
+;
+PROCEDURE INPUT REDSTU
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_REDSTU = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_REDSTU, T_REDSTU &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_REDSTU)
+  END
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de valider que le seul statut modifiable est " "
+; (saisie) et que la seule valeur permise en saisie est "X" (annulée) lorsque la
+; réception est approuvée.
+;
+PROCEDURE EDIT REDSTU
+BEGIN
+
+  IF   T_REDSTUOLD = "X" &
+    OR T_REDSTUOLD = "C" &
+    OR RECSTU OF ARRECEPTION = "P" &
+    OR RECSTU OF ARRECEPTION = "C"
+  THEN ERROR 1398 ; On ne peut pas changer le statut de la réception.
+
+
+  IF FIELDTEXT <> "X" AND FIELDTEXT <> " "
+  THEN ERROR 1370 ; Cette valeur n'est pas permise.
+
+END
+
+
+;-------------------------------------------------------------------------------
+; Pour saisir et afficher les valeurs Oui/Non
+;
+PROCEDURE INPUT REDFLGCOM
+BEGIN
+  USE usflginp NOLIST  ; Pour l'entrée d'un flag oui/non
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de valider qu'une et une seule ligne de réception peut
+; compléter la ligne de commande.
+;
+PROCEDURE EDIT REDFLGCOM
+BEGIN
+   ; La ligne de réception complète la ligne de commande.
+   ;
+  IF FIELDTEXT = "1" AND CDESTU OF ARCMD_DETAIL = "C"
+  THEN ERROR 1472 ; La ligne de commande a déjà été complétée par une réception.
+
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de changer le statut de la ligne de commande en
+; fonction de la ligne de réception qui complète ou non la ligne de commande.
+;
+PROCEDURE PROCESS REDFLGCOM
+BEGIN
+  IF REDFLGCOM OF ARREC_DETAIL = "1"
+  THEN LET CDESTU OF ARCMD_DETAIL = "C"
+  ELSE LET CDESTU OF ARCMD_DETAIL = "S"
+  ;
+  ; Si la ligne de réception n'est pas complète.
+  ;
+  IF REDSTU OF ARREC_DETAIL = ""  ; Ligne est saisie
+  THEN BEGIN
+    IF REDFLGCOM OF ARREC_DETAIL = "0"
+    THEN LET CDEQTEREJ OF ARCMD_DETAIL = 0
+    ELSE BEGIN
+         ; La ligne est complète et il y a une quantité rejetée.
+         ;
+      IF  CDEQTECOM OF ARCMD_DETAIL <> CDEQTEREC OF ARCMD_DETAIL
+      THEN BEGIN
+        LET CDEQTEREJ    OF ARCMD_DETAIL = ( CDEQTECOM OF ARCMD_DETAIL - &
+                                             CDEQTEREC OF ARCMD_DETAIL )
+      END
+      ELSE BEGIN
+        LET CDEQTEREJ OF ARCMD_DETAIL = 0
+      END
+    END
+  END
+
+
+  DO INTERNAL CALCUL_MONTANT
+END
+
+
+;-------------------------------------------------------------------------------
+; Pour saisir et afficher les valeurs Oui/Non
+;
+PROCEDURE OUTPUT REDFLGCOM
+BEGIN
+  USE usflgout3 NOLIST ; Pour afficher la valeur O/N
+END
+
+
+;-------------------------------------------------------------------------------
+; Procédure pour le dépisteur du numéro de compte.
+;
+PROCEDURE INPUT CPTCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_PECCLE    = " "
+    LET T_CPTTYPPAT = "@"
+    LET T_CPTCATPAT = "@"
+    RUN SCREEN mc103 MODE F PASSING T_CPTCLE   , &
+                                    T_CPTTYPPAT, &
+                                    T_CPTCATPAT, &
+                                    T_PECCLE     &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_CPTCLE)
+  END
+
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation si le compte est actif.
+;
+;
+PROCEDURE EDIT CPTCLE
+BEGIN
+  ;
+  ; Note: La période de fin, est la première période d'inactivité.
+  ;
+  ; Ajustement pour le changement de siècle
+  IF PECCLE OF ARRECEPTION[1:1] < "8"
+  THEN LET D_PECCLE_AR = "1" + PECCLE OF ARRECEPTION
+  ELSE LET D_PECCLE_AR = "0" + PECCLE OF ARRECEPTION
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBA OF VCPT_DSC[1:1] < "8"
+  THEN LET D_CPTPECDEBA_VCPT = "1" + CPTPECDEBA OF VCPT_DSC
+  ELSE LET D_CPTPECDEBA_VCPT = "0" + CPTPECDEBA OF VCPT_DSC
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBI OF VCPT_DSC[1:1] < "8"
+  THEN LET D_CPTPECDEBI_VCPT = "1" + CPTPECDEBI OF VCPT_DSC
+  ELSE LET D_CPTPECDEBI_VCPT = "0" + CPTPECDEBI OF VCPT_DSC
+
+  IF D_PECCLE_AR  >= D_CPTPECDEBA_VCPT AND &
+     ( &
+       D_PECCLE_AR < D_CPTPECDEBI_VCPT OR &
+       CPTPECDEBI OF VCPT_DSC = "" &
+     )
+  THEN NULL
+  ELSE ERROR 1380 ; Ce compte est inactif.
+
+  IF CPTTYP OF VCPT_DSC <> "R"
+  THEN ERROR 1417 ; On ne peut pas utiliser ce compte dans une réception.
+
+  IF     DEVCLE OF VCPT_DSC <> DEVCLE OF VFOC_FOU  &
+     AND DEVCLE OF VCPT_DSC <> DEVCLE OF MCHOLDING
+  THEN ERROR 1382 ; On ne peut pas utiliser ce compte à cause de la devise.
+END
+
+
+;
+;
+;
+PROCEDURE PROCESS CPTCLE
+BEGIN
+  IF NACCLE OF MCNATURE_CTB <> 4 AND &
+     NACCLE OF MCNATURE_CTB <> 5
+  THEN BEGIN
+    LET PRJCLE OF ARREC_DETAIL = ""
+    LET PRACLE OF ARREC_DETAIL = ""
+    DISPLAY PRJCLE  OF ARREC_DETAIL
+    DISPLAY PRJDSC1 OF GPPROJETS
+    DISPLAY PRACLE  OF ARREC_DETAIL
+    DISPLAY PRADSC1 OF GPPRO_ACTIVITE
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT UNACLE
+BEGIN
+  ;
+  ; Popup sur les unités administratives.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE = CPTCLE OF ARREC_DETAIL
+    LET T_PECCLE = PECCLE OF ARRECEPTION
+    LET T_UNACLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    ;
+    ; Il y a trois popup possible:
+    ;  1) sur les unités administrative par compagnie(MCUNITE_ADM).
+    ;  2) sur les unités administrative d'une charte de compte(MCCHARTE_UNA).
+    ;  3) sur les unités administrative qui ne sont pas définis dans la charte
+    ;     de compte(MCUNITE_ADM, MCCHARTE_UNA).
+    ;
+    IF HLDCHTCPT OF MCHOLDING = "0"
+    THEN RUN SCREEN mc104 MODE F PASSING T_CIECLEMNU, T_UNACLE
+    ELSE BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN RUN SCREEN mc115 MODE F PASSING T_CIECLEMNU, T_CPTCLE, T_UNACLE, &
+                                           T_PECCLE
+      ELSE RUN SCREEN mc116 MODE F PASSING T_CIECLEMNU, T_CPTCLE, T_UNACLE, &
+                                           T_PECCLE
+    END
+    LET FIELDTEXT = TRUNCATE(T_UNACLE)
+  END
+  ;
+  ; Force le lookup de l'unité pour la charte.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(UNACLE OF ARREC_DETAIL))
+  THEN LET FIELDTEXT = UNACLE OF ARREC_DETAIL
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation si l'unité administrative est active.
+;
+;
+PROCEDURE EDIT UNACLE
+BEGIN
+  IF HLDCHTCPT OF MCHOLDING = "1"
+  THEN BEGIN
+    GET MCCHARTE_UNA OPTIONAL
+    ;
+    ; Si la charte est incluse, le lien est obligatoire.
+    ;
+    IF NOT ACCESSOK
+    THEN BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN ERROR 1314 ; La combinaison compte/unité administrative n'existe pas.
+    END
+    ELSE BEGIN
+      ;
+      ; Si la charte est Exclusive et que la période fait partie de
+      ; l'intervalle de périodes de la charte alors c'est une erreur.
+      ;
+      ; Si la charte est inclusive et que la période ne fait pas partie de
+      ; l'intervalle de périodes de la charte alors c'est une erreur.
+      ;
+      ; Ajustement pour le changement de siècle
+      IF PECCLE OF ARRECEPTION[1:1] < "8"
+      THEN LET D_PECCLE_ARREC = "1" + PECCLE OF ARRECEPTION
+      ELSE LET D_PECCLE_ARREC = "0" + PECCLE OF ARRECEPTION
+
+      ; Ajustement pour le changement de siècle
+      IF CCUPECDEBA OF MCCHARTE_UNA[1:1] < "8"
+      THEN LET D_CCUPECDEBA_MC = "1" + CCUPECDEBA OF MCCHARTE_UNA
+      ELSE LET D_CCUPECDEBA_MC = "0" + CCUPECDEBA OF MCCHARTE_UNA
+
+      ; Ajustement pour le changement de siècle
+      IF CCUPECDEBI OF MCCHARTE_UNA[1:1] < "8"
+      THEN LET D_CCUPECDEBI_MC = "1" + CCUPECDEBI OF MCCHARTE_UNA
+      ELSE LET D_CCUPECDEBI_MC = "0" + CCUPECDEBI OF MCCHARTE_UNA
+
+      IF ( &
+           D_PECCLE_ARREC >= D_CCUPECDEBA_MC AND &
+           ( &
+             D_PECCLE_ARREC < D_CCUPECDEBI_MC OR &
+             CCUPECDEBI OF MCCHARTE_UNA = " " &
+           ) &
+         )
+      THEN BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "E"
+        THEN ERROR 1384 ; La combinaison compte/unité administrative est inactive.
+      END
+      ELSE BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "I"
+        THEN ERROR 1384 ; La combinaison compte/unité administrative est inactive.
+      END
+    END
+  END
+
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les projets.
+;
+;
+PROCEDURE INPUT PRJCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PRJSTUPAT = "A"
+    LET T_PRJCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gp104 MODE F PASSING T_CIECLEMNU, &
+                                    T_PRJCLE   , &
+                                    T_PRJSTUPAT WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_PRJCLE)
+  END
+
+   ; Pour forcer la procédure EDIT
+   ;
+  IF      NOT FINDMODE &
+    AND 0  = SIZE (TRUNCATE(FIELDTEXT)) &
+    AND "" <> TRUNCATE (PRJCLE OF ARREC_DETAIL)
+  THEN LET FIELDTEXT = PRJCLE OF ARREC_DETAIL
+
+  IF (HLDNTNPRO OF MCHOLDING    = "1" AND &
+      NACCLE    OF MCNATURE_CTB = 4   AND &
+      FIELDTEXT                 = "" ) OR &
+     (HLDNTNPRO OF MCHOLDING    = "1" AND &
+      NACCLE    OF MCNATURE_CTB = 5   AND &
+      FIELDTEXT                 = "" )
+  THEN ERROR 889
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du projet, le projet est optionnel dans la ligne de réception.
+;
+;
+PROCEDURE EDIT PRJCLE
+BEGIN
+  GET GPPROJETS  OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 1385 ; Ce projet n'existe pas.
+
+  IF PRJSTU OF GPPROJETS <> "A"
+  THEN ERROR 1386 ; Ce projet n'est pas actif.
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT PRACLE
+BEGIN
+  IF PRJCLE OF ARREC_DETAIL = ""
+  THEN ERROR 889
+  ;
+  ; Popup sur les activités.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PRJCLE    = PRJCLE OF ARREC_DETAIL
+    LET T_PRASTUPAT = "A"
+    LET T_PRACLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gp108 MODE F PASSING T_CIECLEMNU, &
+                                    T_PRJCLE   , &
+                                    T_PRACLE   , &
+                                    T_PRASTUPAT WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_PRACLE)
+  END
+
+  ;
+  ; Force le lookup de l'activité car il est en liaison avec le projet
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(PRJCLE OF ARREC_DETAIL))
+  THEN LET FIELDTEXT = PRACLE OF ARREC_DETAIL
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation de l'activité, l'activité est optionnelle dans la ligne de réception.
+;
+;
+PROCEDURE EDIT PRACLE
+BEGIN
+  GET GPPRO_ACTIVITE  OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 1387 ; Cette activité n'existe pas.
+
+  IF PRASTU OF GPPRO_ACTIVITE <> "A"
+  THEN ERROR 1388 ; Cette activité est inactive.
+END
+
+;-------------------------------------------------------------------------------
+; Pop up pour la catégorie d'équipement
+;
+PROCEDURE INPUT IMMCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_IMMCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN im102 MODE F &
+                     PASSING T_CIECLEMNU, &
+                             T_IMMCLE  WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE( T_IMMCLE )
+  END
+
+  ;
+  ; Par défaut on utilise la catégorie définie dans GPPROJETS S'il n'y en a pas
+  ; on force la validation.
+  ;
+  IF     0 = SIZE(FIELDTEXT) &
+     AND 0 = SIZE(TRUNCATE(IMMCLE OF ARREC_DETAIL))
+  THEN BEGIN
+     IF 0 <> SIZE(TRUNCATE(PRAIMMCLE OF GPPRO_ACTIVITE))
+     THEN LET FIELDTEXT = PRAIMMCLE OF GPPRO_ACTIVITE
+     ELSE LET FIELDTEXT = IMMCLE OF ARREC_DETAIL
+  END
+END
+
+
+PROCEDURE EDIT IMMCLE
+BEGIN
+   IF IMMTYP OF IMIMMOBILISATION <> "E"
+   THEN ERROR 1503
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de valider que le prix unitaire.
+;
+PROCEDURE EDIT REDPRIUNI
+BEGIN
+  IF FIELDVALUE = 0
+  THEN ERROR 1383 ; Vous devez saisir le prix unitaire du produit.
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de faire l'appel de la procédure de calcul des taxes.
+;
+;
+PROCEDURE PROCESS REDPRIUNI
+BEGIN
+  DO INTERNAL CALCUL_MONTANT
+END
+
+;-------------------------------------------------------------------------
+;
+;
+PROCEDURE APPEND
+BEGIN
+  ACCEPT REDCLE OF ARREC_DETAIL
+  DISPLAY REDSTU OF ARREC_DETAIL
+  DISPLAY CBIDSC OF A_CBI_REDSTU
+  DISPLAY PRDCLE OF ARREC_DETAIL
+  ACCEPT REDFLGCOM OF ARREC_DETAIL
+  ACCEPT REDETA OF ARREC_DETAIL
+  DISPLAY CBIDSC OF A_CBI_REDETA
+  ACCEPT REDQTEREC OF ARREC_DETAIL
+  DISPLAY CDEQTECOM OF ARCMD_DETAIL
+  DISPLAY CPTDSCABR OF VCPT_DSC
+  DISPLAY UNANOMABR OF MCUNITE_ADM
+  DISPLAY PRJDSC1 OF GPPROJETS
+  DISPLAY PRADSC1 OF GPPRO_ACTIVITE
+  DISPLAY TAXDSCFRA OF A_TAX_TPS
+  DISPLAY REDMNTTPS OF ARREC_DETAIL
+  DISPLAY TAXDSCFRA OF A_TAX_TVP
+  DISPLAY REDMNTTVQ OF ARREC_DETAIL
+  DISPLAY REDMNTESC OF ARREC_DETAIL
+  DISPLAY REDMNTTOT OF ARREC_DETAIL
+  DISPLAY REDMNTNET OF ARREC_DETAIL
+END
+
+;------------------------------------------------------------------------
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  FOR ARREC_DETAIL
+  BEGIN
+    PERFORM APPEND
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Procédure d'appel de l'impression de la réception
+;
+PROCEDURE DESIGNER D001
+BEGIN
+  RUN SCREEN gs092  &
+             MODE E &
+             PASSING D_IMPREC, &
+                     D_LISPAR, &
+                     D_INDLON, &
+                     D_LISVAL
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE DESIGNER 5
+BEGIN
+  ACCEPT  REDSTU OF ARREC_DETAIL
+  DISPLAY CBIDSC OF A_CBI_REDSTU
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE DESIGNER 10
+BEGIN
+  IF RECSTU OF ARRECEPTION  = "P"
+  THEN BEGIN
+    IF PRDTYP OF VPRE_PRD = "D"
+    THEN ACCEPT REDDSC  OF ARREC_DETAIL
+    ELSE DISPLAY REDDSC OF ARREC_DETAIL
+
+    ;
+    ; Si la ligne de commande n'est pas compl\350te je peux la compl\351ter,
+    ; si elle est compl\350te et que c'est moi qui l'ai compl\351t\351e je peux
+    ; aussi la modifier.
+    ;
+    IF CDESTU OF ARCMD_DETAIL <> "C"
+    THEN ACCEPT REDFLGCOM OF ARREC_DETAIL
+    ELSE BEGIN
+      IF REDFLGCOM OF ARREC_DETAIL = "1"
+      THEN ACCEPT REDFLGCOM OF ARREC_DETAIL
+    END
+
+    ACCEPT REDETA OF ARREC_DETAIL
+    DISPLAY CBIDSC OF A_CBI_REDETA
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE DESIGNER 25
+BEGIN
+  IF RECSTU OF ARRECEPTION  = "P"
+  THEN BEGIN
+    ;
+    ; Si la ligne de réception complète la ligne de commande alors la quantitée n'est
+    ; pas modifiable.
+    ;
+    IF REDFLGCOM OF ARREC_DETAIL <> "1" AND &
+       CDESTU    OF ARCMD_DETAIL <> "C"
+    THEN ACCEPT  REDQTEREC    OF ARREC_DETAIL
+  END
+  ACCEPT CDEQTECOM OF ARCMD_DETAIL
+  ACCEPT REDPRIUNI OF ARREC_DETAIL
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE DESIGNER 35
+BEGIN
+  IF RECSTU OF ARRECEPTION  = "P"
+  THEN BEGIN
+    ACCEPT CPTCLE OF ARREC_DETAIL
+    DISPLAY CPTDSCABR OF VCPT_DSC
+    INFORMATION = CPTDSC OF VCPT_DSC
+
+    ACCEPT UNACLE OF ARREC_DETAIL
+    DISPLAY UNANOMABR OF MCUNITE_ADM
+    INFORMATION = UNANOM OF MCUNITE_ADM
+  END
+END
+
+;------------------------------------------------------------------------------
+;
+;
+PROCEDURE DESIGNER 37
+BEGIN
+  IF RECSTU OF ARRECEPTION = "P"
+  THEN BEGIN
+    ;
+    ; Si notion de projet.
+    ;
+
+    IF (HLDNTNPRO OF MCHOLDING = "1" AND NACCLE OF MCNATURE_CTB = 4) OR &
+       (HLDNTNPRO OF MCHOLDING = "1" AND NACCLE OF MCNATURE_CTB = 5)
+    THEN BEGIN
+      WHILE 0 = SIZE(TRUNCATE(PRJCLE OF ARREC_DETAIL))
+      BEGIN
+        ACCEPT  PRJCLE OF ARREC_DETAIL
+        DISPLAY PRJDSC1 OF GPPROJETS
+        IF 0 <> SIZE(TRUNCATE(PRJCLE OF ARREC_DETAIL))
+        THEN BEGIN
+          INFORMATION = PRJDSC1 OF GPPROJETS
+          ACCEPT  PRACLE OF ARREC_DETAIL
+          DISPLAY PRADSC1 OF GPPRO_ACTIVITE
+          INFORMATION = PRADSC1 OF GPPRO_ACTIVITE
+          LET T_FLAG_ALT = "1"
+        END
+      END
+      IF T_FLAG_ALT <> "1"
+      THEN BEGIN
+        ACCEPT  PRJCLE OF ARREC_DETAIL
+        DISPLAY PRJDSC1 OF GPPROJETS
+        IF 0 <> SIZE(TRUNCATE(PRJCLE OF ARREC_DETAIL))
+        THEN BEGIN
+          INFORMATION = PRJDSC1 OF GPPROJETS
+          ACCEPT  PRACLE OF ARREC_DETAIL
+          DISPLAY PRADSC1 OF GPPRO_ACTIVITE
+          INFORMATION = PRADSC1 OF GPPRO_ACTIVITE
+        END
+      END
+    END
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE DESIGNER 43
+BEGIN
+  IF RECSTU OF ARRECEPTION  = "P"
+  THEN BEGIN
+    ACCEPT  IMMCLE OF ARREC_DETAIL
+    DISPLAY IMMDSC  OF IMIMMOBILISATION
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE DESIGNER 45
+BEGIN
+  IF RECSTU OF ARRECEPTION  = "P"
+  THEN BEGIN
+    ACCEPT  REDTAXCODTPS OF ARREC_DETAIL
+    DISPLAY TAXDSCFRA OF A_TAX_TPS
+    ACCEPT  REDTERESCACH OF ARREC_DETAIL
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE DESIGNER 50
+BEGIN
+  IF RECSTU OF ARRECEPTION  = "P"
+  THEN BEGIN
+    ACCEPT  REDTAXCODTVQ OF ARREC_DETAIL
+    DISPLAY TAXDSCFRA OF A_TAX_TVP
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE POSTFIND
+BEGIN
+
+  FOR ARREC_DETAIL
+  BEGIN
+
+     ; Il faut conserver l'ancien statut de la ligne pour permettre ou non
+     ; la modification.
+     ;
+
+     LET T_REDSTUOLD = REDSTU OF ARREC_DETAIL
+
+     ;
+     ; Il faut conserver l'ancienne valeur qui a servi à
+     ; incrémenter le cumulatif des montants bruts(incluant taxe).
+     ; Il faut prendre les informations du code de taxe pr\351c\351demment
+     ; saisi code de taxe précédemment saisi, c'est pour
+     ; cette raison que le traitement est fait dans cette proc\351dure.
+
+     LET T_TAXMODTPSOLD = TAXMOD OF A_TAX_TPS
+     LET T_TAXMODTVQOLD = TAXMOD OF A_TAX_TVP
+  END
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de mettre à jour quantité reçue pour la facturation
+; lorsque la ligne est annulée.
+;
+PROCEDURE INTERNAL ANNULER_LIGNE
+BEGIN
+    ; Permet de valider lors d'annulation de la ligne que les factures
+    ; soient transférées s'il y en a.
+    ;
+  WHILE RETRIEVING ARFAC_DETAIL
+  BEGIN
+    GET ARFACTURE_REC OPTIONAL
+    IF ACCESSOK
+    THEN BEGIN
+      IF FACDATTRF OF ARFACTURE_REC = 0
+      THEN ERROR 1478 ; Impossible d'annuler la ligne, il reste des factures non
+                      ; transférées.
+    END
+  END
+
+  LET REDQTERECREJ OF ARREC_DETAIL = REDQTERECREJ OF ARREC_DETAIL + &
+                                     (REDQTEREC   OF ARREC_DETAIL - &
+                                      REDQTERET   OF ARREC_DETAIL - &
+                                      REDQTEFAC   OF ARREC_DETAIL )
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR ARREC_DETAIL
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF ARREC_DETAIL &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF ARREC_DETAIL &
+       AND NOT NEWRECORD     OF ARREC_DETAIL &
+       AND NOT DELETEDRECORD OF ARREC_DETAIL &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+
+  IF (HLDNTNPRO OF MCHOLDING = "1" AND (NACCLE OF MCNATURE_CTB = 4  OR &
+                                        NACCLE OF MCNATURE_CTB = 5) AND &
+      PRJCLE OF ARREC_DETAIL = "")
+  THEN ERROR 889
+
+    ; Enlever le droit de modification et de destruction si la réception n'est
+    ; plus préliminaire.
+    ; Cependant, on peut annuler une ligne de réception à l'aide du statut "X".
+    ;
+    IF     ALTEREDRECORD     OF ARREC_DETAIL &
+       AND NOT NEWRECORD     OF ARREC_DETAIL &
+       AND T_REDSTUOLD <> " "                &
+       AND T_REDSTUOLD <> "S"
+      THEN ERROR 1401 ; Seule la modification d'une réception préliminaire est
+                      ; permise.
+
+
+
+    IF (   DELETEDRECORD OF ARREC_DETAIL  &
+        OR NEWRECORD     OF ARREC_DETAIL )&
+     AND T_RECSTUOLD <> "P"
+    THEN ERROR 1401 ; Seule la modification d'une réception préliminaire est
+                    ; permise.
+
+
+    ; Validation de la destruction d'une ligne de réception.
+    ;
+    IF    DELETEDRECORD   OF ARREC_DETAIL  &
+      AND NOT NEWRECORD   OF ARREC_DETAIL &
+      AND CDESTU    OF ARCMD_DETAIL = "C"  &
+      AND REDFLGCOM OF ARREC_DETAIL = "0"
+    THEN ERROR 1419 ; Impossible de détruire la ligne de réception.
+
+    ; Mise à jour du nombre d'items de la réception.
+    ;
+    ;
+    IF         NEWRECORD     OF ARREC_DETAIL &
+       AND NOT DELETEDRECORD OF ARREC_DETAIL
+    THEN LET RECNBRITE OF ARRECEPTION = RECNBRITE OF ARRECEPTION + 1
+    ELSE BEGIN
+      IF        DELETEDRECORD OF ARREC_DETAIL &
+        AND NOT NEWRECORD     OF ARREC_DETAIL
+      THEN LET RECNBRITE OF ARRECEPTION = RECNBRITE OF ARRECEPTION - 1
+    END
+
+
+  ;
+  ; Mise à jour des quantités rejetées de facturation.
+  ;
+    IF    ALTEREDRECORD OF ARREC_DETAIL &
+      AND REDSTU        OF ARREC_DETAIL = "X"
+    THEN DO INTERNAL ANNULER_LIGNE
+
+
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE POSTUPDATE
+BEGIN
+
+  ;
+  ; Il faut conserver l'ancienne valeur qui a servi à incrémenter le cumulatif
+  ; des montants bruts(incluant taxe). Il faut prendre les informations du
+  ; code de taxe précédemment saisi, c'est pour cette raison que le traitement
+  ; est fait dans cette procédure.
+  ;
+
+  FOR ARREC_DETAIL
+  BEGIN
+    LET T_TAXMODTPSOLD = TAXMOD OF A_TAX_TPS
+    LET T_TAXMODTVQOLD = TAXMOD OF A_TAX_TVP
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Cette procédure permet de mettre à jour les totaux.
+;
+;
+PROCEDURE DELETE
+BEGIN
+  IF NOT DELETEDRECORD OF ARREC_DETAIL
+  THEN BEGIN
+    ;
+    ; Enlève les anciennes valeurs.
+    ;
+    LET RECMNTTPS OF ARRECEPTION = RECMNTTPS OF ARRECEPTION - &
+                                   REDMNTTPS OF ARREC_DETAIL
+
+    LET RECMNTTVQ OF ARRECEPTION = RECMNTTVQ OF ARRECEPTION - &
+                                   REDMNTTVQ OF ARREC_DETAIL
+
+    LET RECMNTCTI OF ARRECEPTION = RECMNTCTI OF ARRECEPTION - &
+                                   REDMNTCTI OF ARREC_DETAIL
+
+    LET RECMNTRTI OF ARRECEPTION = RECMNTRTI OF ARRECEPTION - &
+                                   REDMNTRTI OF ARREC_DETAIL
+
+    LET RECMNTESC OF ARRECEPTION = RECMNTESC OF ARRECEPTION - &
+                                   REDMNTESC OF ARREC_DETAIL
+
+    LET RECMNTTOT OF ARRECEPTION = RECMNTTOT OF ARRECEPTION - &
+                                   REDMNTTOT OF ARREC_DETAIL
+
+    LET RECMNTNET OF ARRECEPTION = RECMNTNET OF ARRECEPTION - &
+                                   REDMNTNET OF ARREC_DETAIL
+
+      ; Mise à jour des quantités reçues et rejetées de la ligne
+      ; de commande.
+      ;
+    LET CDEQTEREC OF ARCMD_DETAIL = CDEQTEREC OF ARCMD_DETAIL - &
+                                    REDQTEREC OF ARREC_DETAIL
+
+    LET CDEQTEREJ OF ARCMD_DETAIL = 0
+
+    IF REDFLGCOM OF ARREC_DETAIL = "1"
+    THEN LET CDESTU    OF ARCMD_DETAIL = "S"
+
+  END
+  DELETE ARREC_DETAIL
+END
+
+
+BUILD
+
+@IF FORMAT
+xxxx                                           xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                            x
+******************************************************* Détail de réception ********************************************************
+* Réception.....: xxxxxxxxxxxx         Fournisseur...: xxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                      *
+************************************************************************************************************************************
+* Item..........: xxxxxxx                    Statut........: x xxxxxxxxxxxxxxx   Code produit..: xxxxxxxxxxxx  xxxxxxxxxxxxxxxxxx  *
+* Complet.......: xxx                        Code..........: x xxxxxxxxxxxxxxxxxxxxxxxxx                                           *
+* Qté reçue.....: xxxxxxxxxx                 Qté cmd.......: xxxxxxxxxx          Prix unitaire.: xxxxxxxxxxxxxxx                   *
+* Compte........: xxxxxx   xxxxxxxxxxxxxxx   Unité adm.....: xxxxxxxx  xxxxxxxxxxxxxxx                                             *
+* Projet.......:  xxxxxxxx xxxxxxxxxxxxxxx   Sous-projet...: xxx       xxxxxxxxxxxxxxx                                             *
+* Equipement....: xxxxxxxxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                           *
+* Code taxe féd.: xx xxxxxxxxxxxxxxx  Mnt tps.:  xxxxxxxxxxxxxxx Terme esc.: xxxx  xxxxxxxxxxxxxxxx  Mnt esc.:  xxxxxxxxxxxxxxx    *
+* Code taxe prov: xx xxxxxxxxxxxxxxx  Mnt tvq.:  xxxxxxxxxxxxxxx Mnt brut..: xxxxxxxxxxxxxxx         Mnt net.:  xxxxxxxxxxxxxxx    *
+************************************************************************************************************************************
+* Item..........: xxxxxxx                    Statut........: x xxxxxxxxxxxxxxx   Code produit..: xxxxxxxxxxxx  xxxxxxxxxxxxxxxxxx  *
+* Complet.......: xxx                        Code..........: x xxxxxxxxxxxxxxxxxxxxxxxxx                                           *
+* Qté reçue.....: xxxxxxxxxx                 Qté cmd.......: xxxxxxxxxx          Prix unitaire.: xxxxxxxxxxxxxxx                   *
+* Compte........: xxxxxx   xxxxxxxxxxxxxxx   Unité adm.....: xxxxxxxx  xxxxxxxxxxxxxxx                                             *
+* Projet.......:  xxxxxxxx xxxxxxxxxxxxxxx   Sous-projet...: xxx       xxxxxxxxxxxxxxx                                             *
+* Equipement....: xxxxxxxxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                           *
+* Code taxe féd.: xx xxxxxxxxxxxxxxx  Mnt tps.:  xxxxxxxxxxxxxxx Terme esc.: xxxx  xxxxxxxxxxxxxxxx  Mnt esc.:  xxxxxxxxxxxxxxx    *
+* Code taxe prov: xx xxxxxxxxxxxxxxx  Mnt tvq.:  xxxxxxxxxxxxxxx Mnt brut..: xxxxxxxxxxxxxxx         Mnt net.:  xxxxxxxxxxxxxxx    *
+************************************************************************************************************************************
+@ENDIF

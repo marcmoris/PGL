@@ -1,0 +1,259 @@
+;/T/ Notes descriptives 
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN ar007g ACTIONBAR &
+              MODE LABEL "" AT 2,80  &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              FROM 10,1 TO 23,80 &
+              MESSAGE ON 24 &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU  , &
+                        T_CIENOM     , &
+                        ARCOMMANDE   , &
+                        ARCMD_DETAIL
+
+USE ar007g.hlp NOLIST
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-écrans
+
+USE ussectmp NOLIST     ; Variable pour la sécurité 
+"AR007G"                ; Nom de l'écran
+
+USE ustrasse NOLIST
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Notes générales             " ACTION DESIGNER D001
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%es générales             " ACTION DESIGNER D001
+@ENDIF
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 04 ; Numéro de la compagnie
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie
+
+DEFINE    DZ_CIECLE   CHARACTER SIZE 04 = T_CIECLEMNU
+DEFINE    DZ_CIENOM   CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+;
+; Table maitre passer en parametre.
+;
+FILE ARCOMMANDE    MASTER
+FILE ARCMD_DETAIL  MASTER
+
+;-------------------------------------------------------------------------------
+;
+; Table primaire.
+;
+FILE ARCDE_NOTE          PRIMARY &
+                        OCCURS 5 &
+                        NOITEM
+  ACCESS VIA    CIECLE   , &
+                CMDCLE   , &
+                CMDAJT   , &
+                CDECLE     &
+         USING  CIECLE    OF ARCOMMANDE, &
+                CMDCLE    OF ARCOMMANDE, &
+                CMDAJT    OF ARCOMMANDE, &
+                CDECLE    OF ARCMD_DETAIL &
+        ORDERBY CIECLE   , &
+                CMDCLE   , &
+                CMDAJT   , &
+                CDECLE   , &
+                CDNSEQ
+
+  ITEM CIECLE OF ARCDE_NOTE INITIAL CIECLE OF ARCOMMANDE
+  ITEM CMDCLE OF ARCDE_NOTE INITIAL CMDCLE OF ARCOMMANDE
+  ITEM CMDAJT OF ARCDE_NOTE INITIAL CMDAJT OF ARCOMMANDE
+  ITEM CDECLE OF ARCDE_NOTE INITIAL CDECLE OF ARCMD_DETAIL
+
+USE ushilite NOLIST     ; Hilite pour tous les écrans
+DRAW  2,1 TO  2,79
+DRAW 12,1 TO 12,80
+DRAW  2,1 TO 12,1
+DRAW 3,80 TO 12,80
+
+TITLE &
+@IF FRANCAIS
+      " Notes descriptives " &
+@ELSE
+      " %%%es descriptives " &
+@ENDIF
+      CENTERED AT 2,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP
+
+ALIGN(,3,17) (,43,50)
+
+FIELD PRDCLE OF ARCMD_DETAIL &
+        DISPLAY PREDISPLAY   &
+@IF FRANCAIS
+        LABEL "Produit.....:"
+@ELSE
+        LABEL "%%%duit.....:"
+@ENDIF
+FIELD CDECLE OF ARCMD_DETAIL &
+        DISPLAY PREDISPLAY   &
+@IF FRANCAIS
+        LABEL "Item.:"
+@ELSE
+        LABEL "%%%duit.....:"
+@ENDIF
+FIELD CDEDSCPRD OF ARCMD_DETAIL &
+        DISPLAY PREDISPLAY   &
+@IF FRANCAIS
+        LABEL "Description.:"
+@ELSE
+        LABEL "%%%duit.....:"
+@ENDIF
+
+SKIP 1
+TITLE " Séq. Description                             Impression" &
+AT ,02
+
+ALIGN(2,2,3) (,,8) (,,51)
+
+CLUSTER OCCURS WITH ARCDE_NOTE ID BASE 10
+
+FIELD CDNSEQ OF ARCDE_NOTE &
+        HIDDEN    &
+        LABEL " " &
+        REQUIRED  &
+        PICTURE "^^"
+FIELD CDNDSC OF ARCDE_NOTE
+FIELD CDNIMP OF ARCDE_NOTE SIZE 3
+
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+; Pour la transformation du flag d'impression en 1 et 0
+;
+PROCEDURE INPUT CDNIMP
+BEGIN
+  USE usflginp NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Pour afficher le falg sous la forme Oui ou Non
+;
+PROCEDURE OUTPUT CDNIMP
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du sous-écran des notes générales.
+;
+PROCEDURE DESIGNER D001 NODATA
+BEGIN
+  IF  CMDSTU    OF ARCOMMANDE  <> "P"  AND &
+     (ALTEREDRECORD OF ARCDE_NOTE       OR &
+      NEWRECORD     OF ARCDE_NOTE       OR &
+      DELETEDRECORD OF ARCDE_NOTE)
+  THEN ERROR 1506
+
+  IF ALTEREDRECORD OF ARCDE_NOTE  
+  THEN ERROR 1390 
+
+  RUN SCREEN ar007h PASSING ARCDE_NOTE MODE F 
+  PUSH FIND
+END
+
+;
+; Procédure servant à modifier la première ligne d'un occurrence 
+; avec Powerhouse Client.
+;
+
+PROCEDURE DESIGNER PH01
+BEGIN
+  ACCEPT CDNSEQ OF ARCDE_NOTE
+  ACCEPT CDNDSC OF ARCDE_NOTE
+  ACCEPT CDNIMP OF ARCDE_NOTE
+END
+
+
+;
+; Procédure servant à détruire la première ligne d'un occurrence 
+; avec Powerhouse Client.
+;
+
+PROCEDURE DESIGNER PH02
+BEGIN
+  DELETE ARCDE_NOTE
+END
+
+
+PROCEDURE PREUPDATE
+BEGIN
+  FOR ARCDE_NOTE
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF ARCDE_NOTE &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF ARCDE_NOTE &
+       AND NOT NEWRECORD     OF ARCDE_NOTE &
+       AND NOT DELETEDRECORD OF ARCDE_NOTE &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+
+    IF  CMDSTU    OF ARCOMMANDE  <> "P"  AND &
+       (ALTEREDRECORD OF ARCDE_NOTE       OR &
+        NEWRECORD     OF ARCDE_NOTE       OR &
+        DELETEDRECORD OF ARCDE_NOTE)
+    THEN ERROR 1506
+    ;
+    ; Mise à jour du timbre de modification si l'usager change la réquisition.
+    ;
+    IF    NOT NEWRECORD OF ARCOMMANDE &
+      AND ALTEREDRECORD OF ARCDE_NOTE
+    THEN BEGIN
+      LET CMDDATMOD OF ARCOMMANDE = SYSDATE
+      LET CMDHREMOD OF ARCOMMANDE = SYSTIME / 10000
+      LET CMDUSRMOD OF ARCOMMANDE = TZ_LOGONID
+    END
+  END
+  ;
+  ; Mise à jour du nombre d'items de la réquisition.
+  ;
+  IF         NEWRECORD     OF ARCMD_DETAIL &
+     AND NOT DELETEDRECORD OF ARCMD_DETAIL
+  THEN LET CMDNBRITE OF ARCOMMANDE = CMDNBRITE OF ARCOMMANDE + 1
+  ELSE BEGIN
+    IF        DELETEDRECORD OF ARCMD_DETAIL &
+      AND NOT NEWRECORD     OF ARCMD_DETAIL 
+    THEN LET CMDNBRITE OF ARCOMMANDE = CMDNBRITE OF ARCOMMANDE - 1
+  END
+END
+
+BUILD
+
+@IF FORMAT
+****************************** Notes descriptives *****************************x
+* Produit.....: xxxxxxxxxxxx              Item.: xxxxxxx                       *
+* Description.: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                       *
+*                                                                              *
+* Séq. Description                             Impression                      *
+* xx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxx                          *
+* xx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxx                          *
+* xx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxx                          *
+* xx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxx                          *
+* xx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxx                          *
+********************************************************************************
+@ENDIF

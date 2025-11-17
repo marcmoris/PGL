@@ -1,0 +1,1395 @@
+;/T/ 2.5.1 Enregistrer les caissons. (DIAGRAMME) ECRAN FANTOME POUR MISE À JOUR
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1995-04-24
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   la liste d'emblalage.
+;
+;/M/ Programmeur...: Nicolas Groleau
+;    Date..........: 8 Septembre 1998
+;    But...........: Ne pas mettre à jour le qte coupee pour granicor
+;                    (PDGQTECPEPRDGRA) car mis à jour dans PD7777.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd216by NOMODE                     &
+               ACTION LABEL " "           &
+               FROM 2,70 TO 2,80          &
+               RECEIVING PDCAISSON,       &
+                         PDEMBAL_DIAG,    &
+                         PDPRIORITE_DIAG, &
+                         PDDIAGRAMME,     &
+                         T_QTE_EMB,       &
+                         T_ALTREC,        &
+                         T_NEWREC,        &
+                         T_DELREC,        &
+                         T_CIECLEMNU      &
+  MESSAGE ON LINE 24
+
+
+TEMPORARY T_QTE_EMB INTEGER SIGNED SIZE 04
+
+TEMPORARY T_ALTREC  CHARACTER      SIZE 01
+
+TEMPORARY T_NEWREC  CHARACTER      SIZE 01
+
+TEMPORARY T_DELREC  CHARACTER      SIZE 01
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 04
+
+;-------------------------------------------------------------------------------
+;
+; La transaction UPDATE doit être celle de l'appelant.
+;
+
+TRANSACTION UPDATE INHERITED NOCOMMIT
+
+
+;-------------------------------------------------------------------------------
+;
+; Caisson
+;
+
+FILE PDCAISSON MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Emballage diagramme
+;
+
+FILE PDEMBAL_DIAG MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Priorité diagramme
+;
+
+FILE PDPRIORITE_DIAG MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Diagramme
+;
+
+FILE PDDIAGRAMME MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Diagramme
+;
+
+FILE PDDIAGRAMME DESIGNER ALIAS A_DIA_MAJ NOITEM
+
+
+;-------------------------------------------------------------------------------
+;
+; Priorité diagramme
+;
+
+FILE PDPRIORITE_DIAG REFERENCE ALIAS PRD_FIC
+
+  ACCESS VIA     CIECLE,          &
+                 PJTABR,          &
+                 DIANUMDIA002,    &
+                 PRICODPRI        &
+         USING   T_CIECLEMNU,                          &
+                 PJTABR           OF PDEMBAL_DIAG,     &
+                 DIANUMDIA002     OF PDEMBAL_DIAG,     &
+                 PRICODPRI        OF PDEMBAL_DIAG
+
+
+;-------------------------------------------------------------------------------
+;
+; Priorité diagramme
+;
+
+FILE PDPRIORITE_DIAG DESIGNER ALIAS PRD_PRIO_DIAG
+FILE PDPRIORITE_DIAG DESIGNER ALIAS PRD_PRIO_DIAG_2
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire au traitement
+;
+
+TEMPORARY T_TOT_QTE_IMP   INTEGER SIGNED SIZE 04
+TEMPORARY T_TOT_QTE_A_IMP INTEGER SIGNED SIZE 04
+TEMPORARY T_QTE_IMP       INTEGER SIGNED SIZE 04
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul des quamtités emballés par priorité
+;
+
+PROCEDURE INTERNAL MAJ_QTE_EMBAL_POS
+BEGIN
+
+  WHILE RETRIEVING PRD_PRIO_DIAG    &
+    VIA     CIECLE,          &
+            PJTABR,          &
+            DIANUMDIA002     &
+    USING   T_CIECLEMNU,                          &
+            PJTABR           OF PDEMBAL_DIAG,     &
+            DIANUMDIA002     OF PDEMBAL_DIAG      &
+    ORDERBY CIECLE,                               &
+            PJTABR           ASCENDING,           &
+            DIANUMDIA002     ASCENDING,           &
+            PRICODPRI        ASCENDING
+  BEGIN
+    IF PRICODPRI OF PRD_PRIO_DIAG >= PRICODPRI OF PDEMBAL_DIAG
+    THEN BEGIN
+      ;
+      ; Calcul de la quantité à imputer à GRANICOR pour la priorité
+      ;
+      IF CAISITEMB OF PDCAISSON = "GR"
+      THEN BEGIN
+        ;
+        ; Calcul de la quantité restante
+        ;
+        LET T_QTE_IMP = T_TOT_QTE_A_IMP - T_TOT_QTE_IMP
+        ;
+        ; Caisson semi-fini
+        ;
+        IF CAIETA OF PDCAISSON = "S" ;OR CAIETA OF PDCAISSON = "C"
+        THEN BEGIN
+          ;
+          ; Si la QTE est plus petite que la QTE planifiée pour la priorité
+          ;
+          IF T_QTE_IMP < (PDGQTEPLACPEGRA OF PRD_PRIO_DIAG - PDGQTECPEPRDGRA OF PRD_PRIO_DIAG)
+          THEN BEGIN
+          ;  LET PDGQTECPEPRDGRA OF PRD_PRIO_DIAG = PDGQTECPEPRDGRA OF PRD_PRIO_DIAG + T_QTE_IMP
+            LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+          END
+          ELSE BEGIN
+            ;
+            ; Vérifie qu'il reste une QTE à imputer pour la priorité
+            ;
+            IF PDGQTEPLACPEGRA OF PRD_PRIO_DIAG > PDGQTECPEPRDGRA OF PRD_PRIO_DIAG
+            THEN BEGIN
+              ;
+              ; Impute la QTE emballer pour la priorité
+              ;
+              LET T_QTE_IMP = PDGQTEPLACPEGRA OF PRD_PRIO_DIAG - PDGQTECPEPRDGRA OF PRD_PRIO_DIAG
+        ;      LET PDGQTECPEPRDGRA OF PRD_PRIO_DIAG = PDGQTECPEPRDGRA OF PRD_PRIO_DIAG + T_QTE_IMP
+              LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+            END
+          END
+        END
+        ;
+        ; Caisson fini
+        ;
+        IF CAIETA OF PDCAISSON = "F" OR CAIETA OF PDCAISSON = "C"
+        THEN BEGIN
+          ;
+          ; Si la QTE est plus petite que la QTE planifiée pour la priorité
+          ;
+          IF T_QTE_IMP < (PDGQTEPLAFINGRA OF PRD_PRIO_DIAG - PDGQTEFINPRDGRA OF PRD_PRIO_DIAG)
+          THEN BEGIN
+;            LET PDGQTEFINPRDGRA OF PRD_PRIO_DIAG = PDGQTEFINPRDGRA OF PRD_PRIO_DIAG + T_QTE_IMP
+            LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+          END
+          ELSE BEGIN
+            ;
+            ; Vérifie qu'il reste une QTE à imputer pour la priorité
+            ;
+            IF PDGQTEPLAFINGRA OF PRD_PRIO_DIAG > PDGQTEFINPRDGRA OF PRD_PRIO_DIAG
+            THEN BEGIN
+              ;
+              ; Impute la QTE emballer pour la priorité
+              ;
+              LET T_QTE_IMP = PDGQTEPLAFINGRA OF PRD_PRIO_DIAG - PDGQTEFINPRDGRA OF PRD_PRIO_DIAG
+;              LET PDGQTEFINPRDGRA OF PRD_PRIO_DIAG = PDGQTEFINPRDGRA OF PRD_PRIO_DIAG + T_QTE_IMP
+              LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+            END
+          END
+        END
+      END
+      ;
+      ; Calcul de la quantité à imputer à USINE SECONDAIRE pour la priorité
+      ;
+      IF CAISITEMB OF PDCAISSON = "US"
+      THEN BEGIN
+        ;
+        ; Calcul de la quantité restante
+        ;
+        LET T_QTE_IMP = T_TOT_QTE_A_IMP - T_TOT_QTE_IMP
+        ;
+        ; Si la QTE est plus petite que la QTE planifiée pour la priorité
+        ;
+        ;
+        ; Caisson semi-fini
+        ;
+        IF CAIETA OF PDCAISSON = "S" ;OR CAIETA OF PDCAISSON = "C"
+        THEN BEGIN
+          IF T_QTE_IMP < (PDGQTEPLACPEUSC OF PRD_PRIO_DIAG - PDGQTECPERCUUSC OF PRD_PRIO_DIAG)
+          THEN BEGIN
+            LET PDGQTECPERCUUSC OF PRD_PRIO_DIAG = PDGQTECPERCUUSC OF PRD_PRIO_DIAG + T_QTE_IMP
+            LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+          END
+          ELSE BEGIN
+            ;
+            ; Vérifie qu'il reste une QTE à imputer pour la priorité
+            ;
+            IF PDGQTEPLACPEUSC OF PRD_PRIO_DIAG > PDGQTECPERCUUSC OF PRD_PRIO_DIAG
+            THEN BEGIN
+              ;
+              ; Impute la QTE emballer pour la priorité
+              ;
+              LET T_QTE_IMP = PDGQTEPLACPEUSC OF PRD_PRIO_DIAG - PDGQTECPERCUUSC OF PRD_PRIO_DIAG
+              LET PDGQTECPERCUUSC OF PRD_PRIO_DIAG = PDGQTECPERCUUSC OF PRD_PRIO_DIAG + T_QTE_IMP
+              LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+            END
+          END
+        END
+        ;
+        ; Caisson fini
+        ;
+        IF CAIETA OF PDCAISSON = "F" OR CAIETA OF PDCAISSON = "C"
+        THEN BEGIN
+          IF T_QTE_IMP < (PDGQTEPLAFINUSC OF PRD_PRIO_DIAG - PDGQTEFINRCUUSC OF PRD_PRIO_DIAG)
+          THEN BEGIN
+            LET PDGQTEFINRCUUSC OF PRD_PRIO_DIAG = PDGQTEFINRCUUSC OF PRD_PRIO_DIAG + T_QTE_IMP
+            LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+          END
+          ELSE BEGIN
+            ;
+            ; Vérifie qu'il reste une QTE à imputer pour la priorité
+            ;
+            IF PDGQTEPLAFINUSC OF PRD_PRIO_DIAG > PDGQTEFINRCUUSC OF PRD_PRIO_DIAG
+            THEN BEGIN
+              ;
+              ; Impute la QTE emballer pour la priorité
+              ;
+              LET T_QTE_IMP = PDGQTEPLAFINUSC OF PRD_PRIO_DIAG - PDGQTEFINRCUUSC OF PRD_PRIO_DIAG
+              LET PDGQTEFINRCUUSC OF PRD_PRIO_DIAG = PDGQTEFINRCUUSC OF PRD_PRIO_DIAG + T_QTE_IMP
+              LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+            END
+          END
+        END
+      END
+      ;
+      ; Calcul de la quantité à imputer à SOUS-CONTRACTANT pour la priorité
+      ;
+      IF CAISITEMB OF PDCAISSON = "SC"
+      THEN BEGIN
+        ;
+        ; Calcul de la quantité restante
+        ;
+        LET T_QTE_IMP = T_TOT_QTE_A_IMP - T_TOT_QTE_IMP
+        ;
+        ; Caisson semi-fini
+        ;
+        IF CAIETA OF PDCAISSON = "S" OR CAIETA OF PDCAISSON = "C"
+        THEN BEGIN
+          ;
+          ; Si la QTE est plus petite que la QTE planifiée pour la priorité
+          ;
+          IF T_QTE_IMP < (PDGQTEPLACPESCT OF PRD_PRIO_DIAG - PDGQTECPERCUSCT OF PRD_PRIO_DIAG)
+          THEN BEGIN
+            LET PDGQTECPERCUSCT OF PRD_PRIO_DIAG = PDGQTECPERCUSCT OF PRD_PRIO_DIAG + T_QTE_IMP
+            LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+          END
+          ELSE BEGIN
+            ;
+            ; Vérifie qu'il reste une QTE à imputer pour la priorité
+            ;
+            IF PDGQTEPLACPESCT OF PRD_PRIO_DIAG > PDGQTECPERCUSCT OF PRD_PRIO_DIAG
+            THEN BEGIN
+              ;
+              ; Impute la QTE emballer pour la priorité
+              ;
+              LET T_QTE_IMP = PDGQTEPLACPESCT OF PRD_PRIO_DIAG - PDGQTECPERCUSCT OF PRD_PRIO_DIAG
+              LET PDGQTECPERCUSCT OF PRD_PRIO_DIAG = PDGQTECPERCUSCT OF PRD_PRIO_DIAG + T_QTE_IMP
+              LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+            END
+          END
+        END
+        ;
+        ; Caisson fini
+        ;
+        IF CAIETA OF PDCAISSON = "F" OR CAIETA OF PDCAISSON = "C"
+        THEN BEGIN
+          ;
+          ; Si la QTE est plus petite que la QTE planifiée pour la priorité
+          ;
+          IF T_QTE_IMP < (PDGQTEPLAFINSCT OF PRD_PRIO_DIAG - PDGQTEFINRCUSCT OF PRD_PRIO_DIAG)
+          THEN BEGIN
+            LET PDGQTEFINRCUSCT OF PRD_PRIO_DIAG = PDGQTEFINRCUSCT OF PRD_PRIO_DIAG + T_QTE_IMP
+            LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+          END
+          ELSE BEGIN
+            ;
+            ; Vérifie qu'il reste une QTE à imputer pour la priorité
+            ;
+            IF PDGQTEPLAFINSCT OF PRD_PRIO_DIAG > PDGQTEFINRCUSCT OF PRD_PRIO_DIAG
+            THEN BEGIN
+              ;
+              ; Impute la QTE emballer pour la priorité
+              ;
+              LET T_QTE_IMP = PDGQTEPLAFINSCT OF PRD_PRIO_DIAG - PDGQTEFINRCUSCT OF PRD_PRIO_DIAG
+              LET PDGQTEFINRCUSCT OF PRD_PRIO_DIAG = PDGQTEFINRCUSCT OF PRD_PRIO_DIAG + T_QTE_IMP
+              LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+            END
+          END
+        END
+      END
+      PUT PRD_PRIO_DIAG RESET
+    END
+  END
+  ;
+  ; boucle pour imputer QTE restante
+  ;
+  IF T_TOT_QTE_IMP < T_TOT_QTE_A_IMP
+  THEN BEGIN
+    WHILE RETRIEVING PRD_PRIO_DIAG    &
+      VIA     CIECLE,          &
+              PJTABR,          &
+              DIANUMDIA002     &
+      USING   T_CIECLEMNU,                          &
+              PJTABR           OF PDEMBAL_DIAG,     &
+              DIANUMDIA002     OF PDEMBAL_DIAG      &
+      ORDERBY CIECLE ,                              &
+              PJTABR           ASCENDING,           &
+              DIANUMDIA002     ASCENDING,           &
+              PRICODPRI        ASCENDING
+    BEGIN
+      IF PRICODPRI OF PRD_PRIO_DIAG < PRICODPRI OF PDEMBAL_DIAG
+      THEN BEGIN
+        ;
+        ; Calcul de la quantité à imputer à GRANICOR pour la priorité
+        ;
+        IF CAISITEMB OF PDCAISSON = "GR"
+        THEN BEGIN
+          ;
+          ; Calcul de la quantité restante
+          ;
+          LET T_QTE_IMP = T_TOT_QTE_A_IMP - T_TOT_QTE_IMP
+          ;
+          ; Caisson semi fini
+          ;
+          IF CAIETA OF PDCAISSON = "S" ;OR CAIETA OF PDCAISSON = "C"
+          THEN BEGIN
+            ;
+            ; Si la QTE est plus petite que la QTE planifiée pour la priorité
+            ;
+            IF T_QTE_IMP < (PDGQTEPLACPEGRA OF PRD_PRIO_DIAG - PDGQTECPEPRDGRA OF PRD_PRIO_DIAG)
+            THEN BEGIN
+         ;     LET PDGQTECPEPRDGRA OF PRD_PRIO_DIAG = PDGQTECPEPRDGRA OF PRD_PRIO_DIAG + T_QTE_IMP
+              LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+            END
+            ELSE BEGIN
+              ;
+              ; Vérifie qu'il reste une QTE à imputer pour la priorité
+              ;
+              IF PDGQTEPLACPEGRA OF PRD_PRIO_DIAG > PDGQTECPEPRDGRA OF PRD_PRIO_DIAG
+              THEN BEGIN
+                ;
+                ; Impute la QTE emballer pour la priorité
+                ;
+                LET T_QTE_IMP = PDGQTEPLACPEGRA OF PRD_PRIO_DIAG - PDGQTECPEPRDGRA OF PRD_PRIO_DIAG
+        ;        LET PDGQTECPEPRDGRA OF PRD_PRIO_DIAG = PDGQTECPEPRDGRA OF PRD_PRIO_DIAG + T_QTE_IMP
+                LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+              END
+            END
+          END
+          ;
+          ; Caisson fini
+          ;
+          IF CAIETA OF PDCAISSON = "F" OR CAIETA OF PDCAISSON = "C"
+          THEN BEGIN
+            ;
+            ; Si la QTE est plus petite que la QTE planifiée pour la priorité
+            ;
+            IF T_QTE_IMP < (PDGQTEPLAFINGRA OF PRD_PRIO_DIAG - PDGQTEFINPRDGRA OF PRD_PRIO_DIAG)
+            THEN BEGIN
+;              LET PDGQTEFINPRDGRA OF PRD_PRIO_DIAG = PDGQTEFINPRDGRA OF PRD_PRIO_DIAG + T_QTE_IMP
+              LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+            END
+            ELSE BEGIN
+              ;
+              ; Vérifie qu'il reste une QTE à imputer pour la priorité
+              ;
+              IF PDGQTEPLAFINGRA OF PRD_PRIO_DIAG > PDGQTEFINPRDGRA OF PRD_PRIO_DIAG
+              THEN BEGIN
+                ;
+                ; Impute la QTE emballer pour la priorité
+                ;
+                LET T_QTE_IMP = PDGQTEPLAFINGRA OF PRD_PRIO_DIAG - PDGQTEFINPRDGRA OF PRD_PRIO_DIAG
+;                LET PDGQTEFINPRDGRA OF PRD_PRIO_DIAG = PDGQTEFINPRDGRA OF PRD_PRIO_DIAG + T_QTE_IMP
+                LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+              END
+            END
+          END
+        END
+        ;
+        ; Calcul de la quantité à imputer à USINE SECONDAIRE pour la priorité
+        ;
+        IF CAISITEMB OF PDCAISSON = "US"
+        THEN BEGIN
+          ;
+          ; Calcul de la quantité restante
+          ;
+          LET T_QTE_IMP = T_TOT_QTE_A_IMP - T_TOT_QTE_IMP
+          ;
+          ; Caisson semi-fini
+          ;
+          IF CAIETA OF PDCAISSON = "S" ;OR CAIETA OF PDCAISSON = "C"
+          THEN BEGIN
+            ;
+            ; Si la QTE est plus petite que la QTE planifiée pour la priorité
+            ;
+            IF T_QTE_IMP < (PDGQTEPLACPEUSC OF PRD_PRIO_DIAG - PDGQTECPERCUUSC OF PRD_PRIO_DIAG)
+            THEN BEGIN
+              LET PDGQTECPERCUUSC OF PRD_PRIO_DIAG = PDGQTECPERCUUSC OF PRD_PRIO_DIAG + T_QTE_IMP
+              LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+            END
+            ELSE BEGIN
+              ;
+              ; Vérifie qu'il reste une QTE à imputer pour la priorité
+              ;
+              IF PDGQTEPLACPEUSC OF PRD_PRIO_DIAG > PDGQTECPERCUUSC OF PRD_PRIO_DIAG
+              THEN BEGIN
+                ;
+                ; Impute la QTE emballer pour la priorité
+                ;
+                LET T_QTE_IMP = PDGQTEPLACPEUSC OF PRD_PRIO_DIAG - PDGQTECPERCUUSC OF PRD_PRIO_DIAG
+                LET PDGQTECPERCUUSC OF PRD_PRIO_DIAG = PDGQTECPERCUUSC OF PRD_PRIO_DIAG + T_QTE_IMP
+                LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+              END
+            END
+          END
+          ;
+          ; Caisson fini
+          ;
+          IF CAIETA OF PDCAISSON = "F" OR CAIETA OF PDCAISSON = "C"
+          THEN BEGIN
+            ;
+            ; Si la QTE est plus petite que la QTE planifiée pour la priorité
+            ;
+            IF T_QTE_IMP < (PDGQTEPLAFINUSC OF PRD_PRIO_DIAG - PDGQTEFINRCUUSC OF PRD_PRIO_DIAG)
+            THEN BEGIN
+              LET PDGQTEFINRCUUSC OF PRD_PRIO_DIAG = PDGQTEFINRCUUSC OF PRD_PRIO_DIAG + T_QTE_IMP
+              LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+            END
+            ELSE BEGIN
+              ;
+              ; Vérifie qu'il reste une QTE à imputer pour la priorité
+              ;
+              IF PDGQTEPLAFINUSC OF PRD_PRIO_DIAG > PDGQTEFINRCUUSC OF PRD_PRIO_DIAG
+              THEN BEGIN
+                ;
+                ; Impute la QTE emballer pour la priorité
+                ;
+                LET T_QTE_IMP = PDGQTEPLAFINUSC OF PRD_PRIO_DIAG - PDGQTEFINRCUUSC OF PRD_PRIO_DIAG
+                LET PDGQTEFINRCUUSC OF PRD_PRIO_DIAG = PDGQTEFINRCUUSC OF PRD_PRIO_DIAG + T_QTE_IMP
+                LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+              END
+            END
+          END
+        END
+        ;
+        ; Calcul de la quantité à imputer à SOUS-CONTRACTANT pour la priorité
+        ;
+        IF CAISITEMB OF PDCAISSON = "SC"
+        THEN BEGIN
+          ;
+          ; Calcul de la quantité restante
+          ;
+          LET T_QTE_IMP = T_TOT_QTE_A_IMP - T_TOT_QTE_IMP
+          ;
+          ; Caisson simi-fini
+          ;
+          IF CAIETA OF PDCAISSON = "S" OR CAIETA OF PDCAISSON = "C"
+          THEN BEGIN
+            ;
+            ; Si la QTE est plus petite que la QTE planifiée pour la priorité
+            ;
+            IF T_QTE_IMP < (PDGQTEPLACPESCT OF PRD_PRIO_DIAG - PDGQTECPERCUSCT OF PRD_PRIO_DIAG)
+            THEN BEGIN
+              LET PDGQTECPERCUSCT OF PRD_PRIO_DIAG = PDGQTECPERCUSCT OF PRD_PRIO_DIAG + T_QTE_IMP
+              LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+            END
+            ELSE BEGIN
+              ;
+              ; Vérifie qu'il reste une QTE à imputer pour la priorité
+              ;
+              IF PDGQTEPLACPESCT OF PRD_PRIO_DIAG > PDGQTECPERCUSCT OF PRD_PRIO_DIAG
+              THEN BEGIN
+                ;
+                ; Impute la QTE emballer pour la priorité
+                ;
+                LET T_QTE_IMP = PDGQTEPLACPESCT OF PRD_PRIO_DIAG - PDGQTECPERCUSCT OF PRD_PRIO_DIAG
+                LET PDGQTECPERCUSCT OF PRD_PRIO_DIAG = PDGQTECPERCUSCT OF PRD_PRIO_DIAG + T_QTE_IMP
+                LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+              END
+            END
+          END
+          ;
+          ; Caisson fini
+          ;
+          IF CAIETA OF PDCAISSON = "F" OR CAIETA OF PDCAISSON = "C"
+          THEN BEGIN
+            ;
+            ; Si la QTE est plus petite que la QTE planifiée pour la priorité
+            ;
+            IF T_QTE_IMP < (PDGQTEPLAFINSCT OF PRD_PRIO_DIAG - PDGQTEFINRCUSCT OF PRD_PRIO_DIAG)
+            THEN BEGIN
+              LET PDGQTEFINRCUSCT OF PRD_PRIO_DIAG = PDGQTEFINRCUSCT OF PRD_PRIO_DIAG + T_QTE_IMP
+              LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+            END
+            ELSE BEGIN
+              ;
+              ; Vérifie qu'il reste une QTE à imputer pour la priorité
+              ;
+              IF PDGQTEPLAFINSCT OF PRD_PRIO_DIAG > PDGQTEFINRCUSCT OF PRD_PRIO_DIAG
+              THEN BEGIN
+                ;
+                ; Impute la QTE emballer pour la priorité
+                ;
+                LET T_QTE_IMP = PDGQTEPLAFINSCT OF PRD_PRIO_DIAG - PDGQTEFINRCUSCT OF PRD_PRIO_DIAG
+                LET PDGQTEFINRCUSCT OF PRD_PRIO_DIAG = PDGQTEFINRCUSCT OF PRD_PRIO_DIAG + T_QTE_IMP
+                LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+              END
+            END
+          END
+        END
+        PUT PRD_PRIO_DIAG RESET
+      END
+    END
+  END
+  ;
+  ; La quantité emballer est suppérieur à la quantité requise
+  ;
+  IF T_TOT_QTE_IMP < T_TOT_QTE_A_IMP
+  THEN BEGIN
+    GET PRD_PRIO_DIAG_2 &
+      VIA     CIECLE,          &
+              PJTABR,          &
+              DIANUMDIA002,    &
+              PRICODPRI        &
+      USING   T_CIECLEMNU,                          &
+              PJTABR           OF PDEMBAL_DIAG,     &
+              DIANUMDIA002     OF PDEMBAL_DIAG,     &
+              "99"
+    IF ACCESSOK
+    THEN BEGIN
+      ;
+      ; Calcul de la quantité à imputer à GRANICOR pour la priorité
+      ;
+      IF CAISITEMB OF PDCAISSON = "GR"
+      THEN BEGIN
+        ;
+        ; Caisson semi-fini
+        ;
+        IF CAIETA OF PDCAISSON = "S"; OR CAIETA OF PDCAISSON = "C"
+        THEN BEGIN
+          ;
+          ; Calcul de la quantité restante
+          ;
+          LET T_QTE_IMP = T_TOT_QTE_A_IMP - T_TOT_QTE_IMP
+      ;    LET PDGQTECPEPRDGRA OF PRD_PRIO_DIAG_2 = PDGQTECPEPRDGRA OF PRD_PRIO_DIAG_2 + T_QTE_IMP
+          LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+        END
+        ;
+        ; Caisson fini
+        ;
+        IF CAIETA OF PDCAISSON = "F" OR CAIETA OF PDCAISSON = "C"
+        THEN BEGIN
+          ;
+          ; Calcul de la quantité restante
+          ;
+          LET T_QTE_IMP = T_TOT_QTE_A_IMP - T_TOT_QTE_IMP
+;          LET PDGQTEFINPRDGRA OF PRD_PRIO_DIAG_2 = PDGQTEFINPRDGRA OF PRD_PRIO_DIAG_2 + T_QTE_IMP
+          LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+        END
+      END
+      ;
+      ; Calcul de la quantité à imputer à USINE SECONDAIRE pour la priorité
+      ;
+      IF CAISITEMB OF PDCAISSON = "US"
+      THEN BEGIN
+        ;
+        ; Caisson semi-fini
+        ;
+        IF CAIETA OF PDCAISSON = "S" ;OR CAIETA OF PDCAISSON = "C"
+        THEN BEGIN
+          ;
+          ; Calcul de la quantité restante
+          ;
+          LET T_QTE_IMP = T_TOT_QTE_A_IMP - T_TOT_QTE_IMP
+          LET PDGQTECPERCUUSC OF PRD_PRIO_DIAG_2 = PDGQTECPERCUUSC OF PRD_PRIO_DIAG_2 + T_QTE_IMP
+          LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+        END
+        ;
+        ; Caisson fini
+        ;
+        IF CAIETA OF PDCAISSON = "F" OR CAIETA OF PDCAISSON = "C"
+        THEN BEGIN
+          ;
+          ; Calcul de la quantité restante
+          ;
+          LET T_QTE_IMP = T_TOT_QTE_A_IMP - T_TOT_QTE_IMP
+          LET PDGQTEFINRCUUSC OF PRD_PRIO_DIAG_2 = PDGQTEFINRCUUSC OF PRD_PRIO_DIAG_2 + T_QTE_IMP
+          LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+        END
+      END
+      ;
+      ; Calcul de la quantité à imputer à SOUS-CONTRACTANT pour la priorité
+      ;
+      IF CAISITEMB OF PDCAISSON = "SC"
+      THEN BEGIN
+        ;
+        ; Caisson semi-fini
+        ;
+        IF CAIETA OF PDCAISSON = "S" OR CAIETA OF PDCAISSON = "C"
+        THEN BEGIN
+          ;
+          ; Calcul de la quantité restante
+          ;
+          LET T_QTE_IMP = T_TOT_QTE_A_IMP - T_TOT_QTE_IMP
+          LET PDGQTECPERCUSCT OF PRD_PRIO_DIAG_2 = PDGQTECPERCUSCT OF PRD_PRIO_DIAG_2 + T_QTE_IMP
+          LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+        END
+        ;
+        ; Caisson fini
+        ;
+        IF CAIETA OF PDCAISSON = "F" OR CAIETA OF PDCAISSON = "C"
+        THEN BEGIN
+          ;
+          ; Calcul de la quantité restante
+          ;
+          LET T_QTE_IMP = T_TOT_QTE_A_IMP - T_TOT_QTE_IMP
+          LET PDGQTEFINRCUSCT OF PRD_PRIO_DIAG_2 = PDGQTEFINRCUSCT OF PRD_PRIO_DIAG_2 + T_QTE_IMP
+          LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+        END
+      END
+      PUT PRD_PRIO_DIAG_2 RESET
+    END
+  END
+
+  ;
+  ; Mise à jour de la quantité total de diagramme emballé
+  ;
+  GET A_DIA_MAJ              &
+    VIA     CIECLE,          &
+            PJTABR,          &
+            DIANUMDIA002     &
+    USING   T_CIECLEMNU,                          &
+            PJTABR           OF PDEMBAL_DIAG,     &
+            DIANUMDIA002     OF PDEMBAL_DIAG
+  IF ACCESSOK
+  THEN BEGIN
+    ;
+    ; Mise à jour du compteur QUANTITÉ EMBALLÉ
+    ;
+    IF ("SC" <> CAISITEMB OF PDCAISSON) AND (("F" = CAIETA OF PDCAISSON) OR ("C" = CAIETA OF PDCAISSON))
+;    IF "F" = CAIETA OF PDCAISSON AND "SC" <> CAISITEMB OF PDCAISSON
+    THEN BEGIN
+      LET DIAQTEEMB OF A_DIA_MAJ = DIAQTEEMB OF A_DIA_MAJ + T_TOT_QTE_IMP
+    END
+    ;IF "C" = CAIETA OF PDCAISSON AND "SC" <> CAISITEMB OF PDCAISSON
+    ;THEN BEGIN
+    ;  LET DIAQTEEMB OF A_DIA_MAJ = DIAQTEEMB OF A_DIA_MAJ + &
+    ;                               (T_TOT_QTE_IMP / 2)
+    ;END
+    ;
+    ; Mise à jour du compteur QUANTITÉ PRÊT GRANICOR
+    ;
+    IF "GR" = CAISITEMB OF PDCAISSON &
+       AND &
+       ("F" = CAIETA OF PDCAISSON OR "C" = CAIETA OF PDCAISSON)
+    THEN BEGIN
+      LET DIAQTEPREGRA OF A_DIA_MAJ = DIAQTEPREGRA OF A_DIA_MAJ + T_TOT_QTE_IMP
+    END
+    ;
+    ; Mise à jour du compteur QUANTITÉ PRÊT USINE SECONDAIRE
+    ;
+    IF "US" = CAISITEMB OF PDCAISSON &
+       AND &
+       ("F" = CAIETA OF PDCAISSON OR "C" = CAIETA OF PDCAISSON)
+    THEN BEGIN
+      LET DIAQTEPREUSC OF A_DIA_MAJ = DIAQTEPREUSC OF A_DIA_MAJ + T_TOT_QTE_IMP
+    END
+    ;
+    ; Mise à jour du compteur QUANTITÉ PRÊT SOUS-CONTRACTANT
+    ;
+    IF "SC" = CAISITEMB OF PDCAISSON &
+       AND &
+       ("F" = CAIETA OF PDCAISSON OR "C" = CAIETA OF PDCAISSON)
+    THEN BEGIN
+      LET DIAQTEPRESCT OF A_DIA_MAJ = DIAQTEPRESCT OF A_DIA_MAJ + T_TOT_QTE_IMP
+    END
+
+    PUT A_DIA_MAJ RESET
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul des quantités emballés lors de la destruction d'une ligne de détail
+;
+
+PROCEDURE INTERNAL MAJ_QTE_EMBAL_NEG
+BEGIN
+
+  WHILE RETRIEVING PRD_PRIO_DIAG    &
+    VIA     CIECLE,          &
+            PJTABR,          &
+            DIANUMDIA002     &
+    USING   T_CIECLEMNU,                          &
+            PJTABR           OF PDEMBAL_DIAG,     &
+            DIANUMDIA002     OF PDEMBAL_DIAG      &
+    ORDERBY CIECLE,                               &
+            PJTABR           ASCENDING,           &
+            DIANUMDIA002     ASCENDING,           &
+            PRICODPRI        ASCENDING
+  BEGIN
+    IF PRICODPRI OF PRD_PRIO_DIAG >= PRICODPRI OF PDEMBAL_DIAG
+    THEN BEGIN
+      ;
+      ; Calcul de la quantité à imputer à GRANICOR pour la priorité
+      ;
+      IF CAISITEMB OF PDCAISSON = "GR"
+      THEN BEGIN
+        ;
+        ; Calcul de la quantité restante
+        ;
+        LET T_QTE_IMP = T_TOT_QTE_A_IMP - T_TOT_QTE_IMP
+        ;
+        ; Caisson semi-fini
+        ;
+        IF CAIETA OF PDCAISSON = "S" ;OR CAIETA OF PDCAISSON = "C"
+        THEN BEGIN
+          ;
+          ; Si la QTE est plus petite que la QTE planifiée pour la priorité
+          ;
+          IF T_QTE_IMP < PDGQTECPEPRDGRA OF PRD_PRIO_DIAG
+          THEN BEGIN
+          ;  LET PDGQTECPEPRDGRA OF PRD_PRIO_DIAG = PDGQTECPEPRDGRA OF PRD_PRIO_DIAG + T_QTE_IMP
+            LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+          END
+          ELSE BEGIN
+            ;
+            ; Vérifie qu'il reste une QTE à imputer pour la priorité
+            ;
+            IF PDGQTECPEPRDGRA OF PRD_PRIO_DIAG > 0
+            THEN BEGIN
+              ;
+              ; Impute la QTE emballer pour la priorité
+              ;
+              LET T_QTE_IMP = PDGQTECPEPRDGRA OF PRD_PRIO_DIAG * -1
+       ;       LET PDGQTECPEPRDGRA OF PRD_PRIO_DIAG = PDGQTECPEPRDGRA OF PRD_PRIO_DIAG + T_QTE_IMP
+              LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+            END
+          END
+        END
+        ;
+        ; Caisson fini
+        ;
+        IF CAIETA OF PDCAISSON = "F" OR CAIETA OF PDCAISSON = "C"
+        THEN BEGIN
+          ;
+          ; Si la QTE est plus petite que la QTE planifiée pour la priorité
+          ;
+          IF T_QTE_IMP < PDGQTEFINPRDGRA OF PRD_PRIO_DIAG
+          THEN BEGIN
+;            LET PDGQTEFINPRDGRA OF PRD_PRIO_DIAG = PDGQTEFINPRDGRA OF PRD_PRIO_DIAG + T_QTE_IMP
+            LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+          END
+          ELSE BEGIN
+            ;
+            ; Vérifie qu'il reste une QTE à imputer pour la priorité
+            ;
+            IF PDGQTEFINPRDGRA OF PRD_PRIO_DIAG > 0
+            THEN BEGIN
+              ;
+              ; Impute la QTE emballer pour la priorité
+              ;
+              LET T_QTE_IMP = PDGQTEFINPRDGRA OF PRD_PRIO_DIAG * -1
+;              LET PDGQTEFINPRDGRA OF PRD_PRIO_DIAG = PDGQTEFINPRDGRA OF PRD_PRIO_DIAG + T_QTE_IMP
+              LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+            END
+          END
+        END
+      END
+      ;
+      ; Calcul de la quantité à imputer à USINE SECONDAIRE pour la priorité
+      ;
+      IF CAISITEMB OF PDCAISSON = "US"
+      THEN BEGIN
+        ;
+        ; Calcul de la quantité restante
+        ;
+        LET T_QTE_IMP = T_TOT_QTE_A_IMP - T_TOT_QTE_IMP
+        ;
+        ; Caisson semi-fini
+        ;
+        IF CAIETA OF PDCAISSON = "S" ;OR CAIETA OF PDCAISSON = "C"
+        THEN BEGIN
+          ;
+          ; Si la QTE est plus petite que la QTE planifiée pour la priorité
+          ;
+          IF T_QTE_IMP < PDGQTECPERCUUSC OF PRD_PRIO_DIAG
+          THEN BEGIN
+            LET PDGQTECPERCUUSC OF PRD_PRIO_DIAG = PDGQTECPERCUUSC OF PRD_PRIO_DIAG + T_QTE_IMP
+            LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+          END
+          ELSE BEGIN
+            ;
+            ; Vérifie qu'il reste une QTE à imputer pour la priorité
+            ;
+            IF PDGQTECPERCUUSC OF PRD_PRIO_DIAG > 0
+            THEN BEGIN
+              ;
+              ; Impute la QTE emballer pour la priorité
+              ;
+              LET T_QTE_IMP = PDGQTECPERCUUSC OF PRD_PRIO_DIAG * -1
+              LET PDGQTECPERCUUSC OF PRD_PRIO_DIAG = PDGQTECPERCUUSC OF PRD_PRIO_DIAG + T_QTE_IMP
+              LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+            END
+          END
+        END
+        ;
+        ; Caisson fini
+        ;
+        IF CAIETA OF PDCAISSON = "F" OR CAIETA OF PDCAISSON = "C"
+        THEN BEGIN
+          ;
+          ; Si la QTE est plus petite que la QTE planifiée pour la priorité
+          ;
+          IF T_QTE_IMP < PDGQTEFINRCUUSC OF PRD_PRIO_DIAG
+          THEN BEGIN
+            LET PDGQTEFINRCUUSC OF PRD_PRIO_DIAG = PDGQTEFINRCUUSC OF PRD_PRIO_DIAG + T_QTE_IMP
+            LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+          END
+          ELSE BEGIN
+            ;
+            ; Vérifie qu'il reste une QTE à imputer pour la priorité
+            ;
+            IF PDGQTEFINRCUUSC OF PRD_PRIO_DIAG > 0
+            THEN BEGIN
+              ;
+              ; Impute la QTE emballer pour la priorité
+              ;
+              LET T_QTE_IMP = PDGQTEFINRCUUSC OF PRD_PRIO_DIAG * -1
+              LET PDGQTEFINRCUUSC OF PRD_PRIO_DIAG = PDGQTEFINRCUUSC OF PRD_PRIO_DIAG + T_QTE_IMP
+              LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+            END
+          END
+        END
+      END
+      ;
+      ; Calcul de la quantité à imputer à SOUS-CONTRACTANT pour la priorité
+      ;
+      IF CAISITEMB OF PDCAISSON = "SC"
+      THEN BEGIN
+        ;
+        ; Calcul de la quantité restante
+        ;
+        LET T_QTE_IMP = T_TOT_QTE_A_IMP - T_TOT_QTE_IMP
+        ;
+        ; Caisson semi-fini
+        ;
+        IF CAIETA OF PDCAISSON = "S" OR CAIETA OF PDCAISSON = "C"
+        THEN BEGIN
+          ;
+          ; Si la QTE est plus petite que la QTE planifiée pour la priorité
+          ;
+          IF T_QTE_IMP < PDGQTECPERCUSCT OF PRD_PRIO_DIAG
+          THEN BEGIN
+            LET PDGQTECPERCUSCT OF PRD_PRIO_DIAG = PDGQTECPERCUSCT OF PRD_PRIO_DIAG + T_QTE_IMP
+            LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+          END
+          ELSE BEGIN
+            ;
+            ; Vérifie qu'il reste une QTE à imputer pour la priorité
+            ;
+            IF PDGQTECPERCUSCT OF PRD_PRIO_DIAG > 0
+            THEN BEGIN
+              ;
+              ; Impute la QTE emballer pour la priorité
+              ;
+              LET T_QTE_IMP = PDGQTECPERCUSCT OF PRD_PRIO_DIAG * -1
+              LET PDGQTECPERCUSCT OF PRD_PRIO_DIAG = PDGQTECPERCUSCT OF PRD_PRIO_DIAG + T_QTE_IMP
+              LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+            END
+          END
+        END
+        ;
+        ; Caisson fini
+        ;
+        IF CAIETA OF PDCAISSON = "F" OR CAIETA OF PDCAISSON = "C"
+        THEN BEGIN
+          ;
+          ; Si la QTE est plus petite que la QTE planifiée pour la priorité
+          ;
+          IF T_QTE_IMP < PDGQTEFINRCUSCT OF PRD_PRIO_DIAG
+          THEN BEGIN
+            LET PDGQTEFINRCUSCT OF PRD_PRIO_DIAG = PDGQTEFINRCUSCT OF PRD_PRIO_DIAG + T_QTE_IMP
+            LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+          END
+          ELSE BEGIN
+            ;
+            ; Vérifie qu'il reste une QTE à imputer pour la priorité
+            ;
+            IF PDGQTEFINRCUSCT OF PRD_PRIO_DIAG > 0
+            THEN BEGIN
+              ;
+              ; Impute la QTE emballer pour la priorité
+              ;
+              LET T_QTE_IMP = PDGQTEFINRCUSCT OF PRD_PRIO_DIAG * -1
+              LET PDGQTEFINRCUSCT OF PRD_PRIO_DIAG = PDGQTEFINRCUSCT OF PRD_PRIO_DIAG + T_QTE_IMP
+              LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+            END
+          END
+        END
+      END
+      PUT PRD_PRIO_DIAG RESET
+    END
+  END
+  ;
+  ; boucle pour imputer QTE restante
+  ;
+  IF T_TOT_QTE_IMP < T_TOT_QTE_A_IMP
+  THEN BEGIN
+    WHILE RETRIEVING PRD_PRIO_DIAG    &
+      VIA     CIECLE,          &
+              PJTABR,          &
+              DIANUMDIA002     &
+      USING   T_CIECLEMNU,                          &
+              PJTABR           OF PDEMBAL_DIAG,     &
+              DIANUMDIA002     OF PDEMBAL_DIAG      &
+      ORDERBY CIECLE,                               &
+              PJTABR           ASCENDING,           &
+              DIANUMDIA002     ASCENDING,           &
+              PRICODPRI        ASCENDING
+    BEGIN
+      IF PRICODPRI OF PRD_PRIO_DIAG < PRICODPRI OF PDEMBAL_DIAG
+      THEN BEGIN
+        ;
+        ; Calcul de la quantité à imputer à GRANICOR pour la priorité
+        ;
+        IF CAISITEMB OF PDCAISSON = "GR"
+        THEN BEGIN
+          ;
+          ; Calcul de la quantité restante
+          ;
+          LET T_QTE_IMP = T_TOT_QTE_A_IMP - T_TOT_QTE_IMP
+          ;
+          ; Caisson semi-fini
+          ;
+          IF CAIETA OF PDCAISSON = "S" ;OR CAIETA OF PDCAISSON = "C"
+          THEN BEGIN
+            ;
+            ; Si la QTE est plus petite que la QTE planifiée pour la priorité
+            ;
+            IF T_QTE_IMP < PDGQTECPEPRDGRA OF PRD_PRIO_DIAG
+            THEN BEGIN
+    ;          LET PDGQTECPEPRDGRA OF PRD_PRIO_DIAG = PDGQTECPEPRDGRA OF PRD_PRIO_DIAG + T_QTE_IMP
+              LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+            END
+            ELSE BEGIN
+              ;
+              ; Vérifie qu'il reste une QTE à imputer pour la priorité
+              ;
+              IF PDGQTECPEPRDGRA OF PRD_PRIO_DIAG > 0
+              THEN BEGIN
+                ;
+                ; Impute la QTE emballer pour la priorité
+                ;
+                LET T_QTE_IMP = PDGQTECPEPRDGRA OF PRD_PRIO_DIAG * -1
+        ;        LET PDGQTECPEPRDGRA OF PRD_PRIO_DIAG = PDGQTECPEPRDGRA OF PRD_PRIO_DIAG + T_QTE_IMP
+                LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+              END
+            END
+          END
+          ;
+          ; Caisson fini
+          ;
+          IF CAIETA OF PDCAISSON = "F" OR CAIETA OF PDCAISSON = "C"
+          THEN BEGIN
+            ;
+            ; Si la QTE est plus petite que la QTE planifiée pour la priorité
+            ;
+            IF T_QTE_IMP < PDGQTEFINPRDGRA OF PRD_PRIO_DIAG
+            THEN BEGIN
+;              LET PDGQTEFINPRDGRA OF PRD_PRIO_DIAG = PDGQTEFINPRDGRA OF PRD_PRIO_DIAG + T_QTE_IMP
+              LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+            END
+            ELSE BEGIN
+              ;
+              ; Vérifie qu'il reste une QTE à imputer pour la priorité
+              ;
+              IF PDGQTEFINPRDGRA OF PRD_PRIO_DIAG > 0
+              THEN BEGIN
+                ;
+                ; Impute la QTE emballer pour la priorité
+                ;
+                LET T_QTE_IMP = PDGQTEFINPRDGRA OF PRD_PRIO_DIAG * -1
+;                LET PDGQTEFINPRDGRA OF PRD_PRIO_DIAG = PDGQTEFINPRDGRA OF PRD_PRIO_DIAG + T_QTE_IMP
+                LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+              END
+            END
+          END
+        END
+        ;
+        ; Calcul de la quantité à imputer à USINE SECONDAIRE pour la priorité
+        ;
+        IF CAISITEMB OF PDCAISSON = "US"
+        THEN BEGIN
+          ;
+          ; Calcul de la quantité restante
+          ;
+          LET T_QTE_IMP = T_TOT_QTE_A_IMP - T_TOT_QTE_IMP
+          ;
+          ; Caisson semi-fini
+          ;
+          IF CAIETA OF PDCAISSON = "S" ;OR CAIETA OF PDCAISSON = "C"
+          THEN BEGIN
+            ;
+            ; Si la QTE est plus petite que la QTE planifiée pour la priorité
+            ;
+            IF T_QTE_IMP < PDGQTECPERCUUSC OF PRD_PRIO_DIAG
+            THEN BEGIN
+              LET PDGQTECPERCUUSC OF PRD_PRIO_DIAG = PDGQTECPERCUUSC OF PRD_PRIO_DIAG + T_QTE_IMP
+              LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+            END
+            ELSE BEGIN
+              ;
+              ; Vérifie qu'il reste une QTE à imputer pour la priorité
+              ;
+              IF PDGQTECPERCUUSC OF PRD_PRIO_DIAG > 0
+              THEN BEGIN
+                ;
+                ; Impute la QTE emballer pour la priorité
+                ;
+                LET T_QTE_IMP = PDGQTECPERCUUSC OF PRD_PRIO_DIAG * -1
+                LET PDGQTECPERCUUSC OF PRD_PRIO_DIAG = PDGQTECPERCUUSC OF PRD_PRIO_DIAG + T_QTE_IMP
+                LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+              END
+            END
+          END
+          ;
+          ; Caisson fini
+          ;
+          IF CAIETA OF PDCAISSON = "F" OR CAIETA OF PDCAISSON = "C"
+          THEN BEGIN
+            ;
+            ; Si la QTE est plus petite que la QTE planifiée pour la priorité
+            ;
+            IF T_QTE_IMP < PDGQTEFINRCUUSC OF PRD_PRIO_DIAG
+            THEN BEGIN
+              LET PDGQTEFINRCUUSC OF PRD_PRIO_DIAG = PDGQTEFINRCUUSC OF PRD_PRIO_DIAG + T_QTE_IMP
+              LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+            END
+            ELSE BEGIN
+              ;
+              ; Vérifie qu'il reste une QTE à imputer pour la priorité
+              ;
+              IF PDGQTEFINRCUUSC OF PRD_PRIO_DIAG > 0
+              THEN BEGIN
+                ;
+                ; Impute la QTE emballer pour la priorité
+                ;
+                LET T_QTE_IMP = PDGQTEFINRCUUSC OF PRD_PRIO_DIAG * -1
+                LET PDGQTEFINRCUUSC OF PRD_PRIO_DIAG = PDGQTEFINRCUUSC OF PRD_PRIO_DIAG + T_QTE_IMP
+                LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+              END
+            END
+          END
+
+        END
+        ;
+        ; Calcul de la quantité à imputer à SOUS-CONTRACTANT pour la priorité
+        ;
+        IF CAISITEMB OF PDCAISSON = "SC"
+        THEN BEGIN
+          ;
+          ; Calcul de la quantité restante
+          ;
+          LET T_QTE_IMP = T_TOT_QTE_A_IMP - T_TOT_QTE_IMP
+          ;
+          ; Caisson semi-fini
+          ;
+          IF CAIETA OF PDCAISSON = "S" OR CAIETA OF PDCAISSON = "C"
+          THEN BEGIN
+            ;
+            ; Si la QTE est plus petite que la QTE planifiée pour la priorité
+            ;
+            IF T_QTE_IMP < PDGQTECPERCUSCT OF PRD_PRIO_DIAG
+            THEN BEGIN
+              LET PDGQTECPERCUSCT OF PRD_PRIO_DIAG = PDGQTECPERCUSCT OF PRD_PRIO_DIAG + T_QTE_IMP
+              LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+            END
+            ELSE BEGIN
+              ;
+              ; Vérifie qu'il reste une QTE à imputer pour la priorité
+              ;
+              IF PDGQTECPERCUSCT OF PRD_PRIO_DIAG > 0
+              THEN BEGIN
+                ;
+                ; Impute la QTE emballer pour la priorité
+                ;
+                LET T_QTE_IMP = PDGQTECPERCUSCT OF PRD_PRIO_DIAG * -1
+                LET PDGQTECPERCUSCT OF PRD_PRIO_DIAG = PDGQTECPERCUSCT OF PRD_PRIO_DIAG + T_QTE_IMP
+                LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+              END
+            END
+          END
+          ;
+          ; Caisson fini
+          ;
+          IF CAIETA OF PDCAISSON = "F" OR CAIETA OF PDCAISSON = "C"
+          THEN BEGIN
+            ;
+            ; Si la QTE est plus petite que la QTE planifiée pour la priorité
+            ;
+            IF T_QTE_IMP < PDGQTEFINRCUSCT OF PRD_PRIO_DIAG
+            THEN BEGIN
+              LET PDGQTEFINRCUSCT OF PRD_PRIO_DIAG = PDGQTEFINRCUSCT OF PRD_PRIO_DIAG + T_QTE_IMP
+              LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+            END
+            ELSE BEGIN
+              ;
+              ; Vérifie qu'il reste une QTE à imputer pour la priorité
+              ;
+              IF PDGQTEFINRCUSCT OF PRD_PRIO_DIAG > 0
+              THEN BEGIN
+                ;
+                ; Impute la QTE emballer pour la priorité
+                ;
+                LET T_QTE_IMP = PDGQTEFINRCUSCT OF PRD_PRIO_DIAG * -1
+                LET PDGQTEFINRCUSCT OF PRD_PRIO_DIAG = PDGQTEFINRCUSCT OF PRD_PRIO_DIAG + T_QTE_IMP
+                LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+              END
+            END
+          END
+        END
+        PUT PRD_PRIO_DIAG RESET
+      END
+    END
+  END
+  ;
+  ; La quantité emballer est suppérieur à la quantité requise
+  ;
+  IF T_TOT_QTE_IMP > T_TOT_QTE_A_IMP
+  THEN BEGIN
+    GET PRD_PRIO_DIAG_2 &
+      VIA     CIECLE,          &
+              PJTABR,          &
+              DIANUMDIA002,    &
+              PRICODPRI        &
+      USING   T_CIECLEMNU,                          &
+              PJTABR           OF PDEMBAL_DIAG,     &
+              DIANUMDIA002     OF PDEMBAL_DIAG,     &
+              "99"
+    IF ACCESSOK
+    THEN BEGIN
+      ;
+      ; Calcul de la quantité à imputer à GRANICOR pour la priorité
+      ;
+      IF CAISITEMB OF PDCAISSON = "GR"
+      THEN BEGIN
+        ;
+        ; Caisson semi-fini
+        ;
+        IF CAIETA OF PDCAISSON = "S" ;OR CAIETA OF PDCAISSON = "C"
+        THEN BEGIN
+          ;
+          ; Calcul de la quantité restante
+          ;
+          LET T_QTE_IMP = T_TOT_QTE_A_IMP - T_TOT_QTE_IMP
+   ;       LET PDGQTECPEPRDGRA OF PRD_PRIO_DIAG_2 = PDGQTECPEPRDGRA OF PRD_PRIO_DIAG_2 + T_QTE_IMP
+          LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+        END
+        ;
+        ; Caisson fini
+        ;
+        IF CAIETA OF PDCAISSON = "F" OR CAIETA OF PDCAISSON = "C"
+        THEN BEGIN
+          ;
+          ; Calcul de la quantité restante
+          ;
+          LET T_QTE_IMP = T_TOT_QTE_A_IMP - T_TOT_QTE_IMP
+;          LET PDGQTEFINPRDGRA OF PRD_PRIO_DIAG_2 = PDGQTEFINPRDGRA OF PRD_PRIO_DIAG_2 + T_QTE_IMP
+          LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+        END
+      END
+      ;
+      ; Calcul de la quantité à imputer à USINE SECONDAIRE pour la priorité
+      ;
+      IF CAISITEMB OF PDCAISSON = "US"
+      THEN BEGIN
+        ;
+        ; Caisson semi-fini
+        ;
+        IF CAIETA OF PDCAISSON = "S" ;OR CAIETA OF PDCAISSON = "C"
+        THEN BEGIN
+          ;
+          ; Calcul de la quantité restante
+          ;
+          LET T_QTE_IMP = T_TOT_QTE_A_IMP - T_TOT_QTE_IMP
+          LET PDGQTECPERCUUSC OF PRD_PRIO_DIAG_2 = PDGQTECPERCUUSC OF PRD_PRIO_DIAG_2 + T_QTE_IMP
+          LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+        END
+        ;
+        ; Caisson fini
+        ;
+        IF CAIETA OF PDCAISSON = "F" OR CAIETA OF PDCAISSON = "C"
+        THEN BEGIN
+          ;
+          ; Calcul de la quantité restante
+          ;
+          LET T_QTE_IMP = T_TOT_QTE_A_IMP - T_TOT_QTE_IMP
+          LET PDGQTEFINRCUUSC OF PRD_PRIO_DIAG_2 = PDGQTEFINRCUUSC OF PRD_PRIO_DIAG_2 + T_QTE_IMP
+          LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+        END
+      END
+      ;
+      ; Calcul de la quantité à imputer à SOUS-CONTRACTANT pour la priorité
+      ;
+      IF CAISITEMB OF PDCAISSON = "SC"
+      THEN BEGIN
+        ;
+        ; Caisson semi-fini
+        ;
+        IF CAIETA OF PDCAISSON = "S" OR CAIETA OF PDCAISSON = "C"
+        THEN BEGIN
+          ;
+          ; Calcul de la quantité restante
+          ;
+          LET T_QTE_IMP = T_TOT_QTE_A_IMP - T_TOT_QTE_IMP
+          LET PDGQTECPERCUSCT OF PRD_PRIO_DIAG_2 = PDGQTECPERCUSCT OF PRD_PRIO_DIAG_2 + T_QTE_IMP
+          LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+        END
+        ;
+        ; Caisson fini
+        ;
+        IF CAIETA OF PDCAISSON = "F" OR CAIETA OF PDCAISSON = "C"
+        THEN BEGIN
+          ;
+          ; Calcul de la quantité restante
+          ;
+          LET T_QTE_IMP = T_TOT_QTE_A_IMP - T_TOT_QTE_IMP
+          LET PDGQTEFINRCUSCT OF PRD_PRIO_DIAG_2 = PDGQTEFINRCUSCT OF PRD_PRIO_DIAG_2 + T_QTE_IMP
+          LET T_TOT_QTE_IMP = T_TOT_QTE_IMP + T_QTE_IMP
+        END
+      END
+      PUT PRD_PRIO_DIAG_2 RESET
+    END
+  END
+
+  ;
+  ; Mise à jour de la quantité total de diagramme emballé
+  ;
+  GET A_DIA_MAJ                &
+    VIA     CIECLE,          &
+            PJTABR,          &
+            DIANUMDIA002     &
+    USING   T_CIECLEMNU,                          &
+            PJTABR           OF PDEMBAL_DIAG,     &
+            DIANUMDIA002     OF PDEMBAL_DIAG
+  IF ACCESSOK
+  THEN BEGIN
+    ;
+    ; Mise à jour du compteur QUANTITÉ EMBALLÉ
+    ;
+    IF ("SC" <> CAISITEMB OF PDCAISSON) AND (("F" = CAIETA OF PDCAISSON) OR ("C" = CAIETA OF PDCAISSON))
+
+;    IF "F" = CAIETA OF PDCAISSON AND "SC" <> CAISITEMB OF PDCAISSON
+    THEN BEGIN
+      LET DIAQTEEMB OF A_DIA_MAJ = DIAQTEEMB OF A_DIA_MAJ + T_TOT_QTE_IMP
+    END
+    ;IF "C" = CAIETA OF PDCAISSON AND "SC" <> CAISITEMB OF PDCAISSON
+    ;THEN BEGIN
+    ;  LET DIAQTEEMB OF A_DIA_MAJ = DIAQTEEMB OF A_DIA_MAJ + &
+    ;                               (T_TOT_QTE_IMP /2)
+    ;END
+    ;
+    ; Mise à jour du compteur QUANTITÉ PRÊT GRANICOR
+    ;
+    IF "GR" = CAISITEMB OF PDCAISSON &
+       AND &
+       ("F" = CAIETA OF PDCAISSON OR "C" = CAIETA OF PDCAISSON)
+    THEN BEGIN
+      LET DIAQTEPREGRA OF A_DIA_MAJ = DIAQTEPREGRA OF A_DIA_MAJ + T_TOT_QTE_IMP
+    END
+    ;
+    ; Mise à jour du compteur QUANTITÉ PRÊT USINE SECONDAIRE
+    ;
+    IF "US" = CAISITEMB OF PDCAISSON &
+       AND &
+       ("F" = CAIETA OF PDCAISSON OR "C" = CAIETA OF PDCAISSON)
+    THEN BEGIN
+      LET DIAQTEPREUSC OF A_DIA_MAJ = DIAQTEPREUSC OF A_DIA_MAJ + T_TOT_QTE_IMP
+    END
+    ;
+    ; Mise à jour du compteur QUANTITÉ PRÊT SOUS-CONTRACTANT
+    ;
+    IF "SC" = CAISITEMB OF PDCAISSON &
+       AND &
+       ("F" = CAIETA OF PDCAISSON OR "C" = CAIETA OF PDCAISSON)
+    THEN BEGIN
+      LET DIAQTEPRESCT OF A_DIA_MAJ = DIAQTEPRESCT OF A_DIA_MAJ + T_TOT_QTE_IMP
+    END
+
+    PUT A_DIA_MAJ RESET
+
+  END
+
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Tranitement
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  LET T_TOT_QTE_IMP   = 0
+  LET T_TOT_QTE_A_IMP = T_QTE_EMB
+  LET T_QTE_IMP       = 0
+
+;;
+;validation sur les sites
+;
+IF CAISITEMB OF PDCAISSON <> CAISITENT OF PDCAISSON
+ THEN ERROR "MAUVAISE COMBINAISON SITE ET ENTREPOT"
+
+  IF T_NEWREC = "1" OR T_ALTREC = "1" OR T_DELREC = "1"
+  THEN BEGIN
+    ;
+    ; Aiguille le traitement selon que la quantité est > 0 ou non
+    ;
+    IF T_TOT_QTE_A_IMP >= 0
+    THEN BEGIN
+      DO INTERNAL MAJ_QTE_EMBAL_POS
+    END
+    ELSE BEGIN
+      DO INTERNAL MAJ_QTE_EMBAL_NEG
+    END
+  END
+
+;  IF T_DELREC = "1"
+;  THEN BEGIN
+;    DO INTERNAL MAJ_QTE_EMBAL_NEG
+;  END
+
+  RETURN
+END
+
+BUILD
+@IF FORMAT
+
+@ENDIF

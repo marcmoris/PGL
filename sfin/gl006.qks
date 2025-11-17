@@ -1,0 +1,614 @@
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+SCREEN gl006 ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU, &
+                       T_CIENOM   , &
+                       T_FLGMNU &
+             ACTIVITIES FIND, &
+                        CHANGE
+
+USE ussectmp NOLIST     ; Variable pour la securite
+    "GL006"
+
+USE gl006.hlp NOLIST
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-ecran
+
+;-------------------------------------------------------------------------------
+;
+; Variables reçus par l'écran.
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4 ; Compagnie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40; Compagnie du menu.
+TEMPORARY T_FLGMNU    CHARACTER SIZE 1 ; Provenance du menu(Holding ou cie)
+;
+; Variables pour l'accès sur MCSOLDE_ANNUEL.
+;
+TEMPORARY T_SANANN    CHARACTER SIZE 2 RESET AT STARTUP
+TEMPORARY T_CIECLE    CHARACTER SIZE 4 RESET AT STARTUP
+TEMPORARY T_UNACLE    CHARACTER SIZE 8 RESET AT STARTUP
+TEMPORARY T_CPTCLE    CHARACTER SIZE 6 RESET AT STARTUP
+;
+; Variables pour l'accès sur la table ARENGAGEMENT
+;
+TEMPORARY T_PECCLEFND     CHARACTER SIZE 4 RESET AT MODE
+TEMPORARY T_REFCLETYP     CHARACTER SIZE 1 RESET AT MODE
+TEMPORARY T_REFCLENUM     CHARACTER SIZE 6 RESET AT MODE
+;
+; Variables pour la saisie des paramètres de l'usager (Recherche)
+;
+TEMPORARY T_PAR_MNT1      FLOAT     SIZE 8 RESET AT MODE
+TEMPORARY T_PAR_MNT2      FLOAT     SIZE 8 RESET AT MODE
+TEMPORARY T_PAR_PERDEB    CHARACTER SIZE 2 RESET AT MODE
+TEMPORARY T_PAR_PERFIN    CHARACTER SIZE 2 RESET AT MODE
+;
+; Variables pour l'appel des écrans maitre en consultation.
+;
+TEMPORARY T_FOUCIECLE CHARACTER SIZE 4
+TEMPORARY T_EMPCIECLE CHARACTER SIZE 4
+TEMPORARY T_CLICIECLE CHARACTER SIZE 4
+TEMPORARY T_PECCLEMNU CHARACTER SIZE 4
+TEMPORARY T_PECCLECOU CHARACTER SIZE 4
+TEMPORARY T_CIECLEFND CHARACTER SIZE 4
+TEMPORARY T_FOUCLEFND CHARACTER SIZE 6
+TEMPORARY T_CMDCLEFND CHARACTER SIZE 9
+TEMPORARY T_CMDAJTFND CHARACTER SIZE 3
+TEMPORARY T_RECCLEFND CHARACTER SIZE 12
+
+;------------------------------------------------------------------------------
+;
+FILE MCSOLDE_ANNUEL   PRIMARY &
+                      NOAPPEND
+;------------------------------------------------------------------------------
+;
+; Historique des transactions.
+;
+FILE VHIS_02          DETAIL &
+                      NOITEM &
+                      OCCURS 14
+
+SELECT IF &
+  T_PAR_MNT1 <= (HEEMNTDBT OF VHIS_02 - HEEMNTCRT OF VHIS_02) &
+AND &
+  T_PAR_MNT2 >= (HEEMNTDBT OF VHIS_02 - HEEMNTCRT OF VHIS_02) &
+AND (  PECCLE OF VHIS_02[3:2] >= T_PAR_PERDEB &
+AND &
+       PECCLE OF VHIS_02[3:2] <= T_PAR_PERFIN &
+    )
+
+;------------------------------------------------------------------------------
+;
+; Pour afficher la description du compte comptable.
+;
+FILE VCPT_DSC         REFERENCE
+  ACCESS VIA CPTCLE &
+         USING CPTCLE OF MCSOLDE_ANNUEL
+
+;------------------------------------------------------------------------------
+;
+; Nom de la référence.
+;
+FILE MCREFERENCE      REFERENCE
+  ACCESS VIA    REFCIECLE, &
+                REFCLETYP, &
+                REFCLENUM  &
+         USING  REFCIECLE OF VHIS_02,      &
+                REFCLETYP OF VHIS_02,      &
+                REFCLENUM OF VHIS_02
+
+;------------------------------------------------------------------------------
+;
+; Nom de la compagnie
+;
+FILE MCCOMPAGNIE      REFERENCE
+  ACCESS VIA CIECLE &
+         USING CIECLE OF MCSOLDE_ANNUEL
+
+;------------------------------------------------------------------------------
+;
+; Nom de l'unité administrative.
+;
+FILE MCUNITE_ADM      REFERENCE
+  ACCESS VIA CIECLE, &
+             UNACLE  &
+         USING CIECLE OF MCSOLDE_ANNUEL, &
+               UNACLE OF MCSOLDE_ANNUEL
+
+;------------------------------------------------------------------------------
+;
+; Pour avoir la définition des chartes de client, employé et fournisseur.
+;
+FILE MCHOLDING        REFERENCE
+  ACCESS VIA CIENMC &
+         USING "1"
+
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_SLDDEB FLOAT SIZE 8 ; Solde début de période
+TEMPORARY T_SLDFIN FLOAT SIZE 8 ; Solde fin de période
+
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU      IF T_FLGMNU = "C"
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER(T_CIENOM)
+
+;
+; On prend le nom de la référence s'il n'y a pas de description général dans
+; l'historique.
+;
+DEFINE D_HISDSCGEN CHARACTER SIZE 21 = REFNOM OF MCREFERENCE
+
+;
+; Calcul du solde de variation des périodes sélectionnées.
+;
+DEFINE D_SLDVAR FLOAT SIZE 8 = T_SLDFIN - T_SLDDEB
+
+;
+; Montant selon le sens du compte.
+;
+DEFINE D_HECMNT FLOAT SIZE 8 = HEEMNTDBT OF VHIS_02 - &
+                               HEEMNTCRT OF VHIS_02
+
+;-------------------------------------------------------------------------------
+
+
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Analyse des engagements " &
+@ELSE
+      " Account Analysis " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP
+
+ALIGN (,3,19) (,,28) (,49,64)
+FIELD CIECLE OF MCSOLDE_ANNUEL &
+label "Compagnie.....:"
+FIELD CIENOMABR OF MCCOMPAGNIE
+
+FIELD T_SLDDEB &
+  TRAILING SIGN ">" &
+  LEADING  SIGN "<" &
+  SIGNIFICANCE 5 &
+  PICTURE " ^^^,^^^,^^^.^^ " &
+@IF FRANCAIS
+    LABEL    "Solde de début:"
+@ELSE
+    LABEL    "Start balance.:"
+@ENDIF
+
+SKIP
+
+FIELD UNACLE    OF MCSOLDE_ANNUEL &
+label "Unité adm.....:"
+FIELD UNANOMABR OF MCUNITE_ADM
+
+FIELD D_SLDVAR &
+  TRAILING SIGN ">" &
+  LEADING  SIGN "<" &
+  SIGNIFICANCE 5 &
+  PICTURE " ^^^,^^^,^^^.^^ " &
+@IF FRANCAIS
+    LABEL    "Variation.....:"
+@ELSE
+    LABEL    "%%%variation..:"
+@ENDIF
+
+FIELD CPTCLE OF MCSOLDE_ANNUEL &
+label "Compte........:"
+
+FIELD CPTDSCABR OF VCPT_DSC &
+        DISPLAY
+
+FIELD T_SLDFIN &
+  TRAILING SIGN ">" &
+  LEADING  SIGN "<" &
+  SIGNIFICANCE 5 &
+  PICTURE " ^^^,^^^,^^^.^^ " &
+@IF FRANCAIS
+    LABEL    "Solde de fin..:"
+@ELSE
+    LABEL    "End balance...:"
+@ENDIF
+
+SKIP
+DRAW  ,1 TO ,80
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+"Pér.   Date   Type Document          Réf.   Description             Montant" &
+@ELSE
+"Per.   Date   Type Document          Ref.   Description              Amount" &
+@ENDIF
+      at ,4
+
+
+SKIP
+ALIGN (3,2,3) (,,8) (,,19) (,,23) (,,28) (,,41) (,,48) (,,64)
+
+;ALIGN (3,2,3) (,,9) (,,19) (,,23) (,,36) (,,43) (,,65)
+CLUSTER OCCURS WITH VHIS_02       ID BASE 30
+FIELD PECCLE OF VHIS_02       HIDDEN LABEL " " &
+        DISPLAY
+
+
+FIELD HENDAT    OF VHIS_02       FORMAT YYYYMMDD PATTERN "####/##/##"&
+        DISPLAY
+
+
+FIELD HENTYPECR OF VHIS_02      &
+        DISPLAY
+
+
+FIELD HENCLE2   OF VHIS_02     &
+       SIZE 12
+
+
+FIELD REFCLENUM OF VHIS_02      &
+        DISPLAY
+
+
+FIELD D_HISDSCGEN          &
+        DISPLAY size 15
+
+
+FIELD D_HECMNT &
+        DISPLAY &
+        PICTURE " ^^,^^^,^^^.^^ " &
+        TRAILING SIGN ">" &
+        LEADING  SIGN "<" &
+        SIGNIFICANCE 5
+
+CLUSTER
+
+
+;------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès pour l'écran par son code.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Appel des écrans en consultation selon le type d'écriture.
+;
+;
+PROCEDURE INPUT HENCLE2
+BEGIN
+  IF 0 <> INDEX ( FIELDTEXT, "*" )
+  THEN BEGIN
+
+    ;
+    ; Il faut déterminer la compagnie des chartes de clients, employés et de
+    ; fournisseur pour que l'appel des écrans suivant fonctionne correctement.
+    ;
+    IF HLDCHTCLI OF MCHOLDING = "1"
+    THEN LET T_CLICIECLE = CIECLE    OF VHIS_02
+    ELSE LET T_CLICIECLE = HLDCHRSUB OF MCHOLDING
+
+    IF HLDCHTEMP OF MCHOLDING = "1"
+    THEN LET T_EMPCIECLE = CIECLE    OF VHIS_02
+    ELSE LET T_EMPCIECLE = HLDCHRSUB OF MCHOLDING
+
+    IF HLDCHTFOU OF MCHOLDING = "1"
+    THEN LET T_FOUCIECLE = CIECLE    OF VHIS_02
+    ELSE LET T_FOUCIECLE = HLDCHRSUB OF MCHOLDING
+
+    ;
+    ; Commande et ajustement.
+    ;
+    IF    HENTYPECR OF VHIS_02      = "CM" &
+       OR HENTYPECR OF VHIS_02      = "AJ"
+
+    THEN BEGIN
+
+      LET T_CIECLEFND = CIECLE    OF VHIS_02
+      LET T_CMDCLEFND = HENCLE2   OF VHIS_02
+      LET T_CMDAJTFND = HENCLE3   OF VHIS_02
+
+      RUN SCREEN ar007 MODE F &
+                        PASSING T_CIECLEFND, &
+                                T_CIENOM   , &
+                                T_PECCLEMNU, &
+                                T_FOUCIECLE, &
+                                T_CMDCLEFND, &
+                                T_CMDAJTFND
+
+    END
+
+    ;
+    ; Réception
+    ;
+    IF HENTYPECR OF VHIS_02     = "RC"
+
+    THEN BEGIN
+
+      LET T_CIECLEFND = CIECLE    OF VHIS_02
+      LET T_RECCLEFND = HENCLE2   OF VHIS_02
+
+      RUN SCREEN ar009 MODE F &
+                        PASSING T_CIECLEFND, &
+                                T_CIENOM   , &
+                                T_PECCLEMNU, &
+                                T_FOUCIECLE, &
+                                T_RECCLEFND
+
+    END
+
+  END
+  LET FIELDTEXT = ""
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; On ne peut pas ajouter de record.
+;
+;
+PROCEDURE APPEND
+DISABLE
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Appel du sous-écran de la saisie des paramètres de recherche.
+;
+;
+PROCEDURE PATH
+BEGIN
+  RUN SCREEN gl006a MODE E &
+                    PASSING T_FLGMNU, &
+                            T_CIECLEMNU, &
+                            T_PAR_PERDEB, &
+                            T_PAR_PERFIN, &
+                            T_PAR_MNT1, &
+                            T_PAR_MNT2, &
+                            T_CIECLE, &
+                            T_UNACLE, &
+                            T_CPTCLE, &
+                            T_SANANN, &
+                            T_REFCLETYP, &
+                            T_REFCLENUM
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; On a besoin de la procédure FIND et DETAIL FIND pour optimiser l'accès
+; sur la vue VHIS_01 selon les critères saisie par l'usager.
+;
+;
+PROCEDURE FIND
+BEGIN
+  GET MCSOLDE_ANNUEL VIA SANANN , &
+                         CIECLE , &
+                         CPTCLE , &
+                         UNACLE   &
+                     USING T_SANANN , &
+                           T_CIECLE , &
+                           T_CPTCLE , &
+                           T_UNACLE
+  ;
+  ; L'affectation de la variable T_PECCLEFND, sert à améliorer la performance
+  ; de la recherche sur un lot de données élévées.
+  ;
+  ; Si la période de début est la même que la période de fin, on prend
+  ; la période de début comme critère de recherche, si elle différente on
+  ; prend année et le caractère de la recherche générique.
+  ;
+  IF T_PAR_PERDEB = T_PAR_PERFIN
+  THEN LET T_PECCLEFND = SANANN OF MCSOLDE_ANNUEL + T_PAR_PERDEB
+  ELSE LET T_PECCLEFND = SANANN OF MCSOLDE_ANNUEL + "@"
+END
+;
+PROCEDURE DETAIL FIND
+BEGIN
+
+  FOR VHIS_02
+  BEGIN
+    IF     T_REFCLETYP = "" &
+       AND T_REFCLENUM = ""
+    THEN GET VHIS_02       VIA   CPTCLE, &
+                                 CIECLE, &
+                                 UNACLE, &
+                                 PECCLE  &
+                           USING CPTCLE OF MCSOLDE_ANNUEL, &
+                                 CIECLE OF MCSOLDE_ANNUEL, &
+                                 UNACLE OF MCSOLDE_ANNUEL, &
+                                 T_PECCLEFND               &
+                         ORDERBY PECCLE   , &
+                                 HENDAT   , &
+                                 HENCLE2  , &
+                                 HENCLE3    &
+                                           OPTIONAL
+
+    IF     T_REFCLETYP <> "" &
+       AND T_REFCLENUM = ""
+    THEN GET VHIS_02       VIA   CPTCLE, &
+                                 CIECLE, &
+                                 UNACLE, &
+                                 PECCLE, &
+                                 REFCLETYP &
+                           USING CPTCLE OF MCSOLDE_ANNUEL, &
+                                 CIECLE OF MCSOLDE_ANNUEL, &
+                                 UNACLE OF MCSOLDE_ANNUEL, &
+                                 T_PECCLEFND             , &
+                                 T_REFCLETYP               &
+                        ORDERBY PECCLE   , &
+                                HENDAT   , &
+                                HENCLE2  , &
+                                HENCLE3    &
+                                          OPTIONAL
+
+    IF     T_REFCLETYP = "" &
+       AND T_REFCLENUM <> ""
+    THEN GET VHIS_02      VIA   CPTCLE, &
+                                CIECLE, &
+                                UNACLE, &
+                                PECCLE, &
+                                REFCLENUM &
+                          USING CPTCLE OF MCSOLDE_ANNUEL, &
+                                CIECLE OF MCSOLDE_ANNUEL, &
+                                UNACLE OF MCSOLDE_ANNUEL, &
+                                T_PECCLEFND             , &
+                                T_REFCLENUM               &
+                        ORDERBY PECCLE   , &
+                                HENDAT   , &
+                                HENCLE2  , &
+                                HENCLE3    &
+                                           OPTIONAL
+
+    IF     T_REFCLETYP <> "" &
+       AND T_REFCLENUM <> ""
+    THEN GET VHIS_02      VIA   CPTCLE, &
+                                CIECLE, &
+                                UNACLE, &
+                                PECCLE, &
+                                REFCLETYP, &
+                                REFCLENUM  &
+                          USING CPTCLE OF MCSOLDE_ANNUEL, &
+                                CIECLE OF MCSOLDE_ANNUEL, &
+                                UNACLE OF MCSOLDE_ANNUEL, &
+                                T_PECCLEFND             , &
+                                T_REFCLETYP             , &
+                                T_REFCLENUM               &
+                        ORDERBY PECCLE   , &
+                                HENDAT   , &
+                                HENCLE2  , &
+                                HENCLE3    &
+                                           OPTIONAL
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du solde de fin selon la période comptable.
+;
+;
+PROCEDURE POSTFIND
+BEGIN
+  LET T_SLDDEB = SANSLDOUVENG OF MCSOLDE_ANNUEL
+  LET T_SLDFIN = SANSLDOUVENG OF MCSOLDE_ANNUEL
+
+  IF "01" < T_PAR_PERDEB
+  THEN LET T_SLDDEB = T_SLDDEB + SANCUMENG1 OF MCSOLDE_ANNUEL
+  IF "02" < T_PAR_PERDEB
+  THEN LET T_SLDDEB = T_SLDDEB + SANCUMENG2 OF MCSOLDE_ANNUEL
+  IF "03" < T_PAR_PERDEB
+  THEN LET T_SLDDEB = T_SLDDEB + SANCUMENG3 OF MCSOLDE_ANNUEL
+  IF "04" < T_PAR_PERDEB
+  THEN LET T_SLDDEB = T_SLDDEB + SANCUMENG4 OF MCSOLDE_ANNUEL
+  IF "05" < T_PAR_PERDEB
+  THEN LET T_SLDDEB = T_SLDDEB + SANCUMENG5 OF MCSOLDE_ANNUEL
+  IF "06" < T_PAR_PERDEB
+  THEN LET T_SLDDEB = T_SLDDEB + SANCUMENG6 OF MCSOLDE_ANNUEL
+  IF "07" < T_PAR_PERDEB
+  THEN LET T_SLDDEB = T_SLDDEB + SANCUMENG7 OF MCSOLDE_ANNUEL
+  IF "08" < T_PAR_PERDEB
+  THEN LET T_SLDDEB = T_SLDDEB + SANCUMENG8 OF MCSOLDE_ANNUEL
+  IF "09" < T_PAR_PERDEB
+  THEN LET T_SLDDEB = T_SLDDEB + SANCUMENG9 OF MCSOLDE_ANNUEL
+  IF "10" < T_PAR_PERDEB
+  THEN LET T_SLDDEB = T_SLDDEB + SANCUMENG10 OF MCSOLDE_ANNUEL
+  IF "11" < T_PAR_PERDEB
+  THEN LET T_SLDDEB = T_SLDDEB + SANCUMENG11 OF MCSOLDE_ANNUEL
+  IF "12" < T_PAR_PERDEB
+  THEN LET T_SLDDEB = T_SLDDEB + SANCUMENG12 OF MCSOLDE_ANNUEL
+  IF "13" < T_PAR_PERDEB
+  THEN LET T_SLDDEB = T_SLDDEB + SANCUMENG13 OF MCSOLDE_ANNUEL
+
+  IF "01" <= T_PAR_PERFIN
+  THEN LET T_SLDFIN = T_SLDFIN + SANCUMENG1 OF MCSOLDE_ANNUEL
+  IF "02" <= T_PAR_PERFIN
+  THEN LET T_SLDFIN = T_SLDFIN + SANCUMENG2 OF MCSOLDE_ANNUEL
+  IF "03" <= T_PAR_PERFIN
+  THEN LET T_SLDFIN = T_SLDFIN + SANCUMENG3 OF MCSOLDE_ANNUEL
+  IF "04" <= T_PAR_PERFIN
+  THEN LET T_SLDFIN = T_SLDFIN + SANCUMENG4 OF MCSOLDE_ANNUEL
+  IF "05" <= T_PAR_PERFIN
+  THEN LET T_SLDFIN = T_SLDFIN + SANCUMENG5 OF MCSOLDE_ANNUEL
+  IF "06" <= T_PAR_PERFIN
+  THEN LET T_SLDFIN = T_SLDFIN + SANCUMENG6 OF MCSOLDE_ANNUEL
+  IF "07" <= T_PAR_PERFIN
+  THEN LET T_SLDFIN = T_SLDFIN + SANCUMENG7 OF MCSOLDE_ANNUEL
+  IF "08" <= T_PAR_PERFIN
+  THEN LET T_SLDFIN = T_SLDFIN + SANCUMENG8 OF MCSOLDE_ANNUEL
+  IF "09" <= T_PAR_PERFIN
+  THEN LET T_SLDFIN = T_SLDFIN + SANCUMENG9 OF MCSOLDE_ANNUEL
+  IF "10" <= T_PAR_PERFIN
+  THEN LET T_SLDFIN = T_SLDFIN + SANCUMENG10 OF MCSOLDE_ANNUEL
+  IF "11" <= T_PAR_PERFIN
+  THEN LET T_SLDFIN = T_SLDFIN + SANCUMENG11 OF MCSOLDE_ANNUEL
+  IF "12" <= T_PAR_PERFIN
+  THEN LET T_SLDFIN = T_SLDFIN + SANCUMENG12 OF MCSOLDE_ANNUEL
+  IF "13" <= T_PAR_PERFIN
+  THEN LET T_SLDFIN = T_SLDFIN + SANCUMENG13 OF MCSOLDE_ANNUEL
+  IF "14" <= T_PAR_PERFIN
+  THEN LET T_SLDFIN = T_SLDFIN + SANCUMENG14 OF MCSOLDE_ANNUEL
+
+  ;
+  ; Si le sens du compte est de type crédit il faut inverser le signe
+  ; du solde, car les soldes sont conservés selon le sens du compte.
+  ;
+  IF CPTCODDC OF VCPT_DSC = "C"
+  THEN BEGIN
+    LET T_SLDDEB = 0 - T_SLDDEB
+    LET T_SLDFIN = 0 - T_SLDFIN
+  END
+END
+
+
+BUILD
+@IF FORMAT
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+**************************** Analyse des engagements ***************************
+* Compagnie.....: xxxx     xxxxxxxxxxxxxxxxxxxx Solde de début:xxxxxxxxxxxxxxxx*
+* Unité adm.....: xxxxxxxx xxxxxxxxxxxxxxxxxxxx Variation.....:xxxxxxxxxxxxxxxx*
+* Compte........: xxxxxx   xxxxxxxxxxxxxxxxxxxx Solde de fin..:xxxxxxxxxxxxxxxx*
+********************************************************************************
+*  Pér.   Date   Type Document     Réf.   Description                  Montant *
+* xxxxx xxxxxxxx xxxx xxxxxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxx*
+* xxxxx xxxxxxxx xxxx xxxxxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxx*
+* xxxxx xxxxxxxx xxxx xxxxxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxx*
+* xxxxx xxxxxxxx xxxx xxxxxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxx*
+* xxxxx xxxxxxxx xxxx xxxxxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxx*
+* xxxxx xxxxxxxx xxxx xxxxxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxx*
+* xxxxx xxxxxxxx xxxx xxxxxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxx*
+* xxxxx xxxxxxxx xxxx xxxxxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxx*
+* xxxxx xxxxxxxx xxxx xxxxxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxx*
+* xxxxx xxxxxxxx xxxx xxxxxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxx*
+* xxxxx xxxxxxxx xxxx xxxxxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxx*
+* xxxxx xxxxxxxx xxxx xxxxxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxx*
+* xxxxx xxxxxxxx xxxx xxxxxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxx*
+* xxxxx xxxxxxxx xxxx xxxxxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxx*
+********************************************************************************
+@ENDIF

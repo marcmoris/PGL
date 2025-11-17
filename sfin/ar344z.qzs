@@ -1,0 +1,463 @@
+;/T/ Liste de vérification des mouvements d'inventaire
+;
+;/M/TRSMAG/Sylvie Chouinard/1999-09-08
+; État......... : Terminé
+; Description.. : GRA01
+;                 Le détail du rapport doit être le détail du mouvement
+;		  d'inventaire au lieu de l'imputation.
+;
+;/P/ Programmeur...: Nancy Marceau
+;    Date Création.: 24 mai 1994
+;
+;    Description...: Pour faire la vérification des lots des mouvements
+;                    d'inventaire. Cette liste peut être lancée pour les
+;                    lots journlaisés ou non.
+;
+;    Paramètres....: Compagnie          (Compagnie du menu)
+;                    Période comptable  (Obligatoire)
+;                    No lot             (Un, Plusieurs ou tous)
+;
+;
+;    Particularités: Pour faire la vérification des lots non journalisés, il
+;                    faut donner en paramètre le numéro de lot (0000). Ainsi,
+;                    tous les mouvements d'inventaire approuvés apparaîtront
+;                    dans la liste de vérification.
+;
+;
+;/M/674/Marc Trudel/1999-10-15
+;  Etat..........: Termine
+;  Description...: GRA01
+;                  Montrer les quantites en negatifs sur le rapport et  
+;                  faire les totaux en consequence.  La description de 
+;                  l'entrepot a ete enleve ( on garde seulement le code d'ent.)
+;                  afin d'avoir plus d'espace pour la description du produit.
+;
+;-------------------------------------------------------------------------------
+
+ USE ussetqzs NOLIST   ; permet de faire les SET REPORT DEV....
+ SET NOBLANK           ; Empêche l'impression de ligne blanche
+
+
+ACCESS *WAR344  &
+  ;
+  ; On va chercher l'entrepôt pour afficher les infos de l'entrepôt.
+  ;
+  LINK CIECLE OF WAR344,      &
+       ENTCLE OF WAR344       &
+    TO CIECLE, &
+       ENTCLE              OF ARENTREPOT   &
+
+  LINK CIECLE     OF WAR344,      &
+       PRD_ENTCLE OF WAR344       &
+    TO CIECLE, &
+       ENTCLE              OF ARENTREPOT  ALIAS  PRD_ARENTREPOT OPTIONAL &
+
+  ;
+  ; Lien pour l'info du produit
+  ;
+  LINK CIECLE OF WAR344,      &
+       PRDCLE OF WAR344,      &
+       ENTCLE OF WAR344       &
+    TO CIECLE, &
+       PRDCLE, &
+       ENTCLE              OF VPRE_PRD         OPTIONAL &
+
+  ;
+  ; Lien pour le nom de l'utilisateur
+  ;
+  LINK UTLCLE OF WAR344     &
+    TO UTLCLE             OF ARUTILISATEUR     OPTIONAL &
+
+
+  LINK CPTCLE   OF WAR344     &
+    TO CPTCLE             OF VCPT_DSC          OPTIONAL &
+
+  LINK CIECLE   OF WAR344 , &
+       UNACLE   OF WAR344   &
+    TO CIECLE             , &
+       UNACLE             OF MCUNITE_ADM       OPTIONAL &
+
+  ;
+  ; Statut du mouvement
+  ;
+  LINK ("MOUSTU",                   &
+         MOUSTU OF WAR344)          &
+    TO XELNOM,                      &
+       CBICLE OF VCBI_DSC    ALIAS A_CBI_MOUSTU OPTIONAL  &
+
+  ;
+  ; Type du mouvement
+  ;
+  LINK ("MOUTYP",                   &
+         MOUTYP OF WAR344)          &
+    TO XELNOM,                      &
+       CBICLE OF VCBI_DSC    ALIAS A_CBI_MOUTYP OPTIONAL
+
+
+
+ DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = & ; titre1  du rapport
+@IF FRANCAIS
+                   "Liste de vérification des mouvements d'inventaire"
+@ELSE
+                   "%%%Liste de vérification des mouvements d'inventaire"
+@ENDIF
+ DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = " " ; titre2  du rapport
+
+ DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "AR344ZA"       ; numéro du rapport
+ DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM            ; nom de la compagnie
+
+
+USE usflgdet NOLIST                    ;Flag Bilingue (O/N)
+DEFINE D_HRSBLC    CHARACTER SIZE 3 =  DZ_FLGAFFO IF 0 <> LARNBRTRSERR OF WAR344 &
+                                       ELSE DZ_FLGAFFN IF LARNBRTRSERR OF WAR344 = 0
+
+
+DEFINE D_JOURNALISE CHAR SIZE 12 = &                                    ;Indique si Journalisé
+@IF FRANCAIS
+                            "Journalisé" &
+@ELSE
+                            "Posted" &
+@ENDIF
+                            IF LARDATJOU OF WAR344 <> 0 ELSE " "
+
+; Statut du mouvement (15 caractères)
+
+DEFINE D_CBIDSC_MOUSTU CHARACTER SIZE 15 = CBIDSC OF A_CBI_MOUSTU
+
+; Type du mouvement (15 caractères)
+
+DEFINE D_CBIDSC_MOUTYP CHARACTER SIZE 15 = CBIDSC OF A_CBI_MOUTYP
+
+
+DEFINE D_LARNBRTRSDIF INTEGER SIZE 4 = LARNBRTRSVER OF WAR344 - &
+                                       LARNBRTRS    OF WAR344     ;Différence nbre transactions réel et nbre transactions évalué
+DEFINE D_LARCUMMNTDIF FLOAT SIZE 8   = LARCUMMNTVER OF WAR344 - &
+                                       LARCUMMNT    OF WAR344     ;Différence Montant transaction réel et Montant transaction évalué
+;
+; Vérification si montant entré par l'usager balance avec le total imputation si
+; ne balance imprimer un "*"
+;
+DEFINE D_BALANCE  CHARACTER SIZE 1 = "*" IF (MOUMNTNET OF WAR344 <> &
+                                             MOUMNTDBT OF WAR344) &
+                                         OR (MOUMNTNET OF WAR344 <> &
+                                             MOUMNTCRT OF WAR344) &
+                                         OR (MOUMNTDBT OF WAR344 <> &
+                                             MOUMNTCRT OF WAR344) ELSE " "
+
+;
+; Nom + prenom de l'utilisateur
+;
+DEFINE D_UTLNOM  CHARACTER SIZE 29 = TRUNC(UTLNOM OF ARUTILISATEUR) + ", " + &
+                                     TRUNC(UTLPNM OF ARUTILISATEUR)
+
+DEFINE D_PRDDSC1 CHARACTER SIZE 40 = PRDDSC1 OF VPRE_PRD[1:40]
+
+
+SORT ON LARCLE    OF WAR344, &          ; No lot
+        MOUCLE    OF WAR344             ; No de mouvement
+
+DEFINE D_MOUNBRITE INTEGER SIZE 4 = &
+       MOUNBRITE OF WAR344 IF MOUTYP OF WAR344 <> "E" &
+                           ELSE MOUNBRITE OF WAR344 * -1 
+
+DEFINE D_MOUMNTNET FLOAT SIZE 8 = &
+       MOUMNTNET OF WAR344 IF MOUTYP OF WAR344 <> "E" &
+                           ELSE MOUMNTNET OF WAR344 * -1
+
+DEFINE D_MODQTE FLOAT SIZE 8 = &
+       MODQTE OF WAR344 IF MOUTYP OF WAR344 <> "E" &
+                        ELSE MODQTE OF WAR344 * -1
+
+DEFINE D_MODMNTNET FLOAT SIZE 8 = &
+       MODMNTNET OF WAR344 IF MOUTYP OF WAR344 <> "E" &
+                           ELSE MODMNTNET OF WAR344 * -1 
+
+ USE ustit175 NOLIST  ; Titre standard pour l'application à 175
+SKIP 2&
+@IF FRANCAIS
+ TAB 001 "Lot....: "   &
+@ELSE
+ TAB 001 "Batch..: "   &
+@ENDIF
+ TAB 011 LARCLE OF WAR344 &
+ TAB 016 LARDSC OF WAR344 &
+ TAB 060 D_JOURNALISE &
+ SKIP &
+@IF FRANCAIS
+ TAB 001 "Période: " &
+@ELSE
+ TAB 001 "Period.: " &
+@ENDIF
+ TAB 011 PECCLE OF WAR344 &
+SKIP 2 &
+@IF FRANCAIS
+  TAB 001 "No.                                                                                                                                                Nombre" &
+@ELSE
+  TAB 001 "%%%No.                                                                                                                                                Nombre" &
+@ENDIF
+
+ SKIP &
+@IF FRANCAIS
+  TAB 001 "mouvement   Type de mouvement  Statut               Date    Entrepôt                                      Utilisateur                              d'items        Montant" &
+@ELSE
+  TAB 001 "%%%vement   Type de mouvement  Statut               Date    Entrepôt                                      Utilisateur                              d'items        Montant" &
+@ENDIF
+skip &
+  TAB 001 "                                                  aa/mm/jj" &
+ SKIP &
+  TAB 001 "----------- ------------------ ----------------- ---------- --------------------------------------------- ---------------------------------------- ------- --------------- " &
+ SKIP
+
+
+HEADING AT MOUCLE &
+  TAB 001  D_BALANCE &
+  TAB 003  MOUCLE    OF WAR344        &
+  TAB 013  MOUTYP    OF WAR344        &
+  TAB 016  D_CBIDSC_MOUTYP            &
+  TAB 032  MOUSTU    OF WAR344        &
+  TAB 034  D_CBIDSC_MOUSTU            &
+  TAB 050  MOUDAT    OF WAR344        &
+  TAB 061  ENTCLE    OF WAR344        &
+  TAB 066  ENTNOM    OF ARENTREPOT    &
+  TAB 107  UTLCLE    OF WAR344        &
+  TAB 118  D_UTLNOM                   &
+  TAB 148  D_MOUNBRITE                &
+           PICTURE "^^^^^^^ "         &
+           TRAILING SIGN "-" SIGNIF 1 &
+  TAB 158  D_MOUMNTNET                &
+           PICTURE "^^^,^^^,^^^.^^ "  &
+           TRAIL SIGN "-" SIGNIF 5 BWZ &
+ SKIP 3 &
+
+@IF FRANCAIS
+  TAB 001 "------------Produit---------------------------------- -Ent- ----------Compte----------- -----Unité administrative---- --Cout moyen-- -Qté mouv.--  Prix unitaire ---Montant---" &
+@ELSE
+  TAB 001 "%%%---------Produit---------------------------------- -Ent- ----------Compte----------- -----Unité administrative---- --Cout moyen-- -Qté mouv.--  Prix unitaire ---Montant---" &
+@ENDIF
+ SKIP
+
+REPORT &
+  TAB 001 PRDCLE     OF WAR344      &
+  TAB 014 D_PRDDSC1   &
+  TAB 054 PRD_ENTCLE OF WAR344      &
+  TAB 061 CPTCLE     OF WAR344      &
+  TAB 068 CPTDSCABR  OF VCPT_DSC    &
+  TAB 089 UNACLE     OF WAR344      &
+  TAB 098 UNANOMABR  OF MCUNITE_ADM &
+  TAB 119 MODCOUMYN  OF WAR344      &
+  TAB 134 D_MODQTE                  &
+          PICTURE "^^^^^^^.^^^ "    &
+          TRAILING SIGN "-" SIGNIF 5 &
+  TAB 147 MODPRIUNI  OF WAR344      &
+
+  TAB 161 D_MODMNTNET               &
+          PICTURE "^^^,^^^,^^^.^^ " &
+          TRAIL SIGN "-" SIGNIF 5 BWZ
+
+
+FOOTING AT MOUCLE &
+   TAB 161 "---------------" &
+SKIP &
+   TAB 161 D_MODMNTNET SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " &
+           TRAIL SIGN "-" SIGNIF 5 BWZ &
+SKIP &
+  TAB 001  "-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------" &
+ SKIP
+
+
+FOOTING AT LARCLE &
+   TAB 161 "---------------" &
+ SKIP &
+@IF FRANCAIS
+  TAB 134 "Total du Lot:" &
+@ELSE
+  TAB 134 "Batch Total :" &
+@ENDIF
+   TAB 161 D_MODMNTNET SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " & 
+           TRAIL SIGN "-" SIGNIF 5 BWZ &
+ SKIP &
+
+   TAB 161 "===============" &
+SKIP PAGE
+
+BUILD ar344za
+
+@IF FORMAT
+AR344ZA                                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                           Page: 9999
+99/99/99 HH:MM xxxxxxxxxxxx              Liste de vérification des mouvements d'inventaire
+                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+Lot.....: xxxx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxx
+Période.: xx-xx
+
+No.                                                                                                                                                Nombre
+mouvement   Type de mouvement  Statut               Date    Entrepôt                                      Raison / Responsable                     d'items        Montant
+----------- ------------------ ----------------- ---------- --------------------------------------------- ---------------------------------------- ------- ---------------
+ xxxxxxxxx  xx xxxxxxxxxxxxxxx x xxxxxxxxxxxxxxx AAAA/MM/JJ xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   999   999,999,999.99-
+                                                                                                          xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+----------Compte-----------  ----Unité administrative-----  ---------Projet-----------  --------Activité----------- -------Montant
+123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99-
+                                                                                                                    ---------------
+                                                                                                                    999,999,999.99-
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ xxxxxxxxx  xx xxxxxxxxxxxxxxx x xxxxxxxxxxxxxxx AAAA/MM/JJ xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   999   999,999,999.99-
+                                                                                                          xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+----------Compte-----------  ----Unité administrative-----  ---------Projet-----------  --------Activité----------- -------Montant
+123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99-
+                                                                                                                    ---------------
+                                                                                                                    999,999,999.99-
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                                    ---------------
+                                                                                                     Total du lot:  999,999,999.99-
+                                                                                                                    ===============
+@ENDIF
+
+
+;/T/ Liste de vérification des mouvements d'inventaire - Cumul par compte et
+;    unité administrative
+;
+;-------------------------------------------------------------------------------
+
+ USE ussetqzs NOLIST   ; permet de faire les SET REPORT DEV....
+ SET NOBLANK           ; Empêche l'impression de ligne blanche
+
+
+;===============================================================================
+;  Rapport - Vérification des mouvements d'inventaire
+;===============================================================================
+
+ACCESS *WAR344              &
+
+  LINK CPTCLE   OF WAR344   &
+    TO CPTCLE   OF VCPT_DSC    OPTIONAL &
+
+  LINK CIECLE   OF WAR344 , &
+       UNACLE   OF WAR344   &
+    TO CIECLE             , &
+       UNACLE   OF MCUNITE_ADM OPTIONAL &
+
+  LINK CIECLE OF WAR344   , &
+       PRJCLE OF WAR344     &
+    TO CIECLE             , &
+       PRJCLE OF GPPROJETS    OPTIONAL &
+
+  LINK CIECLE OF WAR344   , &
+       PRJCLE OF WAR344   , &
+       PRACLE OF WAR344     &
+    TO CIECLE             , &
+       PRJCLE             , &
+       PRACLE OF GPPRO_ACTIVITE  OPTIONAL
+
+ SELECT IF MODMNTNET OF WAR344 <> 0
+
+ DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = & ; titre1  du rapport
+                   "Liste de vérification des mouvements d'inventaire"
+ DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = "Cumul par compte et unité administrative " ; titre2  du rapport
+
+ DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "AR344ZB"       ; numéro du rapport
+ DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM            ; nom de la compagnie
+
+
+USE usflgdet NOLIST                    ;Flag Bilingue (O/N)
+
+;***********************
+; Pour le rendre à 20 caractères.
+;
+DEFINE D_PRJTIT    CHARACTER SIZE 20 = PRJDSC1 OF GPPROJETS
+
+DEFINE D_PRATIT    CHARACTER SIZE 20 = PRADSC1 OF GPPRO_ACTIVITE
+
+;***********************
+
+;Indique si Journalisé
+DEFINE D_JOURNALISE CHAR SIZE 12 = "Journalisé" &
+                            IF LARDATJOU OF WAR344 <> 0 ELSE " "
+
+
+SORT ON CIECLE OF WAR344 &
+     ON LARCLE OF WAR344 &
+     ON CPTCLE OF WAR344 &
+     ON UNACLE OF WAR344
+
+DEFINE D_MODMNTNET FLOAT SIZE 8 = &
+       MODMNTNET OF WAR344 IF MOUTYP OF WAR344 <> "E" &
+                           ELSE MODMNTNET OF WAR344 * -1
+
+ USE ustit175 NOLIST  ; Titre standard pour l'application à 220
+SKIP 2&
+@IF FRANCAIS
+ TAB 001 "Lot....: "   &
+@ELSE
+ TAB 001 "Batch..: "   &
+@ENDIF
+ TAB 011 LARCLE OF WAR344 &
+ TAB 016 LARDSC OF WAR344 &
+ TAB 060 D_JOURNALISE &
+ SKIP &
+@IF FRANCAIS
+ TAB 001 "Période: " &
+@ELSE
+ TAB 001 "Period.: " &
+@ENDIF
+ TAB 011 PECCLE OF WAR344 &
+SKIP 2 &
+ TAB 010 "----------Compte-----------  ----Unité administrative-----  -----------Projet------------  -------Activité---------  -------Montant" &
+ SKIP
+
+
+FOOTING AT UNACLE                       &
+  TAB 010 CPTCLE       OF WAR344        &
+  TAB 017 CPTDSCABR    OF VCPT_DSC      &
+  TAB 039 UNACLE       OF WAR344        &
+  TAB 048 UNANOMABR    OF MCUNITE_ADM   &
+  TAB 070 PRJCLE       OF WAR344        &
+  TAB 079 D_PRJTIT                      &
+  TAB 101 PRACLE       OF WAR344        &
+  TAB 105 D_PRATIT                      &
+  TAB 127 D_MODMNTNET                   &
+          SUBTOTAL                      &
+          PICTURE "^^^,^^^,^^^.^^ "     &
+          TRAIL SIGN "-" SIGNIF 5 BWZ   & 
+ RESERVE 3 LINES
+
+
+FOOTING AT LARCLE                       &
+ SKIP 2                                 &
+  TAB 127 "=============="              &
+ SKIP 1                                 &
+  TAB 127 D_MODMNTNET                   &
+          SUBTOTAL                      &
+          PICTURE "^^^,^^^,^^^.^^ "     &
+          TRAIL SIGN "-" SIGNIF 5       &
+ SKIP PAGE
+
+
+BUILD ar344zb
+
+
+@IF FORMAT
+AR344ZB                                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                                          Page: 9999
+99/99/99 HH:MM xxxxxxxxxxxx             Liste de vérification des mouvements d'inventaire
+                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+Lot....: xxxx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxx
+Période: xx-xx
+
+         ----------Compte-----------  ----Unité administrative-----  -----------Projet------------  -------Activité---------  -------Montant
+         123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  123 xxxxxxxxxxxxxxxxxxxx  999,999,999.99-
+         123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  123 xxxxxxxxxxxxxxxxxxxx  999,999,999.99-
+         123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  123 xxxxxxxxxxxxxxxxxxxx  999,999,999.99-
+
+                                                                                                                              ==============
+                                                                                                                              999,999,999.99-
+
+
+@ENDIF
+

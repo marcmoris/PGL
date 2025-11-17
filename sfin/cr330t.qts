@@ -1,0 +1,149 @@
+;/T/ Vérification des factures / Notes de crédit / Ajustement
+;
+;/P/ Programmeur...: Chantal Martineau
+;    Date Création.: 11-juin-1993
+;
+;    Description...: Pour faire la vérification des lots de factures, Note de crédit,
+;                    et ajustement non journalisées au grand-livre. Remarqué que ce
+;                    rapport peut-être exécuté même si le lot à déjà été journalisé.
+;
+;    Paramètres....: Compagnie
+;                    Periode CTB
+;                    No Lot (Un, Plusieurs ou tous)
+;
+;    Particularités: Met à jour la date et l'usager de vérification du lot.
+;
+;/M/ Marie-Josée Hamel, 96.02.13, remplacer élément par produit/élém. tarif.
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST   ; permet de faire les SET REPORT NOLIMIT....
+
+
+RUN cr330t
+
+REQUEST VERIFICATION_FACTURE_NC_AJUT
+
+ACCESS CRLOT &
+  ;
+  ; Transactions du lot.
+  ;
+  LINK CIECLE    OF CRLOT         , &
+       PECCLE    OF CRLOT         , &
+       LCRCLE    OF CRLOT           &
+    TO CIECLE                     , &
+       PECCLE                     , &
+       LCRCLE                     OF CRCPT_A_REC &
+  ;
+  ; Imputation.
+  ;
+  LINK CIECLE    OF CRLOT         , &
+       CARCLE    OF CRCPT_A_REC     &
+    TO CIECLE                     , &
+       CARCLE                     OF CRCAR_IMPUTATION OPTIONAL &
+  ;
+  ; On va chercher le numéro de pièce référé pour les N/C et les ajustements.
+  ;
+  LINK CIECLE    OF CRCPT_A_REC   , &
+       CARCLE    OF CRCPT_A_REC   , &
+       CARTYPECR OF CRCPT_A_REC   , &
+       CARTYPECR OF CRCPT_A_REC     &
+    TO CRHCLE1                    , &
+       CRHCLE2                    , &
+       CRHTYPECR                  , &
+       CRHTYPTRA                  OF CRCAR_HISTO OPTIONAL
+
+
+CHOOSE CIECLE    PARM, &                ; No Compagnie
+       PECCLE    PARM, &                ; Période
+       LCRCLE    PARM, &                ; No lot
+       LCRTYPECR "FA"                   ; Type de lot
+
+
+TEMPORARY T_CARCLEREF CHARACTER SIZE 15 ; No facture en référence pour Note de
+                                        ; crédit ou ajustement.
+
+TEMPORARY T_CCDCLELIG INTEGER   SIZE  2 ; No cédule en référence pour note de
+                                        ; crédit ou ajustement.
+
+
+SORTED ON LCRCLE OF CRLOT  ; Numéro de lot
+
+;
+; No facture référée si note crédit ou ajustement
+;
+ITEM T_CARCLEREF = CARCLE OF CRCAR_HISTO &
+                     IF CARTYPECR OF CRCPT_A_REC = "AJ" OR &
+                        CARTYPECR OF CRCPT_A_REC = "NC"    &
+              ELSE " "
+;
+; No cédule référée si note crédit ou ajustement
+;
+ITEM T_CCDCLELIG = CCDCLELIG OF CRCAR_HISTO &
+                     IF CARTYPECR OF CRCPT_A_REC = "AJ" OR &
+                        CARTYPECR OF CRCPT_A_REC = "NC"    &
+              ELSE 0
+
+
+SUBFILE WCR330 KEEP INCLUDE &
+ CIECLE       OF CRLOT, &
+ PECCLE       OF CRLOT, &
+ LCRCLE       OF CRLOT, &
+ LCRDSC       OF CRLOT, &
+ LCRDATJOU    OF CRLOT, &
+ LCRNBRTRS    OF CRLOT, &
+ LCRNBRTRSVER OF CRLOT, &
+ LCRCUMMNT    OF CRLOT, &
+ LCRCUMMNTVER OF CRLOT, &
+ LCRNBRTRSERR OF CRLOT, &
+ CARCLE       OF CRCPT_A_REC, &
+ CARMNT       OF CRCPT_A_REC, &
+ CARCUMMNT    OF CRCPT_A_REC, &
+ REFCIECLE    OF CRCPT_A_REC, &
+ REFCLENUM    OF CRCPT_A_REC, &
+ REFCLETYP    OF CRCPT_A_REC, &
+ RADCLE       OF CRCPT_A_REC, &
+ CARTYPECR    OF CRCPT_A_REC, &
+ CARDAT       OF CRCPT_A_REC, &
+ CARTERNET    OF CRCPT_A_REC, &
+ CARDATNET    OF CRCPT_A_REC, &
+ CARTERFRS    OF CRCPT_A_REC, &
+ CARDATFRS    OF CRCPT_A_REC, &
+ CARTERESC1   OF CRCPT_A_REC, &
+ CARDATESC1   OF CRCPT_A_REC, &
+ CARTERESC2   OF CRCPT_A_REC, &
+ CARDATESC2   OF CRCPT_A_REC, &
+ CARMNTTPS    OF CRCPT_A_REC, &
+ CARMNTTVP    OF CRCPT_A_REC, &
+ CARMNTNET    OF CRCPT_A_REC, &
+ CARDSC1      OF CRCPT_A_REC, &
+ CARDSC2      OF CRCPT_A_REC, &
+ CARDATCRE    OF CRCPT_A_REC, &
+ CARHRECRE    OF CRCPT_A_REC, &
+ PRJCLE       OF CRCAR_IMPUTATION, &
+ PRACLE       OF CRCAR_IMPUTATION, &
+ IMMCLE       OF CRCAR_IMPUTATION, &
+ TRPCLE       OF CRCAR_IMPUTATION, &
+ ETACLE       OF CRCAR_IMPUTATION, &
+ CPTCLE       OF CRCAR_IMPUTATION, &
+ UNACLE       OF CRCAR_IMPUTATION, &
+ CRIMNT       OF CRCAR_IMPUTATION, &
+ CRIMNTTPS    OF CRCAR_IMPUTATION, &
+ CRIMNTTVP    OF CRCAR_IMPUTATION, &
+ CRITAXCODTPS OF CRCAR_IMPUTATION, &
+ CRITAXCODTVP OF CRCAR_IMPUTATION, &
+ T_CARCLEREF                      , &
+ T_CCDCLELIG
+
+
+
+;
+; Mise à jour de la date et de l'usager de vérification du lot si le lot
+; n'est pas journalisé.
+;
+OUTPUT CRLOT AT LCRCLE UPDATE &
+                       IF LCRDATJOU OF CRLOT = 0
+
+ ITEM LCRDATVAL OF CRLOT = SYSDATE
+ ITEM LCRUSRVAL OF CRLOT = LOGONID
+
+BUILD cr330t

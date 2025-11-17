@@ -1,0 +1,2324 @@
+;/T/ Budgets
+;
+;//M/GRA01/Francois Richard/1999-06-18
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur..: Guy Chabot
+;    Date Création: 05-Mar-1992
+;
+;    Description..: Ecran pour definir le budget initial ou le budget revisé.
+;                   Il y a plusieur méthode pour saisir les budgets;
+;
+;                   Méthode   Description/Traitement
+;                   -------   --------------------------------------------
+;                     INC     Incrémentale
+;                             Le but est d'auguementer le budget déjà pré-
+;                             sent, en spécifiant un montant à répartir
+;                             linéairement en ayant la possibilité de spé-
+;                             cifier un pourcentage sur ce montant.
+;
+;                     LIN     Linéaire
+;                             On réparti le montant également sur chaque
+;                             période. S'il y avait déjà un budget, celui-ci
+;                             est écrasé.
+;
+;                     MAN     Manuel
+;                             Aucun automatisme, l'usager saisie le budget
+;                             pour chaque période.
+;
+;                     BIN     Budget initial
+;                             Transfert du budget initial dans le budget
+;                             revisé.
+;
+;
+;/M/ Nancy Marceau, 94/07/07, Afficher l'usager et la date d'approbation
+;                             des budgets. C'est la colonne budget initial ou
+;                             courant qui est modifiable selon que les budgets
+;                             sont approuvés ou non. Enlever le type de budget
+;                             puisque l'approbation joue ce rôle ainsi que la
+;                             méthode BIN qui sera remplacée par la procédure
+;                             d'approbation des budgets.(SOS #158)
+;
+;/M/ Programmeur..: Martin Bruyère
+;    Date Création: 1995-12-22
+;    Description..: Ajouter le responsable du budget.
+;
+;/M/ Marie-Josée Hamel, 96.03.29, ne pas permettre de saisir ou de répartir
+;                                 automatiquement des budgets pour des périodes
+;                                 ou le compte est inactif.
+;/M/ Marie-Josée Hamel, 96.04.01, ajouter une piste de vérification et modifier
+;                                 la date d'approbation si on modifie le budget.
+;
+;/M/ Stephane Jackson, 98-09-14
+;
+;    Ajustement pour le changement de siècle
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN gl003 ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             ACTIVITIES ENTRY, FIND, CHANGE &
+             RECEIVING T_CIECLEMNU, &
+                       T_CIENOM
+
+TEMPORARY CCUPECDEBI_MC CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_SANANN_MC CHARACTER SIZE 3 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY CCUPECDEBA_UNA CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY CCUPECDEBI_UNA CHARACTER SIZE 3 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY SANANN_ANNUEL CHARACTER SIZE 3 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CPTPECDEBI_SIE1 CHARACTER SIZE 3 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CPTPECDEBA_SIE1 CHARACTER SIZE 3 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_SANANN_SIE1 CHARACTER SIZE 3 ; Temporaire servant pour le changement de siècle
+
+USE ussectmp  NOLIST
+    "GL003"
+
+USE gl003.hlp NOLIST
+
+USE usactecr  NOLIST
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Options"
+  MENUITEM LABEL "Activer saisie rapide  " ACTION DESIGNER SRAP
+  MENUITEM LABEL "Désactiver saisie rap. " ACTION DESIGNER SNOR
+  MENUITEM LABEL "Initialisation budgets " ACTION DESIGNER IBUD
+  MENUITEM LABEL "Vérification           " ACTION DESIGNER D001
+@ELSE
+ACTIONMENU LABEL "Options"
+  MENUITEM LABEL "%%%Quick entry on      " ACTION DESIGNER SRAP
+  MENUITEM LABEL "%%%Quick entry off     " ACTION DESIGNER SNOR
+  MENUITEM LABEL "%%%Initial. budgets    " ACTION DESIGNER IBUD
+  MENUITEM LABEL "%%%Vérification        " ACTION DESIGNER D001
+@ENDIF
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4                  ; Compagnie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40                 ; Compagnie du menu.
+TEMPORARY T_MTHREP    CHARACTER SIZE 3 RESET AT STARTUP ; Méthode de répartition
+
+;-------------------------------------------------------------------------------
+;
+; Pour le nombre de période du Grand Livre.
+;
+FILE MCHOLDING        REFERENCE
+  ACCESS VIA CIENMC USING "1"
+
+;
+; Contient les bugets.
+;
+FILE MCSOLDE_ANNUEL   PRIMARY &
+                      NOITEM
+
+  ACCESS REQUEST SANANN OF MCSOLDE_ANNUEL, &
+                 UNACLE OF MCSOLDE_ANNUEL, &
+                 CPTCLE OF MCSOLDE_ANNUEL  &
+         VIA     SANANN, &
+                 CIECLE, &
+                 UNACLE, &
+                 CPTCLE  &
+         USING   SANANN OF MCSOLDE_ANNUEL, &
+                 T_CIECLEMNU             , &
+                 UNACLE OF MCSOLDE_ANNUEL, &
+                 CPTCLE OF MCSOLDE_ANNUEL  &
+         ORDERED
+
+  ACCESS REQUEST SANANN OF MCSOLDE_ANNUEL, &
+                 UNACLE OF MCSOLDE_ANNUEL  &
+         VIA     SANANN, &
+                 CIECLE, &
+                 UNACLE  &
+         USING   SANANN OF MCSOLDE_ANNUEL, &
+                 T_CIECLEMNU             , &
+                 UNACLE OF MCSOLDE_ANNUEL  &
+         ORDERBY UNACLE, &
+                 CPTCLE
+
+  ACCESS REQUEST SANANN OF MCSOLDE_ANNUEL, &
+                 CPTCLE OF MCSOLDE_ANNUEL  &
+         VIA     SANANN, &
+                 CIECLE, &
+                 CPTCLE  &
+         USING   SANANN OF MCSOLDE_ANNUEL, &
+                 T_CIECLEMNU             , &
+                 CPTCLE OF MCSOLDE_ANNUEL  &
+         ORDERBY CPTCLE, &
+                 UNACLE
+
+  ACCESS REQUEST SANANN OF MCSOLDE_ANNUEL &
+         VIA     SANANN, &
+                 CIECLE  &
+         USING   SANANN OF MCSOLDE_ANNUEL, &
+                 T_CIECLEMNU               &
+         ORDERBY UNACLE, &
+                 CPTCLE
+
+  ACCESS VIA     CIECLE      &
+         USING   T_CIECLEMNU &
+         ORDERBY SANANN,     &
+                 UNACLE,     &
+                 CPTCLE
+
+  ITEM CIECLE    OF MCSOLDE_ANNUEL INITIAL T_CIECLEMNU
+  ITEM SANUSRAPP OF MCSOLDE_ANNUEL FINAL   LOGONID &
+                                       IF    ALTEREDRECORD OF MCSOLDE_ANNUEL &
+                                         AND SANUSRAPP OF MCSOLDE_ANNUEL <> ""
+  ITEM SANDATAPP OF MCSOLDE_ANNUEL FINAL   SYSDATE &
+                                       IF    ALTEREDRECORD OF MCSOLDE_ANNUEL &
+                                         AND SANDATAPP OF MCSOLDE_ANNUEL <> 0
+;
+; Piste de vérification
+;
+FILE MCSAN_VERIF      SECONDARY NOITEMS NEED 1
+  ITEM SANANN       OF MCSAN_VERIF INITIAL SANANN OF MCSOLDE_ANNUEL
+  ITEM CPTCLE       OF MCSAN_VERIF INITIAL CPTCLE OF MCSOLDE_ANNUEL
+  ITEM CIECLE       OF MCSAN_VERIF INITIAL CIECLE OF MCSOLDE_ANNUEL
+  ITEM UNACLE       OF MCSAN_VERIF INITIAL UNACLE OF MCSOLDE_ANNUEL
+  ITEM SAVDATMOD    OF MCSAN_VERIF FINAL   SYSDATE &
+                                       IF SAVDATCRE OF MCSAN_VERIF <> 0
+  ITEM SAVUSRMOD    OF MCSAN_VERIF FINAL   LOGONID &
+                                       IF SAVUSRCRE OF MCSAN_VERIF <> ""
+  ITEM SAVDATCRE    OF MCSAN_VERIF INITIAL SYSDATE
+  ITEM SAVUSRCRE    OF MCSAN_VERIF INITIAL LOGONID
+
+;
+; Pour vérifier si le record est présent lors du mode ENTRY.
+;
+FILE MCSOLDE_ANNUEL   DESIGNER &
+                      OPEN READ &
+                      ALIAS A_SAN_EXISTE
+
+;
+; Pour vérifier si pour cette compagnie le budget est approuvé,
+;
+FILE MCSOLDE_ANNUEL   DESIGNER &
+                      OPEN READ &
+                      ALIAS A_SAN_APPROUVE
+
+;
+; Validation de l'unité adm.
+;
+FILE MCUNITE_ADM      REFERENCE
+  ACCESS VIA CIECLE, &
+             UNACLE  &
+         USING CIECLE OF MCSOLDE_ANNUEL, &
+               UNACLE OF MCSOLDE_ANNUEL
+
+;
+; Validation du compte comptable.
+;
+FILE VCPT_DSC         REFERENCE
+  ACCESS VIA CPTCLE &
+         USING CPTCLE OF MCSOLDE_ANNUEL
+
+
+;
+; Validation de la charte de compte.
+;
+FILE MCCHARTE_UNA     REFERENCE
+  ACCESS VIA CPTCLE,CIECLE,UNACLE &
+         USING CPTCLE OF MCSOLDE_ANNUEL, &
+               CIECLE OF MCSOLDE_ANNUEL, &
+               UNACLE OF MCSOLDE_ANNUEL
+
+;
+; Validation de la méthode de répartition.
+;
+DEFINE    D_MTHREP     CHARACTER SIZE 16 = "T__MTHREP"
+TEMPORARY T_MTHREP_CBI CHARACTER SIZE 4
+;
+FILE VCBI_DSC         REFERENCE &
+                      ALIAS A_CBI_REP
+  ACCESS VIA XELNOM, &
+             CBICLE  &
+         USING D_MTHREP, &
+               T_MTHREP
+
+;-------------------------------------------------------------------------------
+;
+; Usager du système
+;
+
+FILE GSUSAGER REFERENCE
+
+  ACCESS VIA   USRCLE       &
+         USING SANUSRAPP    OF MCSOLDE_ANNUEL
+
+
+;-------------------------------------------------------------------------------
+;
+; Usager du système (Responsable)
+;
+
+FILE GSUSAGER REFERENCE ALIAS A_USR_RPS
+
+  ACCESS VIA   USRCLE       &
+         USING SANUSRRPS    OF MCSOLDE_ANNUEL
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_CIECLE    CHARACTER SIZE 4 ; Popup sur unité administrative.
+TEMPORARY T_CPTCLE    CHARACTER SIZE 6 ; Popup sur les comptes.
+TEMPORARY T_UNACLE    CHARACTER SIZE 8 ; Popup sur unité administrative.
+TEMPORARY T_PECCLE    CHARACTER SIZE 4 ; Popup sur les comptes.
+TEMPORARY T_CPTTYPPAT CHARACTER SIZE 1 ; Popup sur les comptes.
+TEMPORARY T_CPTCATPAT CHARACTER SIZE 8 ; Popup sur les comptes.
+TEMPORARY T_USRCLE    CHARACTER SIZE 12 ; Popup sur les usagers
+
+TEMPORARY T_MNTORI    FLOAT     SIZE 8 ; Montant à répartir
+TEMPORARY T_MNTADD    FLOAT     SIZE 8 ; Montant à additionner
+TEMPORARY T_MNTRES    FLOAT     SIZE 8 ; Reste à additionner
+TEMPORARY T_PCT       FLOAT     SIZE 4 ; Montant à répartir
+
+TEMPORARY T_NBRPEC    FLOAT     SIZE 8 ; Nbre de périodes actives
+TEMPORARY T_PECACT01  CHARACTER SIZE 1 ; Pour indiquer si la pér. 01 est active
+TEMPORARY T_PECACT02  CHARACTER SIZE 1 ; Pour indiquer si la pér. 02 est active
+TEMPORARY T_PECACT03  CHARACTER SIZE 1 ; Pour indiquer si la pér. 03 est active
+TEMPORARY T_PECACT04  CHARACTER SIZE 1 ; Pour indiquer si la pér. 04 est active
+TEMPORARY T_PECACT05  CHARACTER SIZE 1 ; Pour indiquer si la pér. 05 est active
+TEMPORARY T_PECACT06  CHARACTER SIZE 1 ; Pour indiquer si la pér. 06 est active
+TEMPORARY T_PECACT07  CHARACTER SIZE 1 ; Pour indiquer si la pér. 07 est active
+TEMPORARY T_PECACT08  CHARACTER SIZE 1 ; Pour indiquer si la pér. 08 est active
+TEMPORARY T_PECACT09  CHARACTER SIZE 1 ; Pour indiquer si la pér. 09 est active
+TEMPORARY T_PECACT10  CHARACTER SIZE 1 ; Pour indiquer si la pér. 10 est active
+TEMPORARY T_PECACT11  CHARACTER SIZE 1 ; Pour indiquer si la pér. 11 est active
+TEMPORARY T_PECACT12  CHARACTER SIZE 1 ; Pour indiquer si la pér. 12 est active
+TEMPORARY T_PECACT13  CHARACTER SIZE 1 ; Pour indiquer si la pér. 13 est active
+
+
+TEMPORARY T_FLGSAI    CHARACTER SIZE 1 RESET AT STARTUP
+                                       ; Flag pour la saisie rapide.
+
+TEMPORARY T_USRAPP    CHARACTER SIZE 12 RESET AT STARTUP
+TEMPORARY T_DATAPP    INTEGER   SIZE  4 RESET AT STARTUP
+
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER(T_CIENOM)
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Budgets " &
+@ELSE
+      " Budgets" &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST
+
+SKIP
+
+
+ALIGN (19,3,19) (,41,57) (,,70)
+FIELD SANANN       OF MCSOLDE_ANNUEL HIDDEN ID 05 &
+label "Année.........:" &
+        REQUIRED &
+        NOCORRECT &
+        NOCHANGE
+
+FIELD SANUSRAPP    OF MCSOLDE_ANNUEL &
+label "Approuvé par..:" &
+        DISPLAY
+
+FIELD SANDATAPP    OF MCSOLDE_ANNUEL  FORMAT YYYYMMDD PATTERN "####/##/##"&
+        DISPLAY
+
+SKIP
+
+ALIGN(19,3,19) (,,28)
+
+FIELD UNACLE       OF MCSOLDE_ANNUEL HIDDEN ID 10 &
+label "Unité adm.....:" &
+        REQUIRED &
+        NOCORRECT &
+        NOCHANGE &
+        LOOKUP ON MCUNITE_ADM &
+          MESSAGE 220 ; Cette unité est inexistante
+
+FIELD UNANOMABR    OF MCUNITE_ADM &
+        DISPLAY
+
+FIELD CPTCLE       OF MCSOLDE_ANNUEL HIDDEN ID 15 &
+label "Compte........:" &
+        REQUIRED &
+        NOCORRECT &
+        NOCHANGE &
+        LOOKUP ON VCPT_DSC &
+          MESSAGE 219 ; Ce compte est inexistant
+
+FIELD CPTDSCABR    OF VCPT_DSC &
+        DISPLAY
+
+SKIP
+
+ALIGN(19,3,19) (,,23) (,53,69)
+
+FIELD T_MTHREP HIDDEN ID 20 & ;ID SAME &
+        UPSHIFT &
+@IF FRANCAIS
+        HELP  "Méthode de répartition du budget." &
+        LABEL "Méthode.......:" &
+@ELSE
+        HELP  "%%%Méthode de répartition du budget." &
+        LABEL "%%%méthode....:" &
+@ENDIF
+        LOOKUP ON A_CBI_REP &
+          MESSAGE 257 ; Ce type de répartition est invalide
+
+FIELD CBIDSC OF A_CBI_REP &
+        DISPLAY &
+        SIZE 15
+
+
+FIELD T_MNTORI &
+        PICTURE "^^,^^^,^^^" &
+        INPUT SCALE 2 &
+        OUTPUT SCALE -2 &
+        SIGNIFICANCE 1 &
+@IF FRANCAIS
+        HELP  "Montant de base selon la répartition." &
+        LABEL "Montant.......:"
+@ELSE
+        HELP  "%%%Montant de base selon la répartition." &
+        LABEL "Amount........:"
+@ENDIF
+
+
+ALIGN (2,3,19) (,,32) (,53,69)
+
+FIELD SANUSRRPS OF MCSOLDE_ANNUEL &
+label "Responsable...:" &
+        HIDDEN ID 22 &
+        DUPLICATE &
+        LOOKUP ON A_USR_RPS &
+          MESSAGE 219 ; Ce compte est inexistant
+
+FIELD USREMPNOM        OF A_USR_RPS &
+        DISPLAY                     &
+        SIZE 20
+
+
+FIELD T_PCT &
+        PICTURE "^^^.^^" &
+        INPUT SCALE -2 &
+        OUTPUT SCALE 4 &
+        SIGNIFICANCE 4  &
+@IF FRANCAIS
+        HELP  "Pourcentage utilisé pour la répartition du budget" &
+        LABEL "Pourcentage...:"
+@ELSE
+        HELP  "%%%Pourcentage utilisé pour la répartition du budget" &
+        LABEL "%%%Pourcentage:"
+@ENDIF
+
+SKIP
+DRAW ,1 TO ,80
+
+TITLE &
+@IF FRANCAIS
+      " Budget initial " &
+@ELSE
+      "%%%Budget init " &
+@ENDIF
+      AT ,19
+
+TITLE &
+@IF FRANCAIS
+      " Budget courant " &
+@ELSE
+      "%%%Budget courant " &
+@ENDIF
+      AT ,52
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      "Période.......:" &
+@ELSE
+      "Period........:" &
+@ENDIF
+      AT ,3
+
+SKIP TO 10
+
+ALIGN(22,19,22)
+
+FIELD SANBDG1    OF MCSOLDE_ANNUEL LABEL "01" HIDDEN ID 31
+FIELD SANBDG2    OF MCSOLDE_ANNUEL LABEL "02" HIDDEN ID 32
+FIELD SANBDG3    OF MCSOLDE_ANNUEL LABEL "03" HIDDEN ID 33
+FIELD SANBDG4    OF MCSOLDE_ANNUEL LABEL "04" HIDDEN ID 34
+FIELD SANBDG5    OF MCSOLDE_ANNUEL LABEL "05" HIDDEN ID 35
+FIELD SANBDG6    OF MCSOLDE_ANNUEL LABEL "06" HIDDEN ID 36
+FIELD SANBDG7    OF MCSOLDE_ANNUEL LABEL "07" HIDDEN ID 37
+FIELD SANBDG8    OF MCSOLDE_ANNUEL LABEL "08" HIDDEN ID 38
+FIELD SANBDG9    OF MCSOLDE_ANNUEL LABEL "09" HIDDEN ID 39
+FIELD SANBDG10   OF MCSOLDE_ANNUEL LABEL "10" HIDDEN ID 40
+FIELD SANBDG11   OF MCSOLDE_ANNUEL LABEL "11" HIDDEN ID 41
+FIELD SANBDG12   OF MCSOLDE_ANNUEL LABEL "12" HIDDEN ID 42
+ALIGN(22,19,22) (,34,36)
+FIELD SANBDG13   OF MCSOLDE_ANNUEL LABEL "13" HIDDEN ID 43
+FIELD SANBDGANN  OF MCSOLDE_ANNUEL LABEL "=" &
+        DISPLAY
+
+SKIP TO 10
+
+ALIGN(54,50,54)
+
+FIELD SANBDGREV1    OF MCSOLDE_ANNUEL LABEL "01" HIDDEN ID 51
+FIELD SANBDGREV2    OF MCSOLDE_ANNUEL LABEL "02" HIDDEN ID 52
+FIELD SANBDGREV3    OF MCSOLDE_ANNUEL LABEL "03" HIDDEN ID 53
+FIELD SANBDGREV4    OF MCSOLDE_ANNUEL LABEL "04" HIDDEN ID 54
+FIELD SANBDGREV5    OF MCSOLDE_ANNUEL LABEL "05" HIDDEN ID 55
+FIELD SANBDGREV6    OF MCSOLDE_ANNUEL LABEL "06" HIDDEN ID 56
+FIELD SANBDGREV7    OF MCSOLDE_ANNUEL LABEL "07" HIDDEN ID 57
+FIELD SANBDGREV8    OF MCSOLDE_ANNUEL LABEL "08" HIDDEN ID 58
+FIELD SANBDGREV9    OF MCSOLDE_ANNUEL LABEL "09" HIDDEN ID 59
+FIELD SANBDGREV10   OF MCSOLDE_ANNUEL LABEL "10" HIDDEN ID 60
+FIELD SANBDGREV11   OF MCSOLDE_ANNUEL LABEL "11" HIDDEN ID 61
+FIELD SANBDGREV12   OF MCSOLDE_ANNUEL LABEL "12" HIDDEN ID 62
+ALIGN(54,50,54) (,66,68)
+FIELD SANBDGREV13   OF MCSOLDE_ANNUEL LABEL "13" HIDDEN ID 63
+FIELD SANBDGREVANN  OF MCSOLDE_ANNUEL LABEL "=" &
+        DISPLAY
+
+
+;----------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les unités administratives.
+;
+;
+PROCEDURE INPUT UNACLE
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_UNACLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    LET T_CIECLE = CIECLE OF MCSOLDE_ANNUEL
+    RUN SCREEN mc104 PASSING T_CIECLE, T_UNACLE MODE F
+    LET FIELDTEXT = TRUNC(T_UNACLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les comptes.
+;
+;
+PROCEDURE INPUT CPTCLE
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE    = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    LET T_PECCLE    = " "
+    LET T_CPTTYPPAT = "@"
+    LET T_CPTCATPAT = "@"
+    RUN SCREEN mc103 MODE F PASSING T_CPTCLE   , &
+                                    T_CPTTYPPAT, &
+                                    T_CPTCATPAT, &
+                                    T_PECCLE
+    LET FIELDTEXT = TRUNC(T_CPTCLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation si le compte est actif.
+;
+;
+PROCEDURE EDIT CPTCLE
+BEGIN
+  ;
+  ; Note: La période de fin, est la première période d'inactivité.
+  ; Attention un compte peut être actif de 9302 a 9305
+  ;
+  ; Ajustement pour le changement de siècle
+  IF SANANN OF MCSOLDE_ANNUEL[1:1] < "8"
+  THEN LET T_SANANN_SIE1 = "1" + SANANN OF MCSOLDE_ANNUEL[1:2]
+  ELSE LET T_SANANN_SIE1 = "0" + SANANN OF MCSOLDE_ANNUEL[1:2]
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBA OF VCPT_DSC[1:1] < "8"
+  THEN LET T_CPTPECDEBA_SIE1 = "1" + CPTPECDEBA OF VCPT_DSC[1:2]
+  ELSE LET T_CPTPECDEBA_SIE1 = "0" + CPTPECDEBA OF VCPT_DSC[1:2]
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBI OF VCPT_DSC[1:1] < "8"
+  THEN LET T_CPTPECDEBI_SIE1 = "1" + CPTPECDEBI OF VCPT_DSC[1:2]
+  ELSE LET T_CPTPECDEBI_SIE1 = "0" + CPTPECDEBI OF VCPT_DSC[1:2]
+
+  IF T_SANANN_SIE1 >= T_CPTPECDEBA_SIE1 AND &
+     ( &
+       T_SANANN_SIE1 <= T_CPTPECDEBI_SIE1 OR &
+       CPTPECDEBI OF VCPT_DSC = "" &
+     )
+  THEN NULL
+  ELSE ERROR 251; Ce compte est inactif.
+
+  IF HLDCHTCPT OF MCHOLDING = "1"
+  THEN BEGIN
+    GET MCCHARTE_UNA OPTIONAL
+    ;
+    ; Si la charte est incluse, le lien est obligatoire.
+    ;
+    IF NOT ACCESSOK
+    THEN BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN ERROR 256 ; La combinaison compte/unité adm n'existe pas.
+    END
+    ELSE BEGIN
+      ;
+      ; Si la charte est Exclusive et que la période fait partie de
+      ; l'intervalle de période de la charte alors c'est une erreur.
+      ;
+      ; Si la charte est inclusive et que la période ne fait pas partie de
+      ; l'intervalle de période de la charte alors c'est une erreur.
+      ;
+
+      ; Ajustement pour le changement de siècle
+      IF SANANN OF MCSOLDE_ANNUEL[1:1] < "8"
+      THEN LET SANANN_ANNUEL = "1" + SANANN OF MCSOLDE_ANNUEL[1:2]
+      ELSE LET SANANN_ANNUEL = "0" + SANANN OF MCSOLDE_ANNUEL[1:2]
+
+      ; Ajustement pour le changement de siècle
+      IF CCUPECDEBA OF MCCHARTE_UNA[1:1] < "8"
+      THEN LET CCUPECDEBA_UNA = "1" + CCUPECDEBA OF MCCHARTE_UNA[1:2]
+      ELSE LET CCUPECDEBA_UNA = "0" + CCUPECDEBA OF MCCHARTE_UNA[1:2]
+
+      ; Ajustement pour le changement de siècle
+      IF CCUPECDEBI OF MCCHARTE_UNA[1:1] < "8"
+      THEN LET CCUPECDEBI_UNA = "1" + CCUPECDEBI OF MCCHARTE_UNA[1:2]
+      ELSE LET CCUPECDEBI_UNA = "0" + CCUPECDEBI OF MCCHARTE_UNA[1:2]
+
+      IF ( &
+           SANANN_ANNUEL >= CCUPECDEBA_UNA AND &
+           ( &
+             SANANN_ANNUEL <= CCUPECDEBI_UNA OR &
+             CCUPECDEBI_UNA = " " &
+           ) &
+         )
+      THEN BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "E"
+        THEN ERROR 250 ; La combinaison compte/unité adm. est inactif.
+      END
+      ELSE BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "I"
+        THEN ERROR 250; La combinaison compte/unité adm. est inactif.
+      END
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les méthodes de répartition(code bilingue).
+;
+;
+PROCEDURE INPUT T_MTHREP
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_MTHREP_CBI = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_MTHREP, T_MTHREP_CBI
+    LET FIELDTEXT = TRUNC(T_MTHREP_CBI)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur pour le champ
+;
+
+PROCEDURE INPUT SANUSRRPS OF MCSOLDE_ANNUEL
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_USRCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gs104 PASSING T_USRCLE MODE F
+    LET FIELDTEXT = TRUNC(T_USRCLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Maintenance du budget initial annuel si l'usager modifi le budget par période.
+;
+;
+PROCEDURE EDIT SANBDG1
+BEGIN
+  LET SANBDGANN OF MCSOLDE_ANNUEL = SANBDGANN OF MCSOLDE_ANNUEL - &
+                                    OLDVALUE(SANBDG1 OF MCSOLDE_ANNUEL) + &
+                                    FIELDVALUE
+END
+;
+PROCEDURE PROCESS SANBDG1
+BEGIN
+  DISPLAY SANBDGANN OF MCSOLDE_ANNUEL
+END
+;
+PROCEDURE EDIT SANBDG2
+BEGIN
+  LET SANBDGANN OF MCSOLDE_ANNUEL = SANBDGANN OF MCSOLDE_ANNUEL - &
+                                    OLDVALUE(SANBDG2 OF MCSOLDE_ANNUEL) + &
+                                    FIELDVALUE
+END
+;
+PROCEDURE PROCESS SANBDG2
+BEGIN
+  DISPLAY SANBDGANN OF MCSOLDE_ANNUEL
+END
+;
+;
+PROCEDURE EDIT SANBDG3
+BEGIN
+  LET SANBDGANN OF MCSOLDE_ANNUEL = SANBDGANN OF MCSOLDE_ANNUEL - &
+                                    OLDVALUE(SANBDG3 OF MCSOLDE_ANNUEL) + &
+                                    FIELDVALUE
+END
+;
+PROCEDURE PROCESS SANBDG3
+BEGIN
+  DISPLAY SANBDGANN OF MCSOLDE_ANNUEL
+END
+;
+;
+PROCEDURE EDIT SANBDG4
+BEGIN
+  LET SANBDGANN OF MCSOLDE_ANNUEL = SANBDGANN OF MCSOLDE_ANNUEL - &
+                                    OLDVALUE(SANBDG4 OF MCSOLDE_ANNUEL) + &
+                                    FIELDVALUE
+END
+;
+PROCEDURE PROCESS SANBDG4
+BEGIN
+  DISPLAY SANBDGANN OF MCSOLDE_ANNUEL
+END
+;
+;
+PROCEDURE EDIT SANBDG5
+BEGIN
+  LET SANBDGANN OF MCSOLDE_ANNUEL = SANBDGANN OF MCSOLDE_ANNUEL - &
+                                    OLDVALUE(SANBDG5 OF MCSOLDE_ANNUEL) + &
+                                    FIELDVALUE
+END
+;
+PROCEDURE PROCESS SANBDG5
+BEGIN
+  DISPLAY SANBDGANN OF MCSOLDE_ANNUEL
+END
+;
+;
+PROCEDURE EDIT SANBDG6
+BEGIN
+  LET SANBDGANN OF MCSOLDE_ANNUEL = SANBDGANN OF MCSOLDE_ANNUEL - &
+                                    OLDVALUE(SANBDG6 OF MCSOLDE_ANNUEL) + &
+                                    FIELDVALUE
+END
+;
+PROCEDURE PROCESS SANBDG6
+BEGIN
+  DISPLAY SANBDGANN OF MCSOLDE_ANNUEL
+END
+;
+;
+PROCEDURE EDIT SANBDG7
+BEGIN
+  LET SANBDGANN OF MCSOLDE_ANNUEL = SANBDGANN OF MCSOLDE_ANNUEL - &
+                                    OLDVALUE(SANBDG7 OF MCSOLDE_ANNUEL) + &
+                                    FIELDVALUE
+END
+;
+PROCEDURE PROCESS SANBDG7
+BEGIN
+  DISPLAY SANBDGANN OF MCSOLDE_ANNUEL
+END
+;
+;
+PROCEDURE EDIT SANBDG8
+BEGIN
+  LET SANBDGANN OF MCSOLDE_ANNUEL = SANBDGANN OF MCSOLDE_ANNUEL - &
+                                    OLDVALUE(SANBDG8 OF MCSOLDE_ANNUEL) + &
+                                    FIELDVALUE
+END
+;
+PROCEDURE PROCESS SANBDG8
+BEGIN
+  DISPLAY SANBDGANN OF MCSOLDE_ANNUEL
+END
+;
+;
+PROCEDURE EDIT SANBDG9
+BEGIN
+  LET SANBDGANN OF MCSOLDE_ANNUEL = SANBDGANN OF MCSOLDE_ANNUEL - &
+                                    OLDVALUE(SANBDG9 OF MCSOLDE_ANNUEL) + &
+                                    FIELDVALUE
+END
+;
+PROCEDURE PROCESS SANBDG9
+BEGIN
+  DISPLAY SANBDGANN OF MCSOLDE_ANNUEL
+END
+;
+;
+PROCEDURE EDIT SANBDG10
+BEGIN
+  LET SANBDGANN OF MCSOLDE_ANNUEL = SANBDGANN OF MCSOLDE_ANNUEL - &
+                                    OLDVALUE(SANBDG10 OF MCSOLDE_ANNUEL) + &
+                                    FIELDVALUE
+END
+;
+PROCEDURE PROCESS SANBDG10
+BEGIN
+  DISPLAY SANBDGANN OF MCSOLDE_ANNUEL
+END
+;
+;
+PROCEDURE EDIT SANBDG11
+BEGIN
+  LET SANBDGANN OF MCSOLDE_ANNUEL = SANBDGANN OF MCSOLDE_ANNUEL - &
+                                    OLDVALUE(SANBDG11 OF MCSOLDE_ANNUEL) + &
+                                    FIELDVALUE
+END
+;
+PROCEDURE PROCESS SANBDG11
+BEGIN
+  DISPLAY SANBDGANN OF MCSOLDE_ANNUEL
+END
+;
+;
+PROCEDURE EDIT SANBDG12
+BEGIN
+  LET SANBDGANN OF MCSOLDE_ANNUEL = SANBDGANN OF MCSOLDE_ANNUEL - &
+                                    OLDVALUE(SANBDG12 OF MCSOLDE_ANNUEL) + &
+                                    FIELDVALUE
+END
+;
+PROCEDURE PROCESS SANBDG12
+BEGIN
+  DISPLAY SANBDGANN OF MCSOLDE_ANNUEL
+END
+;
+;
+PROCEDURE EDIT SANBDG13
+BEGIN
+  LET SANBDGANN OF MCSOLDE_ANNUEL = SANBDGANN OF MCSOLDE_ANNUEL - &
+                                    OLDVALUE(SANBDG13 OF MCSOLDE_ANNUEL) + &
+                                    FIELDVALUE
+END
+;
+PROCEDURE PROCESS SANBDG13
+BEGIN
+  DISPLAY SANBDGANN OF MCSOLDE_ANNUEL
+END
+;
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Maintenance du budget revisé annuel si l'usager modifi le budget par période.
+;
+;
+PROCEDURE EDIT SANBDGREV1
+BEGIN
+  LET SANBDGREVANN OF MCSOLDE_ANNUEL = SANBDGREVANN OF MCSOLDE_ANNUEL - &
+                                    OLDVALUE(SANBDGREV1 OF MCSOLDE_ANNUEL) + &
+                                    FIELDVALUE
+END
+;
+PROCEDURE PROCESS SANBDGREV1
+BEGIN
+  DISPLAY SANBDGREVANN OF MCSOLDE_ANNUEL
+END
+;
+PROCEDURE EDIT SANBDGREV2
+BEGIN
+  LET SANBDGREVANN OF MCSOLDE_ANNUEL = SANBDGREVANN OF MCSOLDE_ANNUEL - &
+                                    OLDVALUE(SANBDGREV2 OF MCSOLDE_ANNUEL) + &
+                                    FIELDVALUE
+END
+;
+PROCEDURE PROCESS SANBDGREV2
+BEGIN
+  DISPLAY SANBDGREVANN OF MCSOLDE_ANNUEL
+END
+;
+;
+PROCEDURE EDIT SANBDGREV3
+BEGIN
+  LET SANBDGREVANN OF MCSOLDE_ANNUEL = SANBDGREVANN OF MCSOLDE_ANNUEL - &
+                                    OLDVALUE(SANBDGREV3 OF MCSOLDE_ANNUEL) + &
+                                    FIELDVALUE
+END
+;
+PROCEDURE PROCESS SANBDGREV3
+BEGIN
+  DISPLAY SANBDGREVANN OF MCSOLDE_ANNUEL
+END
+;
+;
+PROCEDURE EDIT SANBDGREV4
+BEGIN
+  LET SANBDGREVANN OF MCSOLDE_ANNUEL = SANBDGREVANN OF MCSOLDE_ANNUEL - &
+                                    OLDVALUE(SANBDGREV4 OF MCSOLDE_ANNUEL) + &
+                                    FIELDVALUE
+END
+;
+PROCEDURE PROCESS SANBDGREV4
+BEGIN
+  DISPLAY SANBDGREVANN OF MCSOLDE_ANNUEL
+END
+;
+;
+PROCEDURE EDIT SANBDGREV5
+BEGIN
+  LET SANBDGREVANN OF MCSOLDE_ANNUEL = SANBDGREVANN OF MCSOLDE_ANNUEL - &
+                                    OLDVALUE(SANBDGREV5 OF MCSOLDE_ANNUEL) + &
+                                    FIELDVALUE
+END
+;
+PROCEDURE PROCESS SANBDGREV5
+BEGIN
+  DISPLAY SANBDGREVANN OF MCSOLDE_ANNUEL
+END
+;
+;
+PROCEDURE EDIT SANBDGREV6
+BEGIN
+  LET SANBDGREVANN OF MCSOLDE_ANNUEL = SANBDGREVANN OF MCSOLDE_ANNUEL - &
+                                    OLDVALUE(SANBDGREV6 OF MCSOLDE_ANNUEL) + &
+                                    FIELDVALUE
+END
+;
+PROCEDURE PROCESS SANBDGREV6
+BEGIN
+  DISPLAY SANBDGREVANN OF MCSOLDE_ANNUEL
+END
+;
+;
+PROCEDURE EDIT SANBDGREV7
+BEGIN
+  LET SANBDGREVANN OF MCSOLDE_ANNUEL = SANBDGREVANN OF MCSOLDE_ANNUEL - &
+                                    OLDVALUE(SANBDGREV7 OF MCSOLDE_ANNUEL) + &
+                                    FIELDVALUE
+END
+;
+PROCEDURE PROCESS SANBDGREV7
+BEGIN
+  DISPLAY SANBDGREVANN OF MCSOLDE_ANNUEL
+END
+;
+;
+PROCEDURE EDIT SANBDGREV8
+BEGIN
+  LET SANBDGREVANN OF MCSOLDE_ANNUEL = SANBDGREVANN OF MCSOLDE_ANNUEL - &
+                                    OLDVALUE(SANBDGREV8 OF MCSOLDE_ANNUEL) + &
+                                    FIELDVALUE
+END
+;
+PROCEDURE PROCESS SANBDGREV8
+BEGIN
+  DISPLAY SANBDGREVANN OF MCSOLDE_ANNUEL
+END
+;
+;
+PROCEDURE EDIT SANBDGREV9
+BEGIN
+  LET SANBDGREVANN OF MCSOLDE_ANNUEL = SANBDGREVANN OF MCSOLDE_ANNUEL - &
+                                    OLDVALUE(SANBDGREV9 OF MCSOLDE_ANNUEL) + &
+                                    FIELDVALUE
+END
+;
+PROCEDURE PROCESS SANBDGREV9
+BEGIN
+  DISPLAY SANBDGREVANN OF MCSOLDE_ANNUEL
+END
+;
+;
+PROCEDURE EDIT SANBDGREV10
+BEGIN
+  LET SANBDGREVANN OF MCSOLDE_ANNUEL = SANBDGREVANN OF MCSOLDE_ANNUEL - &
+                                    OLDVALUE(SANBDGREV10 OF MCSOLDE_ANNUEL) + &
+                                    FIELDVALUE
+END
+;
+PROCEDURE PROCESS SANBDGREV10
+BEGIN
+  DISPLAY SANBDGREVANN OF MCSOLDE_ANNUEL
+END
+;
+;
+PROCEDURE EDIT SANBDGREV11
+BEGIN
+  LET SANBDGREVANN OF MCSOLDE_ANNUEL = SANBDGREVANN OF MCSOLDE_ANNUEL - &
+                                    OLDVALUE(SANBDGREV11 OF MCSOLDE_ANNUEL) + &
+                                    FIELDVALUE
+END
+;
+PROCEDURE PROCESS SANBDGREV11
+BEGIN
+  DISPLAY SANBDGREVANN OF MCSOLDE_ANNUEL
+END
+;
+;
+PROCEDURE EDIT SANBDGREV12
+BEGIN
+  LET SANBDGREVANN OF MCSOLDE_ANNUEL = SANBDGREVANN OF MCSOLDE_ANNUEL - &
+                                    OLDVALUE(SANBDGREV12 OF MCSOLDE_ANNUEL) + &
+                                    FIELDVALUE
+END
+;
+PROCEDURE PROCESS SANBDGREV12
+BEGIN
+  DISPLAY SANBDGREVANN OF MCSOLDE_ANNUEL
+END
+;
+;
+PROCEDURE EDIT SANBDGREV13
+BEGIN
+  LET SANBDGREVANN OF MCSOLDE_ANNUEL = SANBDGREVANN OF MCSOLDE_ANNUEL - &
+                                    OLDVALUE(SANBDGREV13 OF MCSOLDE_ANNUEL) + &
+                                    FIELDVALUE
+END
+;
+PROCEDURE PROCESS SANBDGREV13
+BEGIN
+  DISPLAY SANBDGREVANN OF MCSOLDE_ANNUEL
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Procedure qui genere automatiquement le budget par periode.
+;
+;
+PROCEDURE INTERNAL AUTOMATIQUE
+BEGIN
+  ;
+  ; Calcul du montant est ajouter à chaque période.
+  ;
+  LET T_MNTADD = ROUND( ROUND( T_MNTORI + (T_MNTORI * T_PCT) ) / 100 &
+                         / T_NBRPEC ) * 100
+  ;
+  ; Budget initial.
+  ;
+  IF SANUSRAPP OF MCSOLDE_ANNUEL = ""
+  THEN BEGIN
+    ;
+    ; Dans la cas du linéaire le budget est écrasé.
+    ;
+    IF T_MTHREP = "LIN"
+    THEN BEGIN
+      LET SANBDG1  OF MCSOLDE_ANNUEL = 0
+      LET SANBDG2  OF MCSOLDE_ANNUEL = 0
+      LET SANBDG3  OF MCSOLDE_ANNUEL = 0
+      LET SANBDG4  OF MCSOLDE_ANNUEL = 0
+      LET SANBDG5  OF MCSOLDE_ANNUEL = 0
+      LET SANBDG6  OF MCSOLDE_ANNUEL = 0
+      LET SANBDG7  OF MCSOLDE_ANNUEL = 0
+      LET SANBDG8  OF MCSOLDE_ANNUEL = 0
+      LET SANBDG9  OF MCSOLDE_ANNUEL = 0
+      LET SANBDG10 OF MCSOLDE_ANNUEL = 0
+      LET SANBDG11 OF MCSOLDE_ANNUEL = 0
+      LET SANBDG12 OF MCSOLDE_ANNUEL = 0
+      LET SANBDG13 OF MCSOLDE_ANNUEL = 0
+    END
+    IF T_PECACT01 = "1"
+    THEN LET SANBDG1  OF MCSOLDE_ANNUEL = T_MNTADD
+    IF T_PECACT02 = "1"
+    THEN LET SANBDG2  OF MCSOLDE_ANNUEL = T_MNTADD
+    IF T_PECACT03 = "1"
+    THEN LET SANBDG3  OF MCSOLDE_ANNUEL = T_MNTADD
+    IF T_PECACT04 = "1"
+    THEN LET SANBDG4  OF MCSOLDE_ANNUEL = T_MNTADD
+    IF T_PECACT05 = "1"
+    THEN LET SANBDG5  OF MCSOLDE_ANNUEL = T_MNTADD
+    IF T_PECACT06 = "1"
+    THEN LET SANBDG6  OF MCSOLDE_ANNUEL = T_MNTADD
+    IF T_PECACT07 = "1"
+    THEN LET SANBDG7  OF MCSOLDE_ANNUEL = T_MNTADD
+    IF T_PECACT08 = "1"
+    THEN LET SANBDG8  OF MCSOLDE_ANNUEL = T_MNTADD
+    IF T_PECACT09 = "1"
+    THEN LET SANBDG9  OF MCSOLDE_ANNUEL = T_MNTADD
+    IF T_PECACT10 = "1"
+    THEN LET SANBDG10 OF MCSOLDE_ANNUEL = T_MNTADD
+    IF T_PECACT11 = "1"
+    THEN LET SANBDG11 OF MCSOLDE_ANNUEL = T_MNTADD
+    IF T_PECACT12 = "1"
+    THEN LET SANBDG12 OF MCSOLDE_ANNUEL = T_MNTADD
+    IF T_PECACT13 = "1"
+    THEN LET SANBDG13 OF MCSOLDE_ANNUEL = T_MNTADD
+    ;
+    ; Calcul du budget annuel.
+    ;
+    LET SANBDGANN OF MCSOLDE_ANNUEL = SANBDG1  OF MCSOLDE_ANNUEL + &
+                                      SANBDG2  OF MCSOLDE_ANNUEL + &
+                                      SANBDG3  OF MCSOLDE_ANNUEL + &
+                                      SANBDG4  OF MCSOLDE_ANNUEL + &
+                                      SANBDG5  OF MCSOLDE_ANNUEL + &
+                                      SANBDG6  OF MCSOLDE_ANNUEL + &
+                                      SANBDG7  OF MCSOLDE_ANNUEL + &
+                                      SANBDG8  OF MCSOLDE_ANNUEL + &
+                                      SANBDG9  OF MCSOLDE_ANNUEL + &
+                                      SANBDG10 OF MCSOLDE_ANNUEL + &
+                                      SANBDG11 OF MCSOLDE_ANNUEL + &
+                                      SANBDG12 OF MCSOLDE_ANNUEL + &
+                                      SANBDG13 OF MCSOLDE_ANNUEL
+    ;
+    ; On affecte le reste sur la derniere periode active
+    ;
+    LET T_MNTRES = ( ROUND( ROUND( T_MNTORI + (T_MNTORI * T_PCT) ) / 100 ) * 100 ) &
+                 - SANBDGANN OF MCSOLDE_ANNUEL
+
+    IF 0 <> T_MNTRES
+    THEN BEGIN
+      IF T_PECACT13 = "1"
+      THEN BEGIN
+        LET SANBDG13 OF MCSOLDE_ANNUEL = SANBDG13 OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET SANBDGANN OF MCSOLDE_ANNUEL = SANBDGANN OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET T_MNTRES = 0
+      END
+      IF T_PECACT12 = "1" AND T_MNTRES <> 0
+      THEN BEGIN
+        LET SANBDG12 OF MCSOLDE_ANNUEL = SANBDG12 OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET SANBDGANN OF MCSOLDE_ANNUEL = SANBDGANN OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET T_MNTRES = 0
+      END
+      IF T_PECACT11 = "1" AND T_MNTRES <> 0
+      THEN BEGIN
+        LET SANBDG11 OF MCSOLDE_ANNUEL = SANBDG11 OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET SANBDGANN OF MCSOLDE_ANNUEL = SANBDGANN OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET T_MNTRES = 0
+      END
+      IF T_PECACT10 = "1" AND T_MNTRES <> 0
+      THEN BEGIN
+        LET SANBDG10 OF MCSOLDE_ANNUEL = SANBDG10 OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET SANBDGANN OF MCSOLDE_ANNUEL = SANBDGANN OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET T_MNTRES = 0
+      END
+      IF T_PECACT09 = "1" AND T_MNTRES <> 0
+      THEN BEGIN
+        LET SANBDG9  OF MCSOLDE_ANNUEL = SANBDG9  OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET SANBDGANN OF MCSOLDE_ANNUEL = SANBDGANN OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET T_MNTRES = 0
+      END
+      IF T_PECACT08 = "1" AND T_MNTRES <> 0
+      THEN BEGIN
+        LET SANBDG8  OF MCSOLDE_ANNUEL = SANBDG8  OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET SANBDGANN OF MCSOLDE_ANNUEL = SANBDGANN OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET T_MNTRES = 0
+      END
+      IF T_PECACT07 = "1" AND T_MNTRES <> 0
+      THEN BEGIN
+        LET SANBDG7  OF MCSOLDE_ANNUEL = SANBDG7  OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET SANBDGANN OF MCSOLDE_ANNUEL = SANBDGANN OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET T_MNTRES = 0
+      END
+      IF T_PECACT06 = "1" AND T_MNTRES <> 0
+      THEN BEGIN
+        LET SANBDG6  OF MCSOLDE_ANNUEL = SANBDG6  OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET SANBDGANN OF MCSOLDE_ANNUEL = SANBDGANN OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET T_MNTRES = 0
+      END
+      IF T_PECACT05 = "1" AND T_MNTRES <> 0
+      THEN BEGIN
+        LET SANBDG5 OF MCSOLDE_ANNUEL = SANBDG5 OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET SANBDGANN OF MCSOLDE_ANNUEL = SANBDGANN OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET T_MNTRES = 0
+      END
+      IF T_PECACT04 = "1" AND T_MNTRES <> 0
+      THEN BEGIN
+        LET SANBDG4 OF MCSOLDE_ANNUEL = SANBDG4 OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET SANBDGANN OF MCSOLDE_ANNUEL = SANBDGANN OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET T_MNTRES = 0
+      END
+      IF T_PECACT03 = "1" AND T_MNTRES <> 0
+      THEN BEGIN
+        LET SANBDG3 OF MCSOLDE_ANNUEL = SANBDG3 OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET SANBDGANN OF MCSOLDE_ANNUEL = SANBDGANN OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET T_MNTRES = 0
+      END
+      IF T_PECACT02 = "1" AND T_MNTRES <> 0
+      THEN BEGIN
+        LET SANBDG2 OF MCSOLDE_ANNUEL = SANBDG2 OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET SANBDGANN OF MCSOLDE_ANNUEL = SANBDGANN OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET T_MNTRES = 0
+      END
+      IF T_PECACT01 = "1" AND T_MNTRES <> 0
+      THEN BEGIN
+        LET SANBDG1 OF MCSOLDE_ANNUEL = SANBDG1 OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET SANBDGANN OF MCSOLDE_ANNUEL = SANBDGANN OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET T_MNTRES = 0
+      END
+    END
+  END
+  ;
+  ; Budget revisé.
+  ;
+  ELSE BEGIN
+    ;
+    ; Dans la cas du linéaire le budget est écrasé.
+    ;
+    IF T_MTHREP = "LIN"
+    THEN BEGIN
+      LET SANBDGREV1  OF MCSOLDE_ANNUEL = 0
+      LET SANBDGREV2  OF MCSOLDE_ANNUEL = 0
+      LET SANBDGREV3  OF MCSOLDE_ANNUEL = 0
+      LET SANBDGREV4  OF MCSOLDE_ANNUEL = 0
+      LET SANBDGREV5  OF MCSOLDE_ANNUEL = 0
+      LET SANBDGREV6  OF MCSOLDE_ANNUEL = 0
+      LET SANBDGREV7  OF MCSOLDE_ANNUEL = 0
+      LET SANBDGREV8  OF MCSOLDE_ANNUEL = 0
+      LET SANBDGREV9  OF MCSOLDE_ANNUEL = 0
+      LET SANBDGREV10 OF MCSOLDE_ANNUEL = 0
+      LET SANBDGREV11 OF MCSOLDE_ANNUEL = 0
+      LET SANBDGREV12 OF MCSOLDE_ANNUEL = 0
+      LET SANBDGREV13 OF MCSOLDE_ANNUEL = 0
+    END
+    IF T_PECACT01 = "1"
+    THEN LET SANBDGREV1  OF MCSOLDE_ANNUEL = T_MNTADD
+    IF T_PECACT02 = "1"
+    THEN LET SANBDGREV2  OF MCSOLDE_ANNUEL = T_MNTADD
+    IF T_PECACT03 = "1"
+    THEN LET SANBDGREV3  OF MCSOLDE_ANNUEL = T_MNTADD
+    IF T_PECACT04 = "1"
+    THEN LET SANBDGREV4  OF MCSOLDE_ANNUEL = T_MNTADD
+    IF T_PECACT05 = "1"
+    THEN LET SANBDGREV5  OF MCSOLDE_ANNUEL = T_MNTADD
+    IF T_PECACT06 = "1"
+    THEN LET SANBDGREV6  OF MCSOLDE_ANNUEL = T_MNTADD
+    IF T_PECACT07 = "1"
+    THEN LET SANBDGREV7  OF MCSOLDE_ANNUEL = T_MNTADD
+    IF T_PECACT08 = "1"
+    THEN LET SANBDGREV8  OF MCSOLDE_ANNUEL = T_MNTADD
+    IF T_PECACT09 = "1"
+    THEN LET SANBDGREV9  OF MCSOLDE_ANNUEL = T_MNTADD
+    IF T_PECACT10 = "1"
+    THEN LET SANBDGREV10 OF MCSOLDE_ANNUEL = T_MNTADD
+    IF T_PECACT11 = "1"
+    THEN LET SANBDGREV11 OF MCSOLDE_ANNUEL = T_MNTADD
+    IF T_PECACT12 = "1"
+    THEN LET SANBDGREV12 OF MCSOLDE_ANNUEL = T_MNTADD
+    IF T_PECACT13 = "1"
+    THEN LET SANBDGREV13 OF MCSOLDE_ANNUEL = T_MNTADD
+    ;
+    ; Calcul du budget annuel.
+    ;
+    LET SANBDGREVANN OF MCSOLDE_ANNUEL = SANBDGREV1  OF MCSOLDE_ANNUEL + &
+                                         SANBDGREV2  OF MCSOLDE_ANNUEL + &
+                                         SANBDGREV3  OF MCSOLDE_ANNUEL + &
+                                         SANBDGREV4  OF MCSOLDE_ANNUEL + &
+                                         SANBDGREV5  OF MCSOLDE_ANNUEL + &
+                                         SANBDGREV6  OF MCSOLDE_ANNUEL + &
+                                         SANBDGREV7  OF MCSOLDE_ANNUEL + &
+                                         SANBDGREV8  OF MCSOLDE_ANNUEL + &
+                                         SANBDGREV9  OF MCSOLDE_ANNUEL + &
+                                         SANBDGREV10 OF MCSOLDE_ANNUEL + &
+                                         SANBDGREV11 OF MCSOLDE_ANNUEL + &
+                                         SANBDGREV12 OF MCSOLDE_ANNUEL + &
+                                         SANBDGREV13 OF MCSOLDE_ANNUEL
+    ;
+    ; On affecte le reste sur la derniere periode active
+    ;
+    LET T_MNTRES = SANBDGREVANN OF MCSOLDE_ANNUEL &
+                 - ( ROUND( ROUND( T_MNTORI + (T_MNTORI * T_PCT) ) / 100 ) * 100 )
+
+    IF 0 <> T_MNTRES
+    THEN BEGIN
+      IF T_PECACT13 = "1"
+      THEN BEGIN
+        LET SANBDGREV13 OF MCSOLDE_ANNUEL = SANBDGREV13 OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET SANBDGREVANN OF MCSOLDE_ANNUEL = SANBDGREVANN OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET T_MNTRES = 0
+      END
+      IF T_PECACT12 = "1" AND T_MNTRES <> 0
+      THEN BEGIN
+        LET SANBDGREV12 OF MCSOLDE_ANNUEL = SANBDGREV12 OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET SANBDGREVANN OF MCSOLDE_ANNUEL = SANBDGREVANN OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET T_MNTRES = 0
+      END
+      IF T_PECACT11 = "1" AND T_MNTRES <> 0
+      THEN BEGIN
+        LET SANBDGREV11 OF MCSOLDE_ANNUEL = SANBDGREV11 OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET SANBDGREVANN OF MCSOLDE_ANNUEL = SANBDGREVANN OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET T_MNTRES = 0
+      END
+      IF T_PECACT10 = "1" AND T_MNTRES <> 0
+      THEN BEGIN
+        LET SANBDGREV10 OF MCSOLDE_ANNUEL = SANBDGREV10 OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET SANBDGREVANN OF MCSOLDE_ANNUEL = SANBDGREVANN OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET T_MNTRES = 0
+      END
+      IF T_PECACT09 = "1" AND T_MNTRES <> 0
+      THEN BEGIN
+        LET SANBDGREV9 OF MCSOLDE_ANNUEL = SANBDGREV9 OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET SANBDGREVANN OF MCSOLDE_ANNUEL = SANBDGREVANN OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET T_MNTRES = 0
+      END
+      IF T_PECACT08 = "1" AND T_MNTRES <> 0
+      THEN BEGIN
+        LET SANBDGREV8 OF MCSOLDE_ANNUEL = SANBDGREV8 OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET SANBDGREVANN OF MCSOLDE_ANNUEL = SANBDGREVANN OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET T_MNTRES = 0
+      END
+      IF T_PECACT07 = "1" AND T_MNTRES <> 0
+      THEN BEGIN
+        LET SANBDGREV7 OF MCSOLDE_ANNUEL = SANBDGREV7 OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET SANBDGREVANN OF MCSOLDE_ANNUEL = SANBDGREVANN OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET T_MNTRES = 0
+      END
+      IF T_PECACT06 = "1" AND T_MNTRES <> 0
+      THEN BEGIN
+        LET SANBDGREV6 OF MCSOLDE_ANNUEL = SANBDGREV6 OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET SANBDGREVANN OF MCSOLDE_ANNUEL = SANBDGREVANN OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET T_MNTRES = 0
+      END
+      IF T_PECACT05 = "1" AND T_MNTRES <> 0
+      THEN BEGIN
+        LET SANBDGREV5 OF MCSOLDE_ANNUEL = SANBDGREV5 OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET SANBDGREVANN OF MCSOLDE_ANNUEL = SANBDGREVANN OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET T_MNTRES = 0
+      END
+      IF T_PECACT04 = "1" AND T_MNTRES <> 0
+      THEN BEGIN
+        LET SANBDGREV4 OF MCSOLDE_ANNUEL = SANBDGREV4 OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET SANBDGREVANN OF MCSOLDE_ANNUEL = SANBDGREVANN OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET T_MNTRES = 0
+      END
+      IF T_PECACT03 = "1" AND T_MNTRES <> 0
+      THEN BEGIN
+        LET SANBDGREV3 OF MCSOLDE_ANNUEL = SANBDGREV3 OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET SANBDGREVANN OF MCSOLDE_ANNUEL = SANBDGREVANN OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET T_MNTRES = 0
+      END
+      IF T_PECACT02 = "1" AND T_MNTRES <> 0
+      THEN BEGIN
+        LET SANBDGREV2 OF MCSOLDE_ANNUEL = SANBDGREV2 OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET SANBDGREVANN OF MCSOLDE_ANNUEL = SANBDGREVANN OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET T_MNTRES = 0
+      END
+      IF T_PECACT01 = "1" AND T_MNTRES <> 0
+      THEN BEGIN
+        LET SANBDGREV1 OF MCSOLDE_ANNUEL = SANBDGREV1 OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET SANBDGREVANN OF MCSOLDE_ANNUEL = SANBDGREVANN OF MCSOLDE_ANNUEL &
+                                          + T_MNTRES
+        LET T_MNTRES = 0
+      END
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Saisie manuelle des budgets.
+;
+;
+PROCEDURE INTERNAL MANUELLE
+BEGIN
+  ;
+  ; Budget initial.
+  ;
+  IF SANUSRAPP OF MCSOLDE_ANNUEL = ""
+  THEN BEGIN
+    IF T_PECACT01 = "1"
+    THEN ACCEPT  SANBDG1     OF MCSOLDE_ANNUEL
+    IF T_PECACT02 = "1"
+    THEN ACCEPT  SANBDG2     OF MCSOLDE_ANNUEL
+    IF T_PECACT03 = "1"
+    THEN ACCEPT  SANBDG3     OF MCSOLDE_ANNUEL
+    IF T_PECACT04 = "1"
+    THEN ACCEPT  SANBDG4     OF MCSOLDE_ANNUEL
+    IF T_PECACT05 = "1"
+    THEN ACCEPT  SANBDG5     OF MCSOLDE_ANNUEL
+    IF T_PECACT06 = "1"
+    THEN ACCEPT  SANBDG6     OF MCSOLDE_ANNUEL
+    IF T_PECACT07 = "1"
+    THEN ACCEPT  SANBDG7     OF MCSOLDE_ANNUEL
+    IF T_PECACT08 = "1"
+    THEN ACCEPT  SANBDG8     OF MCSOLDE_ANNUEL
+    IF T_PECACT09 = "1"
+    THEN ACCEPT  SANBDG9     OF MCSOLDE_ANNUEL
+    IF T_PECACT10 = "1"
+    THEN ACCEPT  SANBDG10    OF MCSOLDE_ANNUEL
+    IF T_PECACT11 = "1"
+    THEN ACCEPT  SANBDG11    OF MCSOLDE_ANNUEL
+    IF T_PECACT12 = "1"
+    THEN ACCEPT  SANBDG12    OF MCSOLDE_ANNUEL
+    IF T_PECACT13 = "1"
+    THEN ACCEPT  SANBDG13    OF MCSOLDE_ANNUEL
+  END
+  ELSE BEGIN
+    IF T_PECACT01 = "1"
+    THEN ACCEPT  SANBDGREV1  OF MCSOLDE_ANNUEL
+    IF T_PECACT02 = "1"
+    THEN ACCEPT  SANBDGREV2  OF MCSOLDE_ANNUEL
+    IF T_PECACT03 = "1"
+    THEN ACCEPT  SANBDGREV3  OF MCSOLDE_ANNUEL
+    IF T_PECACT04 = "1"
+    THEN ACCEPT  SANBDGREV4  OF MCSOLDE_ANNUEL
+    IF T_PECACT05 = "1"
+    THEN ACCEPT  SANBDGREV5  OF MCSOLDE_ANNUEL
+    IF T_PECACT06 = "1"
+    THEN ACCEPT  SANBDGREV6  OF MCSOLDE_ANNUEL
+    IF T_PECACT07 = "1"
+    THEN ACCEPT  SANBDGREV7  OF MCSOLDE_ANNUEL
+    IF T_PECACT08 = "1"
+    THEN ACCEPT  SANBDGREV8  OF MCSOLDE_ANNUEL
+    IF T_PECACT09 = "1"
+    THEN ACCEPT  SANBDGREV9  OF MCSOLDE_ANNUEL
+    IF T_PECACT10 = "1"
+    THEN ACCEPT  SANBDGREV10 OF MCSOLDE_ANNUEL
+    IF T_PECACT11 = "1"
+    THEN ACCEPT  SANBDGREV11 OF MCSOLDE_ANNUEL
+    IF T_PECACT12 = "1"
+    THEN ACCEPT  SANBDGREV12 OF MCSOLDE_ANNUEL
+    IF T_PECACT13 = "1"
+    THEN ACCEPT  SANBDGREV13 OF MCSOLDE_ANNUEL
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; On affiche les budgets, pour voir le résultat d'une répartition...
+;
+;
+PROCEDURE INTERNAL AFFICHAGE
+BEGIN
+  ;
+  ; Budget initial.
+  ;
+  DISPLAY SANBDG1     OF MCSOLDE_ANNUEL
+  DISPLAY SANBDG2     OF MCSOLDE_ANNUEL
+  DISPLAY SANBDG3     OF MCSOLDE_ANNUEL
+  DISPLAY SANBDG4     OF MCSOLDE_ANNUEL
+  DISPLAY SANBDG5     OF MCSOLDE_ANNUEL
+  DISPLAY SANBDG6     OF MCSOLDE_ANNUEL
+  DISPLAY SANBDG7     OF MCSOLDE_ANNUEL
+  DISPLAY SANBDG8     OF MCSOLDE_ANNUEL
+  DISPLAY SANBDG9     OF MCSOLDE_ANNUEL
+  DISPLAY SANBDG10    OF MCSOLDE_ANNUEL
+  DISPLAY SANBDG11    OF MCSOLDE_ANNUEL
+  DISPLAY SANBDG12    OF MCSOLDE_ANNUEL
+  DISPLAY SANBDG13    OF MCSOLDE_ANNUEL
+  DISPLAY SANBDGANN   OF MCSOLDE_ANNUEL
+  ;
+  ; Budget revisé.
+  ;
+  DISPLAY SANBDGREV1   OF MCSOLDE_ANNUEL
+  DISPLAY SANBDGREV2   OF MCSOLDE_ANNUEL
+  DISPLAY SANBDGREV3   OF MCSOLDE_ANNUEL
+  DISPLAY SANBDGREV4   OF MCSOLDE_ANNUEL
+  DISPLAY SANBDGREV5   OF MCSOLDE_ANNUEL
+  DISPLAY SANBDGREV6   OF MCSOLDE_ANNUEL
+  DISPLAY SANBDGREV7   OF MCSOLDE_ANNUEL
+  DISPLAY SANBDGREV8   OF MCSOLDE_ANNUEL
+  DISPLAY SANBDGREV9   OF MCSOLDE_ANNUEL
+  DISPLAY SANBDGREV10  OF MCSOLDE_ANNUEL
+  DISPLAY SANBDGREV11  OF MCSOLDE_ANNUEL
+  DISPLAY SANBDGREV12  OF MCSOLDE_ANNUEL
+  DISPLAY SANBDGREV13  OF MCSOLDE_ANNUEL
+  DISPLAY SANBDGREVANN OF MCSOLDE_ANNUEL
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Répartition du budget en mode CHANGE.
+;
+;
+PROCEDURE DESIGNER 20
+BEGIN
+  ;
+  ; Méthode de répartition.
+  ;
+  ACCEPT T_MTHREP
+  DISPLAY CBIDSC OF A_CBI_REP
+  ;
+  ; Selon la méthode de répartition on demande le montant et le pourcentage.
+  ;
+  IF T_MTHREP = "INC" OR &
+     T_MTHREP = "LIN"
+  THEN BEGIN
+    ACCEPT T_MNTORI
+    ACCEPT T_PCT
+  END
+  ;
+  ; On réparti le budget automatiquement, ou fait saisir les budgets.
+  ;
+  IF T_MTHREP <> "MAN"
+  THEN BEGIN
+    DO INTERNAL AUTOMATIQUE
+    DO INTERNAL AFFICHAGE
+  END
+  ELSE DO INTERNAL MANUELLE
+END
+
+;-------------------------------------------------------------------------------
+; Ces procédures permettent de restreindre l'accès au budget initial ou au budget
+; courant dépendamment si le budget a été approuvé ou non. Budget initial est
+; accessible lorsque le budget n'est pas approuvé et lors de l'approbation, seul
+; le budget courant est accessible.
+;
+PROCEDURE DESIGNER 31
+BEGIN
+  IF    SANUSRAPP OF MCSOLDE_ANNUEL = "" &
+    AND T_PECACT01 = "1"
+  THEN ACCEPT SANBDG1
+END
+
+PROCEDURE DESIGNER 32
+BEGIN
+  IF    SANUSRAPP OF MCSOLDE_ANNUEL = "" &
+    AND T_PECACT02 = "1"
+  THEN ACCEPT SANBDG2
+END
+
+PROCEDURE DESIGNER 33
+BEGIN
+  IF    SANUSRAPP OF MCSOLDE_ANNUEL = "" &
+    AND T_PECACT03 = "1"
+  THEN ACCEPT SANBDG3
+END
+
+PROCEDURE DESIGNER 34
+BEGIN
+  IF    SANUSRAPP OF MCSOLDE_ANNUEL = "" &
+    AND T_PECACT04 = "1"
+  THEN ACCEPT SANBDG4
+END
+
+PROCEDURE DESIGNER 35
+BEGIN
+  IF    SANUSRAPP OF MCSOLDE_ANNUEL = "" &
+    AND T_PECACT05 = "1"
+  THEN ACCEPT SANBDG5
+END
+
+PROCEDURE DESIGNER 36
+BEGIN
+  IF    SANUSRAPP OF MCSOLDE_ANNUEL = "" &
+    AND T_PECACT06 = "1"
+  THEN ACCEPT SANBDG6
+END
+
+PROCEDURE DESIGNER 37
+BEGIN
+  IF    SANUSRAPP OF MCSOLDE_ANNUEL = "" &
+    AND T_PECACT07 = "1"
+  THEN ACCEPT SANBDG7
+END
+
+PROCEDURE DESIGNER 38
+BEGIN
+  IF    SANUSRAPP OF MCSOLDE_ANNUEL = "" &
+    AND T_PECACT08 = "1"
+  THEN ACCEPT SANBDG8
+END
+
+PROCEDURE DESIGNER 39
+BEGIN
+  IF    SANUSRAPP OF MCSOLDE_ANNUEL = "" &
+    AND T_PECACT09 = "1"
+  THEN ACCEPT SANBDG9
+END
+
+PROCEDURE DESIGNER 40
+BEGIN
+  IF    SANUSRAPP OF MCSOLDE_ANNUEL = "" &
+    AND T_PECACT10 = "1"
+  THEN ACCEPT SANBDG10
+END
+
+PROCEDURE DESIGNER 41
+BEGIN
+  IF    SANUSRAPP OF MCSOLDE_ANNUEL = "" &
+    AND T_PECACT11 = "1"
+  THEN ACCEPT SANBDG11
+END
+
+PROCEDURE DESIGNER 42
+BEGIN
+  IF    SANUSRAPP OF MCSOLDE_ANNUEL = "" &
+    AND T_PECACT12 = "1"
+  THEN ACCEPT SANBDG12
+END
+
+PROCEDURE DESIGNER 51
+BEGIN
+  IF    SANUSRAPP OF MCSOLDE_ANNUEL <> "" &
+    AND T_PECACT01 = "1"
+  THEN ACCEPT SANBDGREV1
+END
+
+
+PROCEDURE DESIGNER 52
+BEGIN
+  IF    SANUSRAPP OF MCSOLDE_ANNUEL <> "" &
+    AND T_PECACT02 = "1"
+  THEN ACCEPT SANBDGREV2
+END
+
+PROCEDURE DESIGNER 53
+BEGIN
+  IF    SANUSRAPP OF MCSOLDE_ANNUEL <> "" &
+    AND T_PECACT03 = "1"
+  THEN ACCEPT SANBDGREV3
+END
+
+PROCEDURE DESIGNER 54
+BEGIN
+  IF    SANUSRAPP OF MCSOLDE_ANNUEL <> "" &
+    AND T_PECACT04 = "1"
+  THEN ACCEPT SANBDGREV4
+END
+
+PROCEDURE DESIGNER 55
+BEGIN
+  IF    SANUSRAPP OF MCSOLDE_ANNUEL <> "" &
+    AND T_PECACT05 = "1"
+  THEN ACCEPT SANBDGREV5
+END
+
+PROCEDURE DESIGNER 56
+BEGIN
+  IF    SANUSRAPP OF MCSOLDE_ANNUEL <> "" &
+    AND T_PECACT06 = "1"
+  THEN ACCEPT SANBDGREV6
+END
+
+
+PROCEDURE DESIGNER 57
+BEGIN
+  IF    SANUSRAPP OF MCSOLDE_ANNUEL <> "" &
+    AND T_PECACT07 = "1"
+  THEN ACCEPT SANBDGREV7
+END
+
+PROCEDURE DESIGNER 58
+BEGIN
+  IF    SANUSRAPP OF MCSOLDE_ANNUEL <> "" &
+    AND T_PECACT08 = "1"
+  THEN ACCEPT SANBDGREV8
+END
+
+
+PROCEDURE DESIGNER 59
+BEGIN
+  IF    SANUSRAPP OF MCSOLDE_ANNUEL <> "" &
+    AND T_PECACT09 = "1"
+  THEN ACCEPT SANBDGREV9
+END
+
+PROCEDURE DESIGNER 60
+BEGIN
+  IF    SANUSRAPP OF MCSOLDE_ANNUEL <> "" &
+    AND T_PECACT10 = "1"
+  THEN ACCEPT SANBDGREV10
+END
+
+PROCEDURE DESIGNER 61
+BEGIN
+  IF    SANUSRAPP OF MCSOLDE_ANNUEL <> "" &
+    AND T_PECACT11 = "1"
+  THEN ACCEPT SANBDGREV11
+END
+
+PROCEDURE DESIGNER 62
+BEGIN
+  IF    SANUSRAPP OF MCSOLDE_ANNUEL <> "" &
+    AND T_PECACT12 = "1"
+  THEN ACCEPT SANBDGREV12
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Si le nombre de période du Grand Livre est de 13 et que le budget n'est pas,
+; approuvé, alors le bugdet de la période treize est accessible, sinon on
+; empêche l'accès.
+;
+;
+PROCEDURE DESIGNER 43
+BEGIN
+  IF    SANUSRAPP OF MCSOLDE_ANNUEL = "" &
+    AND T_PECACT13 = "1"
+  THEN ACCEPT SANBDG13    OF MCSOLDE_ANNUEL
+END
+;
+; On saisit le budget si le budget est approuvé.
+;
+PROCEDURE DESIGNER 63
+BEGIN
+  IF    SANUSRAPP    OF MCSOLDE_ANNUEL <> "" &
+    AND T_PECACT13 = "1"
+  THEN ACCEPT SANBDGREV13 OF MCSOLDE_ANNUEL
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sert à activer la saisie rapide, c-a-d. que l'usager va faire une recherche
+; et la procédure DESIGNER 20 est éxecutée automatiquement dans la procédure
+; postfind.
+;
+;
+PROCEDURE DESIGNER SRAP NODATA &
+  HELP "Active la saisie rapide."
+BEGIN
+  LET T_FLGSAI = "R"
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Pour désactiver la saisie rapide.
+;
+;
+PROCEDURE DESIGNER SNOR NODATA &
+  HELP "Pour désactiver la saisie rapide"
+BEGIN
+  LET T_FLGSAI = " "
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Appel du sous-écran pour la création des budgets à zéro.
+;
+;
+PROCEDURE DESIGNER IBUD NODATA &
+  HELP "Initialisation des budgets à zéro"
+BEGIN
+  IF HLDCHTCPT OF MCHOLDING = "1" AND &
+     HLDCHTCPTRLT OF MCHOLDING = "I"
+  THEN RUN SCREEN gl003a MODE E PASSING T_CIECLEMNU
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Piste de vérification
+;
+PROCEDURE DESIGNER D001
+BEGIN
+  RUN SCREEN gl003b PASSING MCSAN_VERIF MODE F
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INTERNAL VALIDE_PERIODE
+BEGIN
+  LET T_PECACT01 = "1"
+  LET T_PECACT02 = "1"
+  LET T_PECACT03 = "1"
+  LET T_PECACT04 = "1"
+  LET T_PECACT05 = "1"
+  LET T_PECACT06 = "1"
+  LET T_PECACT07 = "1"
+  LET T_PECACT08 = "1"
+  LET T_PECACT09 = "1"
+  LET T_PECACT10 = "1"
+  LET T_PECACT11 = "1"
+  LET T_PECACT12 = "1"
+  IF    HLDNBRPERCTB OF MCHOLDING = 13
+  THEN LET T_PECACT13 = "1"
+  ELSE LET T_PECACT13 = "0"
+
+  IF SANANN OF MCSOLDE_ANNUEL = CPTPECDEBA OF VCPT_DSC[1:2]
+  THEN BEGIN
+    IF CPTPECDEBA OF VCPT_DSC[3:2] > "01"
+    THEN LET T_PECACT01 = "0"
+    IF CPTPECDEBA OF VCPT_DSC[3:2] > "02"
+    THEN LET T_PECACT02 = "0"
+    IF CPTPECDEBA OF VCPT_DSC[3:2] > "03"
+    THEN LET T_PECACT03 = "0"
+    IF CPTPECDEBA OF VCPT_DSC[3:2] > "04"
+    THEN LET T_PECACT04 = "0"
+    IF CPTPECDEBA OF VCPT_DSC[3:2] > "05"
+    THEN LET T_PECACT05 = "0"
+    IF CPTPECDEBA OF VCPT_DSC[3:2] > "06"
+    THEN LET T_PECACT06 = "0"
+    IF CPTPECDEBA OF VCPT_DSC[3:2] > "07"
+    THEN LET T_PECACT07 = "0"
+    IF CPTPECDEBA OF VCPT_DSC[3:2] > "08"
+    THEN LET T_PECACT08 = "0"
+    IF CPTPECDEBA OF VCPT_DSC[3:2] > "09"
+    THEN LET T_PECACT09 = "0"
+    IF CPTPECDEBA OF VCPT_DSC[3:2] > "10"
+    THEN LET T_PECACT10 = "0"
+    IF CPTPECDEBA OF VCPT_DSC[3:2] > "11"
+    THEN LET T_PECACT11 = "0"
+    IF CPTPECDEBA OF VCPT_DSC[3:2] > "12"
+    THEN LET T_PECACT12 = "0"
+    IF CPTPECDEBA OF VCPT_DSC[3:2] > "13"
+    THEN LET T_PECACT13 = "0"
+  END
+  IF SANANN OF MCSOLDE_ANNUEL = CPTPECDEBI OF VCPT_DSC[1:2]
+  THEN BEGIN
+    IF CPTPECDEBI OF VCPT_DSC[3:2] <= "01"
+    THEN LET T_PECACT01 = "0"
+    IF CPTPECDEBI OF VCPT_DSC[3:2] <= "02"
+    THEN LET T_PECACT02 = "0"
+    IF CPTPECDEBI OF VCPT_DSC[3:2] <= "03"
+    THEN LET T_PECACT03 = "0"
+    IF CPTPECDEBI OF VCPT_DSC[3:2] <= "04"
+    THEN LET T_PECACT04 = "0"
+    IF CPTPECDEBI OF VCPT_DSC[3:2] <= "05"
+    THEN LET T_PECACT05 = "0"
+    IF CPTPECDEBI OF VCPT_DSC[3:2] <= "06"
+    THEN LET T_PECACT06 = "0"
+    IF CPTPECDEBI OF VCPT_DSC[3:2] <= "07"
+    THEN LET T_PECACT07 = "0"
+    IF CPTPECDEBI OF VCPT_DSC[3:2] <= "08"
+    THEN LET T_PECACT08 = "0"
+    IF CPTPECDEBI OF VCPT_DSC[3:2] <= "09"
+    THEN LET T_PECACT09 = "0"
+    IF CPTPECDEBI OF VCPT_DSC[3:2] <= "10"
+    THEN LET T_PECACT10 = "0"
+    IF CPTPECDEBI OF VCPT_DSC[3:2] <= "11"
+    THEN LET T_PECACT11 = "0"
+    IF CPTPECDEBI OF VCPT_DSC[3:2] <= "12"
+    THEN LET T_PECACT12 = "0"
+    IF CPTPECDEBI OF VCPT_DSC[3:2] <= "13"
+    THEN LET T_PECACT13 = "0"
+  END
+  IF HLDCHTCPT OF MCHOLDING = "1"
+  THEN BEGIN
+    ;
+    ; Si la charte est Exclusive et que la période fait partie de
+    ; l'intervalle de période de la charte alors c'est une erreur.
+    ;
+    ; Si la charte est inclusive et que la période ne fait pas partie de
+    ; l'intervalle de période de la charte alors c'est une erreur.
+    ;
+
+    ; Ajustement pour le changement de siècle
+    IF CCUPECDEBA OF MCCHARTE_UNA[1:1] < "8"
+    THEN LET CCUPECDEBA_UNA = "1" + CCUPECDEBA OF MCCHARTE_UNA
+    ELSE LET CCUPECDEBA_UNA = "0" + CCUPECDEBA OF MCCHARTE_UNA
+
+    ; Ajustement pour le changement de siècle
+    IF SANANN OF MCSOLDE_ANNUEL[1:1] < "8"
+    THEN LET T_SANANN_MC = "1" + SANANN OF MCSOLDE_ANNUEL
+    ELSE LET T_SANANN_MC = "0" + SANANN OF MCSOLDE_ANNUEL
+
+    ; Ajustement pour le changement de siècle
+    IF CCUPECDEBI OF MCCHARTE_UNA[1:1] < "8"
+    THEN LET CCUPECDEBI_MC = "1" + CCUPECDEBI OF MCCHARTE_UNA
+    ELSE LET CCUPECDEBI_MC = "0" + CCUPECDEBI OF MCCHARTE_UNA
+
+    IF ( &
+         CCUPECDEBA_UNA <= (T_SANANN_MC + "01") AND &
+         ( &
+           CCUPECDEBI_MC >= (T_SANANN_MC + "01") OR &
+           CCUPECDEBI OF MCCHARTE_UNA = " " &
+         ) &
+       )
+    THEN BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "E"
+      THEN LET T_PECACT01 = "0"
+    END
+    ELSE BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN LET T_PECACT01 = "0"
+    END
+    IF ( &
+         CCUPECDEBA_UNA <= (T_SANANN_MC + "02") AND &
+         ( &
+           CCUPECDEBI_MC >= (T_SANANN_MC + "02") OR &
+           CCUPECDEBI OF MCCHARTE_UNA = " " &
+         ) &
+       )
+    THEN BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "E"
+      THEN LET T_PECACT02 = "0"
+    END
+    ELSE BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN LET T_PECACT02 = "0"
+    END
+    IF ( &
+         CCUPECDEBA_UNA <= (T_SANANN_MC + "03") AND &
+         ( &
+           CCUPECDEBI_MC >= (T_SANANN_MC + "03") OR &
+           CCUPECDEBI OF MCCHARTE_UNA = " " &
+         ) &
+       )
+    THEN BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "E"
+      THEN LET T_PECACT03 = "0"
+    END
+    ELSE BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN LET T_PECACT03 = "0"
+    END
+    IF ( &
+         CCUPECDEBA_UNA <= (T_SANANN_MC + "04") AND &
+         ( &
+           CCUPECDEBI_MC >= (T_SANANN_MC + "04") OR &
+           CCUPECDEBI OF MCCHARTE_UNA = " " &
+         ) &
+       )
+    THEN BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "E"
+      THEN LET T_PECACT04 = "0"
+    END
+    ELSE BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN LET T_PECACT04 = "0"
+    END
+    IF ( &
+         CCUPECDEBA_UNA <= (T_SANANN_MC + "05") AND &
+         ( &
+           CCUPECDEBI_MC >= (T_SANANN_MC + "05") OR &
+           CCUPECDEBI OF MCCHARTE_UNA = " " &
+         ) &
+       )
+    THEN BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "E"
+      THEN LET T_PECACT05 = "0"
+    END
+    ELSE BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN LET T_PECACT05 = "0"
+    END
+    IF ( &
+         CCUPECDEBA_UNA <= (T_SANANN_MC + "06") AND &
+         ( &
+           CCUPECDEBI_MC >= (T_SANANN_MC + "06") OR &
+           CCUPECDEBI OF MCCHARTE_UNA = " " &
+         ) &
+       )
+    THEN BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "E"
+      THEN LET T_PECACT06 = "0"
+    END
+    ELSE BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN LET T_PECACT06 = "0"
+    END
+    IF ( &
+         CCUPECDEBA_UNA <= (T_SANANN_MC + "07") AND &
+         ( &
+           CCUPECDEBI_MC >= (T_SANANN_MC + "07") OR &
+           CCUPECDEBI OF MCCHARTE_UNA = " " &
+         ) &
+       )
+    THEN BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "E"
+      THEN LET T_PECACT07 = "0"
+    END
+    ELSE BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN LET T_PECACT07 = "0"
+    END
+    IF ( &
+         CCUPECDEBA_UNA <= (T_SANANN_MC + "08") AND &
+         ( &
+           CCUPECDEBI_MC >= (T_SANANN_MC + "08") OR &
+           CCUPECDEBI OF MCCHARTE_UNA = " " &
+         ) &
+       )
+    THEN BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "E"
+      THEN LET T_PECACT08 = "0"
+    END
+    ELSE BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN LET T_PECACT08 = "0"
+    END
+    IF ( &
+         CCUPECDEBA_UNA <= (T_SANANN_MC + "09") AND &
+         ( &
+           CCUPECDEBI_MC >= (T_SANANN_MC + "09") OR &
+           CCUPECDEBI OF MCCHARTE_UNA = " " &
+         ) &
+       )
+    THEN BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "E"
+      THEN LET T_PECACT09 = "0"
+    END
+    ELSE BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN LET T_PECACT09 = "0"
+    END
+    IF ( &
+         CCUPECDEBA_UNA <= (T_SANANN_MC + "10") AND &
+         ( &
+           CCUPECDEBI_MC >= (T_SANANN_MC + "10") OR &
+           CCUPECDEBI OF MCCHARTE_UNA = " " &
+         ) &
+       )
+    THEN BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "E"
+      THEN LET T_PECACT10 = "0"
+    END
+    ELSE BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN LET T_PECACT10 = "0"
+    END
+    IF ( &
+         CCUPECDEBA_UNA <= (T_SANANN_MC + "11") AND &
+         ( &
+           CCUPECDEBI_MC >= (T_SANANN_MC + "11") OR &
+           CCUPECDEBI OF MCCHARTE_UNA = " " &
+         ) &
+       )
+    THEN BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "E"
+      THEN LET T_PECACT11 = "0"
+    END
+    ELSE BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN LET T_PECACT11 = "0"
+    END
+    IF ( &
+         CCUPECDEBA_UNA <= (T_SANANN_MC + "12") AND &
+         ( &
+           CCUPECDEBI_MC >= (T_SANANN_MC + "12") OR &
+           CCUPECDEBI OF MCCHARTE_UNA = " " &
+         ) &
+       )
+    THEN BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "E"
+      THEN LET T_PECACT12 = "0"
+    END
+    ELSE BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN LET T_PECACT12 = "0"
+    END
+    IF ( &
+         CCUPECDEBA_UNA <= (T_SANANN_MC + "13") AND &
+         ( &
+           CCUPECDEBI_MC >= (T_SANANN_MC + "13") OR &
+           CCUPECDEBI OF MCCHARTE_UNA = " " &
+         ) &
+       )
+    THEN BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "E"
+      THEN LET T_PECACT13 = "0"
+    END
+    ELSE BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN LET T_PECACT13 = "0"
+    END
+  END
+
+  LET T_NBRPEC = 0
+  IF T_PECACT01 = "1"
+  THEN LET T_NBRPEC = T_NBRPEC + 1
+  IF T_PECACT02 = "1"
+  THEN LET T_NBRPEC = T_NBRPEC + 1
+  IF T_PECACT03 = "1"
+  THEN LET T_NBRPEC = T_NBRPEC + 1
+  IF T_PECACT04 = "1"
+  THEN LET T_NBRPEC = T_NBRPEC + 1
+  IF T_PECACT05 = "1"
+  THEN LET T_NBRPEC = T_NBRPEC + 1
+  IF T_PECACT06 = "1"
+  THEN LET T_NBRPEC = T_NBRPEC + 1
+  IF T_PECACT07 = "1"
+  THEN LET T_NBRPEC = T_NBRPEC + 1
+  IF T_PECACT08 = "1"
+  THEN LET T_NBRPEC = T_NBRPEC + 1
+  IF T_PECACT09 = "1"
+  THEN LET T_NBRPEC = T_NBRPEC + 1
+  IF T_PECACT10 = "1"
+  THEN LET T_NBRPEC = T_NBRPEC + 1
+  IF T_PECACT11 = "1"
+  THEN LET T_NBRPEC = T_NBRPEC + 1
+  IF T_PECACT12 = "1"
+  THEN LET T_NBRPEC = T_NBRPEC + 1
+  IF T_PECACT13 = "1"
+  THEN LET T_NBRPEC = T_NBRPEC + 1
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  ACCEPT  SANANN    OF MCSOLDE_ANNUEL
+  ACCEPT  UNACLE    OF MCSOLDE_ANNUEL
+  DISPLAY UNANOMABR OF MCUNITE_ADM
+  ACCEPT  CPTCLE    OF MCSOLDE_ANNUEL
+  DISPLAY CPTDSCABR OF VCPT_DSC
+  ;
+  ; On valide s'il existe un budget approuvé.
+  ;
+  GET A_SAN_APPROUVE VIA SANANN, &
+                         CIECLE  &
+                   USING SANANN OF MCSOLDE_ANNUEL, &
+                         CIECLE OF MCSOLDE_ANNUEL  &
+                   OPTIONAL
+  IF SANDATAPP OF A_SAN_APPROUVE <> 0
+  THEN BEGIN
+    LET T_USRAPP = SANUSRAPP OF A_SAN_APPROUVE
+    LET T_DATAPP = SANDATAPP OF A_SAN_APPROUVE
+    LET SANUSRAPP OF MCSOLDE_ANNUEL = SANUSRAPP OF A_SAN_APPROUVE
+    LET SANDATAPP OF MCSOLDE_ANNUEL = SANDATAPP OF A_SAN_APPROUVE
+    DISPLAY SANUSRAPP OF MCSOLDE_ANNUEL
+    DISPLAY SANDATAPP OF MCSOLDE_ANNUEL
+  END
+  ;
+  ;
+  ; On vérifie si le record existe déjà, si oui on réinitialise certaine
+  ; champs et on affiche les budgets existent.
+  ;
+  GET A_SAN_EXISTE VIA SANANN, &
+                       CIECLE, &
+                       CPTCLE, &
+                       UNACLE &
+                   USING SANANN OF MCSOLDE_ANNUEL, &
+                         CIECLE OF MCSOLDE_ANNUEL, &
+                         CPTCLE OF MCSOLDE_ANNUEL, &
+                         UNACLE OF MCSOLDE_ANNUEL  &
+                   OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    GET MCSOLDE_ANNUEL VIA SANANN, &
+                           CIECLE, &
+                           CPTCLE, &
+                           UNACLE  &
+                       USING SANANN OF MCSOLDE_ANNUEL, &
+                             CIECLE OF MCSOLDE_ANNUEL, &
+                             CPTCLE OF MCSOLDE_ANNUEL, &
+                             UNACLE OF MCSOLDE_ANNUEL
+
+    LET SANUSRAPP OF MCSOLDE_ANNUEL = T_USRAPP
+    LET SANDATAPP OF MCSOLDE_ANNUEL = T_DATAPP
+    DO INTERNAL AFFICHAGE
+  END
+  ;
+  ; Méthode de répartition.
+  ;
+  ACCEPT T_MTHREP
+  DISPLAY CBIDSC OF A_CBI_REP
+  ;
+  ; Selon la méthode de répartition on demande le montant et le pourcentage.
+  ;
+  IF T_MTHREP = "INC" OR &
+     T_MTHREP = "LIN"
+  THEN BEGIN
+    ACCEPT T_MNTORI
+    ACCEPT T_PCT
+  END
+  ACCEPT  SANUSRRPS OF MCSOLDE_ANNUEL
+  DISPLAY USREMPNOM OF A_USR_RPS
+  ;
+  ; On réparti le budget automatiquement, ou fait saisir les budgets.
+  ;
+  DO INTERNAL VALIDE_PERIODE
+  IF T_MTHREP <> "MAN"
+  THEN BEGIN
+    DO INTERNAL AUTOMATIQUE
+    DO INTERNAL AFFICHAGE
+  END
+  ELSE BEGIN
+    DO INTERNAL MANUELLE
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Cette procédure appel automatiquement la procédure designer 20 après
+; chaque record sélectionné.
+; Elle vérifie aussi quelle périodes sont courantes pour bien répartir
+; et demander le budget par la suite.
+;
+PROCEDURE POSTFIND
+BEGIN
+  DO INTERNAL VALIDE_PERIODE
+
+  IF T_FLGSAI = "R"
+  THEN PUSH ID 20
+  ;
+  ; On valide s'il existe un budget approuvé.
+  ;
+  GET A_SAN_APPROUVE VIA SANANN, &
+                         CIECLE  &
+                   USING SANANN OF MCSOLDE_ANNUEL, &
+                         CIECLE OF MCSOLDE_ANNUEL  &
+                   OPTIONAL
+  IF SANDATAPP OF A_SAN_APPROUVE <> 0
+  THEN BEGIN
+    LET SANUSRAPP OF MCSOLDE_ANNUEL = SANUSRAPP OF A_SAN_APPROUVE
+    LET SANDATAPP OF MCSOLDE_ANNUEL = SANDATAPP OF A_SAN_APPROUVE
+    DISPLAY SANUSRAPP OF MCSOLDE_ANNUEL
+    DISPLAY SANDATAPP OF MCSOLDE_ANNUEL
+    PUSH UPDATE STAY
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF MCSOLDE_ANNUEL &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF MCSOLDE_ANNUEL &
+     AND NOT NEWRECORD     OF MCSOLDE_ANNUEL &
+     AND NOT DELETEDRECORD OF MCSOLDE_ANNUEL &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+END
+
+BUILD
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+*********************************** Budgets ************************************
+* Année.........: xx                    Approuvé par..: xxxxxxxxxxxx xxxxxxxx  *
+* Unité adm.....: xxxxxxxx xxxxxxxxxxxxxxxxxxxx                                *
+* Compte........: xxxxxx   xxxxxxxxxxxxxxxxxxxx                                *
+* Méthode.......: xxx xxxxxxxxxxxxxxx               Montant.......: xxxxxxxxxx *
+* Responsable...: xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxx Pourcentage...: xxxxxx     *
+****************** Budget initial ***************** Budget courant *************
+* Période.......: 01 xxxxxxxxxxx                 01  xxxxxxxxxxx               *
+*                 02 xxxxxxxxxxx                 02  xxxxxxxxxxx               *
+*                 03 xxxxxxxxxxx                 03  xxxxxxxxxxx               *
+*                 04 xxxxxxxxxxx                 04  xxxxxxxxxxx               *
+*                 05 xxxxxxxxxxx                 05  xxxxxxxxxxx               *
+*                 06 xxxxxxxxxxx                 06  xxxxxxxxxxx               *
+*                 07 xxxxxxxxxxx                 07  xxxxxxxxxxx               *
+*                 08 xxxxxxxxxxx                 08  xxxxxxxxxxx               *
+*                 09 xxxxxxxxxxx                 09  xxxxxxxxxxx               *
+*                 10 xxxxxxxxxxx                 10  xxxxxxxxxxx               *
+*                 11 xxxxxxxxxxx                 11  xxxxxxxxxxx               *
+*                 12 xxxxxxxxxxx                 12  xxxxxxxxxxx               *
+*                 13 xxxxxxxxxxx = xxxxxxxxxxx   13  xxxxxxxxxxx = xxxxxxxxxxx *
+********************************************************************************
+@ENDIF

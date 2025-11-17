@@ -1,0 +1,663 @@
+;/T/ 2.5.5 Impression du formulaire de douane (format "John V. Carr & Son")
+;
+;/P/ Programmeur..: Denis Pouliot
+;    Date Création: 1995-06-05
+;
+;    Description..: Imprimer le formulaire de douane selon la référence
+;                   aux bons de livraison.
+;
+;       *** NOTE : Un bon de livraison ne se fait que pour des diagrammes
+;                  ou des tranches.
+;
+;/M/ Programmeur..: Nancy Breton
+;    Date modif...: 1998-10-13
+;    Description..: Modification du footin je l'es mis sur la description, car
+;                   ils peuvent avoir la même epaisseur.
+;
+;/M/ Programmeur..: Nancy Breton
+;    Date modif...: 1998-12-07
+;    Description..: Ajout de la compagnie sur les liens, j'ai enlever des liens
+;                   inutile (sos #565)
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par......: Marc Poulin     
+;    Date modification: 09 mars 2000
+;    Description......: Ajuster le point d'impression afin l'usager n'est plus à le déplacer de 38 positions.
+;
+;    Référence........: Demande directe 999999.
+;
+;    Signet...........: MP-00-03-09_DD999999.
+;
+;    --------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par......: Marc Poulin     
+;    Date modification: 27 avril 2000
+;    Description......: Corriger le calcul du total de la formule de douane. Un problème d'arrondi dû à l'utilisation
+;                       du type de donnée "FLOAT" causait un débalancement de quelques centièmes.
+;
+;    Référence........: Demande de changement 000044.
+;
+;    Signet...........: MP-00-04-27_D44.
+;
+;    --------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par......: Marc Poulin     
+;    Date modification: 01 mai 2000
+;    Description......: Ajuster le traitement afin que la surface au pieds carré puisse s'imprimer au niveau du détail.
+;
+;    Référence........: Demande de changement 000046.
+;
+;    Signet...........: MP-00-05-01_D46.
+;
+;    --------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par......: Marc Poulin     
+;    Date modification: 17 janvier 2002
+;    Description......: Ajuster le traitement afin de modifier la classification des produits pour se conformer au 
+;                       nouveau certificat d'origine des formules de douanes.
+;
+;    Référence........: Demande de changement 200204.
+;
+;    Signet...........: MP-02-01-17_2002046.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST
+
+SET PAGE LENGTH 62 WIDTH 85
+SET FORMFEED NOCLOSE NOHEAD
+
+ACCESS *WPD227_BONLIVRDOU                   &
+
+  LINK CIECLE        OF WPD227_BONLIVRDOU , & ; MP-00-04-27_D44.
+       D_TRI_BONDOU  OF WPD227_BONLIVRDOU , & ; MP-00-04-27_D44.
+       D_DESCPRODUIT OF WPD227_BONLIVRDOU   & ; MP-00-04-27_D44.
+    TO CIECLE                             , & ; MP-00-04-27_D44.
+       T_TRI_BONDOU                       , & ; MP-00-04-27_D44.
+       T_DESCPRODUIT OF *WPD227_BONLIVRIDX  & ; MP-00-04-27_D44.
+
+  LINK CIECLE    OF WPD227_BONLIVRDOU   , &
+       EXPNUMEXP OF WPD227_BONLIVRDOU     & ; Information sur l'expédition
+  TO   CIECLE                           , &
+       EXPNUMEXP OF PDEXPEDITION          &
+
+  LINK CIECLE    OF WPD227_BONLIVRDOU   , &
+       EXPNUMEXP OF WPD227_BONLIVRDOU   , &
+       BLINUMBLI OF WPD227_BONLIVRDOU     &
+  TO   CIECLE                           , &
+       EXPNUMEXP                        , &
+       BLINUMBLI OF PDBON_LIVRAISON       &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       PJTABR    OF PDBON_LIVRAISON       &  ; Information sur le projet
+  TO   CIECLE                           , &
+       PJTABR    OF PDPROJET              &
+
+  LINK CIECLE       OF PDBON_LIVRAISON  , &
+       PJTABR       OF PDBON_LIVRAISON  , & ; Information sur la commande interne
+       T_COMNUMINT  OF WPD227_BONLIVRDOU  &
+  TO   CIECLE                           , &
+       PJTABR                           , &
+       COMNUMCOMINT OF PDCOMMAN_INTERNE   &
+
+  LINK ("----", &
+       CLICLE       OF PDBON_LIVRAISON) &
+   TO  CLICIECLE, &
+       CLICLE OF CRCLIENT &
+
+  LINK ("----", & ; CLICIECLE    OF PDCOMMAN_INTERNE , &
+       CLICLE       OF PDCOMMAN_INTERNE , &
+       CIECLE       OF PDCOMMAN_INTERNE)   &
+  TO   CLICIECLE                        , &
+       CLICLE                           , &
+       CIECLE       OF VCLC_CLI           &
+
+  LINK (CLICLE      OF PDBON_LIVRAISON , & ; Adresse de livraison
+        "C"                             , &
+        COMNUMADRLIV OF PDBON_LIVRAISON) &
+  TO   REFCLENUM                        , &
+       REFCLETYP                        , &
+       RADCLE       OF MCREF_ADRESSE      &
+
+  LINK (CLICLE      OF PDCOMMAN_INTERNE , & ; Adresse de facturation
+        "C"                             , &
+       COMNUMADRFAC OF PDCOMMAN_INTERNE)  &
+  TO   REFCLENUM                        , &
+       REFCLETYP                        , &
+       RADCLE       OF MCREF_ADRESSE      ALIAS A_FAC_ADRFAC OPTIONAL &
+
+  LINK FOUCLE OF PDEXPEDITION             &
+  TO   FOUCLE OF CPFOURNISSEUR            &
+
+  LINK DEVCLE OF VCLC_CLI                 &  ; Information sur les devises
+  TO   DEVCLE OF MCDEVISE                 &
+
+  LINK CIECLE    OF WPD227_BONLIVRDOU   , &
+       EXPNUMEXP OF WPD227_BONLIVRDOU   , &  ; Information sur les pièces
+       BLINUMBLI OF WPD227_BONLIVRDOU   , &
+       CAINUMCAI OF WPD227_BONLIVRDOU     &
+  TO   CIECLE                           , &
+       EXPNUMEXP                        , &
+       BLINUMBLI                        , &
+       CAINUMCAI OF PDLIVRE_CAISSON       &
+
+  LINK ("2000")                           &
+  TO   CIECLE OF MCCOMPAGNIE
+
+
+SORT   ON CIECLE        OF WPD227_BONLIVRDOU &
+       ON D_TRI_BONDOU  OF WPD227_BONLIVRDOU &
+       ON D_DESCPRODUIT OF WPD227_BONLIVRDOU &
+       ON T_EPAIS       OF WPD227_BONLIVRDOU &
+       ON T_TGRCLADOU   OF WPD227_BONLIVRDOU
+
+;
+; Variables
+;
+DEFINE D_DESCQTEPIE  CHARACTER SIZE 12 = "Qte pièce..:" &
+                                         IF COMCODLNGCOR OF PDCOMMAN_INTERNE = "F" &
+                                         ELSE "Pieces.....:"
+
+DEFINE D_DESCQTECAI CHARACTER SIZE 12 = "Qte caisson:" &
+                                        IF COMCODLNGCOR OF PDCOMMAN_INTERNE = "F" &
+                                        ELSE "Crates.....:"
+
+DEFINE D_DESCDOUA CHARACTER SIZE 5 = "Doua."  &
+                                      IF COMCODLNGCOR OF PDCOMMAN_INTERNE = "F" &
+                                      ELSE "Duty"
+
+DEFINE D_DESCSURF CHARACTER SIZE 36 = "Surface totale (MC)................:" &
+                                   IF COMCODLNGCOR OF PDCOMMAN_INTERNE = "F" &
+                                 ELSE "Total square foot..................:"
+
+DEFINE D_DESCVAL  CHARACTER SIZE 36 = "Valeur total.......................:" &
+                                   IF COMCODLNGCOR OF PDCOMMAN_INTERNE = "F" &
+                                 ELSE "Total value of merchandise.........:"
+
+DEFINE D_UNPOIDS   CHARACTER SIZE 2 = "KG"  &
+                                      IF COMCODLNGCOR OF PDCOMMAN_INTERNE = "F" &
+                                      ELSE "LB"
+
+DEFINE D_UNSURF   CHARACTER SIZE 2 = "M2"  &
+                                      IF COMCODLNGCOR OF PDCOMMAN_INTERNE = "F" &
+                                      ELSE "SF"
+
+DEFINE D_UNVOL    CHARACTER SIZE 2 = "M3"  &
+                                      IF COMCODLNGCOR OF PDCOMMAN_INTERNE = "F" &
+                                      ELSE "CF"
+
+DEFINE D_DESCDEV  CHARACTER SIZE 15 = DEVDSCFRA OF MCDEVISE &
+                                      IF COMCODLNGCOR OF PDCOMMAN_INTERNE = "F" &
+                                      ELSE DEVDSCANG OF MCDEVISE
+
+DEFINE D_ADRFACT1 CHARACTER SIZE 40 = RADADR1 OF A_FAC_ADRFAC ;&
+
+DEFINE D_ADRFACT2 CHARACTER SIZE 40 = RADADR2 OF A_FAC_ADRFAC ;&
+
+DEFINE D_ADRFACT3 CHARACTER SIZE 40 = RADADR3 OF A_FAC_ADRFAC ;&
+
+DEFINE D_ADRFACT4 CHARACTER SIZE 40 = RADADR4 OF A_FAC_ADRFAC ;&
+
+DEFINE D_ADRDESTINATION CHARACTER SIZE 18 = RADADR3 OF MCREF_ADRESSE[1:18] &
+                                            IF RADADR4 OF MCREF_ADRESSE = " " &
+                                            ELSE RADADR4 OF MCREF_ADRESSE[1:18]
+
+;
+; Avoir le prix par detail en plus de celui total !
+;
+DEFINE D_VALMAR FLOAT SIZE 8 = D_VALMAR_DIA OF WPD227_BONLIVRDOU &
+                               IF TPDTYPPRD OF WPD227_BONLIVRDOU = "DI" &
+                               ELSE D_VALMAR_TRA OF WPD227_BONLIVRDOU
+
+DEFINE D_ORIGINE CHARACTER  SIZE 10 = "QC. CANADA"
+
+DEFINE D_SURP2  FLOAT SIZE 8 =   D_SURMC2 OF WPD227_BONLIVRDOU &
+                               * 10.764262 ;CUMFACCON OF A_CUM_P2
+
+DEFINE D_VOLP3  FLOAT SIZE 8 =   D_VOLMC3 OF WPD227_BONLIVRDOU &
+                               * 35.314475 ;CUMFACCON OF A_CUM_P3
+
+DEFINE D_POIDKG  FLOAT SIZE 8 = T_POIDKGREE OF WPD227_BONLIVRDOU
+
+DEFINE D_POIDTOT FLOAT SIZE 8 = D_POIDKG IF COMCODLNGCOR OF PDCOMMAN_INTERNE = "F" &
+                                ELSE T_POIDKGREE * 2.2045855 ;CUMFACCON OF A_CUM_LB
+
+DEFINE D_VOLUME  FLOAT SIZE 8 = D_VOLMC3 OF WPD227_BONLIVRDOU  &
+                                IF COMCODLNGCOR OF PDCOMMAN_INTERNE = "F" &
+                                ELSE D_VOLP3
+
+DEFINE D_SURFACE FLOAT SIZE 8 = D_SURMC2 OF WPD227_BONLIVRDOU  &
+                                IF COMCODLNGCOR OF PDCOMMAN_INTERNE = "F" &
+                                ELSE D_SURP2
+
+
+; -------------------------------------------------------------------------------
+; MP-02-01-17_2002046.
+
+DEFINE D_DESC      CHARACTER SIZE 55 =  "Produit                        Épaisseur" &
+                                       IF COMCODLNGCOR OF PDCOMMAN_INTERNE = "F"   &
+                                  ELSE  "Product                        Thickness"
+
+; -------------------------------------------------------------------------------
+
+PAGE HEADING &
+    TAB 99 "."                            &  ; MP-00-03-09_DD999999.
+  SKIP 4                                  &  ; MP-00-03-09_DD999999.
+    TAB 08 CIENOMABR OF MCCOMPAGNIE       &  ; Nom compagnie et no référence
+    TAB 28 EXPNUMEXP OF WPD227_BONLIVRDOU &
+                     PICTURE "^^^^^^^^^"  &
+    TAB 37 "-"                            &
+    TAB 38 BLINUMBLI OF WPD227_BONLIVRDOU &
+    TAB 40 "-" &
+    TAB 41 BLIAMM OF PDBON_LIVRAISON &
+
+  SKIP &
+    TAB 08 CIEADR1   OF MCCOMPAGNIE     &  ; Adresse de Granicor et numéro d'exportateur
+
+  SKIP &
+    TAB 08 CIEADR2   OF MCCOMPAGNIE     &
+
+  SKIP &
+    TAB 08 CIEADR3   OF MCCOMPAGNIE     &
+
+  SKIP &
+    TAB 08 CIEADR4   OF MCCOMPAGNIE     &
+    TAB 15 CIECP     OF MCCOMPAGNIE     &
+    TAB 23 CIEENRTPS OF MCCOMPAGNIE     &
+
+  SKIP 2 &
+    TAB 08 RADNOMABR OF MCREF_ADRESSE   &  ;  Adresse de livraison et de facturation
+    TAB 45 RADNOMABR OF A_FAC_ADRFAC &
+
+  SKIP &
+    TAB 08 RADADR1 OF MCREF_ADRESSE     &
+    TAB 45 D_ADRFACT1                   &
+
+  SKIP &
+    TAB 08 RADADR2 OF MCREF_ADRESSE     &
+    TAB 45 D_ADRFACT2                   &
+
+  SKIP &
+    TAB 08 RADADR3 OF MCREF_ADRESSE     &
+    TAB 45 D_ADRFACT3                   &
+
+  SKIP &
+    TAB 08 RADADR4 OF MCREF_ADRESSE     &
+    TAB 45 D_ORIGINE                    &  ; Origine, destination, numéro IRS client
+    TAB 63 D_ADRDESTINATION             &
+
+  SKIP &
+    TAB 08 RADCP   OF MCREF_ADRESSE     &
+
+  SKIP 2 &
+    tab 01 " "                          &
+    TAB 08 CLIINR OF CRCLIENT           &
+    TAB 70 CLCNUMIRS OF VCLC_CLI        &
+
+  SKIP 2 &
+    TAB 08 FOUNOMABR OF CPFOURNISSEUR   &  ; Transporteur et date de livraison
+
+  SKIP 2 &
+    TAB 08 FOUNOMABR OF CPFOURNISSEUR   &
+    TAB 48 BLIDAT OF PDBON_LIVRAISON    &
+    TAB 68 BLIDAT OF PDBON_LIVRAISON    &
+
+  SKIP 2 &
+    TAB 08 " "                          &
+
+  SKIP 2 &
+    TAB 08 D_DESCQTEPIE                        &  ; Nombres de pièces, caissons et cubage
+    TAB 22 T_TOTQTEPRD OF WPD227_BONLIVRDOU    &
+                          PICTURE "^,^^^"      &
+    TAB 62 D_POIDTOT   PICTURE "^^^,^^^.^^^^"  &;;OUTPUT SCALE 4          &
+    TAB 75 D_UNPOIDS                           &
+
+  SKIP &
+    TAB 08 D_DESCQTECAI                     &
+    TAB 22 BLIQTECAI OF WPD227_BONLIVRDOU   &
+                     PICTURE "^,^^^"        &
+    TAB 62 D_VOLUME  OUTPUT SCALE 4         &
+                     PICTURE "^^^,^^^.^^^^" &
+    TAB 75 D_UNVOL                          &
+
+  SKIP 3 &
+    TAB 03 D_DESCDOUA                   &
+    TAB 11 "CANADA PROJET:"             &
+    TAB 26 PJTNOM OF PDPROJET           &
+
+  SKIP &
+      TAB 11 D_DESC                     &
+  SKIP 2
+
+  FOOTING AT D_DESCPRODUIT &
+      TAB 03 D_DESCPRODUIT OF WPD227_BONLIVRDOU    &               ; MP-02-01-17_2002046.
+      TAB 44 T_EPAIS        PICTURE "^^^" BWZ      &
+      TAB 47 "MM"                                  &
+      TAB 50 T_SURFAC_SUB OUTPUT SCALE 4 PICTURE "^,^^^.^^^^"    & ; MP-00-05-01_D46.
+      TAB 61 "SF"                                                & ; MP-00-05-01_D46.
+      TAB 64 T_VALMAR_SUB                PICTURE "^^,^^^,^^^.^^" & ; MP-00-04-27_D44.
+      TAB 78 DEVCLE OF MCDEVISE                                  & ; MP-00-05-01_D46.
+    SKIP 1
+
+  FOOTING AT D_TRI_BONDOU                           &
+    SKIP 2                                          &
+      TAB 11 D_DESCSURF                             &
+      TAB 48 T_SURFAC_SUB SUBTOTAL AT D_DESCPRODUIT & ; MP-00-05-01_D46.
+                          OUTPUT SCALE 4            &
+                          PICTURE "^^^,^^^.^^^^"    &
+      TAB 61 D_UNSURF                               &
+    SKIP 2 &
+      TAB 11 D_DESCVAL   &
+      TAB 63 T_VALMAR_SUB SUB AT D_DESCPRODUIT PICTURE "^^^,^^^,^^^.^^"  ; MP-00-04-27_D44.
+
+  PAGE FOOTING &
+      TAB 68 T_VALMAR_SUB SUB AT D_DESCPRODUIT PICTURE "^^^,^^^,^^^.^^"  ; MP-00-04-27_D44.
+
+
+BUILD pd227z
+
+;----------------------------------------------------------------------------
+;/T/ 2.5.5 Impression du formulaire de douane (format "Fritz Compagnies, Inc")
+
+USE ussetqzs NOLIST
+                ;66
+SET PAGE LENGTH 62 WIDTH 85
+SET FORMFEED NOCLOSE NOHEAD
+
+ACCESS *WPD227_BONLIVRDOU                   &
+
+  LINK CIECLE        OF WPD227_BONLIVRDOU , & ; MP-00-04-27_D44.
+       D_TRI_BONDOU  OF WPD227_BONLIVRDOU , & ; MP-00-04-27_D44.
+       T_TGRCLADOU   OF WPD227_BONLIVRDOU , & ; MP-00-04-27_D44.
+       D_DESCPRODUIT OF WPD227_BONLIVRDOU , & ; MP-00-04-27_D44.
+       T_EPAIS       OF WPD227_BONLIVRDOU   & ; MP-00-04-27_D44.
+    TO CIECLE                             , & ; MP-00-04-27_D44.
+       T_TRI_BONDOU                       , & ; MP-00-04-27_D44.
+       T_TGRCLADOUX                       , & ; MP-00-04-27_D44.
+       T_DESCPRODUIT                      , & ; MP-00-04-27_D44.
+       T_EPAISSEUR  OF *WPD227_BONLIVRIDX2  & ; MP-00-04-27_D44.
+
+  LINK CIECLE    OF WPD227_BONLIVRDOU   , &
+       EXPNUMEXP OF WPD227_BONLIVRDOU     & ; Information sur l'expédition
+  TO   CIECLE                           , &
+       EXPNUMEXP OF PDEXPEDITION          &
+
+  LINK CIECLE    OF WPD227_BONLIVRDOU   , &
+       EXPNUMEXP OF WPD227_BONLIVRDOU   , &
+       BLINUMBLI OF WPD227_BONLIVRDOU     &
+  TO   CIECLE                           , &
+       EXPNUMEXP                        , &
+       BLINUMBLI OF PDBON_LIVRAISON       &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       PJTABR    OF PDBON_LIVRAISON       &  ; Information sur le projet
+  TO   CIECLE                           , &
+       PJTABR    OF PDPROJET              &
+
+  LINK CIECLE OF PDBON_LIVRAISON ,&        ;info commande en remplacement
+       COMNUMCOM OF PDBON_LIVRAISON &
+    TO CIECLE ,&
+       COMNUMCOM OF PDCOMMAN_INTERNE &
+
+  LINK ("----", &
+       CLICLE       OF PDBON_LIVRAISON) &
+   TO  CLICIECLE, &
+       CLICLE OF CRCLIENT &
+
+  LINK ("----", & ; CLICIECLE    OF PDCOMMAN_INTERNE , &
+       CLICLE       OF PDBON_LIVRAISON , &
+       CIECLE       OF PDCOMMAN_INTERNE)   &
+  TO   CLICIECLE                        , &
+       CLICLE                           , &
+       CIECLE       OF VCLC_CLI           &
+
+  LINK (CLICLE      OF PDBON_LIVRAISON , & ; Adresse de livraison
+        "C"                             , &
+        COMNUMADRLIV OF PDBON_LIVRAISON) &
+  TO   REFCLENUM                        , &
+       REFCLETYP                        , &
+       RADCLE       OF MCREF_ADRESSE      &
+
+  LINK (CLICLE      OF PDCOMMAN_INTERNE , & ; Adresse de facturation
+        "C"                             , &
+       COMNUMADRFAC OF PDCOMMAN_INTERNE)  &
+  TO   REFCLENUM                        , &
+       REFCLETYP                        , &
+       RADCLE       OF MCREF_ADRESSE      ALIAS A_FAC_ADRFAC OPTIONAL &
+
+  LINK FOUCLE OF PDEXPEDITION             &
+  TO   FOUCLE OF CPFOURNISSEUR            &
+
+  LINK DEVCLE OF VCLC_CLI                 &  ; Information sur les devises
+  TO   DEVCLE OF MCDEVISE                 &
+
+  LINK CIECLE    OF WPD227_BONLIVRDOU   , &
+       EXPNUMEXP OF WPD227_BONLIVRDOU   , &  ; Information sur les pièces
+       BLINUMBLI OF WPD227_BONLIVRDOU   , &
+       CAINUMCAI OF WPD227_BONLIVRDOU     &
+  TO   CIECLE                           , &
+       EXPNUMEXP                        , &
+       BLINUMBLI                        , &
+       CAINUMCAI OF PDLIVRE_CAISSON       &
+
+  LINK ("2000")                           &
+  TO   CIECLE OF MCCOMPAGNIE
+
+SORT   ON CIECLE        OF WPD227_BONLIVRDOU &
+       ON D_TRI_BONDOU  OF WPD227_BONLIVRDOU &
+       ON T_TGRCLADOU   OF WPD227_BONLIVRDOU &
+       ON D_DESCPRODUIT OF WPD227_BONLIVRDOU &
+       ON T_EPAIS       OF WPD227_BONLIVRDOU
+;
+; Avoir le prix par detail en plus de celui total !
+;
+DEFINE D_VALMAR FLOAT SIZE 8 = D_VALMAR_DIA OF WPD227_BONLIVRDOU &
+                               IF TPDTYPPRD OF WPD227_BONLIVRDOU = "DI" &
+                               ELSE D_VALMAR_TRA OF WPD227_BONLIVRDOU
+
+;
+; Variables
+;
+
+DEFINE D_DESCQTEPIE  CHARACTER SIZE 12 = "Qte pièce..:" &
+                                         IF COMCODLNGCOR OF PDCOMMAN_INTERNE = "F" &
+                                         ELSE "Pieces.....:"
+
+DEFINE D_DESCQTECAI CHARACTER SIZE 12 = "Qte caisson:" &
+                                        IF COMCODLNGCOR OF PDCOMMAN_INTERNE = "F" &
+                                        ELSE "Crates.....:"
+
+DEFINE D_DESCDOUA CHARACTER SIZE 5 = "Doua."  &
+                                      IF COMCODLNGCOR OF PDCOMMAN_INTERNE = "F" &
+                                      ELSE "Duty"
+
+DEFINE D_DESCSURF CHARACTER SIZE 30 = "Surface totale (MC)..........:" &
+                                      IF COMCODLNGCOR OF PDCOMMAN_INTERNE = "F" &
+                                      ELSE "Total square foot............:"
+
+DEFINE D_DESCVAL  CHARACTER SIZE 30 = "Valeur total.................:" &
+                                      IF COMCODLNGCOR OF PDCOMMAN_INTERNE = "F" &
+                                      ELSE "Total value of merchandise...:"
+
+DEFINE D_UNPOIDS   CHARACTER SIZE 2 = "KG"  &
+                                      IF COMCODLNGCOR OF PDCOMMAN_INTERNE = "F" &
+                                      ELSE "LB"
+
+DEFINE D_UNSURF   CHARACTER SIZE 2 = "M2"  &
+                                      IF COMCODLNGCOR OF PDCOMMAN_INTERNE = "F" &
+                                      ELSE "SF"
+
+DEFINE D_UNVOL    CHARACTER SIZE 2 = "M3"  &
+                                      IF COMCODLNGCOR OF PDCOMMAN_INTERNE = "F" &
+                                      ELSE "CF"
+
+DEFINE D_DESCDEV  CHARACTER SIZE 15 = DEVDSCFRA OF MCDEVISE &
+                                      IF COMCODLNGCOR OF PDCOMMAN_INTERNE = "F" &
+                                      ELSE DEVDSCANG OF MCDEVISE
+
+DEFINE D_ADRFACT1 CHARACTER SIZE 40 = RADADR1 OF A_FAC_ADRFAC ;&
+
+DEFINE D_ADRFACT2 CHARACTER SIZE 40 = RADADR2 OF A_FAC_ADRFAC ;&
+
+DEFINE D_ADRFACT3 CHARACTER SIZE 40 = RADADR3 OF A_FAC_ADRFAC ;&
+
+DEFINE D_ADRFACT4 CHARACTER SIZE 40 = RADADR4 OF A_FAC_ADRFAC ;&
+
+DEFINE D_ADRDESTINATION CHARACTER SIZE 18 = RADADR3 OF MCREF_ADRESSE[1:18] &
+                                            IF RADADR4 OF MCREF_ADRESSE = " " &
+                                            ELSE RADADR4 OF MCREF_ADRESSE[1:18]
+
+DEFINE D_ORIGINE CHARACTER  SIZE 10 = "QC. CANADA"
+
+DEFINE D_SURP2  FLOAT SIZE 8 =   D_SURMC2 OF WPD227_BONLIVRDOU &
+                               * 10.764262; CUMFACCON OF A_CUM_P2
+
+DEFINE D_VOLP3  FLOAT SIZE 8 =   D_VOLMC3 OF WPD227_BONLIVRDOU &
+                               * 35.314475 ;CUMFACCON OF A_CUM_P3
+
+DEFINE D_POIDKG  FLOAT SIZE 8 = T_POIDKGREE OF WPD227_BONLIVRDOU / 10000
+
+DEFINE D_POIDTOT FLOAT SIZE 8 = D_POIDKG IF COMCODLNGCOR OF PDCOMMAN_INTERNE = "F" &
+                                ELSE (T_POIDKGREE / 10000) * 2.2045855; CUMFACCON OF A_CUM_LB
+
+DEFINE D_VOLUME  FLOAT SIZE 8 = D_VOLMC3 OF WPD227_BONLIVRDOU  &
+                                IF COMCODLNGCOR OF PDCOMMAN_INTERNE = "F" &
+                                ELSE D_VOLP3
+
+DEFINE D_SURFACE FLOAT SIZE 8 = D_SURMC2 OF WPD227_BONLIVRDOU  &
+                                IF COMCODLNGCOR OF PDCOMMAN_INTERNE = "F" &
+                                ELSE D_SURP2
+
+DEFINE D_CIEADR3 CHAR SIZE 8 = CIEADR3 OF MCCOMPAGNIE[1:8]
+DEFINE D_CIEADR4 CHAR SIZE 8 = CIEADR4 OF MCCOMPAGNIE[1:8]
+DEFINE D-RADADR4 CHAR SIZE 8 = RADADR4 OF MCREF_ADRESSE[1:8]
+
+; -------------------------------------------------------------------------------
+; MP-02-01-17_2002046.
+
+DEFINE D_DESC      CHARACTER SIZE 55 =  "Produit                        Épaisseur" &
+                                       IF COMCODLNGCOR OF PDCOMMAN_INTERNE = "F"   &
+                                  ELSE  "Product                        Thickness"
+
+; -------------------------------------------------------------------------------
+
+PAGE HEADING &
+    TAB 13 CIENOMABR OF MCCOMPAGNIE       &  ; Nom compagnie et no référence
+    TAB 65 EXPNUMEXP OF WPD227_BONLIVRDOU &;D-RADADR4
+
+                     PICTURE "^^^^^^^^"  &
+    TAB 73 "-"                            &
+    TAB 74 BLINUMBLI OF WPD227_BONLIVRDOU &
+    TAB 76 "-" &
+    TAB 77 BLIAMM OF PDBON_LIVRAISON &
+
+  SKIP &
+    TAB 13 CIEADR1   OF MCCOMPAGNIE     &  ; Adresse de Granicor et numéro d'exportateur
+
+  SKIP &
+    TAB 13 CIEADR2   OF MCCOMPAGNIE     &
+
+  SKIP &
+    TAB 13 D_CIEADR3                    &
+    TAB 22 "C.P."                       &
+    TAB 32 "Num. export."               &
+
+  SKIP &
+    TAB 13 D_CIEADR4                    &
+    TAB 22 CIECP     OF MCCOMPAGNIE     &
+    TAB 32 CIEENRTPS OF MCCOMPAGNIE     &
+
+  SKIP 2 &
+    TAB 13 RADNOMABR OF MCREF_ADRESSE   &  ;  Adresse de livraison et de facturation
+
+  SKIP &
+    TAB 13 RADADR1 OF MCREF_ADRESSE     &
+
+  SKIP &
+    TAB 13 RADADR2 OF MCREF_ADRESSE     &
+
+  SKIP &
+    TAB 13 RADADR3 OF MCREF_ADRESSE     &
+
+  SKIP &
+    TAB 13 D-RADADR4     &
+    TAB 22 "C.P. "&
+    TAB 28 RADCP   OF MCREF_ADRESSE     &
+
+  SKIP 2 &
+    TAB 13 CLIINR OF CRCLIENT &
+  SKIP 1 &
+    TAB 01 " "                          &
+
+  SKIP 1 &
+    TAB 13 RADNOMABR OF A_FAC_ADRFAC &
+    TAB 46 D_ORIGINE                    &  ; Origine, destination, numéro IRS client
+    TAB 66 D_ADRDESTINATION             &
+
+  SKIP 1 &
+    TAB 13 D_ADRFACT1                   &
+
+  SKIP 1 &
+    TAB 13 D_ADRFACT3                   &
+
+  SKIP 2 &
+    TAB 13 FOUNOMABR OF CPFOURNISSEUR   &
+    TAB 52 CLCNUMIRS OF VCLC_CLI        &
+
+  SKIP 2 &
+    TAB 13 FOUNOMABR OF CPFOURNISSEUR   &  ; Transporteur et date de livraison
+    TAB 48 BLIDAT OF PDBON_LIVRAISON    &
+    TAB 68 BLIDAT OF PDBON_LIVRAISON    &
+
+  SKIP 2 &
+    TAB 68 " "                          &
+
+  SKIP 6 &
+    TAB 13 D_DESCQTEPIE                        &  ; Nombres de pièces, caissons et cubage
+    TAB 27 T_TOTQTEPRD OF WPD227_BONLIVRDOU    &
+                          PICTURE "^,^^^"      &
+    TAB 35 D_DESCQTECAI                     &
+    TAB 49 BLIQTECAI OF WPD227_BONLIVRDOU   &
+                     PICTURE "^,^^^"        &
+    TAB 61 D_POIDTOT   PICTURE "^^^,^^^.^^^^"  &;;OUTPUT SCALE 4          &
+    TAB 74 D_UNPOIDS                           &
+
+  SKIP &
+      TAB 20 " "  &
+
+  SKIP 2 &
+    TAB 05 D_DESCDOUA                   &
+    TAB 15 "CANADA PROJET:"             &
+    TAB 30 PJTNOM OF PDPROJET           &
+
+  SKIP &
+      TAB 15 D_DESC                     &
+  SKIP 2
+
+  FOOT AT T_EPAIS &
+      TAB 12 D_DESCPRODUIT  OF WPD227_BONLIVRDOU    &               ; MP-02-01-17_2002046.
+      TAB 44 T_EPAIS        PICTURE "^^^" BWZ       &
+      TAB 48 "MM"                                   &
+      TAB 51 T_SURFAC_SUB OUTPUT SCALE 4 PICTURE "^,^^^.^^^^"     & ; MP-00-05-01_D46.
+      TAB 62 "SF"                                                 & ; MP-00-05-01_D46.
+      TAB 65  T_VALMAR_SUB               PICTURE "^^^,^^^,^^^.^^" & ; MP-00-04-27_D44.
+    SKIP 1
+
+  FOOTING AT D_TRI_BONDOU &
+    SKIP 2 &
+      TAB 15 D_DESCSURF                             &
+      TAB 49 T_SURFAC_SUB SUBTOTAL AT D_DESCPRODUIT & ; MP-00-05-01_D46.
+                          OUTPUT SCALE 4            &
+                          PICTURE "^^^,^^^.^^^^"    &
+      TAB 62 D_UNSURF                               &
+    SKIP 2 &
+      TAB 15 D_DESCVAL   &
+      TAB 65 T_VALMAR_SUB SUB AT T_EPAIS PICTURE "^^^,^^^,^^^.^^" ; MP-00-04-27_D44.
+
+PAGE FOOTING &
+SKIP 4 &
+      TAB 65 T_VALMAR_SUB SUB AT T_EPAIS PICTURE "^^^,^^^,^^^.^^" ; MP-00-04-27_D44.
+
+BUILD pd227za
+

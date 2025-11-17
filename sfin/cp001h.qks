@@ -1,0 +1,263 @@
+;/T/ Paiement
+;
+;/P/ Programmeur..: Thomas BRENNEUR
+;    Date Création: 1 Juin 1993
+;
+;    Description..: Consultation des paiements d'un fournisseur
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cp001h ACTIONBAR &
+              MODE LABEL "" AT 2,80 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              ACTIVITIES FIND &
+              RECEIVING CPFOURNISSEUR, &
+                        T_CIECLEMNU  , &
+                        T_CIENOM
+
+USE ussectmp   NOLIST
+    "CP001H"
+
+USE cp001h.hlp NOLIST
+
+USE usactecr   NOLIST
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE  4 ; Cie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie
+TEMPORARY T_DATSEL    DATE              ; Date de sélection
+
+;-------------------------------------------------------------------------------
+;
+; Récupération du fournisseur de l'écran maître
+;
+
+FILE CPFOURNISSEUR  MASTER NOITEM
+
+;-------------------------------------------------------------------------------
+;
+; Recherche de tous les paiements de ce fournisseur pour la compagnie
+; en cours de traitement (compagnie du menu).
+;
+; NOTE : Seuls les paiement imprimés sont affichés. Ceci permet d'éliminer
+;        les paiements annulés avant impression.
+;
+;
+
+FILE CPPAIEMENT     PRIMARY &
+                    NOITEM &
+                    OCCURS 14
+
+  ACCESS  VIA     CIECLE   , &
+                  REFCIECLE, &
+                  REFCLETYP, &
+                  REFCLENUM, &
+                  PAMFLGIMP  &
+          USING   T_CIECLEMNU               , &
+                  FOUCIECLE OF CPFOURNISSEUR, &
+                  "F"                       , &
+                  FOUCLE OF CPFOURNISSEUR   , &
+                  "1"                         &
+          REQUEST T_DATSEL &
+          ORDERBY CIECLE, &
+                  LBQCPTENC, &
+                  PAMCLE
+
+  SELECT IF PAMDATJOU OF CPPAIEMENT <> 0 &
+            AND (     PAMDAT OF CPPAIEMENT <= T_DATSEL &
+                  OR  T_DATSEL = 0 )
+
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLE        CHARACTER SIZE  4 ; Compagnie du paiement
+TEMPORARY T_LBQCPTENC     CHARACTER SIZE  6 ; Compte d'encaisse
+TEMPORARY T_PAMCLE        CHARACTER SIZE  7 ; Numéro du paiement
+
+TEMPORARY T_LBQCPTENCTMP  CHARACTER SIZE 6 OCCURS WITH CPPAIEMENT
+
+;-------------------------------------------------------------------------------
+
+DEFINE    DZ_CIECLE   CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE    DZ_CIENOM   CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+
+USE usdrwecr NOLIST     ; Draw pour les écrans pleine page
+USE ustitstd NOLIST     ; Draw pour les écrans pleine page
+USE ushilite NOLIST     ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Paiements " &
+@ELSE
+      " Payments " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP
+
+ALIGN(,3,19) (,,26)
+
+FIELD FOUCLE OF CPFOURNISSEUR &
+label "Fournisseur..:"&
+      DISPLAY PREDISPLAY
+
+FIELD FOUNOM OF CPFOURNISSEUR &
+      DISPLAY PREDISPLAY
+
+ALIGN(,3,32)
+
+FIELD T_DATSEL &
+ FORMAT YYYYMMDD PATTERN "####/##/##"&
+      LABEL "Sélectionner jusqu'au......:" &
+      HELP "Il faut sélectionner tous les chèques, depuis le premier jusqu'à cette date."
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+      "Compte   No chèque     No Chèque     Date           Montant        Montant" &
+@ELSE
+      "%%%%%%   %%%%%%%%%     %%%%%%%%%     %%%%           %%%%%%%        %%%%%%%" &
+@ENDIF
+      AT ,3
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      "encais. informatique  pré-imprimé   chèque             payé     d'escompte" &
+@ELSE
+      "%%%%%%% %%%%%%%%%%%%  %%%%%%%%%%%   %%%%%%             %%%%     %%%%%%%%%%" &
+@ENDIF
+      AT ,3
+
+SKIP
+
+;ALIGN(2,2,3) (,,14) (,,26) (,,38) (,,49) (,,67)
+ALIGN(2,2,3) (,,14) (,,26) (,,38) (,,51) (,,67)
+
+CLUSTER OCCURS WITH CPPAIEMENT ID BASE 10
+
+FIELD T_LBQCPTENCTMP &
+      LABEL " " &
+      HIDDEN
+
+FIELD PAMCLE OF CPPAIEMENT &
+      DISPLAY
+
+FIELD PAMNUMPIM OF CPPAIEMENT &
+      DISPLAY &
+      NUMERIC SIGNIFICANCE 8
+
+FIELD PAMDAT OF CPPAIEMENT  FORMAT YYYYMMDD PATTERN "####/##/##"&
+      DISPLAY
+
+FIELD PAMMNT OF CPPAIEMENT &
+      DISPLAY
+
+FIELD PAMMNTESC OF CPPAIEMENT &
+      DISPLAY &
+      PICTURE "^^^,^^^.^^ " SIGNIFICANCE 5 TRAILING "-"
+
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès pour l'écran par son code.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Initialisation de la valeur par défaut de la date de sélection
+;
+;
+PROCEDURE INPUT T_DATSEL
+BEGIN
+  IF 0 = SIZE (TRUNCATE(FIELDTEXT))
+  THEN LET FIELDTEXT = "0"
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du sous écran de consultation de la ventilation des documents pour un
+; paiement.
+;
+PROCEDURE INPUT T_LBQCPTENCTMP
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE    = CIECLE    OF CPPAIEMENT
+    LET T_LBQCPTENC = LBQCPTENC OF CPPAIEMENT
+    LET T_PAMCLE    = PAMCLE    OF CPPAIEMENT
+    RUN SCREEN cp108 MODE F &
+        PASSING T_CIECLE, &
+                T_LBQCPTENC, &
+                T_PAMCLE
+  END
+  LET FIELDTEXT = ""
+END
+
+;-------------------------------------------------------------------------------
+;
+; Saisie de la zone temporaire si l'usager fait un "retour" sur la ligne
+;
+PROCEDURE DESIGNER 10
+BEGIN
+  PROMPT T_LBQCPTENCTMP
+END
+
+;-------------------------------------------------------------------------------
+;
+; Après la lecture des données, on va initialiser le temporaire T_LBQCPTENCTMP
+; pour pouvoir afficher le compte d'encaisse
+;
+PROCEDURE POSTFIND
+BEGIN
+  FOR CPPAIEMENT
+  BEGIN
+    LET T_LBQCPTENCTMP = LBQCPTENC OF CPPAIEMENT
+    DISPLAY T_LBQCPTENCTMP
+  END
+END
+
+BUILD
+;
+;xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+;********************************** Paiements ***********************************
+;*                                                                              *
+;* Fournisseur...: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              *
+;* Sélectionner jusqu'au......: xxxxxxxx                                        *
+;*                                                                              *
+;* Compte   No chèque     No Chèque     Date           Montant        Montant   *
+;* encais. informatique  pré-imprimé   chèque             payé     d'escompte   *
+;* xxxxxx     xxxxxxx     xxxxxxxx    xxxxxxxx   xxxxxxxxxxxxxx    xxxxxxxxxxx  *
+;* xxxxxx     xxxxxxx     xxxxxxxx    xxxxxxxx   xxxxxxxxxxxxxx    xxxxxxxxxxx  *
+;* xxxxxx     xxxxxxx     xxxxxxxx    xxxxxxxx   xxxxxxxxxxxxxx    xxxxxxxxxxx  *
+;* xxxxxx     xxxxxxx     xxxxxxxx    xxxxxxxx   xxxxxxxxxxxxxx    xxxxxxxxxxx  *
+;* xxxxxx     xxxxxxx     xxxxxxxx    xxxxxxxx   xxxxxxxxxxxxxx    xxxxxxxxxxx  *
+;* xxxxxx     xxxxxxx     xxxxxxxx    xxxxxxxx   xxxxxxxxxxxxxx    xxxxxxxxxxx  *
+;* xxxxxx     xxxxxxx     xxxxxxxx    xxxxxxxx   xxxxxxxxxxxxxx    xxxxxxxxxxx  *
+;* xxxxxx     xxxxxxx     xxxxxxxx    xxxxxxxx   xxxxxxxxxxxxxx    xxxxxxxxxxx  *
+;* xxxxxx     xxxxxxx     xxxxxxxx    xxxxxxxx   xxxxxxxxxxxxxx    xxxxxxxxxxx  *
+;* xxxxxx     xxxxxxx     xxxxxxxx    xxxxxxxx   xxxxxxxxxxxxxx    xxxxxxxxxxx  *
+;* xxxxxx     xxxxxxx     xxxxxxxx    xxxxxxxx   xxxxxxxxxxxxxx    xxxxxxxxxxx  *
+;* xxxxxx     xxxxxxx     xxxxxxxx    xxxxxxxx   xxxxxxxxxxxxxx    xxxxxxxxxxx  *
+;* xxxxxx     xxxxxxx     xxxxxxxx    xxxxxxxx   xxxxxxxxxxxxxx    xxxxxxxxxxx  *
+;********************************************************************************

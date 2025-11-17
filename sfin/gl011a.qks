@@ -1,0 +1,1289 @@
+;/T/ Détail - état financier
+;
+;/P/ Programmeur..: Alain Côté
+;    Date Création: 16 mars 1992
+;
+;/V3.00.02/ Alain Côté, 9 mars 1994, 197
+;/V3.02.00/ Alain Côté, 5 avril 1994, 199
+;
+;    Description..: Définition du détail de l'état financier. L'usager construit
+;                   le corps de son état financier, c-a-d. chaque ligne à imp-
+;                   rimer ou à calculer...
+;
+;    Modification.: Patrick Langlois
+;                   Document 000054 de PGL
+;                   Changer VCPT_DSC pour VCPT_DSC2
+;
+;/M/ Modifié par..: Guy Chabot le 18 octobre 1994
+;            but..: Retirer la procédure PROCESS UNACLE pour l'affectation du
+;                   centre par défaut car le centre est un regroupement d'unité
+;                   et si l'ont modifie le centre dans l'unité l'état sort à 0.
+
+SET NESTING 100
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN gl011a ACTIONBAR &
+              MODE LABEL "" AT 2,80 &
+              NOACTION FIELDMARK STARTUP &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        T_FLGMNU   , &
+                        T_CBIDSCTYP, &
+                        GLETAT_FINANCIER
+
+USE gl011a.hlp NOLIST
+
+USE ussectmp NOLIST
+    "GL011A"
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-ecran
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Procédures"
+  MENUITEM LABEL "Renumérotation" ACTION DESIGNER RENU
+@ELSE
+ACTIONMENU LABEL "Procedures"
+  MENUITEM LABEL "Renumbering" ACTION DESIGNER RENU
+@ENDIF
+
+;------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE  4 ; Compagnie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Compagnie du menu.
+TEMPORARY T_FLGMNU    CHARACTER SIZE  1 ; Provenance du menu.
+TEMPORARY T_CBIDSCTYP CHARACTER SIZE 25 ; Desc. du type d'E/F.
+
+;------------------------------------------------------------------------------
+;
+; Corps principal de la définitions d'un état financier
+;
+
+FILE GLETAT_FINANCIER MASTER
+
+;------------------------------------------------------------------------------
+;
+; Détail de la définition d'un état financiers : lignes
+;
+
+FILE GLEFI_DETAIL     PRIMARY &
+                      OCCURS 15 &
+                      NOITEM &
+                      OPEN EACH LEVEL
+
+  ACCESS VIAINDEX EFD_R01 &
+         USING EFICIECLE OF GLETAT_FINANCIER, EFICLE OF GLETAT_FINANCIER
+
+  ITEM EFICIECLE OF GLEFI_DETAIL INIT EFICIECLE OF GLETAT_FINANCIER
+  ITEM EFICLE    OF GLEFI_DETAIL INIT EFICLE    OF GLETAT_FINANCIER
+
+;-------------------------------------------------------------------------------
+;
+; Valide le numéro de note et affiche sa description.
+;
+
+FILE GLETAT_FINANCIER REFERENCE &
+                      ALIAS A_EFI_NOTE
+
+  SELECT IF EFITYP OF A_EFI_NOTE = "N"
+
+;------------------------------------------------------------------------------
+;
+; Validation du code de transaction.
+;
+
+FILE VCBI_DSC DESIGNER OPEN READ
+
+;------------------------------------------------------------------------------
+; Validation du compte.
+;
+
+FILE VCPT_DSC2         REFERENCE
+
+;------------------------------------------------------------------------------
+; Validation du numéro de compagnie.
+;
+
+FILE MCCOMPAGNIE      REFERENCE
+
+;------------------------------------------------------------------------------
+; Validation de l'unité adm.
+;
+
+FILE MCUNITE_ADM      REFERENCE
+
+;------------------------------------------------------------------------------
+; Validation du centre
+;
+
+FILE MCCENTRE         REFERENCE
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU      IF T_FLGMNU = "C"
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER(T_CIENOM)
+
+;
+; Sert à valider les codes bilingue et pour les sous-écrans de consultation
+;
+DEFINE    D_EFDCOD    CHARACTER SIZE 16 = "EFDCOD"
+DEFINE    D_EFDFLGIMP CHARACTER SIZE 16 = "EFDFLGIMP"
+TEMPORARY T_EFDCOD    CHARACTER SIZE 4
+TEMPORARY T_EFDFLGIMP CHARACTER SIZE 4
+;
+TEMPORARY T_CENCLE    CHARACTER SIZE 4
+TEMPORARY T_CIECLE    CHARACTER SIZE 4
+TEMPORARY T_CPTCLE    CHARACTER SIZE 6
+TEMPORARY T_CPTTYPPAT CHARACTER SIZE 1
+TEMPORARY T_CPTCATPAT CHARACTER SIZE 8
+TEMPORARY T_EFICIECLE CHARACTER SIZE 4
+TEMPORARY T_EFICLE    CHARACTER SIZE 4
+TEMPORARY T_EFITYP    CHARACTER SIZE 1 INIT "N" RESET AT STARTUP
+TEMPORARY T_PECCLE    CHARACTER SIZE 4 ; = à blanc dans cet écran.
+TEMPORARY T_UNACLE    CHARACTER SIZE 8
+TEMPORARY T_SILENT    CHARACTER SIZE 1 ; Pour valider les colonnes.
+
+;
+; Pour la numérotation des lignes.
+;
+TEMPORARY T_NUMLIG INT SIZE 4 RESET AT STARTUP
+;
+; Sert à la procédure de renumérotation des lignes.
+;
+TEMPORARY T_FLGRNU CHARACTER SIZE 1 RESET AT MODE
+;
+; Regroupe les codes de transactions selon les champs à saisir...
+;
+; Identifie le compte.
+;
+DEFINE D_GRPCPT INT SIZE 1 &
+  = 1 IF "CPT"  = EFDCOD OF GLEFI_DETAIL OR &
+         "SDEB" = EFDCOD OF GLEFI_DETAIL OR &
+         "SFIN" = EFDCOD OF GLEFI_DETAIL OR &
+         "JUM"  = EFDCOD OF GLEFI_DETAIL OR &
+         "NOTE" = EFDCOD OF GLEFI_DETAIL    &
+      ELSE 0
+
+;
+; Identifie la compagnie, unité adm. et centre
+;
+
+DEF D_GRPCIE INT SIZE 1 &
+  = 1 IF "CPT"  = EFDCOD OF GLEFI_DETAIL OR &
+         "SDEB" = EFDCOD OF GLEFI_DETAIL OR &
+         "JUM"  = EFDCOD OF GLEFI_DETAIL OR &
+         "SFIN" = EFDCOD OF GLEFI_DETAIL    &
+      ELSE 0
+;
+; Identifie la description. (texte)
+;
+DEFINE D_GRPDSC INT SIZE 1 &
+  = 1 IF "CPT"  = EFDCOD OF GLEFI_DETAIL OR &
+         "SDEB" = EFDCOD OF GLEFI_DETAIL OR &
+         "SFIN" = EFDCOD OF GLEFI_DETAIL OR &
+         "TOT"  = EFDCOD OF GLEFI_DETAIL OR &
+         "TEXT" = EFDCOD OF GLEFI_DETAIL OR &
+         "NOTE" = EFDCOD OF GLEFI_DETAIL OR &
+         "BAL"  = EFDCOD OF GLEFI_DETAIL OR &
+         "JUM"  = EFDCOD OF GLEFI_DETAIL OR &
+         "SLG"  = EFDCOD OF GLEFI_DETAIL OR &
+         "SLGD" = EFDCOD OF GLEFI_DETAIL OR &
+         "SLGC" = EFDCOD OF GLEFI_DETAIL    &
+      ELSE 0
+;
+; Identifie les 8 colonnes.
+;
+DEFINE D_GRPCOL INT SIZE 1 &
+   = 1 IF "CPT"  = EFDCOD OF GLEFI_DETAIL OR &
+          "SDEB" = EFDCOD OF GLEFI_DETAIL OR &
+          "SFIN" = EFDCOD OF GLEFI_DETAIL OR &
+          "TOT"  = EFDCOD OF GLEFI_DETAIL OR &
+          "BAL"  = EFDCOD OF GLEFI_DETAIL OR &
+          "JUM"  = EFDCOD OF GLEFI_DETAIL OR &
+          "NOTE" = EFDCOD OF GLEFI_DETAIL    &
+       ELSE 0
+;
+; Identifie le flag d'impression des lignes.
+;
+DEFINE D_GRPIMP INT SIZE 1 &
+  = 1 IF "CPT"  = EFDCOD OF GLEFI_DETAIL OR &
+         "SDEB" = EFDCOD OF GLEFI_DETAIL OR &
+         "SFIN" = EFDCOD OF GLEFI_DETAIL OR &
+         "TOT"  = EFDCOD OF GLEFI_DETAIL OR &
+         "NOTE" = EFDCOD OF GLEFI_DETAIL OR &
+         "JUM"  = EFDCOD OF GLEFI_DETAIL OR &
+         "BAL"  = EFDCOD OF GLEFI_DETAIL    &
+      ELSE 0
+;
+; Identifie le premier numéro de ligne de référence.
+;
+DEFINE D_GRPREF1 INT SIZE 1 &
+  = 1  IF "JUM"  = EFDCOD OF GLEFI_DETAIL OR &
+          "BAL"  = EFDCOD OF GLEFI_DETAIL    &
+       ELSE 0
+;
+; Identifie le deuxiemme numéro de ligne de référence.
+;
+DEFINE D_GRPREF2 INT SIZE 1 &
+  = 1  IF "BAL"  = EFDCOD OF GLEFI_DETAIL    &
+       ELSE 0
+
+;-------------------------------------------------------------------------------
+
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Détail - état financier " &
+@ELSE
+      " Detail - Financial Statement " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP
+ALIGN(,3,19) (,35,51) (,,54)
+
+FIELD EFICLE OF GLETAT_FINANCIER FIXED
+
+FIELD EFITYP OF GLETAT_FINANCIER FIXED
+
+FIELD T_CBIDSCTYP FIXED
+
+SKIP 1
+
+@IF FRANCAIS
+    TITLE "No   Code   No" AT ,5
+    TITLE "1 3 5 7 "       AT ,56
+    TITLE "Ref"   AT ,68
+    TITLE "Ref"   AT ,75
+    SKIP
+    TITLE "Ligne Tran Compte Cie  Unité    Cen  Texte" AT ,4
+    TITLE " 2 4 6 8"                             AT ,56
+    TITLE "I"                                    AT ,65
+    TITLE "(1)"   AT ,68
+    TITLE "(2)"   AT ,75
+@ELSE
+    TITLE "Line  Tran  Account" AT ,4
+    TITLE "1 3 5 7 "       AT ,56
+    TITLE "Ref"   AT ,68
+    TITLE "Ref"   AT ,75
+    SKIP
+    TITLE "No.  Code  No.  Co.  Unit     Cen  Text" AT ,5
+    TITLE " 2 4 6 8"                             AT ,56
+    TITLE "I"                                    AT ,65
+    TITLE "(1)"   AT ,68
+    TITLE "(2)"   AT ,75
+@ENDIF
+
+SKIP
+
+ALIGN(3,2,3) (,,10) (,,15) (,,22) (,,27) (,,36) (,,41) (,,56) (,,57) (,,58) &
+     (,,59)  (,,60) (,,61) (,,62) (,,63) (,,65) (,,67) (,,74)
+CLUSTER OCCURS WITH GLEFI_DETAIL
+
+FIELD EFDNUMLIG OF GLEFI_DETAIL HIDDEN LABEL " "
+
+FIELD EFDCOD OF GLEFI_DETAIL &
+      REQUIRED &
+      LOOKUP ON VCBI_DSC &
+          VIA   XELNOM, CBICLE &
+          USING D_EFDCOD, EFDCOD  &
+          MESSAGE 279 ; Code de transaction invalide
+
+FIELD CPTCLE OF GLEFI_DETAIL &
+      PATTERN "@" &
+      REQUIRED
+
+FIELD CIECLE    OF GLEFI_DETAIL
+
+FIELD UNACLE    OF GLEFI_DETAIL
+
+FIELD CENCLE    OF GLEFI_DETAIL
+
+FIELD EFDDSC    OF GLEFI_DETAIL &
+        FOR 1,13 &
+        POPUP FROM 7,35 TO 9,71
+
+HILITE DATA INVERSE
+
+FIELD EFDCOL1   OF GLEFI_DETAIL &
+        AUTONEXT
+
+HILITE DATA INVERSE HALFTONE
+
+FIELD EFDCOL2   OF GLEFI_DETAIL &
+        AUTONEXT
+
+HILITE DATA INVERSE
+
+FIELD EFDCOL3   OF GLEFI_DETAIL &
+        AUTONEXT
+
+HILITE DATA INVERSE HALFTONE
+
+FIELD EFDCOL4   OF GLEFI_DETAIL &
+        AUTONEXT
+
+HILITE DATA INVERSE
+
+FIELD EFDCOL5   OF GLEFI_DETAIL &
+        AUTONEXT
+
+HILITE DATA INVERSE HALFTONE
+
+FIELD EFDCOL6   OF GLEFI_DETAIL &
+        AUTONEXT
+
+HILITE DATA INVERSE
+
+FIELD EFDCOL7   OF GLEFI_DETAIL &
+        AUTONEXT
+
+HILITE DATA INVERSE HALFTONE
+
+FIELD EFDCOL8   OF GLEFI_DETAIL &
+        AUTONEXT
+
+USE ushilite NOLIST
+
+FIELD T_SILENT &
+        SILENT
+
+FIELD EFDFLGIMP OF GLEFI_DETAIL &
+      LOOKUP ON VCBI_DSC &
+          VIA XELNOM, CBICLE &
+          USING D_EFDFLGIMP, EFDFLGIMP  &
+          MESSAGE 300 ; Code d'impression invalide
+
+FIELD EFDLIGREF1 OF GLEFI_DETAIL BWZ
+
+FIELD EFDLIGREF2 OF GLEFI_DETAIL BWZ
+
+CLUSTER
+
+DRAW 5, 1 TO  5,80
+DRAW 5,55 TO 23,55
+DRAW 5,64 TO 23,64
+DRAW 5,66 TO 23,66
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès pour l'écran par son code.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE INPUT EFDNUMLIG
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Conserve le numéro de ligne saisie par l'usager, sert à la numérotation
+; automatique des lignes.
+;
+PROCEDURE EDIT EFDNUMLIG
+BEGIN
+  LET T_NUMLIG = FIELDVALUE
+END
+
+;-------------------------------------------------------------------------------
+;
+; Traitement du code de ligne du détail de l'état financier
+;
+
+;
+; Accès au popup de consultation des codes de lignes
+;
+PROCEDURE INPUT EFDCOD
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_EFDCOD = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_EFDCOD, T_EFDCOD
+    LET FIELDTEXT = TRUNC(T_EFDCOD)
+  END
+END
+
+;
+; Numérotation automatique des numéros de ligne.
+;
+PROCEDURE PROCESS EFDCOD
+BEGIN
+  IF EFDNUMLIG OF GLEFI_DETAIL = 0 AND &
+     NEWRECORD OF GLEFI_DETAIL
+  THEN BEGIN
+    LET T_NUMLIG = T_NUMLIG + 100
+    LET EFDNUMLIG OF GLEFI_DETAIL = T_NUMLIG
+    DISPLAY EFDNUMLIG
+  END
+  ;
+  ; Efface les champs selon le code de transaction.
+  ;
+  IF D_GRPCPT = 0
+  THEN BEGIN
+    LET CPTCLE    OF GLEFI_DETAIL = " "
+    DISPLAY CPTCLE    OF GLEFI_DETAIL
+  END
+
+  IF D_GRPCIE = 0
+  THEN BEGIN
+    LET CIECLE    OF GLEFI_DETAIL = " "
+    LET UNACLE    OF GLEFI_DETAIL = " "
+    LET CENCLE    OF GLEFI_DETAIL = " "
+    DISPLAY CIECLE    OF GLEFI_DETAIL
+    DISPLAY UNACLE    OF GLEFI_DETAIL
+    DISPLAY CENCLE    OF GLEFI_DETAIL
+  END
+
+  IF D_GRPDSC = 0
+  THEN BEGIN
+    LET EFDDSC     OF GLEFI_DETAIL = " "
+    DISPLAY EFDDSC OF GLEFI_DETAIL
+  END
+
+  IF D_GRPCOL = 0
+  THEN BEGIN
+    LET EFDCOL1 OF GLEFI_DETAIL = " "
+    LET EFDCOL2 OF GLEFI_DETAIL = " "
+    LET EFDCOL3 OF GLEFI_DETAIL = " "
+    LET EFDCOL4 OF GLEFI_DETAIL = " "
+    LET EFDCOL5 OF GLEFI_DETAIL = " "
+    LET EFDCOL6 OF GLEFI_DETAIL = " "
+    LET EFDCOL7 OF GLEFI_DETAIL = " "
+    LET EFDCOL8 OF GLEFI_DETAIL = " "
+    DISPLAY EFDCOL1 OF GLEFI_DETAIL
+    DISPLAY EFDCOL2 OF GLEFI_DETAIL
+    DISPLAY EFDCOL3 OF GLEFI_DETAIL
+    DISPLAY EFDCOL4 OF GLEFI_DETAIL
+    DISPLAY EFDCOL5 OF GLEFI_DETAIL
+    DISPLAY EFDCOL6 OF GLEFI_DETAIL
+    DISPLAY EFDCOL7 OF GLEFI_DETAIL
+    DISPLAY EFDCOL8 OF GLEFI_DETAIL
+  END
+
+  IF D_GRPIMP = 0
+  THEN BEGIN
+    LET EFDFLGIMP OF GLEFI_DETAIL = " "
+    DISPLAY EFDFLGIMP OF GLEFI_DETAIL
+  END
+
+  IF D_GRPREF1 = 0
+  THEN BEGIN
+    LET EFDLIGREF1 OF GLEFI_DETAIL = 0
+    DISPLAY EFDLIGREF1 OF GLEFI_DETAIL
+  END
+
+  IF D_GRPREF2 = 0
+  THEN BEGIN
+    LET EFDLIGREF2 OF GLEFI_DETAIL = 0
+    DISPLAY EFDLIGREF2 OF GLEFI_DETAIL
+  END
+
+END
+
+;-------------------------------------------------------------------------------
+;
+; Traitement du champs CPTCLE
+;
+
+;
+; Accés au popup de consultation des comptes ou des états financiers suivant
+; le code de transaction
+;
+PROCEDURE INPUT CPTCLE
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    IF EFDCOD OF GLEFI_DETAIL <> "NOTE"
+    THEN BEGIN
+      LET T_CPTCLE    = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+      LET T_CPTTYPPAT = "@"
+      LET T_CPTCATPAT = "@"
+      LET T_PECCLE    = ""
+      RUN SCREEN mc103 MODE F &
+          PASSING T_CPTCLE, T_CPTTYPPAT, T_CPTCATPAT, T_PECCLE
+      LET FIELDTEXT = TRUNC(T_CPTCLE)
+    END
+    ELSE BEGIN
+      LET T_EFICIECLE = EFICIECLE OF GLETAT_FINANCIER
+      LET T_EFICLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+      RUN SCREEN gl108 MODE F PASSING T_EFITYP, T_EFICIECLE, T_EFICLE
+      LET FIELDTEXT = TRUNC(T_EFICLE)
+    END
+  END
+  ;
+  ; Force l'éxécution de la procédure EDIT, car l'usager peut changer le
+  ; code de transaction.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT)
+  THEN LET FIELDTEXT = CPTCLE OF GLEFI_DETAIL
+END
+
+;
+; Vérification de l'éxistance du compte ou de la note demandé
+;
+PROCEDURE EDIT CPTCLE
+BEGIN
+  IF EFDCOD OF GLEFI_DETAIL <> "NOTE"
+  THEN BEGIN
+    GET VCPT_DSC2 VIA CPTCLE &
+                 USING CPTCLE OF GLEFI_DETAIL OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 249 ; Ce compte n'existe pas
+  END
+  ELSE BEGIN
+    GET A_EFI_NOTE VIA EFICIECLE,EFICLE &
+                   USING EFICIECLE OF GLETAT_FINANCIER,FIELDTEXT OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 291 ; Ce code d'état financier n'existe pas.
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Traitement de la compagnie
+;
+
+;
+; Accés au sous-écran de consultation des compagnies.
+;
+PROCEDURE INPUT CIECLE
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc106 MODE F PASSING T_CIECLE
+    LET FIELDTEXT = TRUNC(T_CIECLE)
+  END
+END
+
+;
+; Validation du numéro de compagnie, il est optionnel.
+;
+PROCEDURE EDIT CIECLE
+BEGIN
+  IF 0 <> SIZE(TRUNC(FIELDTEXT))
+  THEN BEGIN
+    GET MCCOMPAGNIE VIA CIECLE &
+                    USING CIECLE OF GLEFI_DETAIL OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 207 ; Ce numéro de compagnie n'existe pas.
+    ELSE LET CIENMC OF GLEFI_DETAIL = CIENMC OF MCCOMPAGNIE
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Traitement de l'unité administrative
+;
+
+;
+; Accés au sous-écran de consultation des unités administrative.
+;
+PROCEDURE INPUT UNACLE
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = CIECLE OF GLEFI_DETAIL
+    LET T_UNACLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc104 MODE F PASSING T_CIECLE,T_UNACLE
+    LET FIELDTEXT = TRUNC(T_UNACLE)
+  END
+  ;
+  ; Force l'éxécution du la procédure EDIT.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNC(UNACLE OF GLEFI_DETAIL))
+  THEN LET FIELDTEXT = UNACLE OF GLEFI_DETAIL
+END
+
+;
+; Validation de l'unité adm., elle est optionel.
+;
+PROCEDURE EDIT UNACLE
+BEGIN
+  ;
+  ; On valide l'unité adm. seulement si l'usager a spécifié un numéro de
+  ; compagnie sur la ligne.
+  ;
+  IF 0 <> SIZE(TRUNC(FIELDTEXT)) AND &
+     0 <> SIZE(TRUNC(CIECLE OF GLEFI_DETAIL))
+  THEN BEGIN
+    GET MCUNITE_ADM VIA CIECLE, UNACLE &
+                    USING CIECLE OF GLEFI_DETAIL, &
+                          UNACLE OF GLEFI_DETAIL OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 220 ; Ce numéro d'unité adm. n'existe pas.
+  END
+END
+
+;
+; Si l'usager à saisie une compagnie et une unité adm.
+; Alors le centre devient celui de l'unité.
+;
+;PROCEDURE PROCESS UNACLE
+;BEGIN
+;  IF     0 <> SIZE(TRUNC(UNACLE OF GLEFI_DETAIL)) &
+;     AND 0 <> SIZE(TRUNC(CIECLE OF GLEFI_DETAIL))
+;  THEN BEGIN
+;    LET CENCLE OF GLEFI_DETAIL = CENCLE OF MCUNITE_ADM
+;    DISPLAY CENCLE OF GLEFI_DETAIL
+;  END
+;END
+
+
+;-------------------------------------------------------------------------------
+;
+; Traitement du centre
+;
+
+;
+; Accès au sous-écran de consultation.
+;
+PROCEDURE INPUT CENCLE
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CENCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc114 MODE F PASSING T_CENCLE
+    LET FIELDTEXT = TRUNC(T_CENCLE)
+  END
+  ;
+  ; Force l'éxécution de la procédure EDIT.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNC(CENCLE OF GLEFI_DETAIL))
+  THEN LET FIELDTEXT = CENCLE OF GLEFI_DETAIL
+END
+
+;
+; Validation du centre, il est optionel.
+;
+PROCEDURE EDIT CENCLE
+BEGIN
+  IF 0 <> SIZE(TRUNC(FIELDTEXT))
+  THEN BEGIN
+    GET MCCENTRE VIA CENCLE &
+                 USING CENCLE OF GLEFI_DETAIL OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 226 ; Ce numéro de centre n'existe pas.
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager entre un seul caractère pour le code de transaction
+; souligné.
+;
+PROCEDURE EDIT EFDDSC
+BEGIN
+  IF  (   "SLG"  = EFDCOD OF GLEFI_DETAIL   &
+       OR "SLGD" = EFDCOD OF GLEFI_DETAIL   &
+       OR "SLGC" = EFDCOD OF GLEFI_DETAIL ) &
+    AND 1 < SIZE(TRUNC(FIELDTEXT))
+  THEN ERROR 287 ; Vous devez entrer un seul caractère pour le soulignement.
+END
+
+;-------------------------------------------------------------------------------
+;
+; Affiche la description du compte dans le champs texte du détail.
+;
+PROCEDURE OUTPUT EFDDSC
+BEGIN
+  IF CPTCLE OF GLEFI_DETAIL <> "" AND &
+     0 = SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    IF    EFDCOD OF GLEFI_DETAIL = "CPT" &
+       OR EFDCOD OF GLEFI_DETAIL = "SDEB" &
+       OR EFDCOD OF GLEFI_DETAIL = "SFIN" &
+       OR EFDCOD OF GLEFI_DETAIL = "JUM" &
+       OR EFDCOD OF GLEFI_DETAIL = "BAL"
+    THEN LET FIELDTEXT = CPTDSCABR OF VCPT_DSC2
+    ELSE LET FIELDTEXT = EFITITEF OF A_EFI_NOTE
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Il faut mettre les colonnes suivantes à blanc, si l'usager a saisie le
+; signe + ou -. Car une seule colonne est possible par ligne.
+;
+PROCEDURE PROCESS EFDCOL1
+BEGIN
+  IF FIELDTEXT = "+" OR &
+     FIELDTEXT = "-"
+  THEN BEGIN
+    LET EFDCOL2 OF GLEFI_DETAIL = " "
+    LET EFDCOL3 OF GLEFI_DETAIL = " "
+    LET EFDCOL4 OF GLEFI_DETAIL = " "
+    LET EFDCOL5 OF GLEFI_DETAIL = " "
+    LET EFDCOL6 OF GLEFI_DETAIL = " "
+    LET EFDCOL7 OF GLEFI_DETAIL = " "
+    LET EFDCOL8 OF GLEFI_DETAIL = " "
+    DISPLAY EFDCOL2 OF GLEFI_DETAIL
+    DISPLAY EFDCOL3 OF GLEFI_DETAIL
+    DISPLAY EFDCOL4 OF GLEFI_DETAIL
+    DISPLAY EFDCOL5 OF GLEFI_DETAIL
+    DISPLAY EFDCOL6 OF GLEFI_DETAIL
+    DISPLAY EFDCOL7 OF GLEFI_DETAIL
+    DISPLAY EFDCOL8 OF GLEFI_DETAIL
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Il faut mettre les colonnes suivantes à blanc, si l'usager a saisie le
+; signe + ou -. Car une seule colonne est possible par ligne.
+;
+PROCEDURE PROCESS EFDCOL2
+BEGIN
+  IF FIELDTEXT = "+" OR &
+     FIELDTEXT = "-"
+  THEN BEGIN
+    LET EFDCOL3 OF GLEFI_DETAIL = " "
+    LET EFDCOL4 OF GLEFI_DETAIL = " "
+    LET EFDCOL5 OF GLEFI_DETAIL = " "
+    LET EFDCOL6 OF GLEFI_DETAIL = " "
+    LET EFDCOL7 OF GLEFI_DETAIL = " "
+    LET EFDCOL8 OF GLEFI_DETAIL = " "
+    DISPLAY EFDCOL3 OF GLEFI_DETAIL
+    DISPLAY EFDCOL4 OF GLEFI_DETAIL
+    DISPLAY EFDCOL5 OF GLEFI_DETAIL
+    DISPLAY EFDCOL6 OF GLEFI_DETAIL
+    DISPLAY EFDCOL7 OF GLEFI_DETAIL
+    DISPLAY EFDCOL8 OF GLEFI_DETAIL
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Il faut mettre les colonnes suivantes à blanc, si l'usager a saisie le
+; signe + ou -. Car une seule colonne est possible par ligne.
+;
+PROCEDURE PROCESS EFDCOL3
+BEGIN
+  IF FIELDTEXT = "+" OR &
+     FIELDTEXT = "-"
+  THEN BEGIN
+    LET EFDCOL4 OF GLEFI_DETAIL = " "
+    LET EFDCOL5 OF GLEFI_DETAIL = " "
+    LET EFDCOL6 OF GLEFI_DETAIL = " "
+    LET EFDCOL7 OF GLEFI_DETAIL = " "
+    LET EFDCOL8 OF GLEFI_DETAIL = " "
+    DISPLAY EFDCOL4 OF GLEFI_DETAIL
+    DISPLAY EFDCOL5 OF GLEFI_DETAIL
+    DISPLAY EFDCOL6 OF GLEFI_DETAIL
+    DISPLAY EFDCOL7 OF GLEFI_DETAIL
+    DISPLAY EFDCOL8 OF GLEFI_DETAIL
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Il faut mettre les colonnes suivantes à blanc, si l'usager a saisie le
+; signe + ou -. Car une seule colonne est possible par ligne.
+;
+PROCEDURE PROCESS EFDCOL4
+BEGIN
+  IF FIELDTEXT = "+" OR &
+     FIELDTEXT = "-"
+  THEN BEGIN
+    LET EFDCOL5 OF GLEFI_DETAIL = " "
+    LET EFDCOL6 OF GLEFI_DETAIL = " "
+    LET EFDCOL7 OF GLEFI_DETAIL = " "
+    LET EFDCOL8 OF GLEFI_DETAIL = " "
+    DISPLAY EFDCOL5 OF GLEFI_DETAIL
+    DISPLAY EFDCOL6 OF GLEFI_DETAIL
+    DISPLAY EFDCOL7 OF GLEFI_DETAIL
+    DISPLAY EFDCOL8 OF GLEFI_DETAIL
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Il faut mettre les colonnes suivantes à blanc, si l'usager a saisie le
+; signe + ou -. Car une seule colonne est possible par ligne.
+;
+PROCEDURE PROCESS EFDCOL5
+BEGIN
+  IF FIELDTEXT = "+" OR &
+     FIELDTEXT = "-"
+  THEN BEGIN
+    LET EFDCOL6 OF GLEFI_DETAIL = " "
+    LET EFDCOL7 OF GLEFI_DETAIL = " "
+    LET EFDCOL8 OF GLEFI_DETAIL = " "
+    DISPLAY EFDCOL6 OF GLEFI_DETAIL
+    DISPLAY EFDCOL7 OF GLEFI_DETAIL
+    DISPLAY EFDCOL8 OF GLEFI_DETAIL
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Il faut mettre les colonnes suivantes à blanc, si l'usager a saisie le
+; signe + ou -. Car une seule colonne est possible par ligne.
+;
+PROCEDURE PROCESS EFDCOL6
+BEGIN
+  IF FIELDTEXT = "+" OR &
+     FIELDTEXT = "-"
+  THEN BEGIN
+    LET EFDCOL7 OF GLEFI_DETAIL = " "
+    LET EFDCOL8 OF GLEFI_DETAIL = " "
+    DISPLAY EFDCOL7 OF GLEFI_DETAIL
+    DISPLAY EFDCOL8 OF GLEFI_DETAIL
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Il faut mettre les colonnes suivantes à blanc, si l'usager a saisie le
+; signe + ou -. Car une seule colonne est possible par ligne.
+;
+PROCEDURE PROCESS EFDCOL7
+BEGIN
+  IF FIELDTEXT = "+" OR &
+     FIELDTEXT = "-"
+  THEN BEGIN
+    LET EFDCOL8 OF GLEFI_DETAIL = " "
+    DISPLAY EFDCOL8 OF GLEFI_DETAIL
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation des colonnes selon le code de transaction.
+;
+;
+PROCEDURE EDIT T_SILENT
+BEGIN
+
+  IF "TOT" = EFDCOD OF GLEFI_DETAIL
+  THEN BEGIN
+    IF NOT MATCHPATTERN( TRUNCATE( EFDCOL1 OF GLEFI_DETAIL + &
+                                   EFDCOL2 OF GLEFI_DETAIL + &
+                                   EFDCOL3 OF GLEFI_DETAIL + &
+                                   EFDCOL4 OF GLEFI_DETAIL + &
+                                   EFDCOL5 OF GLEFI_DETAIL + &
+                                   EFDCOL6 OF GLEFI_DETAIL + &
+                                   EFDCOL7 OF GLEFI_DETAIL + &
+                                   EFDCOL8 OF GLEFI_DETAIL), &
+                     "( *!= *(+|-))|(       =)" )
+    THEN ERROR 285 ; Le signe = doit être présent pour un total.
+  END
+  ELSE BEGIN
+    IF NOT MATCHPATTERN( TRUNCATE( EFDCOL1 OF GLEFI_DETAIL + &
+                                   EFDCOL2 OF GLEFI_DETAIL + &
+                                   EFDCOL3 OF GLEFI_DETAIL + &
+                                   EFDCOL4 OF GLEFI_DETAIL + &
+                                   EFDCOL5 OF GLEFI_DETAIL + &
+                                   EFDCOL6 OF GLEFI_DETAIL + &
+                                   EFDCOL7 OF GLEFI_DETAIL + &
+                                   EFDCOL8 OF GLEFI_DETAIL), &
+                     " *(+|-)" )
+    THEN ERROR 283 ; Seul les signes + et - sont valide.
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Accès au sous-écran de consultation.
+;
+;
+PROCEDURE INPUT EFDFLGIMP
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_EFDFLGIMP = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_EFDFLGIMP, T_EFDFLGIMP
+    LET FIELDTEXT = TRUNC(T_EFDFLGIMP)
+  END
+  ;
+  ; Valeur par défaut pour le flag d'impression des lignes.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 = SIZE(TRUNC(EFDFLGIMP OF GLEFI_DETAIL))
+  THEN LET FIELDTEXT = "1"
+
+END
+
+;-------------------------------------------------------------------------------
+;
+; Cet procédure demande les champs à l'usager selon le code de transaction.
+;
+; Valeurs des codes de transaction:
+;
+;         CPT    Compte             Saisie d'un compte.
+;         SDEB   Solde de début     Saisie d'un compte, mais indique de prendre
+;                                   le solde de début période.
+;         SFIN   Solde de fin       Saisie d'un compte, mais indique de prendre
+;                                   le solde de fin période.
+;         TOT     Total             Pour faire des totaux.
+;
+;         BAL     Balance           Pour balancer 2 lignes, sert si l'usager
+;                                   imprime des E/F avec des montants arrondi.
+;         JUM1à9  Jumelé            Jumel 2 lignes.
+;         TEXT    Texte             Saisie du texte libre.
+;         SLG     Soulignement      Saisie du caractère de souslignement.
+;         SLGD    Soulignement      Saisie du caractère de souslignement.
+;         SLGC    Soulignement      Saisie du caractère de souslignement.
+;         PAGE    Saut de page.     Saut de page manuel.
+;
+PROCEDURE APPEND
+BEGIN
+
+  IF T_FLGRNU = "O"
+  THEN ERROR 289 ; Faire une recherche avant modif.
+
+  ACCEPT EFDNUMLIG OF GLEFI_DETAIL
+  ACCEPT EFDCOD    OF GLEFI_DETAIL
+
+  IF D_GRPCPT = 1
+  THEN BEGIN
+    IF EFDCOD OF GLEFI_DETAIL = "NOTE"
+    THEN INFO 290 ; Entrez le code identifiant la note.
+    ACCEPT CPTCLE    OF GLEFI_DETAIL
+  END
+
+  IF D_GRPCIE = 1
+  THEN BEGIN
+    ACCEPT CIECLE OF GLEFI_DETAIL
+    ACCEPT UNACLE OF GLEFI_DETAIL
+    ;
+    ; Notion de centre.
+    ;
+    IF 0 = SIZE(TRUNC(UNACLE OF GLEFI_DETAIL))
+    THEN ACCEPT CENCLE    OF GLEFI_DETAIL
+  END
+
+  IF D_GRPDSC = 1
+  THEN BEGIN
+    IF   "SLG"   = EFDCOD OF GLEFI_DETAIL &
+      OR "SLGD"  = EFDCOD OF GLEFI_DETAIL &
+      OR "SLGC"  = EFDCOD OF GLEFI_DETAIL
+    THEN INFO 286 ; Entrez un seul caractère pour le soulignement.
+    ACCEPT EFDDSC    OF GLEFI_DETAIL
+  END
+
+  IF D_GRPCOL = 1
+  THEN BEGIN
+    ACCEPT EFDCOL1   OF GLEFI_DETAIL
+    IF EFDCOL1 OF GLEFI_DETAIL <> "+" AND &
+       EFDCOL1 OF GLEFI_DETAIL <> "-"
+    THEN BEGIN
+      ACCEPT EFDCOL2   OF GLEFI_DETAIL
+      IF EFDCOL2 OF GLEFI_DETAIL <> "+" AND &
+         EFDCOL2 OF GLEFI_DETAIL <> "-"
+      THEN BEGIN
+        ACCEPT EFDCOL3   OF GLEFI_DETAIL
+        IF EFDCOL3 OF GLEFI_DETAIL <> "+" AND &
+           EFDCOL3 OF GLEFI_DETAIL <> "-"
+        THEN BEGIN
+          ACCEPT EFDCOL4   OF GLEFI_DETAIL
+          IF EFDCOL4 OF GLEFI_DETAIL <> "+" AND &
+             EFDCOL4 OF GLEFI_DETAIL <> "-"
+          THEN BEGIN
+            ACCEPT EFDCOL5   OF GLEFI_DETAIL
+            IF EFDCOL5 OF GLEFI_DETAIL <> "+" AND &
+               EFDCOL5 OF GLEFI_DETAIL <> "-"
+            THEN BEGIN
+              ACCEPT EFDCOL6   OF GLEFI_DETAIL
+              IF EFDCOL6 OF GLEFI_DETAIL <> "+" AND &
+                 EFDCOL6 OF GLEFI_DETAIL <> "-"
+              THEN BEGIN
+                ACCEPT EFDCOL7   OF GLEFI_DETAIL
+                IF EFDCOL7 OF GLEFI_DETAIL <> "+" AND &
+                   EFDCOL7 OF GLEFI_DETAIL <> "-"
+                THEN BEGIN
+                  ACCEPT EFDCOL8   OF GLEFI_DETAIL
+                END
+              END
+            END
+          END
+        END
+      END
+    END
+  EDIT T_SILENT
+  END
+
+  IF D_GRPIMP = 1
+  THEN ACCEPT EFDFLGIMP OF GLEFI_DETAIL
+
+  IF D_GRPREF1 = 1
+  THEN BEGIN
+    IF "JUM"  = EFDCOD OF GLEFI_DETAIL
+    THEN INFO 282; Entrez le numéro ligne à jumeler.
+    IF "BAL"  = EFDCOD OF GLEFI_DETAIL
+    THEN INFO 280; Entrez le premier numéro de ligne à balancer.
+    ACCEPT EFDLIGREF1 OF GLEFI_DETAIL
+  END
+
+  IF D_GRPREF2 = 1
+  THEN BEGIN
+    IF "BAL"  = EFDCOD OF GLEFI_DETAIL
+    THEN INFO 281; Entrez le deuxiemme numéro de ligne à balancer.
+    ACCEPT EFDLIGREF2 OF GLEFI_DETAIL
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Entrée des données
+;
+PROCEDURE ENTRY
+BEGIN
+  FOR GLEFI_DETAIL
+    PERFORM APPEND
+END
+
+;-------------------------------------------------------------------------------
+;
+; Modification d'une ligne de détail de l'état financier.
+; Cette procédure respecte la logique de la procédure ENTRY.
+;
+;
+PROCEDURE DESIGNER 01
+BEGIN
+  IF T_FLGRNU = "O"
+  THEN ERROR 289 ; Faire une recherche avant modif.
+
+  ACCEPT EFDNUMLIG OF GLEFI_DETAIL
+  ACCEPT EFDCOD    OF GLEFI_DETAIL
+
+  IF D_GRPCPT = 1
+  THEN BEGIN
+    IF EFDCOD OF GLEFI_DETAIL = "NOTE"
+    THEN INFO 290 ; Entrez le code identifiant la note.
+    ACCEPT CPTCLE    OF GLEFI_DETAIL
+  END
+
+  IF D_GRPCIE = 1
+  THEN BEGIN
+    ;
+    ; On peut spécifier une compagnie seulement si le holding permet l'inter-cie.
+    ;
+    ACCEPT CIECLE OF GLEFI_DETAIL
+    ACCEPT UNACLE OF GLEFI_DETAIL
+    ;
+    ; Notion de centre.
+    ;
+    IF 0 = SIZE(TRUNC(UNACLE OF GLEFI_DETAIL))
+    THEN ACCEPT CENCLE    OF GLEFI_DETAIL
+  END
+
+  IF D_GRPDSC = 1
+  THEN BEGIN
+    IF   "SLG"   = EFDCOD OF GLEFI_DETAIL &
+      OR "SLGD"  = EFDCOD OF GLEFI_DETAIL &
+      OR "SLGC"  = EFDCOD OF GLEFI_DETAIL
+    THEN INFO 286 ; Entrez un seul caractère pour le soulignement.
+    ACCEPT EFDDSC    OF GLEFI_DETAIL
+  END
+
+  IF D_GRPCOL = 1
+  THEN BEGIN
+    ACCEPT EFDCOL1   OF GLEFI_DETAIL
+    IF EFDCOL1 OF GLEFI_DETAIL <> "+" AND &
+       EFDCOL1 OF GLEFI_DETAIL <> "-"
+    THEN BEGIN
+      ACCEPT EFDCOL2   OF GLEFI_DETAIL
+      IF EFDCOL2 OF GLEFI_DETAIL <> "+" AND &
+         EFDCOL2 OF GLEFI_DETAIL <> "-"
+      THEN BEGIN
+        ACCEPT EFDCOL3   OF GLEFI_DETAIL
+        IF EFDCOL3 OF GLEFI_DETAIL <> "+" AND &
+           EFDCOL3 OF GLEFI_DETAIL <> "-"
+        THEN BEGIN
+          ACCEPT EFDCOL4   OF GLEFI_DETAIL
+          IF EFDCOL4 OF GLEFI_DETAIL <> "+" AND &
+             EFDCOL4 OF GLEFI_DETAIL <> "-"
+          THEN BEGIN
+            ACCEPT EFDCOL5   OF GLEFI_DETAIL
+            IF EFDCOL5 OF GLEFI_DETAIL <> "+" AND &
+               EFDCOL5 OF GLEFI_DETAIL <> "-"
+            THEN BEGIN
+              ACCEPT EFDCOL6   OF GLEFI_DETAIL
+              IF EFDCOL6 OF GLEFI_DETAIL <> "+" AND &
+                 EFDCOL6 OF GLEFI_DETAIL <> "-"
+              THEN BEGIN
+                ACCEPT EFDCOL7   OF GLEFI_DETAIL
+                IF EFDCOL7 OF GLEFI_DETAIL <> "+" AND &
+                   EFDCOL7 OF GLEFI_DETAIL <> "-"
+                THEN BEGIN
+                  ACCEPT EFDCOL8   OF GLEFI_DETAIL
+                END
+              END
+            END
+          END
+        END
+      END
+    END
+  EDIT T_SILENT
+  END
+
+  IF D_GRPIMP = 1
+  THEN ACCEPT EFDFLGIMP OF GLEFI_DETAIL
+
+  IF D_GRPREF1 = 1
+  THEN BEGIN
+    IF "JUM"  = EFDCOD OF GLEFI_DETAIL
+    THEN INFO 282; Entrez le numéro ligne à jumeler.
+    IF "BAL"  = EFDCOD OF GLEFI_DETAIL
+    THEN INFO 280; Entrez le premier numéro de ligne à balancer.
+    ACCEPT EFDLIGREF1 OF GLEFI_DETAIL
+  END
+
+  IF D_GRPREF2 = 1
+  THEN BEGIN
+    IF "BAL"  = EFDCOD OF GLEFI_DETAIL
+    THEN INFO 281; Entrez le deuxiemme numéro de ligne à balancer.
+    ACCEPT EFDLIGREF2 OF GLEFI_DETAIL
+  END
+
+END
+
+;-------------------------------------------------------------------------------
+;
+; Cette procédure renumérote les numéros de ligne.
+;
+;
+PROCEDURE DESIGNER RENU
+BEGIN
+  ;
+  ; Il faut s'assurer que l'usager n'a pas modifié des records à l'écran.
+  ;
+  FOR GLEFI_DETAIL
+  BEGIN
+    IF ALTEREDRECORD OF GLEFI_DETAIL
+    THEN ERROR 216 ; Faire une mise à jour.
+  END
+
+  LET T_EFICIECLE = EFICIECLE OF GLETAT_FINANCIER
+  LET T_EFICLE    = EFICLE    OF GLETAT_FINANCIER
+
+  RUN SCREEN gl011c PASSING T_EFICIECLE, T_EFICLE MODE E
+
+  LET T_FLGRNU = "O"
+  INFO 288 ; Faire une recherche pour visualiser le résultat.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR GLEFI_DETAIL
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF    DELETEDRECORD OF GLEFI_DETAIL &
+      AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF GLEFI_DETAIL &
+       AND NOT NEWRECORD     OF GLEFI_DETAIL &
+       AND NOT DELETEDRECORD OF GLEFI_DETAIL &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+  END
+  ;
+  ; Maintenance du nombre de lignes de détail d'un état financier, servant
+  ; au programme d'impression des états financier.
+  ;
+  FOR GLEFI_DETAIL
+  BEGIN
+    IF NEWRECORD OF GLEFI_DETAIL
+    THEN LET EFINBRLIG OF GLETAT_FINANCIER = EFINBRLIG OF GLETAT_FINANCIER + 1
+    ;
+    ; Lors d'une destruction, la première mise à jour fait par l'usager rempli
+    ; la condition qui suit. Dans le cas des mises à jour subséquente du même
+    ; record seul le flag DELETEDRECORD est vrai et le flag ALTEREDRECORD est
+    ; à faux.
+    ;
+    IF DELETEDRECORD OF GLEFI_DETAIL AND &
+       ALTEREDRECORD OF GLEFI_DETAIL
+    THEN LET EFINBRLIG OF GLETAT_FINANCIER = EFINBRLIG OF GLETAT_FINANCIER - 1
+  END
+END
+
+BUILD
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+*************************** Détail - état financier ****************************
+* Code E/F......: xxxx            Type E/F......: x  xxxxxxxxxxxxxxxxxxxxxxxxx *
+********************************************************************************
+*   No   Code   No                                    *1 3 5 7 * * Ref    Ref  *
+*  Ligne Tran Compte Cie  Unité    Cen  Texte         * 2 4 6 8*I* (1)    (2)  *
+* xxxxxx xxxx xxxxxx xxxx xxxxxxxx xxxx xxxxxxxxxxxxx *xxxxxxxx*x*xxxxxx xxxxxx*
+* xxxxxx xxxx xxxxxx xxxx xxxxxxxx xxxx xxxxxxxxxxxxx *xxxxxxxx*x*xxxxxx xxxxxx*
+* xxxxxx xxxx xxxxxx xxxx xxxxxxxx xxxx xxxxxxxxxxxxx *xxxxxxxx*x*xxxxxx xxxxxx*
+* xxxxxx xxxx xxxxxx xxxx xxxxxxxx xxxx xxxxxxxxxxxxx *xxxxxxxx*x*xxxxxx xxxxxx*
+* xxxxxx xxxx xxxxxx xxxx xxxxxxxx xxxx xxxxxxxxxxxxx *xxxxxxxx*x*xxxxxx xxxxxx*
+* xxxxxx xxxx xxxxxx xxxx xxxxxxxx xxxx xxxxxxxxxxxxx *xxxxxxxx*x*xxxxxx xxxxxx*
+* xxxxxx xxxx xxxxxx xxxx xxxxxxxx xxxx xxxxxxxxxxxxx *xxxxxxxx*x*xxxxxx xxxxxx*
+* xxxxxx xxxx xxxxxx xxxx xxxxxxxx xxxx xxxxxxxxxxxxx *xxxxxxxx*x*xxxxxx xxxxxx*
+* xxxxxx xxxx xxxxxx xxxx xxxxxxxx xxxx xxxxxxxxxxxxx *xxxxxxxx*x*xxxxxx xxxxxx*
+* xxxxxx xxxx xxxxxx xxxx xxxxxxxx xxxx xxxxxxxxxxxxx *xxxxxxxx*x*xxxxxx xxxxxx*
+* xxxxxx xxxx xxxxxx xxxx xxxxxxxx xxxx xxxxxxxxxxxxx *xxxxxxxx*x*xxxxxx xxxxxx*
+* xxxxxx xxxx xxxxxx xxxx xxxxxxxx xxxx xxxxxxxxxxxxx *xxxxxxxx*x*xxxxxx xxxxxx*
+* xxxxxx xxxx xxxxxx xxxx xxxxxxxx xxxx xxxxxxxxxxxxx *xxxxxxxx*x*xxxxxx xxxxxx*
+* xxxxxx xxxx xxxxxx xxxx xxxxxxxx xxxx xxxxxxxxxxxxx *xxxxxxxx*x*xxxxxx xxxxxx*
+* xxxxxx xxxx xxxxxx xxxx xxxxxxxx xxxx xxxxxxxxxxxxx *xxxxxxxx*x*xxxxxx xxxxxx*
+********************************************************************************
+@ENDIF

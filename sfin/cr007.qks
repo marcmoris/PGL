@@ -1,0 +1,1419 @@
+;/T/ Encaissements
+;
+;//M/GRA01/Francois Richard/1999-06-18
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur..: Alain Côté
+;    Date Création: 23 juin 1993
+;
+;    Description..: On peut saisir deux types d'encaissement, soit un
+;                   encaissement sur factures, ou soit divers.
+;
+;                   Un encaissement sur factures est un montant reçu par un
+;                   client pour payé des factures qui sont incrites au
+;                   recevable.
+;
+;                   Un encaissement divers, est une somme d'argent qui entre
+;                   dans le compte de banque qui ne provient pas d'un paiement
+;                   de facture. Comme par exemple, une subvention, une avance
+;                   remboursé par un employé.
+;
+;                   Le montant reçu est dans la devise du client et le montant
+;                   encaissé est dans la devise du compte de banque.
+;
+;/M/ François Déry, 30 avril 1999
+;       Modifier l'accèss au fichier de séquence car il a
+;       été converti en format interbase au lieu d'indexé.
+;-------------------------------------------------------------------------------
+;**M Alain Côté, le 23 juin 1993
+;**M
+;**M Maintenance des champs modifiables après journalisation dans l'historique
+;**m du grand livre.
+;**m
+;
+;/V3.02.05/, Nancy Marceau, 13 juin 1994, (273)
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cr007 ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             AUTOUPDATE &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CLICIECLE, &
+                       T_EMPCIECLE, &
+                       T_FOUCIECLE, &
+                       T_CIECLEMNU, &
+                       T_CIENOM   , &
+                       T_PECCLEMNU, &
+                       T_PECCLECOU, &
+                       T_DPOCLEFND
+
+TEMPORARY T_PECCLECOU_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_FIELDTEXT_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+
+USE ussectmp  NOLIST
+    "CR007"
+
+USE cr007.hlp NOLIST
+
+USE ustraecr NOLIST
+
+USE usactecr NOLIST
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Imputation                      " ACTION DESIGNER D001
+  MENUITEM LABEL "Ventilation de factures         " ACTION DESIGNER D002
+  MENUITEM LABEL "Ecriture comptable              " ACTION DESIGNER D003
+  MENUITEM LABEL "Paramètres de sélection         " ACTION DESIGNER D004
+  MENUITEM LABEL "Gestion des lots                " ACTION DESIGNER D005
+  MENUITEM LABEL "Vérification                    " ACTION DESIGNER D006
+@ELSE
+ACTIONMENU LABEL "Subscreens"
+  MENUITEM LABEL "Charge                          " ACTION DESIGNER D001
+  MENUITEM LABEL "Invoice breakdown               " ACTION DESIGNER D002
+  MENUITEM LABEL "Accounting entry                " ACTION DESIGNER D003
+  MENUITEM LABEL "Selection parameter             " ACTION DESIGNER D004
+  MENUITEM LABEL "Batch verification              " ACTION DESIGNER D005
+  MENUITEM LABEL "Verification                    " ACTION DESIGNER D006
+@ENDIF
+
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE CRDPO_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_CLICIECLE CHARACTER SIZE 4 ; Compagnie de la charte client
+TEMPORARY T_EMPCIECLE CHARACTER SIZE 4 ; Compagnie de la charte employé
+TEMPORARY T_FOUCIECLE CHARACTER SIZE 4 ; Compagnie de la charte fournisseur
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4 ; Compagnie du menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40; Nom de la compagnie du menu.
+TEMPORARY T_PECCLEMNU CHARACTER SIZE 4 ; Période saisie au menu
+TEMPORARY T_PECCLECOU CHARACTER SIZE 4 ; Période courante
+TEMPORARY T_DPOCLEFND CHARACTER SIZE 12 ; Clé de recherche
+
+;
+; Variables temporaires pour répèter la valeur de la période et du lot en
+; mode saisie.
+;
+TEMPORARY T_PECCLESAI CHARACTER SIZE 4 RESET AT STARTUP
+TEMPORARY T_LCRCLESAI CHARACTER SIZE 4 RESET AT STARTUP
+
+;-------------------------------------------------------------------------------
+
+FILE CRDEPOT          PRIMARY NOITEM
+  ;
+  ; La procédure PATH et FIND on été écrite pour que l'écran soit appelé
+  ; directement par l'analyse de compte.
+  ;
+  ;
+  ; On sélectionne que les encaissements, car la relation CRDEPOT contient
+  ; aussi les mauvaises créances.
+  ;
+  SELECT IF DPOTYPECR OF CRDEPOT = "EN"
+
+  ITEM CIECLE    OF CRDEPOT INITIAL T_CIECLEMNU
+  ITEM DPOTYPECR OF CRDEPOT INITIAL "EN"
+  ITEM DPODATCRE OF CRDEPOT INITIAL SYSDATE
+  ITEM DPOHRECRE OF CRDEPOT INITIAL SYSTIME / 10000
+  ITEM DPOUSRCRE OF CRDEPOT INITIAL LOGONID
+  ;
+  ; Le timbre de modification est mis à jour si l'usager modifie la relation
+  ; CRDEPOT.
+  ;
+  ITEM DPODATMOD OF CRDEPOT FINAL   SYSDATE         &
+                                        IF NOT NEWRECORD OF CRDEPOT AND &
+                                           ALTEREDRECORD OF CRDEPOT
+  ITEM DPOHREMOD OF CRDEPOT FINAL   SYSTIME / 10000 &
+                                        IF NOT NEWRECORD OF CRDEPOT AND &
+                                           ALTEREDRECORD OF CRDEPOT
+  ITEM DPOUSRMOD OF CRDEPOT FINAL   LOGONID         &
+                                        IF NOT NEWRECORD OF CRDEPOT AND &
+                                           ALTEREDRECORD OF CRDEPOT
+  ITEM PECCLE    OF CRDEPOT INITIAL T_PECCLESAI
+  ITEM LCRCLE    OF CRDEPOT INITIAL T_LCRCLESAI
+
+
+;
+; Destruction des fils lors de la destruction du père.
+;
+FILE CRDPO_IMPUTATION DELETE &
+                      NOITEM
+  ACCESS VIA CIECLE, &
+             DPOCLE  &
+         USING CIECLE OF CRDEPOT, &
+               DPOCLE OF CRDEPOT
+;
+FILE CRCAR_HISTO      DESIGNER &
+                      OPEN READ SHARE
+
+;
+; Numéro séquentiel des encaissements, fichier indexé.
+;
+FILE CRDPO_SEQ        DESIGNER &
+                      TRANSACTION GEN_NUM_SEQ
+
+;
+; Validation de la période comptable.
+;
+FILE MCPERIODE_CTB    REFERENCE
+  ACCESS VIA PECCLE &
+         USING PECCLE OF CRDEPOT
+
+;
+; Validation du lot.
+;
+FILE CRLOT            REFERENCE
+  ACCESS VIA CIECLE, &
+             PECCLE, &
+             LCRCLE &
+         USING CIECLE OF CRDEPOT, &
+               PECCLE OF CRDEPOT, &
+               LCRCLE OF CRDEPOT
+
+;
+; Validation du numéro de client et on a besoin de certaines informations sur
+; le client , comme le type, son statut...
+;
+FILE VCLC_CLI         REFERENCE
+  ACCESS VIA CLICIECLE, &
+             CLICLE   , &
+             CIECLE   , &
+             CLIREFTYP  &
+         USING REFCIECLE OF CRDEPOT, &
+               REFCLENUM OF CRDEPOT, &
+               CIECLE    OF CRDEPOT, &
+               REFCLETYP OF CRDEPOT
+
+
+;
+; Validation de la référence(client/employé/fournisseur).
+;
+FILE MCREFERENCE      REFERENCE
+  ACCESS VIA REFCIECLE, &
+             REFCLETYP, &
+             REFCLENUM &
+         USING REFCIECLE OF CRDEPOT, &
+               REFCLETYP OF CRDEPOT, &
+               REFCLENUM OF CRDEPOT
+
+;
+; Validation du compte de banque pour les encaissements divers.
+;
+FILE MCLIVRET_BQ      REFERENCE
+ ACCESS VIA CIECLE   , &
+            LBQCPTENC  &
+        USING CIECLE    OF CRDEPOT, &
+              LBQCPTENC OF CRDEPOT
+
+
+;
+; Pour avoir la devise du compte de banque.
+;
+FILE VCPT_DSC         REFERENCE
+  ACCESS VIA CPTCLE &
+         USING LBQCPTENC OF CRDEPOT
+
+
+;
+; Validation du type d'encaissement.
+;
+DEFINE    D_DPOTYP CHARACTER SIZE 16 = "DPOTYP"
+TEMPORARY T_DPOTYP CHARACTER SIZE  4
+;
+FILE VCBI_DSC         ALIAS A_CBI_DPOTYP &
+                      REFERENCE
+  ACCESS VIA XELNOM, &
+             CBICLE  &
+         USING D_DPOTYP         , &
+               DPOTYP OF CRDEPOT
+
+
+;
+; Validation de référence(client/employé).
+;
+DEFINE    D_REFCLETYP CHARACTER SIZE 16 = "REFCLETYP"
+TEMPORARY T_REFCLETYP CHARACTER SIZE  4
+;
+FILE VCBI_DSC         ALIAS A_CBI_REFCLETYP &
+                      REFERENCE
+  ACCESS VIA XELNOM, &
+             CBICLE  &
+         USING D_REFCLETYP      , &
+               REFCLETYP OF CRDEPOT
+
+
+;
+; Validation du type de paiement.
+;
+DEFINE    D_DPOTYPPAM CHARACTER SIZE 16 = "DPOTYPPAM"
+TEMPORARY T_DPOTYPPAM CHARACTER SIZE  4
+;
+FILE VCBI_DSC         ALIAS A_CBI_DPOTYPPAM &
+                      REFERENCE
+  ACCESS VIA XELNOM, &
+             CBICLE  &
+         USING D_DPOTYPPAM, &
+               DPOTYPPAM OF CRDEPOT
+
+;-------------------------------------------------------------------------------
+;
+; Informations sur le holding
+;
+FILE MCHOLDING REFERENCE
+  ACCESS VIA CIENMC &
+         USING "1"
+
+
+;-------------------------------------------------------------------------------
+;
+
+TEMPORARY T_LCRCLE    CHARACTER SIZE  4 ; Popup sur les lots
+TEMPORARY T_CODMOD    CHARACTER SIZE  2 ; Popup sur les périodes
+TEMPORARY T_PECCLE    CHARACTER SIZE  4 ; Popup sur les périodes et lots
+TEMPORARY T_TYPECR    CHARACTER SIZE  2 ; Popup sur les lots
+
+TEMPORARY T_REFCIECLE  CHARACTER SIZE  4 ; Popup sur les clients/employé.
+TEMPORARY T_REFCLENUM  CHARACTER SIZE  6 ; Popup sur les clients/employé.
+TEMPORARY T_REFCLETYP2 CHARACTER SIZE  1 ; Popup sur les clients/employé.
+TEMPORARY T_REFSTUPAT  CHARACTER SIZE  5 ; Popup sur les clients/employé.
+
+TEMPORARY T_LBQCPTENC CHARACTER SIZE  6 ; Popup sur les comptes de banque.
+
+;
+; Variable pour le sous-écran de consultation des écritures comptable
+;
+DEFINE D_HISCLE INTEGER UNSIGNED SIZE 4 = HISCLE OF CRDEPOT
+
+;
+; Si le lot est autorisé, sert au sous-écrans.
+;
+DEFINE D_LCRATRJOU  CHARACTER SIZE 1 = LCRATRJOU OF CRLOT
+;
+; Devise de la référence, sert au sous-écran CR007A.
+;
+DEFINE D_REFDEVCLE  CHARACTER SIZE 3 = DEVCLE OF MCREFERENCE
+
+;
+; Pour affciher le nom du client ou le nom de l'employé ou celui saisie dans
+; le cas d'un client divers. Sert dans les sous-écran pour la même raison.
+;
+DEFINE D_DPONOM CHARACTER SIZE 40 = REFNOM OF MCREFERENCE &
+                                    IF    REFCLETYP OF CRDEPOT = "E" &
+                                       OR REFCLETYP OF CRDEPOT = "F" &
+                                       OR (     REFCLETYP OF CRDEPOT = "C" &
+                                            AND CLITYP    OF VCLC_CLI <> "D" ) &
+                               ELSE DPONOM OF CRDEPOT
+
+;
+; Définition de l'en-tête, # compagnie et nom de la compagnie.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Encaissements " &
+@ELSE
+      " Cash Receipt " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST
+
+ALIGN(3,3,19) (,27,43) (,49,65) (,,74)
+
+FIELD PECCLE OF CRDEPOT HIDDEN ID 05 &
+        DEFAULT T_PECCLEMNU &
+        DUPLICATE &
+        NOCHANGE &
+        LOOKUP ON MCPERIODE_CTB &
+          MESSAGE 606 ; Cette periode est inexistante
+
+FIELD LCRCLE    OF CRDEPOT &
+        REQUIRED  &
+        DUPLICATE &
+        NOCHANGE  &
+        NUMERIC   &
+        SIGNIFICANCE 4 &
+        LOOKUP ON CRLOT &
+          MESSAGE 622 ; Ce lot est inexistant
+
+FIELD DPODATJOU OF CRDEPOT  FORMAT YYYYMMDD PATTERN "####/##/##"&
+        DISPLAY
+
+FIELD DPOHREJOU OF CRDEPOT &
+        DISPLAY
+
+SKIP 1
+
+ALIGN(3,3,19) (,,21)
+
+FIELD DPOTYP    OF CRDEPOT HIDDEN ID 10 &
+        REQUIRED &
+        NOCHANGE &
+        NOCORRECT &
+        LOOKUP ON A_CBI_DPOTYP &
+          MESSAGE 689 ; Code invalide.
+
+FIELD CBIDSC OF A_CBI_DPOTYP &
+        DISPLAY
+
+SKIP 1
+
+ALIGN(3,3,19) (,49,65)
+
+FIELD DPOCLE OF CRDEPOT HIDDEN ID 15 &
+        DISPLAY
+
+FIELD DPODAT OF CRDEPOT  FORMAT YYYYMMDD PATTERN "####/##/##"&
+        REQUIRED
+
+SKIP 1
+
+ALIGN(3,3,19) (,,21) (,,28)
+
+FIELD REFCLETYP OF CRDEPOT HIDDEN ID 20 &
+@IF FRANCAIS
+        LABEL "Client/employé:" &
+@ELSE
+        LABEL "Client/employe:" &
+@ENDIF
+        REQUIRED &
+        LOOKUP ON A_CBI_REFCLETYP &
+          MESSAGE 682; Code invalide
+
+FIELD REFCLENUM OF CRDEPOT &
+        REQUIRED &
+        LOOKUP ON MCREFERENCE &
+          MESSAGE 618 ; Ce client/employé n'existe pas.
+
+FIELD DPONOM    OF CRDEPOT &
+        REQUIRED
+
+SKIP 1
+
+ALIGN (3,3,19) (,,26)
+
+FIELD LBQCPTENC OF CRDEPOT HIDDEN ID 25 &
+        REQUIRED &
+        LOOKUP ON MCLIVRET_BQ &
+          MESSAGE 611 ; Ce compte d'encaisse n'existe pas.
+
+FIELD CPTDSC OF VCPT_DSC &
+        DISPLAY
+
+SKIP 1
+
+ALIGN (3,3,19)
+
+FIELD DPOCHQNUM OF CRDEPOT HIDDEN ID 30 &
+        REQUIRED
+
+ALIGN(3,3,19) (,,21)
+
+FIELD DPOTYPPAM OF CRDEPOT HIDDEN ID 35 &
+        LOOKUP ON A_CBI_DPOTYPPAM &
+          MESSAGE 690 ; Ce type de paiement n'existe pas.
+
+FIELD CBIDSC OF A_CBI_DPOTYPPAM &
+        DISPLAY
+
+SKIP 1
+
+ALIGN(3,3,19)
+
+FIELD DPODSC1 OF CRDEPOT HIDDEN ID 40 &
+        REQUIRED
+
+FIELD DPODSC2 OF CRDEPOT &
+        NOLABEL &
+        ID SAME
+
+SKIP 1
+
+ALIGN(3,3,19) (,33,34)
+
+FIELD DPOMNTPAM OF CRDEPOT HIDDEN ID 45 &
+        REQUIRED
+
+FIELD DEVCLE OF MCREFERENCE &
+        LABEL "/" &
+        DISPLAY
+
+FIELD DPOMNTENC OF CRDEPOT HIDDEN ID 50 &
+        REQUIRED
+
+FIELD DEVCLE OF VCPT_DSC &
+        LABEL "/" &
+        DISPLAY
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+  ;
+  ; Si l'écran n'est pas appellé par le menu, alors on interdit la saisie,
+  ; la destruction et la modification à l'usager
+  ;
+  IF T_DPOCLEFND <> ""
+  THEN BEGIN
+    LET TZ_SECENT = "0"
+    LET TZ_SECDEL = "0"
+    LET TZ_SECMOD = "0"
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les périodes.
+;
+;
+PROCEDURE INPUT PECCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CODMOD = "CR"
+    LET T_PECCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc109 MODE F PASSING T_CIECLEMNU, &
+                                    T_PECCLE   , &
+                                    T_CODMOD
+    LET FIELDTEXT = TRUNC(T_PECCLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation de la période.
+;
+;
+PROCEDURE EDIT PECCLE
+BEGIN
+
+  ; Ajustement pour le changement de siècle
+  IF FIELDTEXT[1:1] < "8"
+  THEN LET T_FIELDTEXT_SIE = "1" + FIELDTEXT
+  ELSE LET T_FIELDTEXT_SIE = "0" + FIELDTEXT
+
+  ; Ajustement pour le changement de siècle
+  IF T_PECCLECOU[1:1] < "8"
+  THEN LET T_PECCLECOU_SIE = "1" + T_PECCLECOU
+  ELSE LET T_PECCLECOU_SIE = "0" + T_PECCLECOU
+
+  IF T_FIELDTEXT_SIE < T_PECCLECOU_SIE
+  THEN ERROR 607 ; Cette période est fermée.
+  ;
+  IF FIELDTEXT <> T_PECCLECOU
+  THEN WARNING 608 ; La période indiquée est différente de la période courante.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les lots.
+;
+;
+PROCEDURE INPUT LCRCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TYPECR = "EN"
+    LET T_PECCLE = PECCLE OF CRDEPOT
+    LET T_LCRCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cr101 MODE F PASSING T_CIECLEMNU, &
+                                    T_TYPECR, &
+                                    T_PECCLE, &
+                                    T_LCRCLE
+    LET FIELDTEXT = TRUNC(T_LCRCLE)
+  END
+  ;
+  ; Force l'éxécution du LOOKUP sur le lot et de la procédure EDIT.
+  ;
+  IF     NOT FINDMODE &
+     AND 0 = SIZE(FIELDTEXT) &
+     AND 0 <> SIZE( TRUNCATE( LCRCLE OF CRDEPOT ) )
+  THEN LET FIELDTEXT = LCRCLE OF CRDEPOT
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du lot.
+;
+;
+PROCEDURE EDIT LCRCLE
+BEGIN
+  IF LCRTYPECR OF CRLOT <> "EN"
+  THEN ERROR 627 ; Ce lot n'est pas du bon type.
+  ;
+  IF LCRDATJOU OF CRLOT <> 0
+  THEN ERROR 628 ; Le lot est déjà journalisé.
+  ;
+  IF LCRATRJOU OF CRLOT = "1"
+  THEN ERROR 629 ; On ne peut pas utiliser un lot autorisé à la journalisation.
+  ;
+  IF LCRUSR OF CRLOT <> LOGONID
+  THEN ERROR 630 ; Ce lot ne vous est pas destiné.
+  ;
+  IF LCRNBRTRSVER OF CRLOT = 0
+  THEN ERROR 719 ; Saisie interdite, entrez d'abord vos montants vérifiés dans le lot.
+  ;
+  IF LCRDATVAL OF CRLOT <> 0
+  THEN WARNING 631 ; Une liste de vérification a déjà été demandé pour ce lot.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les types de dépôt(bilingue).
+;
+;
+PROCEDURE INPUT DPOTYP
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_DPOTYP = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_DPOTYP, T_DPOTYP
+    LET FIELDTEXT = TRUNC(T_DPOTYP)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Type de dépôt. Si c'est un type F on assigne le type de référence à C
+; car un encaissement sur facture s'applique qu'au client.
+;
+;
+PROCEDURE PROCESS DPOTYP
+BEGIN
+  IF DPOTYP OF CRDEPOT = "F"
+  THEN BEGIN
+    LET     REFCLETYP OF CRDEPOT = "C"
+    EDIT    REFCLETYP OF CRDEPOT
+    DISPLAY REFCLETYP OF CRDEPOT
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la date de l'encaissement selon l'interval de date de la période.
+;
+;
+PROCEDURE EDIT DPODAT
+BEGIN
+  IF FIELDVALUE < PECDATDEB OF MCPERIODE_CTB
+  THEN ERROR 637 ; La date est inférieure à la date de début de la période
+
+  IF FIELDVALUE > PECDATFIN OF MCPERIODE_CTB
+  THEN ERROR 638 ; La date est supérieure à la date de fin de la période.
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur le type de référence(bilingue).
+;
+;
+PROCEDURE INPUT REFCLETYP
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_REFCLETYP = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_REFCLETYP, T_REFCLETYP
+    LET FIELDTEXT = TRUNC(T_REFCLETYP)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; On assigne la compagnie de la référence(client/employé) selon sont type.
+;
+;
+PROCEDURE PROCESS REFCLETYP
+BEGIN
+  IF FIELDTEXT = "C"
+  THEN LET REFCIECLE OF CRDEPOT = T_CLICIECLE
+
+  IF FIELDTEXT = "E"
+  THEN LET REFCIECLE OF CRDEPOT = T_EMPCIECLE
+
+  IF FIELDTEXT = "F"
+  THEN LET REFCIECLE OF CRDEPOT = T_FOUCIECLE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les références(client/employé).
+;
+;
+PROCEDURE INPUT REFCLENUM
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    IF REFCLETYP OF CRDEPOT = "C"
+    THEN LET T_REFCIECLE = T_CLICIECLE
+
+    IF REFCLETYP OF CRDEPOT = "E"
+    THEN LET T_REFCIECLE = T_EMPCIECLE
+
+    IF REFCLETYP OF CRDEPOT = "F"
+    THEN LET T_REFCIECLE = T_FOUCIECLE
+
+    LET T_REFCLETYP2 = REFCLETYP OF CRDEPOT
+    LET T_REFSTUPAT  = "A"
+    LET T_REFCLENUM  = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc112 MODE F PASSING T_REFCIECLE , &
+                                    T_REFCLETYP2, &
+                                    T_REFCLENUM , &
+                                    T_REFSTUPAT
+    LET FIELDTEXT = TRUNC(T_REFCLENUM)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation de la référence(client/employé).
+;
+;
+PROCEDURE EDIT REFCLENUM
+BEGIN
+  ;
+  ; Si c'est un client, on vérifie si le client est disponible selon
+  ; la compagnie du dépôt(menu).
+  ;
+  IF REFCLETYP OF CRDEPOT = "C"
+  THEN BEGIN
+    GET VCLC_CLI OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 624 ; ce client est inexistant
+  END
+
+  ;
+  ; On averti l'usager si la référence n'est pas active.
+  ;
+  IF REFSTU OF MCREFERENCE <> "A"
+  THEN WARNING 619 ; Le client/employé n'est pas actif.
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; On affiche le nom de la référence, la devise. Si c'est un client on assigne
+; le compte de banque.
+;
+;
+PROCEDURE PROCESS REFCLENUM
+BEGIN
+  DISPLAY DPONOM OF CRDEPOT
+  DISPLAY DEVCLE OF MCREFERENCE
+  ;
+  IF REFCLETYP OF CRDEPOT = "C"
+  THEN BEGIN
+    LET LBQCPTENC OF CRDEPOT = LBQCPTENC OF VCLC_CLI
+    DISPLAY LBQCPTENC OF CRDEPOT
+    DISPLAY CPTDSC OF VCPT_DSC
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Affiche le nom du client ou le nom de l'employé ou celui saisie dans le cas
+; d'un client divers.
+;
+;
+PROCEDURE OUTPUT DPONOM
+BEGIN
+  LET FIELDTEXT = D_DPONOM
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les comptes de banque.
+;
+;
+PROCEDURE INPUT LBQCPTENC
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_LBQCPTENC = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc110 MODE F PASSING T_CIECLEMNU, &
+                                    T_LBQCPTENC
+    LET FIELDTEXT = TRUNC(T_LBQCPTENC)
+  END
+  ;
+  ; Force la validation du compte d'encaisse.
+  ;
+  IF     0 = SIZE( FIELDTEXT ) &
+     AND NOT FINDMODE &
+     AND 0 <> SIZE( TRUNCATE( LBQCPTENC OF CRDEPOT ) )
+  THEN LET FIELDTEXT = LBQCPTENC OF CRDEPOT
+END
+
+PROCEDURE EDIT LBQCPTENC
+BEGIN
+  IF     DEVCLE OF VCPT_DSC <> DEVCLE OF MCHOLDING &
+     AND DEVCLE OF VCPT_DSC <> DEVCLE OF VCLC_CLI &
+     AND DEVCLE OF VCPT_DSC <> DEVCLE OF MCREFERENCE
+  THEN ERROR 726 ; Compte interdit due à la devise du compte.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les types de paiement(bilingue).
+;
+;
+PROCEDURE INPUT DPOTYPPAM
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_DPOTYPPAM = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_DPOTYPPAM, T_DPOTYPPAM
+    LET FIELDTEXT = TRUNC(T_DPOTYPPAM)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide le montant reçu.
+;
+;
+PROCEDURE EDIT DPOMNTPAM
+BEGIN
+  ;
+  ; Valide la partie décimale.
+  ;
+  USE usvaldec NOLIST
+  ;
+  IF FIELDVALUE < 0
+  THEN ERROR 688 ; Un encaissement ne peut pas être négatif.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Procedure d'affectation du montant encaissé si la devise du compte de banque
+; et du client sont identique.
+;
+;
+PROCEDURE PROCESS DPOMNTPAM
+BEGIN
+  IF DEVCLE OF MCREFERENCE = DEVCLE OF VCPT_DSC
+  THEN BEGIN
+    LET DPOMNTENC OF CRDEPOT = DPOMNTPAM OF CRDEPOT
+    DISPLAY DPOMNTENC OF CRDEPOT
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide le montant encaissé.
+;
+PROCEDURE EDIT DPOMNTENC
+BEGIN
+  ;
+  ; Valide la partie décimale.
+  ;
+  USE usvaldec NOLIST
+  ;
+  IF FIELDVALUE < 0
+  THEN ERROR 688 ; Un encaissement ne être négatif.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Génération de la procédure ENTRY pour les champs conditionnels.
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  ;
+  ; Période, lot.
+  ;
+  IF    T_PECCLESAI = "" &
+     OR T_LCRCLESAI = ""
+  THEN BEGIN
+    ACCEPT PECCLE OF CRDEPOT
+    ACCEPT LCRCLE OF CRDEPOT
+    LET T_PECCLESAI = PECCLE OF CRDEPOT
+    LET T_LCRCLESAI = LCRCLE OF CRDEPOT
+  END
+  ELSE BEGIN
+    EDIT PECCLE OF CRDEPOT
+    EDIT LCRCLE OF CRDEPOT
+    DISPLAY PECCLE OF CRDEPOT
+    DISPLAY LCRCLE OF CRDEPOT
+  END
+  ;
+  ; Type d'encaissement.
+  ;
+  ACCEPT DPOTYP OF CRDEPOT
+  DISPLAY CBIDSC OF A_CBI_DPOTYP
+  ;
+  ; Date encaissé.
+  ;
+  ACCEPT DPODAT OF CRDEPOT
+  ;
+  ; Si c'est un encaissement sur facture, on ne demande pas le type de référence
+  ; c'est toujours un client.
+  ;
+  IF DPOTYP OF CRDEPOT = "D"
+  THEN ACCEPT REFCLETYP OF CRDEPOT
+
+  ACCEPT REFCLENUM OF CRDEPOT
+  ;
+  ; Si c'est un client divers l'usager doit identifier l'encaissement.
+  ;
+  IF     REFCLETYP OF CRDEPOT  = "C" &
+     AND CLITYP    OF VCLC_CLI = "D"
+  THEN ACCEPT DPONOM OF CRDEPOT
+  ELSE LET DPONOM OF CRDEPOT = ""
+  ;
+  ; Si c'est un encaissement divers l'usager doit saisir un compte de banque.
+  ;
+  IF DPOTYP OF CRDEPOT = "D"
+  THEN ACCEPT LBQCPTENC OF CRDEPOT
+  DISPLAY CPTDSC OF VCPT_DSC
+  ;
+  ; Numéro de chèque.
+  ;
+  ACCEPT DPOCHQNUM OF CRDEPOT
+  ;
+  ; Type de paiement.
+  ;
+  ACCEPT DPOTYPPAM OF CRDEPOT
+  DISPLAY CBIDSC OF A_CBI_DPOTYPPAM
+  ;
+  ; Si c'est un encaissement divers, on fait saisir un description.
+  ;
+  ACCEPT DPODSC1 OF CRDEPOT
+  ACCEPT DPODSC2 OF CRDEPOT
+  ;
+  ; Montant reçu.
+  ;
+  ACCEPT DPOMNTPAM OF CRDEPOT
+  ;
+  ; On demande le montant encaissé si la devise de la référence est différente
+  ; de la devise du compte de banque.
+  ;
+  IF DEVCLE OF MCREFERENCE <> DEVCLE OF VCPT_DSC
+  THEN ACCEPT DPOMNTENC OF CRDEPOT
+  ;
+  IF DPOTYP OF CRDEPOT = "F"
+  THEN BEGIN
+    ;
+    ; Paramètres de sélection des factures.
+    ;
+    RUN SCREEN cr007c PASSING CRDEPOT MODE E
+    ;
+    ; Ventilation facture. Si la sélection choisi est de type Manuel
+    ; alors on appelle le sous-écran en mode Entry, sinon on appelle
+    ; le sous-écran en mode Find.
+    ;
+    IF DPOTYPSEL OF CRDEPOT = "M"
+    THEN RUN SCREEN cr007b PASSING T_CIECLEMNU  , &
+                                   T_CIENOM     , &
+                                   D_LCRATRJOU  , &
+                                   D_DPONOM     , &
+                                   CRDEPOT        &
+                           MODE E
+    ELSE RUN SCREEN cr007b PASSING T_CIECLEMNU  , &
+                                   T_CIENOM     , &
+                                   D_LCRATRJOU  , &
+                                   D_DPONOM     , &
+                                   CRDEPOT        &
+                           MODE F
+  END
+  ;
+  ; Imputation. Lors d'un encaissement sur facture, le sous-écran imputation
+  ; est appellé seulement si la ventilation facture ne balance pas avec le
+  ; montant reçu.
+  ;
+  IF DPOMNTPAM OF CRDEPOT <> DPOMNTFAC OF CRDEPOT
+  THEN RUN SCREEN cr007a PASSING T_CIECLEMNU  , &
+                                 T_CIENOM     , &
+                                 D_LCRATRJOU  , &
+                                 D_REFDEVCLE  , &
+                                 D_DPONOM     , &
+                                 CRDEPOT        &
+                         MODE E
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Si l'encaissement n'est pas journalisé et que c'est un encaissement divers,
+; alors l'usager peut modifier la référence.
+;
+;
+PROCEDURE DESIGNER 20
+BEGIN
+  IF     DPODATJOU OF CRDEPOT = 0 &
+     AND DPOTYP OF CRDEPOT = "D"
+  THEN BEGIN
+    ACCEPT REFCLETYP OF CRDEPOT
+    ACCEPT REFCLENUM OF CRDEPOT
+    ;
+    ; Si c'est un client divers l'usager doit identifier l'encaissement.
+    ;
+    IF     REFCLETYP OF CRDEPOT  = "C" &
+       AND CLITYP    OF VCLC_CLI = "D"
+    THEN ACCEPT DPONOM OF CRDEPOT
+    ELSE LET DPONOM OF CRDEPOT = ""
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Si c'est un encaissement divers l'usager peut modifier le compte de banque
+; si l'encaissement n'est pas journalisé.
+;
+;
+PROCEDURE DESIGNER 25
+BEGIN
+  IF     DPODATJOU OF CRDEPOT = 0 &
+     AND DPOTYP    OF CRDEPOT = "D"
+  THEN BEGIN
+    ACCEPT LBQCPTENC OF CRDEPOT
+    DISPLAY CPTDSC OF VCPT_DSC
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Le montant reçu est non modifiable après journalisation.
+;
+;
+PROCEDURE DESIGNER 45
+BEGIN
+  IF DPODATJOU OF CRDEPOT = 0
+  THEN ACCEPT DPOMNTPAM OF CRDEPOT
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; On demande le montant encaissé si la devise de la référence est différente
+; de la devise du compte de banque, il est non modifiable après journalisation.
+;
+;
+PROCEDURE DESIGNER 50
+BEGIN
+  IF     DPODATJOU OF CRDEPOT = 0 &
+     AND DEVCLE OF MCREFERENCE <> DEVCLE OF VCPT_DSC
+  THEN ACCEPT DPOMNTENC OF CRDEPOT
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Imputation
+;
+;
+PROCEDURE DESIGNER D001
+BEGIN
+  RUN SCREEN cr007a PASSING T_CIECLEMNU  , &
+                            T_CIENOM     , &
+                            D_LCRATRJOU  , &
+                            D_REFDEVCLE  , &
+                            D_DPONOM     , &
+                            CRDEPOT        &
+                         MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Ventilation de factures
+;
+;
+PROCEDURE DESIGNER D002
+BEGIN
+  IF DPOTYP OF CRDEPOT = "F"
+  THEN RUN SCREEN cr007b PASSING T_CIECLEMNU  , &
+                                 T_CIENOM     , &
+                                 D_LCRATRJOU  , &
+                                 D_DPONOM     , &
+                                 CRDEPOT        &
+                         MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Ecritures comptable
+;
+;
+PROCEDURE DESIGNER D003
+BEGIN
+  ;
+  ; Cette procédure empeche l'accès au sous-écran si l'écriture n'est pas
+  ; journalisée.
+  ;
+  IF DPODATJOU OF CRDEPOT = 0
+  THEN ERROR 646 ; L'écriture doit être journalisée pour accèder le sous-écran.
+
+  RUN SCREEN mc090 MODE F &
+                   PASSING D_HISCLE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Paramètres de sélection.
+;
+;
+PROCEDURE DESIGNER D004
+BEGIN
+  IF DPOTYP OF CRDEPOT = "F"
+  THEN RUN SCREEN cr007c PASSING CRDEPOT &
+                         MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Gestion des lots.
+;
+;
+PROCEDURE DESIGNER D005
+BEGIN
+  LET T_PECCLE = PECCLE OF CRDEPOT
+  LET T_LCRCLE = LCRCLE OF CRDEPOT
+  RUN SCREEN cr020 MODE F &
+                   PASSING T_CIECLEMNU, &
+                           T_CIENOM   , &
+                           T_PECCLEMNU, &
+                           T_PECCLECOU, &
+                           T_PECCLE   , &
+                           T_LCRCLE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Vérification
+;
+;
+PROCEDURE DESIGNER D006
+BEGIN
+  RUN SCREEN cr007d PASSING CRDEPOT &
+                    MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; La procédure PATH suivante est nécessaire dans le cas où l'écran est
+; appelé autre que par le menu.
+;
+;
+PROCEDURE PATH
+BEGIN
+  IF T_DPOCLEFND <> ""
+  THEN LET PATH = 99
+  ELSE BEGIN
+    REQUEST PECCLE OF CRDEPOT
+    IF PROMPTOK
+    THEN REQUEST LCRCLE OF CRDEPOT
+    IF PROMPTOK
+    THEN LET PATH = 1
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST PECCLE OF CRDEPOT
+      IF PROMPTOK
+      THEN LET PATH = 2
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST REFCLETYP OF CRDEPOT
+      IF PROMPTOK
+      THEN REQUEST REFCLENUM OF CRDEPOT
+      IF PROMPTOK
+      THEN REQUEST DPOCHQNUM OF CRDEPOT
+      IF PROMPTOK
+      THEN LET PATH = 3
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST REFCLETYP OF CRDEPOT
+      IF PROMPTOK
+      THEN REQUEST REFCLENUM OF CRDEPOT
+      IF PROMPTOK
+      THEN LET PATH = 4
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      LET PATH = 5
+    END
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; La procédure FIND est pour gérer l'appel en sous-écran (PATH=99)
+;
+;
+PROCEDURE FIND
+BEGIN
+  IF PATH = 1
+  THEN GET CRDEPOT VIA CIECLE , &
+                       PECCLE , &
+                       LCRCLE   &
+                   USING T_CIECLEMNU       , &
+                         PECCLE OF CRDEPOT , &
+                         LCRCLE OF CRDEPOT   &
+                   ORDERBY CIECLE , &
+                           DPOCLE
+
+  IF PATH = 2
+  THEN GET CRDEPOT VIA CIECLE , &
+                       PECCLE   &
+                   USING T_CIECLEMNU       , &
+                         PECCLE OF CRDEPOT   &
+                   ORDERBY CIECLE , &
+                           DPOCLE
+
+  IF PATH = 3
+  THEN GET CRDEPOT VIA CIECLE    , &
+                       REFCLETYP , &
+                       REFCLENUM , &
+                       DPOCHQNUM   &
+                   USING T_CIECLEMNU          , &
+                         REFCLETYP OF CRDEPOT , &
+                         REFCLENUM OF CRDEPOT , &
+                         DPOCHQNUM OF CRDEPOT
+
+  IF PATH = 4
+  THEN GET CRDEPOT VIA CIECLE    , &
+                       REFCLETYP , &
+                       REFCLENUM   &
+                   USING T_CIECLEMNU          , &
+                         REFCLETYP OF CRDEPOT , &
+                         REFCLENUM OF CRDEPOT   &
+                   ORDERBY DPOCHQNUM
+
+  IF PATH = 5
+  THEN GET CRDEPOT VIA CIECLE &
+                   USING T_CIECLEMNU &
+                   ORDERBY CIECLE , &
+                           DPOCLE
+
+  IF PATH = 99
+  THEN GET CRDEPOT VIA CIECLE , &
+                       DPOCLE   &
+                   USING T_CIECLEMNU , &
+                         T_DPOCLEFND
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF CRDEPOT &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF CRDEPOT &
+     AND NOT NEWRECORD     OF CRDEPOT &
+     AND NOT DELETEDRECORD OF CRDEPOT &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+  ;
+  ; Validation de la destruction d'une transaction journalisé
+  ;
+  IF     DELETEDRECORD OF CRDEPOT &
+     AND DPODATJOU     OF CRDEPOT <> 0
+  THEN ERROR 716 ;Impossible de détruire une transaction journalisé
+  ;
+  ; Non modifiable Si le lot est autorisé ou journalisé
+  ;
+  IF     LCRATRJOU OF CRLOT = "1" &
+     AND DPODATJOU OF CRDEPOT = 0
+  THEN ERROR 713 ; Impossible de mettre à jour la transaction est autorisé.
+  ;
+  ; On informe l'usager si l'encaissement ne balance pas.
+  ;
+  IF 0 <> (   DPOMNTPAM OF CRDEPOT &  ; Montant reçu
+            - DPOMNTFAC OF CRDEPOT &  ; Sommation ventilation factures
+            - DPOCUMMNT OF CRDEPOT )  ; Sommation impuation(crédit).
+  THEN WARNING 649 ; L'imputation ne balance pas.
+  ;
+  ; On incrémente le numéro d'encaissment.
+  ;
+  IF DPOCLE OF CRDEPOT = ""
+  THEN BEGIN
+    START TRANSACTION GEN_NUM_SEQ
+    GET CRDPO_SEQ VIA CIECLE, &
+                      PECCLE, &
+                      LCRCLE  &
+                  USING CIECLE OF CRDEPOT, &
+                        PECCLE OF CRDEPOT, &
+                        LCRCLE OF CRDEPOT  &
+                  OPTIONAL
+    LET CIECLE    OF CRDPO_SEQ = CIECLE    OF CRDEPOT
+    LET PECCLE    OF CRDPO_SEQ = PECCLE    OF CRDEPOT
+    LET LCRCLE    OF CRDPO_SEQ = LCRCLE    OF CRDEPOT
+    ;LET DPSNUMSEQ OF CRDPO_SEQ = DPSNUMSEQ OF CRDPO_SEQ + 1
+    ;an 2000
+    if newrecord of crdpo_seq
+    then LET DPSNUMSEQ OF CRDPO_SEQ = 0
+    LET DPSNUMSEQ OF CRDPO_SEQ = DPSNUMSEQ OF CRDPO_SEQ + 1
+
+    LET DPOCLE    OF CRDEPOT   = PECCLE    OF CRDEPOT + &
+                                 LCRCLE    OF CRDEPOT + &
+                            ASCII(DPSNUMSEQ OF CRDPO_SEQ,DPSLONNUM OF CRDPO_SEQ - 2)
+    PUT CRDPO_SEQ
+    COMMIT TRANSACTION GEN_NUM_SEQ
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Il faut détruire la ventilation factures par le sous-écran, à cause
+; du traitement des paiements non-appliqués.
+;
+;
+PROCEDURE DELETE
+BEGIN
+  IF NOT DELETEDRECORD OF CRDEPOT
+  THEN BEGIN
+    GET CRCAR_HISTO VIA CRHCLE1, &
+                        CRHCLE2, &
+                        CRHTYPECR &
+                    USING CIECLE    OF CRDEPOT, &
+                          DPOCLE    OF CRDEPOT, &
+                          DPOTYPECR OF CRDEPOT  &
+                    OPTIONAL
+    IF ACCESSOK
+    THEN ERROR 605 ; Il faut détruire la ventilation factures en premier.
+    DELETE CRDEPOT
+    DELETE CRDPO_IMPUTATION
+  END
+END
+
+
+BUILD
+
+;
+;xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+;******************************** Encaissements *********************************
+;* Période ......: xxxxx   Lot...........: xxxx  Journalisé le.: xxxxxxxx xxxxx *
+;*                                                                              *
+;* Type..........: x xxxxxxxxxxxxxxxxxxxxxxxxx                                  *
+;*                                                                              *
+;* Encaissement..: xxxxxxxxxxxx                  Date encaissé.: xxxxxxxx       *
+;*                                                                              *
+;* Client/employé: x xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            *
+;*                                                                              *
+;* Cpt encaisse..: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   *
+;*                                                                              *
+;* Chèque........: xxxxxxxx                                                     *
+;* Type paiement.: x xxxxxxxxxxxxxxxxxxxxxxxxx                                  *
+;*                                                                              *
+;* Description...: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+;*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+;*                                                                              *
+;* Montant reçu..: xxxxxxxxxxxxxx/xxx                                           *
+;* Mnt encaissé..: xxxxxxxxxxxxxx/xxx                                           *
+;*                                                                              *
+;********************************************************************************

@@ -1,0 +1,249 @@
+;/T/ Sommaire projet
+;
+;/P/ Programmeur..: Marc Morissette
+;    Date Création: 13 Oct 1993
+;
+;    Description..: Sommaire projet
+;
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pr014 ACTIONBAR &
+             MODE LABEL "" AT 2,132 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             FROM 1,1 TO 23,132 &
+             ACTIVITIES FIND &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU, &
+                       T_CIENOM   , &
+                       T_PROCLEFND
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie du menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; Compagnie du menu
+TEMPORARY T_PROCLEFND CHARACTER SIZE 8  RESET AT STARTUP
+
+USE ussectmp NOLIST     ; Variable pour la securite
+    "PR014"             ; Nom de l'écran
+
+USE pr014.hlp nolist ; Use servant à la documentation de l'écran
+
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-ecran
+
+FILE GPPRO_TRANS  PRIMARY OCCURS 16 TIMES
+
+; La procédure find et path sont écrite
+;-------------------------------------------------------------------------------
+;
+; Validation du compte comptable.
+;
+FILE VCPT_DSC         REFERENCE &
+                      OCCURS WITH GPPRO_TRANS
+
+  ACCESS  VIA   CPTCLE &
+          USING CPTCLE OF GPPRO_TRANS
+
+;-------------------------------------------------------------------------------
+;
+; Validation de l'unité administrative.
+;
+FILE MCUNITE_ADM      REFERENCE &
+                      OCCURS WITH GPPRO_TRANS
+
+  ACCESS  VIA   CIECLE, &
+                UNACLE &
+          USING T_CIECLEMNU, &
+                UNACLE OF GPPRO_TRANS
+
+;-------------------------------------------------------------------------------
+;
+; Validation du projet.
+;
+FILE GPPROJET         REFERENCE
+
+  ACCESS VIA CIECLE, &
+             PROCLE  &
+         USING T_CIECLEMNU, &
+               PROCLE OF GPPRO_TRANS
+
+
+;-------------------------------------------------------------------------------
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+TEMPORARY T_PROCLE CHARACTER SIZE 8
+TEMPORARY T_PROSTUPAT CHARACTER SIZE 8 ; Popup sur les projets.
+TEMPORARY T_CPTCLE CHARACTER SIZE 6
+TEMPORARY T_UNACLE CHARACTER SIZE 8
+TEMPORARY T_MNT    INTEGER   SIZE 4   ; Temporaire en attend des achats.
+
+;-------------------------------------------------------------------------------
+;
+DRAW 3,01 TO 23,132
+USE ustitstd NOLIST     ; En-tête pour les écrans pleine page
+USE ushilite NOLIST     ; Hilite pour tout les écrans
+SKIP
+TITLE &
+@IF FRANCAIS
+      " Sommaire des transactions au projet " &
+@ELSE
+      " %%% " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+
+SKIP
+ALIGN (,2,13)(,,22)
+FIELD PROCLE  OF GPPRO_TRANS LABEL "Projet...:" DISPLAY &
+   LOOKUP ON GPPROJET &
+   MESSAGE 2511 ; Ce projet n'existe pas
+FIELD PRODSC OF GPPROJET DISPLAY  NOLABEL
+SKIP
+
+TITLE "Unité" AT ,2
+SKIP
+TITLE "Adm.     Desc.                Compte Desc.                       Budget      Engagement           Réel          Total     Écart" AT ,2
+SKIP
+ALIGN (2,2,2)(,,11)(,,32)(,,39) (,,60) (,,75) (,,90)(,,105)(,,120)
+;xxxxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxx Xxxxxxxxxxxxxx Xxxxxxxxxxxxxx Xxxxxxxxxxxxxx Xxxxxxxxxxxxxx xxxxxxxxx
+CLUSTER OCCURS WITH GPPRO_TRANS
+  FIELD UNACLE OF GPPRO_TRANS DISPLAY LABEL " "
+  FIELD UNANOM OF MCUNITE_ADM DISPLAY SIZE 20
+  FIELD CPTCLE OF GPPRO_TRANS DISPLAY
+  FIELD CPTDSC OF VCPT_DSC    DISPLAY SIZE 20
+  FIELD T_MNT DISPLAY SIGNIF 4         PICTURE "^^,^^^,^^^.^^ "
+  FIELD T_MNT DISPLAY SIGNIF 4         PICTURE "^^,^^^,^^^.^^ "
+  FIELD TRDMNT OF GPPRO_TRANS DISPLAY  PICTURE "^^,^^^,^^^.^^ " SIGNIF 4
+  FIELD TRDMNT OF GPPRO_TRANS DISPLAY  PICTURE "^^,^^^,^^^.^^ " SIGNIF 4
+  FIELD T_MNT DISPLAY SIGNIF 4         PICTURE "^,^^^.^^ "
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les projets.
+;
+;
+PROCEDURE INPUT PROCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PROSTUPAT = "A"
+    LET T_PROCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pr101 MODE F PASSING T_CIECLEMNU, &
+                                    T_PROCLE   , &
+                                    T_PROSTUPAT &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNCATE(T_PROCLE)
+  END
+END
+
+
+PROCEDURE DESIGNER 1
+BEGIN
+  LET T_PROCLE = PROCLE OF GPPRO_TRANS
+  LET T_CPTCLE = CPTCLE OF GPPRO_TRANS
+  LET T_UNACLE = UNACLE OF GPPRO_TRANS
+  RUN SCREEN pr010d PASSING T_CIECLEMNU, T_CIENOM, T_PROCLE, T_UNACLE, &
+                             T_CPTCLE MODE F &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+END
+
+PROCEDURE PATH
+BEGIN
+  IF T_PROCLEFND = ""
+  THEN BEGIN
+     REQUEST PROCLE OF GPPRO_TRANS
+     IF PROMPTOK
+       THEN REQUEST UNACLE OF GPPRO_TRANS
+     IF PROMPTOK
+       THEN REQUEST CPTCLE OF GPPRO_TRANS
+     IF PROMPTOK
+       THEN LET PATH = 1
+     IF PATH = 0
+       THEN BEGIN
+         REQUEST PROCLE OF GPPRO_TRANS
+         IF PROMPTOK
+           THEN REQUEST UNACLE OF GPPRO_TRANS
+         IF PROMPTOK
+           THEN LET PATH = 2
+         END
+     IF PATH = 0
+       THEN BEGIN
+         REQUEST PROCLE OF GPPRO_TRANS
+         IF PROMPTOK
+           THEN REQUEST CPTCLE OF GPPRO_TRANS
+         IF PROMPTOK
+           THEN LET PATH = 3
+         END
+     IF PATH = 0
+       THEN BEGIN
+         REQUEST PROCLE OF GPPRO_TRANS
+         IF PROMPTOK
+           THEN LET PATH = 4
+         END
+     IF PATH = 0
+       THEN ERROR = "Key required."
+   END
+   ELSE LET PATH = 99
+END
+
+PROCEDURE FIND
+BEGIN
+  FOR GPPRO_TRANS
+  BEGIN
+    IF PATH = 1
+    THEN GET GPPRO_TRANS &
+         VIA CIECLE , &
+             PROCLE , &
+             UNACLE , &
+             CPTCLE &
+     ORDERBY CIECLE , &
+             PROCLE , &
+             UNACLE , &
+             CPTCLE &
+       USING T_CIECLEMNU , &
+             PROCLE OF GPPRO_TRANS , &
+             UNACLE OF GPPRO_TRANS , &
+             CPTCLE OF GPPRO_TRANS
+    IF PATH = 2
+    THEN GET GPPRO_TRANS VIA CIECLE , PROCLE , UNACLE ORDERBY &
+               CIECLE , PROCLE , UNACLE , CPTCLE USING T_CIECLEMNU , &
+               PROCLE OF GPPRO_TRANS , UNACLE OF GPPRO_TRANS
+    IF PATH = 3
+    THEN GET GPPRO_TRANS VIA CIECLE , PROCLE , CPTCLE ORDERBY &
+               CIECLE , PROCLE , UNACLE , CPTCLE USING T_CIECLEMNU , &
+               PROCLE OF GPPRO_TRANS , CPTCLE OF GPPRO_TRANS
+    IF PATH = 4
+    THEN GET GPPRO_TRANS VIA CIECLE , PROCLE ORDERBY CIECLE , &
+               PROCLE , UNACLE , CPTCLE USING T_CIECLEMNU , PROCLE OF &
+               GPPRO_TRANS
+
+    IF PATH = 99
+    THEN GET GPPRO_TRANS VIA CIECLE , PROCLE &
+          ORDERBY CIECLE , PROCLE , UNACLE , CPTCLE &
+            USING T_CIECLEMNU , T_PROCLEFND
+  END
+END
+
+
+BUILD

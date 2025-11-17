@@ -1,0 +1,122 @@
+;/T/ Prévision des encaissements
+;
+;/P/ Programmeur...: Alain Côté
+;    Date Création.: 28 juillet 1993
+;
+;    Description...: Prévision des encaissements par client, nous fourni
+;                    une vision global des encaissements prévue par
+;                    intervalle de date.
+;
+;                    Toutes les transactions journalisées sont sélectionnées,
+;                    les soldes sont répartie dans la bonne colonne selon la
+;                    date spécifiée par l'usager.
+;
+;                    Les transactions doivent être journalisées.
+;
+;    Paramètres....: Compte ctb à recevoir  un, plusieur
+;                    Client                 Une, plusieurs ou tous
+;                    Date de calcul         Jusqu'au
+;
+;
+;    Particularités: Le QTP sert à préparer un sous-fichier contenant les
+;                    factures qui restent un solde.
+;
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST
+
+RUN cr322t
+
+
+GLOBAL TEMPORARY G_DATDEB    DATE             PARM
+                                              ; Date de début pour la colonne 1
+GLOBAL TEMPORARY G_ITVCOD    CHARACTER SIZE 1 PARM
+                                              ; Code identifiant l'interval
+                                              ; choisi pour les colonnes.
+
+
+;-------------------------------------------------------------------------------
+
+REQUEST PREPARE_LES_SOLDES
+
+ACCESS CRCPT_A_REC &
+ ;
+ ; Cédule d'encaissement, date due, montant à recevoir.
+ ;
+ LINK CIECLE OF CRCPT_A_REC, &
+      CARCLE OF CRCPT_A_REC  &
+   TO CIECLE , &
+      CARCLE OF                  CRCAR_CEDULE &
+ ;
+ ; Transactions associées à la cédule(ajust., encaissement...)
+ ;
+ LINK CIECLE    OF CRCAR_CEDULE, &
+      CARCLE    OF CRCAR_CEDULE, &
+      CCDCLELIG OF CRCAR_CEDULE  &
+   TO CIECLE , &
+      CARCLE , &
+      CCDCLELIG OF               CRCAR_HISTO OPTIONAL
+
+
+CHOOSE CIECLE    PARM, &  ; Compagnie du menu.
+       CARCPTCAR PARM, &  ; Compte ctb à recevoir.
+       REFCLENUM PARM     ; Numéro de client
+
+
+SELECT CRCPT_A_REC IF     (    CARTYPECR OF CRCPT_A_REC = "FA" &
+                            OR CARTYPECR OF CRCPT_A_REC = "CR" &
+                            OR CARTYPECR OF CRCPT_A_REC = "NA" ) &
+                      AND CARDATJOU OF CRCPT_A_REC <> 0
+
+
+SELECT CRCAR_HISTO IF     CRHDATJOU OF CRCAR_HISTO <> 0
+
+
+TEMPORARY T_CRHMNT  FLOAT SIZE 8 ; Sommation des trs. associées.
+TEMPORARY T_SLD_TOT FLOAT SIZE 8 ; Solde de la ligne de cédule.
+
+
+
+SORT ON CIECLE    OF CRCPT_A_REC , & ; No compagnie
+        CARCPTCAR OF CRCPT_A_REC , & ; Compte ctb à recevoir
+        REFCLENUM OF CRCPT_A_REC , & ; Numéro de client
+        CARCLE    OF CRCPT_A_REC , & ; No facture
+        CCDCLELIG OF CRCAR_CEDULE    ; No Cédule
+
+
+;
+; Si c'est un encaissement ou une mauvaise créance il faut soustraire
+; le montant du montant brut.
+;
+ITEM T_CRHMNT = 0 - CRHMNTCAR OF CRCAR_HISTO &
+                         IF    CRHTYPTRA OF CRCAR_HISTO = "EN" &
+                            OR CRHTYPTRA OF CRCAR_HISTO = "MC" &
+           ELSE CRHMNTCAR OF CRCAR_HISTO
+
+;
+; Solde de la cédule.
+;
+ITEM T_SLD_TOT SUBTOTAL T_CRHMNT &
+               RESET AT CCDCLELIG TO CCDMNT OF CRCAR_CEDULE
+
+
+SUBFILE WCR322 KEEP &
+               AT CCDCLELIG &
+               IF T_SLD_TOT <> 0 &
+INCLUDE CIECLE    OF CRCPT_A_REC   , &
+        CARCLE    OF CRCPT_A_REC   , &
+        RADCLE    OF CRCPT_A_REC   , &
+        CARCPTCAR OF CRCPT_A_REC   , &
+        CARDAT    OF CRCPT_A_REC   , &
+        REFCIECLE OF CRCPT_A_REC   , &
+        REFCLENUM OF CRCPT_A_REC   , &
+        REFCLETYP OF CRCPT_A_REC   , &
+        CCDCLELIG OF CRCAR_CEDULE  , &
+        CCDDATDUE OF CRCAR_CEDULE  , &
+        G_DATDEB                   , &
+        T_SLD_TOT                  , &
+        G_ITVCOD
+
+
+BUILD cr322t

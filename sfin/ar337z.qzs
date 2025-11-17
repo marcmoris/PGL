@@ -1,0 +1,315 @@
+;/T/ Impression du sommaire de commande 
+;
+;/P/ Programmeur...: Guy Chabot
+;    Date Création.: 26 octobre 1994
+;
+;    Description...: Ce programme permet de faire l'impression des bons de 
+;                    commande et de ses ajustements. 
+;
+;    Paramètres....: Compagnie          (Compagnie du menu)
+;                    Numéro de commande (Borne de début)
+;                    Numéro de commande (Borne de fin)
+;
+;/M/ Modification..: Pierre Routhier
+;                    15 novembre 1996
+;                    - Création d'une macro pour incorporer les codes escapes
+;                      selon la demande du CRIM.
+;
+;/M/ Modification..: Pierre Routhier
+;    Date..........: 11 décembre 1996
+;    Description...: Sélection dans le rapport ar337z.qzs des items qui ne
+;                    sont pas annulés. J'ai arrangé le rapport en conséquence
+;                    pour que le total du bon de commande ne contienne pas
+;                    le montant des items annulés.
+;
+;-------------------------------------------------------------------------------
+
+
+USE ussetqzs NOLIST
+SET PAGE LENGTH 80 WIDTH 250
+SET FORMFEED 
+
+ACCESS *WAR337A  &
+    ;
+    ; Adresse de facturation.  
+    ;
+  LINK CIECLE OF WAR337A &
+    TO CIECLE OF MCCOMPAGNIE   &
+
+  LINK CIECLE OF WAR337A, &
+       ENTCLE OF WAR337A  & 
+    TO CIECLE, &
+       ENTCLE OF ARENTREPOT   &
+
+  LINK CIECLE OF WAR337A, &
+       ENTCLE OF WAR337A, &
+       PRDCLE OF WAR337A  &
+    TO CIECLE, &
+       ENTCLE, &
+       PRDCLE OF VPRE_PRD   &
+      
+  
+  LINK FOUCIECLE OF WAR337A, &
+       REFCLETYP OF WAR337A, &
+       FOUCLE    OF WAR337A, &
+       RADCLE    OF WAR337A  &
+    TO REFCIECLE, &
+       REFCLETYP, &
+       REFCLENUM, &
+       RADCLE  OF MCREF_ADRESSE   OPTIONAL & 
+
+ 
+  LINK FOCTERESCACH & 
+    TO TERCLE OF VTER_DSC    OPTIONAL &
+
+
+  LINK ("CMDTRP",                                    &
+         CDETRP OF WAR337A)                          &
+      TO XELNOM,                                     &
+         CBICLE OF VCBI_DSC   ALIAS A_CBI_CDETRP OPTIONAL &
+
+  LINK ("CMDFAB",                                    &
+         CDEFAB OF WAR337A)                          &
+      TO XELNOM,                                     &
+         CBICLE OF VCBI_DSC   ALIAS A_CBI_CDEFAB OPTIONAL 
+
+
+
+;
+;*** CODE ESCAPE TYPIQUE A IMP. LASER SERIE HPIII ***
+;                                     deb: x  y  fin: x    y
+
+DEFINE D_ENTETE           CHARACTER SIZE 42 = &
+"&a5R&a3C(5012X(s0PABCDEF(3@*p0X*p0Y"
+DEFINE ESCLITE    CHARACTER SIZE 15 = "(19U&l8D&k4S"  ; 12 CPS, 8 ligne/pouce
+DEFINE ESCCOND    CHARACTER SIZE 15 = "(19U&l8D&k2S"  ; 16 CPS, 8 ligne/pouce
+DEFINE ESCNORM    CHARACTER SIZE 15 = "(19U&l6D&k0S"  ; 10 CPS, 6 ligne/pouce
+
+DEFINE ESCCOINSUPGAUCHE CHARACTER SIZE 5 = "*p1Y"       ; PLACER CURSEUR AU DEBUT DE LA FEUILLE
+DEFINE ESCSTOT          CHARACTER SIZE 8 = "*p1875x" ; titre col DEDUCTIONS:  entete 2
+DEFINE D_AD      CHARACTER SIZE   5 = "&f2X" ; Exécute la macro
+DEFINE D_ADU     CHARACTER SIZE   5 = "&f8X" ; Détruire la macro
+;DEFINE DUNLOAD  CHARACTER SIZE 20 = "*c0F"
+;
+;*** FIN CODE ESCAPE ***
+
+DEFINE D_RADNOM CHARACTER SIZE 40 = RADNOM OF MCREF_ADRESSE[1:40]
+
+DEFINE D_CMDTRPLIB CHARACTER SIZE 18   = "Mode de transport:" &
+                                         IF FOULNG OF WAR337A = "F" ELSE &
+                                         "Mode of transport:" 
+
+DEFINE D_CMDFABLIB2 CHARACTER SIZE 4 = "T.C:" &
+                                        IF FOULNG OF WAR337A = "F" ELSE &
+                                        "C.T:"  
+
+DEFINE D_REQCLELIB CHARACTER SIZE 15 = "No.réquisition:" &
+                                       IF FOULNG OF WAR337A = "F" ELSE &
+                                       "Requisition no:" 
+
+DEFINE D_CMANOMLIB CHARACTER SIZE 40 = "              I D E M            " &
+                                      IF    FOULNG OF WAR337A = "F" &
+                                        AND ADENOM OF WAR337A = ""  ELSE  &
+                                       "              S A M E            " &
+                                      IF    FOULNG OF WAR337A = "A" &
+                                        AND ADENOM OF WAR337A = ""  ELSE  &
+                                      ENTNOMABR OF ARENTREPOT
+    
+
+DEFINE D_CIENOM    CHARACTER SIZE 30 = CIENOM OF MCCOMPAGNIE[1:30]
+
+;
+; Description des codes bilingues à 15 caractères.
+;
+DEFINE D_CBIDSC_CMDTRP CHARACTER SIZE 15 = CBIDSC OF A_CBI_CDETRP
+DEFINE D_CBIDSC_CMDFAB CHARACTER SIZE 15 = CBIDSC OF A_CBI_CDEFAB
+
+DEFINE D_CDEMNTNET     FLOAT SIZE 8  &
+  PICTURE " ^^^,^^^,^^^.^^ "   &
+  FLOAT  "$"                   &
+  BWZ SIGNIFICANCE 4           &
+  TRAILING SIGN "-"            &
+     = CDEMNTNET OF WAR337A &
+         IF T_FLGDRN OF WAR337A = "1" &
+       ELSE 0
+
+DEFINE D_CDEMNTTPS     FLOAT SIZE 8  &
+  PICTURE " ^^^,^^^,^^^.^^ "     &
+  FLOAT    "$"                   &
+  BWZ SIGNIFICANCE 4           &
+  TRAILING SIGN "-"              &
+    = CDEMNTTPS OF WAR337A &
+        IF T_FLGDRN OF WAR337A = "1" &
+      ELSE 0                        
+
+DEFINE D_CDEMNTTVQ     FLOAT SIZE 8  &
+  PICTURE " ^^^,^^^,^^^.^^ "     &
+  FLOAT    "$"                   &
+  BWZ SIGNIFICANCE 4           &
+  TRAILING SIGN "-"              &
+    = CDEMNTTVQ OF WAR337A &
+        IF T_FLGDRN OF WAR337A = "1" &
+      ELSE 0
+
+DEFINE D_CDEMNTTOT FLOAT SIZE 8  &
+  PICTURE " ^^^,^^^,^^^.^^ "     &
+  FLOAT    "$"                   &
+  BWZ SIGNIFICANCE 4           &
+  TRAILING SIGN "-"              &
+    = CDEMNTTOT OF WAR337A       &
+        IF T_FLGDRN OF WAR337A = "1" &
+      ELSE 0
+
+DEFINE D_DEVCLE CHARACTER SIZE 3 = DEVCLE OF WAR337A &
+  IF D_CDEMNTTOT <> 0 ELSE ""
+
+DEFINE D_REPIMP CHARACTER SIZE 5 = ""
+  
+DEFINE D_CDELIE CHARACTER SIZE 14 = CDELIE OF WAR337A[1:14]
+
+DEFINE D_FAXRADFAX CHARACTER SIZE 20 = "Fax:" + &
+                                       RADFAX OF MCREF_ADRESSE
+
+DEFINE D_RADADR3 CHARACTER SIZE 40 = &
+                     RADADR3 OF MCREF_ADRESSE &
+                     IF 0 <> SIZE(TRUNCATE(RADADR3 OF MCREF_ADRESSE)) &
+                     ELSE RADCP OF MCREF_ADRESSE
+
+DEFINE D_RADCP CHARACTER SIZE 40 = &
+                     RADCP OF MCREF_ADRESSE &
+                     IF 0 <> SIZE(TRUNCATE(RADADR3 OF MCREF_ADRESSE)) & 
+                     ELSE D_FAXRADFAX
+
+
+DEFINE D_RADFAX CHARACTER SIZE 20 = &
+                     D_FAXRADFAX &
+                     IF 0 <> SIZE(TRUNCATE(RADADR3 OF MCREF_ADRESSE)) &
+                     ELSE " "
+
+
+
+SORTED ON CIECLE   OF WAR337A            &
+       ON CMDCLE   OF WAR337A RESET PAGE &
+       ON CDECLE   OF WAR337A            &
+       ON CDNSEQ   OF WAR337A
+                
+PAGE HEADING &  
+  D_AD &
+  D_ENTETE &
+  " " &
+SKIP 1 &
+  ESCLITE &
+
+SKIP 7 &
+  TAB 006 FOUCLE OF WAR337A  &
+
+SKIP &
+  TAB 006 D_RADNOM &
+  TAB 075 SYSPAGE  &
+
+SKIP &
+  TAB 006 RADADR1 OF MCREF_ADRESSE  &
+  TAB 071 CMDDAT OF WAR337A       &
+
+SKIP &
+  TAB 006 RADADR2 OF MCREF_ADRESSE  &
+  TAB 071 ENTNOMABR OF ARENTREPOT   &
+  
+SKIP &
+  TAB 006 D_RADADR3 &
+  TAB 071 TERDSCABR OF VTER_DSC &  
+
+SKIP &  
+  TAB 006 D_RADCP &
+
+SKIP &
+  TAB 006 D_RADFAX & 
+
+SKIP 3 &
+  TAB 006 D_CIENOM          &
+  TAB 055 D_CMANOMLIB       &
+
+SKIP 1 &
+  TAB 006 CIEADR1 OF MCCOMPAGNIE &
+  TAB 055 ADENOM  OF WAR337A     &
+
+SKIP 1 &
+  TAB 006 CIEADR2 OF MCCOMPAGNIE &
+  TAB 055 ADEADR1 OF WAR337A     &
+
+SKIP 1 &
+  TAB 006 CIEADR3 OF MCCOMPAGNIE &
+  TAB 055 ADEADR2 OF WAR337A     &
+
+SKIP 1 &
+  TAB 006 CIECP   OF MCCOMPAGNIE &
+  TAB 055 ADEADR3 OF WAR337A     &
+
+SKIP 1 &
+  TAB 055 ADECP   OF WAR337A     &
+
+SKIP 3 &
+  TAB 077 CMDCLE OF WAR337A &
+  TAB 087 D_REPIMP          &
+
+SKIP 1 &
+  ESCCOND &
+
+SKIP 3
+
+
+HEADING AT CDECLE &
+  TAB 002 T_NBRLIG OF WAR337A &
+    PICTURE "^^"   &
+    SIGNIFICANCE 2 &
+  TAB 007 PRDCLE       OF WAR337A  &
+  TAB 020 CDEDSCPRD    OF WAR337A  &
+  TAB 062 CDEDATLIVPRE OF WAR337A  &
+  TAB 073 CDETAXCODTPS OF WAR337A  &
+  TAB 076 CDETAXCODTVQ OF WAR337A  &
+  TAB 080 CDEQTECOM    OF WAR337A  &
+        PICTURE "^^^^^.^^^ "       &
+  TAB 094 PRDUNI       OF VPRE_PRD &
+  TAB 100 CDEPRIUNI    OF WAR337A  &
+    PICTURE " ^,^^^,^^^.^^^^ "  &
+    FLOAT    "$"                &
+    TRAILING SIGN "-"           & 
+  TAB 118 T_CDEMNTNET    OF WAR337A &
+    PICTURE " ^^^,^^^,^^^.^^ " &
+    FLOAT    "$"               &
+    TRAILING SIGN "-"
+
+REPORT &
+  TAB 020 CDNDSC OF WAR337A
+
+FOOTING AT CDECLE &
+  TAB 020 D_CMDTRPLIB &
+  TAB 039 D_CBIDSC_CMDTRP &
+SKIP 1 &
+  TAB 020 D_CMDFABLIB2 &
+  TAB 025 D_CBIDSC_CMDFAB &
+  TAB 046 D_CDELIE &
+SKIP 2
+
+FOOTING AT CMDCLE &
+     SKIP PAGE
+
+
+PAGE FOOTING &
+  "   " &
+SKIP 2 &
+  TAB 116 D_CDEMNTNET &
+SKIP 2 &
+  TAB 116 D_CDEMNTTPS &
+SKIP 2 &
+  TAB 116 D_CDEMNTTVQ &
+SKIP 2 &
+  TAB 116 D_CDEMNTTOT  &
+  TAB 131 D_DEVCLE   &
+SKIP 4 &
+  TAB 001 "  "
+
+FINAL FOOTING &
+  D_ADU
+
+BUILD ar337z

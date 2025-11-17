@@ -1,0 +1,241 @@
+SCREEN pd900 ACTIONBAR                         &
+             MODE LABEL "" AT 2,80             &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72      &
+             ACTIVITIES ENTRY, FIND, CHANGE    &
+             RECEIVING T_CIECLEMNU ,           &
+                       T_CIENOM
+
+USE ussectmp  NOLIST
+    "PD900"
+
+USE pd312.hlp NOLIST
+USE usactecr  NOLIST
+
+
+TEMPORARY T_CIECLEMNU    CHARACTER SIZE 04 RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM       CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+FILE PDTRANCHE  PRIMARY NOAPPEND NODELETE &
+                OCCURS 15 &
+                NOITEMS
+
+TEMPORARY T_TRANUMTRA002  CHARACTER SIZE 07 OCCURS WITH PDTRANCHE
+TEMPORARY T_DTRCODDEF     CHARACTER SIZE 02 OCCURS WITH PDTRANCHE
+TEMPORARY T_DTRCODDEF_TMP CHARACTER SIZE 04
+TEMPORARY T_TRANUMLOC     CHARACTER SIZE 04 OCCURS WITH PDTRANCHE
+
+FILE PDTRANCHE_DEF DESIGNER
+FILE PDTRANCHE  ALIAS A_PDTRANCHE DESIGNER OPEN 2
+
+FILE PDDEF_DE_TRANCHE REFERENCE
+
+  ACCESS VIA     CIECLE,                      &
+                 DTRCODDEF                    &
+         USING   T_CIECLEMNU,                 &
+                 T_DTRCODDEF
+
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = " "
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE " Défauts et localisation de tranche  " CENTERED AT ,1
+
+SKIP 1
+
+USE ustitoff NOLIST
+
+
+TITLE "No. tranche   Défaut                                        Localisation"   AT ,6
+SKIP TO 7
+
+ALIGN (3,,8) (,,20) (,,23) (,,71)
+
+CLUSTER OCCURS WITH PDTRANCHE
+
+FIELD T_TRANUMTRA002                          &
+        REQUIRED                              &
+        NOCHANGE 
+
+FIELD T_DTRCODDEF                             &
+        HIDDEN                                &
+        UPSHIFT                               
+
+FIELD DTRDSCFRA OF PDDEF_DE_TRANCHE           &
+        DISPLAY
+
+FIELD T_TRANUMLOC                             &
+        HIDDEN                                &
+        UPSHIFT
+
+CLUSTER
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+PROCEDURE INPUT T_TRANUMTRA002
+BEGIN
+  IF 0 <> SIZE(TRUNCATE(FIELDTEXT)) AND NOT 0 <> INDEX(FIELDTEXT,"@")
+  THEN BEGIN
+    LET FIELDTEXT = ASCII(NCONVERT(FIELDTEXT),7)
+  END
+END
+
+PROCEDURE PROCESS T_TRANUMTRA002
+BEGIN
+    GET A_PDTRANCHE                                 &
+      VIA     CIECLE,                               &
+              TRANUMTRA002                          &
+      USING   T_CIECLEMNU,                          &
+              T_TRANUMTRA002 OPT           
+
+    IF ACCESSOK
+    THEN BEGIN
+      LET T_TRANUMLOC = TRANUMLOC OF A_PDTRANCHE
+    END
+END
+
+PROCEDURE INPUT T_DTRCODDEF
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_DTRCODDEF_TMP = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd116 MODE F &
+                     PASSING T_DTRCODDEF_TMP, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_DTRCODDEF_TMP )
+  END
+
+  IF FIELDTEXT <> ""
+  THEN BEGIN
+    GET PDDEF_DE_TRANCHE       &
+            VIA     CIECLE,                     &
+                    DTRCODDEF                   &
+            USING   T_CIECLEMNU,                &
+                    FIELDTEXT   OPT 
+    IF NOT ACCESSOK
+    THEN ERROR 2954 ; Ce code de défaut n'existe pas
+  END
+
+  GET PDTRANCHE_DEF                 &
+          VIA     CIECLE,                               &
+                  TRANUMTRA002,                         &
+                  DTRCODDEF                             &
+          USING   T_CIECLEMNU,                          &
+                  T_TRANUMTRA002,                       &
+                  FIELDTEXT       OPT
+  IF ACCESSOK
+  THEN ERROR 2956 ; Ce code de défaut existe déjà pour cette tranche
+END
+
+PROCEDURE PREUPDATE
+BEGIN
+  FOR PDTRANCHE
+  BEGIN
+
+    IF DELETEDRECORD OF PDTRANCHE &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+
+    IF    ALTEREDRECORD     OF PDTRANCHE &
+      AND NOT NEWRECORD     OF PDTRANCHE &
+      AND NOT DELETEDRECORD OF PDTRANCHE &
+      AND TZ_SECMOD = "0"
+    THEN ERROR 2
+    
+    GET A_PDTRANCHE                                 &
+      VIA     CIECLE,                               &
+              TRANUMTRA002                          &
+      USING   T_CIECLEMNU,                          &
+              T_TRANUMTRA002 OPT           
+
+    IF ACCESSOK
+    THEN BEGIN
+      LET TRANUMLOC OF A_PDTRANCHE = T_TRANUMLOC
+      PUT A_PDTRANCHE
+    END
+    
+    IF T_DTRCODDEF <> ""
+    THEN BEGIN
+      GET PDTRANCHE_DEF VIA CIECLE        ,  &
+                            TRANUMTRA002  ,  &
+                            DTRCODDEF        &
+                      USING T_CIECLEMNU   ,  &
+                            T_TRANUMTRA002,  &
+                            T_DTRCODDEF  OPT
+      IF NOT ACCESSOK
+      THEN BEGIN
+        LET CIECLE       OF PDTRANCHE_DEF = T_CIECLEMNU
+        LET TRANUMTRA002 OF PDTRANCHE_DEF = T_TRANUMTRA002
+        LET DTRCODDEF    OF PDTRANCHE_DEF = T_DTRCODDEF
+
+        PUT PDTRANCHE_DEF RESET
+      END
+    END
+
+  END
+END
+
+PROCEDURE APPEND
+DISABLE
+PROCEDURE ENTRY
+  BEGIN
+    FOR PDTRANCHE
+      BEGIN
+        ACCEPT T_TRANUMTRA002
+        DISPLAY T_TRANUMLOC
+        ACCEPT T_DTRCODDEF
+        DISPLAY DTRDSCFRA OF PDDEF_DE_TRANCHE
+        ACCEPT T_TRANUMLOC
+        END
+    END
+PROCEDURE PATH
+  BEGIN
+    REQUEST T_TRANUMTRA002
+    IF PROMPTOK
+      THEN LET PATH = 1
+    IF PATH = 0
+      THEN BEGIN
+        LET PATH = 2
+        END
+    END
+PROCEDURE FIND
+  BEGIN
+    FOR MISSING PDTRANCHE
+      BEGIN
+        IF PATH = 1
+          THEN GET PDTRANCHE VIA CIECLE , TRANUMTRA002 ORDERBY CIECLE &
+              , TRANUMTRA002 , TRANUMTRA001 USING T_CIECLEMNU , &
+              T_TRANUMTRA002
+        IF PATH = 2
+          THEN GET PDTRANCHE VIA CIECLE ORDERBY CIECLE , TRANUMTRA002 &
+              , TRANUMTRA001 USING T_CIECLEMNU
+        END
+    END
+PROCEDURE POSTFIND
+  BEGIN
+    FOR PDTRANCHE
+      BEGIN
+        LET T_TRANUMTRA002 = TRANUMTRA002 OF PDTRANCHE
+        LET T_TRANUMLOC    = TRANUMLOC    OF PDTRANCHE
+    END
+  END
+PROCEDURE UPDATE
+NULL
+PROCEDURE DELETE
+NULL
+
+BUILD LIST DETAIL

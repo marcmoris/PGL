@@ -1,0 +1,566 @@
+;/T/ Calcul des commissions d'agents.
+;
+;/R/ Réalisé par...: Marc Poulin.
+;    Date..........: 2000-05-22.
+;
+;    Description...: Calcul des montants de commissions destinés aux agents en fonction des ventes et des encaissements.
+;
+;    Paramètres....: Code de compagnie (ciecle)    - fourni par le système ;
+;                    Code d'agent      (foucle)    - fourni par l'usager   ;
+;                    Code de devise    (comdev)    - fourni par l'usager   ;
+;                    Code de projet    (pjtabr)    - fourni par l'usager   ;
+;                    Code de commande  (comnumcom) - fourni par l'usager   ;
+;                    Date de commande  (comdatcmd) - fourni par l'usager.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin     
+;    Date..............: 12 juin 2000
+;    Description.......: Ajuster le traitement afin d'identifier les commandes en balance mais pour
+;                        lesquelles des commissions à payer sont encore à venir.
+;
+;    Référence.........: Demande de changement 000067.
+;
+;    Signet............: MP-00-06-12_D67.
+;
+;    ----------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin     
+;    Date..............: 16 juin 2000
+;    Description.......: Ajuster le traitement afin de considérer les cas d'exceptions suivants: 
+;
+;                              - la numérotation des factures qui peut différer en le module de
+;                                Production et celui des Comptes à recevoir ;
+;                              - considérer le solde à ventiler lorsque la facture a été transférée
+;                                du module de Production vers celui des Comptes à recevoir.
+;
+;    Référence.........: Demande de changement 000068.
+;
+;    Signet............: MP-00-06-16_D68.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+use ussetqts nolist     ; Déclaration standard pour qtp.
+set lock record update  ; Vérouillage restreint.
+
+RUN pd807ta
+
+;-------------------------------------------------------------------------------------------------------------
+; Procédure de calcul des montants de commissions.
+;
+REQUEST cal_com_fac
+;
+; Accès à la base de données.
+;
+ACCESS pdcomman_interne link "----"                               , &
+                             foucle    of pdcomman_interne          &
+                          to fouciecle                            , &                     
+                             foucle    of cpfournisseur             & ; Table des fournisseurs (agents).
+                                                                  
+                        link comdev    of pdcomman_interne          &
+                          to devcle    of mcdevise                  & ; Table des devises.
+                                                                  
+                        link ciecle    of pdcomman_interne        , & 
+                             comnumcom of pdcomman_interne          &
+                          to ciecle                               , &                     
+                             comnumcom of pdfacture                 & ; Table des factures
+                                                                  
+                        link ciecle    of pdfacture               , &
+                             ftrnumfac of pdfacture                 &
+                          to ciecle                               , &                     
+                             ftrnumfac of pdfact_bon_livr optional  & ; Table des bons de livraison.
+        
+                        link ciecle    of pdfacture               , &
+                             ftrnumfac of pdfacture                 &
+                          to ciecle                               , &                     
+                             ftrnumfac of pdfac_imputation          & ; Table des imputations comptables (factures).
+                                                                  
+                        link cptcle    of pdfac_imputation          &
+                          to cptcle    of mccompte                    ; Table des comptes (charte comptable).
+;
+; Sélection selon les paramètres.
+;
+CHOOSE ciecle    parm, & ; Code de compagnie.
+       foucle    parm, & ; Code d'agent.
+       comdev    parm, & ; Code de devise.
+       pjtabr    parm, & ; Code de projet.
+       comnumcom parm    ; Code de commande.
+;
+; Variable de travail associée à la date de commande fournie en paramètre.
+;
+define d_datcmd date = parm
+;
+; Sélection uniquement des commandes associées à un agent.
+; Si demandé, sélection des commandes dont la date de commande est supérieure ou égale à la date fournie en paramètre.
+;
+SELECT pdcomman_interne if foucle    of pdcomman_interne <> " "  and &
+                           comdatcmd of pdcomman_interne >= d_datcmd
+;
+; Tri des informations.
+;
+SORT on ciecle    of pdcomman_interne & ; Code de compagnie.
+     on foucle    of pdcomman_interne & ; Code d'agent.
+     on comdev    of pdcomman_interne & ; Code de devise dans lequel les montants sont transigés.
+     on comnumcom of pdcomman_interne & ; Code de commande.
+     on ftrnumfac of pdfacture          ; Numéro de facture.
+;
+; Déclaration des variables de travail temporaires.
+;
+temporary t_mntcomfac float   size 08 ; Montant de commissions par facture.
+temporary t_mntgrafac float   size 08 ; Montant de granit par facture.
+temporary t_mntautfac float   size 08 ; Montant autres par facture.
+temporary t_mntdepfac float   size 08 ; Montant de dépenses de commissions par facture.
+temporary t_mnttpsfac float   size 08 ; Montant de taxe fédérale (TPS) par facture.
+temporary t_mnttvpfac float   size 08 ; Montant de taxe provinciale (TVP) par facture.
+temporary t_mnttotfac float   size 08 ; Montant total de la facture.
+temporary t_mntsldven float   size 08 ; Montant solde à ventiler pour la facture. ; MP-00-06-16_D68.
+temporary t_mnttpscom float   size 08 ; Montant de taxe fédérale (TPS) par commande (projet).
+temporary t_mnttvpcom float   size 08 ; Montant de taxe provinciale (TVP) par commande (projet).
+temporary t_mntfaccom float   size 08 ; Montant facturé par commande (projet).
+temporary t_mntcomcom float   size 08 ; Montant de commissions payé pour la commande (projet).
+temporary t_mntenccuf float   size 08 ; Montant encaissé par facture.
+temporary t_mntcomduc float   size 08 ; Montant de commissions dû par commande (projet).
+temporary t_flghrsbal integer size 02 ; Indicateur de commandes hors balance.
+temporary t_flgbalres integer size 02 ; Indicateur de commandes en balance mais pour lesquelles des commissions à payer sont à venir.
+;
+; Cumul des montants de commissions, de granit et autres.
+;
+item t_mntcomfac subtotal crimnt    of pdfac_imputation &
+                       if cptindcls of mccompte = "CO"  &
+                 reset at ftrnumfac of pdfacture
+
+item t_mntgrafac subtotal crimnt    of pdfac_imputation &
+                       if cptindcls of mccompte = "GR"  &
+                 reset at ftrnumfac of pdfacture
+
+item t_mntautfac subtotal crimnt    of pdfac_imputation &
+                       if cptindcls of mccompte = "AU"  &
+                 reset at ftrnumfac of pdfacture
+
+item t_mntdepfac subtotal crimnt    of pdfac_imputation &
+                       if cptindcls of mccompte = "DE"  &
+                 reset at ftrnumfac of pdfacture
+
+item t_mnttpsfac subtotal crimnttps of pdfac_imputation &
+                 reset at ftrnumfac of pdfacture
+
+item t_mnttvpfac subtotal crimnttvp of pdfac_imputation &
+                 reset at ftrnumfac of pdfacture
+
+item t_mnttotfac subtotal crimnt    of pdfac_imputation &
+                 reset at ftrnumfac of pdfacture
+
+; -------------------------------------------------------
+; MP-00-06-16_D68.
+
+item t_mntsldven        = ftrmnt    of pdfacture        & 
+                        - carcummnt of pdfacture        &
+                       if ftrflgcar of pdfacture = "1"  & ; Indique si la facture est hors balance avec les C/R (cet indicateur est saisi par l'usager).
+                     else 0
+; -------------------------------------------------------
+
+item t_mnttpscom subtotal crimnttps of pdfac_imputation &
+                 reset at comnumcom of pdcomman_interne
+
+item t_mnttvpcom subtotal crimnttvp of pdfac_imputation &
+                 reset at comnumcom of pdcomman_interne
+
+item t_mntfaccom subtotal crimnt    of pdfac_imputation &
+                 reset at comnumcom of pdcomman_interne
+
+item t_mntcomcom        = commnt02  of pdcomman_interne 
+;
+; Fichier séquentiel des montants de commissions par facture.
+;
+SUBFILE wpd807a keep at ftrnumfac   of pdfacture         &   
+                include ciecle      of pdcomman_interne, & ; Code de compagnie.
+                        foucle      of pdcomman_interne, & ; Code d'agent.
+                        comdev      of pdcomman_interne, & ; Code de devise dans lequel les montants sont transigés.
+                        comnumcom   of pdcomman_interne, & ; Code de commande.
+                        ftrnumfac   of pdfacture       , & ; Numéro de facture.
+                        ftrnumcar   of pdfacture       , & ; Numéro de facture (comptes à recevoir).
+                        founom      of cpfournisseur   , & ; Nom de l'agent.
+                        devdscfra   of mcdevise        , & ; Description associée au code de devise.
+                        comnom      of pdcomman_interne, & ; Description associée à la commande.
+                        ftrdatfac   of pdfacture       , & ; Date de facturation.
+                        expnumexp   of pdfact_bon_livr , & ; Numéro d'expédition.
+                        blinumbli   of pdfact_bon_livr , & ; Numéro du bon de livraison.
+                        t_mntcomfac                    , & ; Montant de commissions.
+                        t_mntgrafac                    , & ; Montant de granit.
+                        t_mntautfac                    , & ; Montant autres.
+                        t_mntdepfac                    , & ; Montant de dépenses de commissions par facture.
+                        t_mnttpsfac                    , & ; Montant de taxe fédérale (TPS) par facture.
+                        t_mnttvpfac                    , & ; Montant de taxe provinciale (TVP) par facture.
+                        t_mnttotfac                    , & ; Montant total de la facture. 
+                        t_mntsldven                    , & ; Montant solde à ventiler pour la facture. ; MP-00-06-16_D68.
+                        t_mntenccuf                        ; Montant encaissé par facture.
+
+; Fichier indexé des montants de commissions payés par commande (projet).
+;
+SUBFILE wpd807b keep at comnumcom   of pdcomman_interne  &   
+                include ciecle      of pdcomman_interne, & ; Code de compagnie.
+                        foucle      of pdcomman_interne, & ; Code d'agent.
+                        comdev      of pdcomman_interne, & ; Code de devise dans lequel les montants sont transigés.
+                        comnumcom   of pdcomman_interne, & ; Code de commande.
+                        t_mnttpscom                    , & ; Montant de taxe fédérale (TPS) par commande (projet).
+                        t_mnttvpcom                    , & ; Montant de taxe provinciale (TVP) par commande (projet).
+                        t_mntfaccom                    , & ; Montant facturé par commande (projet).
+                        t_mntcomcom                    , & ; Montant de commissions payé pour la commande (projet).
+                        t_mntcomduc                    , & ; Montant de commissions dû par commande (projet).
+                        t_flghrsbal                    , & ; Indicateur de commandes hors balance.
+                        t_flgbalres                      & ; Indicateur de commandes en balance mais pour lesquelles des commissions à payer sont à venir.
+                  index wpd807b_idx                      & 
+                segment ciecle                         , & 
+                        foucle                         , & 
+                        comdev                         , & 
+                        comnumcom                      
+                        
+;-------------------------------------------------------------------------------------------------------------
+; Procédure de cumul des montants encaissés par facture et commande (projets).
+;
+REQUEST cum_enc
+;
+; Accès à la base de données à partir des fichiers de factures.
+;
+ACCESS *wpd807a link ciecle    of wpd807a    , &         ; Fichier des montants de commissions par facture.
+                     foucle    of wpd807a    , &
+                     comdev    of wpd807a    , &
+                     comnumcom of wpd807a      &
+                  to ciecle                  , &                     
+                     foucle                  , &
+                     comdev                  , &
+                     comnumcom of *wpd807b     &         ; Fichier des montants facturés et de commissions payés par commande (projet).
+
+                link ciecle    of wpd807a    , & 
+                     ftrnumcar of wpd807a      &         ; MP-00-06-16_D68.
+                  to ciecle                  , &                     
+                     carcle    of crcar_histo  optional  ; Table des encaissements
+;
+; Tri des informations.
+;
+SORT on ciecle    of wpd807a     & ; Code de compagnie.
+     on foucle    of wpd807a     & ; Code d'agent.
+     on comdev    of wpd807a     & ; Code de devise dans lequel les montants sont transigés.
+     on comnumcom of wpd807a     & ; Code de commande.
+     on ftrnumfac of wpd807a     & ; Numéro de facture.
+     on crhdat    of crcar_histo   ; Date de l'encaissement.
+;
+; Déclaration des variables de travail temporaires.
+;
+temporary t_mntencfac float size 08 ; Montant encaissés par facture.
+;
+; Cumul du montant encaissé par facture et par commande (projet).
+;
+item t_mntencfac subtotal crhmntrec of crcar_histo                                  reset at ftrnumfac
+;
+; Mise à jour du Fichier des montants de commissions par facture et du fichier indexé des montants de commissions payés par commande (projet).
+;
+OUTPUT wpd807a update at ftrnumfac 
+  item t_mntenccuf of wpd807a final t_mntencfac
+
+;-------------------------------------------------------------------------------------------------------------
+; Procédure de cumul des montants de commissions dûs par commande (projet).
+;
+REQUEST cum_due_com
+;
+; Accès à la base de données à partir des fichiers de factures.
+;
+ACCESS *wpd807a link ciecle    of wpd807a    , &         ; Fichier des montants de commissions par facture.
+                     foucle    of wpd807a    , &
+                     comdev    of wpd807a    , &
+                     comnumcom of wpd807a      &
+                  to ciecle                  , &                     
+                     foucle                  , &
+                     comdev                  , &
+                     comnumcom of *wpd807b     &         ; Fichier des montants facturés et de commissions payés par commande (projet).
+
+                link ciecle    of wpd807a    , & 
+                     ftrnumcar of wpd807a      &         ; MP-00-06-16_D68.
+                  to ciecle                  , &                     
+                     carcle    of crcar_histo  optional  ; Table des encaissements
+;
+; Tri des informations.
+;
+SORT on ciecle    of wpd807a     & ; Code de compagnie.
+     on foucle    of wpd807a     & ; Code d'agent.
+     on comdev    of wpd807a     & ; Code de devise dans lequel les montants sont transigés.
+     on comnumcom of wpd807a     & ; Code de commande.
+     on ftrnumfac of wpd807a     & ; Numéro de facture.
+     on crhdat    of crcar_histo   ; Date de l'encaissement.
+;
+; Déclaration des variables de travail temporaires.
+;
+temporary t_mntcomdue float size 08 ; Montant de commissions dû par encaissement.
+temporary t_mntcumdue float size 08 ; Montant de commissions dû par projet.
+;
+; Calcul du montant de commissions payé en fonction du montant de l'encaissement par rapport au montant de la facture - Uniquement pour les factures comportant des montants de commissions.
+;
+item t_mntcomdue = round((crhmntrec of crcar_histo / (t_mnttotfac of wpd807a  + t_mnttpsfac of wpd807a + t_mnttvpfac of wpd807a + t_mntsldven of wpd807a)) * t_mntcomfac of wpd807a ,0) ; MP-00-06-16_D68.
+item t_mntcumdue = t_mntcumdue + t_mntcomdue reset at comnumcom
+
+OUTPUT wpd807b update at comnumcom 
+  item t_mntcomduc of wpd807b final t_mntcumdue
+
+;-------------------------------------------------------------------------------------------------------------
+; Procédure de récupération des encaissements et calcul des montants de commissions payés et restant à payer.
+;
+REQUEST rec_enc_cal_com_pay_bal
+;
+; Accès à la base de données à partir des fichiers de factures.
+;
+ACCESS *wpd807a link ciecle    of wpd807a    , &         ; Fichier des montants de commissions par facture.
+                     foucle    of wpd807a    , &
+                     comdev    of wpd807a    , &
+                     comnumcom of wpd807a      &
+                  to ciecle                  , &                     
+                     foucle                  , &
+                     comdev                  , &
+                     comnumcom of *wpd807b     &         ; Fichier des montants facturés et de commissions payés par commande (projet).
+
+                link ciecle    of wpd807a    , & 
+                     ftrnumcar of wpd807a      &         ; MP-00-06-16_D68.
+                  to ciecle                  , &                     
+                     carcle    of crcar_histo  optional  ; Table des encaissements
+;
+; Tri des informations.
+;
+SORT on ciecle    of wpd807a     & ; Code de compagnie.
+     on foucle    of wpd807a     & ; Code d'agent.
+     on comdev    of wpd807a     & ; Code de devise dans lequel les montants sont transigés.
+     on comnumcom of wpd807a     & ; Code de commande.
+     on ftrnumfac of wpd807a     & ; Numéro de facture.
+     on crhdat    of crcar_histo   ; Date de l'encaissement.
+;
+; Déclaration des variables de travail temporaires.
+;
+temporary t_mntcomdue float size 08 ; Montant de commissions dû par encaissement.
+temporary t_mntcompay float size 08 ; Montant de commissions payé par encaissement.
+temporary t_mntbalpay float size 08 ; Montant de commissions restant à payer (balance) par encaissement.
+;
+; Calcul du montant de commissions payé en fonction du montant de l'encaissement par rapport au montant de la facture - Uniquement pour les factures comportant des montants de commissions.
+;
+item t_mntcomdue = round((crhmntrec of crcar_histo / (t_mnttotfac of wpd807a  + t_mnttpsfac of wpd807a + t_mnttvpfac of wpd807a + t_mntsldven of wpd807a)) * t_mntcomfac of wpd807a ,0) ; MP-00-06-16_D68.
+;
+; Fichier des montants de commissions par facture et des encaissements.
+;
+SUBFILE wpd807c keep include wpd807a                   , &
+                             crhmntrec   of crcar_histo, & ; Montant encaissé
+                             crhdat      of crcar_histo, & ; Date de l'encaissement
+                             t_mntcomdue               , & ; Montant de commissions dû par encaissement.
+                             t_mntcompay               , & ; Montant de commissions payé
+                             t_mntbalpay                   ; Montant de commissions restant à payer (balance)
+
+;-------------------------------------------------------------------------------------------------------------
+; Procédure d'ajustement des montants de commissions dûset des montants de commissions payés. Ajout de la 
+; différence (dû aux arrondissements) sur l'encaissement le plus élevé par facture.
+;
+REQUEST aju_mnt_due
+;
+; Accès aux fichiers de factures.
+;
+ACCESS *wpd807c  ; Fichier des montants de commissions par facture et des encaissements.
+;
+; Tri des informations.
+;
+SORT on ciecle    of wpd807c & ; Code de compagnie.
+     on foucle    of wpd807c & ; Code d'agent.
+     on comdev    of wpd807c & ; Code de devise dans lequel les montants sont transigés.
+     on comnumcom of wpd807c & ; Code de commande.
+     on ftrnumfac of wpd807c & ; Numéro de facture.
+     on crhmntrec of wpd807c   ; Montant encaissé par facture. *
+;
+; Déclaration des variables de travail temporaires.
+;
+temporary t_mntcumdue float size 08 ; Montant de commissions dû cumulé par facture.
+temporary t_mntduedif float size 08 ; Différenciel entre montants de commissions par facture et somme (par facture) des montants de commissions dûs par encaissements.
+;
+; Calcul du montant de commissions payé en fonction de l'encaissement.
+;
+item t_mntcumdue = t_mntcumdue + t_mntcomdue of wpd807c reset at ftrnumfac
+item t_mntduedif = t_mntcomfac of wpd807c - t_mntcumdue if t_mntenccuf of wpd807c = (t_mnttotfac of wpd807c + t_mnttpsfac of wpd807c + t_mnttvpfac of wpd807c + t_mntsldven of wpd807c) else 0 ; MP-00-06-16_D68.
+;
+; Mise à jour du fichier des montants de commissions par facture et des encaissements
+;
+OUTPUT wpd807c update at ftrnumfac of wpd807c
+  item t_mntcomdue of wpd807c final t_mntcomdue of wpd807c + t_mntduedif
+
+;-------------------------------------------------------------------------------------------------------------
+; Procédure de répartition des montants de commissions payées.
+;
+REQUEST rep_com_pay
+;
+; Accès aux fichiers de factures.
+;
+ACCESS *wpd807c link ciecle    of wpd807c , & ; Fichier des montants de commissions par facture et des encaissements.
+                     foucle    of wpd807c , &
+                     comdev    of wpd807c , &
+                     comnumcom of wpd807c   &
+                  to ciecle               , &                     
+                     foucle               , &
+                     comdev               , &
+                     comnumcom of *wpd807b    ; Fichier des montants facturés et de commissions payés par commande (projet).
+;
+; Tri des informations.
+;
+SORTED on ciecle    of wpd807c & ; Code de compagnie.
+       on foucle    of wpd807c & ; Code d'agent.
+       on comdev    of wpd807c & ; Code de devise dans lequel les montants sont transigés.
+       on comnumcom of wpd807c & ; Code de commande.
+       on ftrnumfac of wpd807c & ; Numéro de facture.
+       on crhdat    of wpd807c   ; Date de l'encaissement.
+;
+; Déclaration des variables de travail temporaires.
+;
+temporary t_mntcumdue float size 08 ; Montant de commissions dû cumulé.
+temporary t_mntcompar float size 08 ; Montant de commissions payé et répari.
+;
+; Répartition des montants de commissions payés par commande (projet).
+;
+item t_mntcumdue = t_mntcumdue + t_mntcomdue of wpd807c reset at comnumcom
+item t_mntcompar = t_mntcomdue of wpd807c                                              &
+                if t_mntcomcom of wpd807b >= t_mntcumdue                               &
+              else t_mntcomcom of wpd807b - (t_mntcumdue - t_mntcomdue of wpd807c)     &
+                if 0 < t_mntcomcom of wpd807b - (t_mntcumdue - t_mntcomdue of wpd807c) &
+              else 0
+;
+; Mise à jour du fichier des montants de commissions par facture et des encaissements
+;
+OUTPUT wpd807c update 
+  item t_mntcompay of wpd807c final t_mntcompar
+  item t_mntbalpay of wpd807c final t_mntcomdue of wpd807c - t_mntcompay of wpd807c
+
+;-------------------------------------------------------------------------------------------------------------
+; Procédure d'ajustement des montants payés. Ajout de la différence (dû aux arrondissements) sur la facture
+; ayant le montant de commissions le plus élevé.
+;
+REQUEST aju_mnt_pay_bal
+;
+; Accès aux fichiers de factures.
+;
+ACCESS *wpd807c link ciecle    of wpd807c , & ; Fichier des montants de commissions par facture et des encaissements.
+                     foucle    of wpd807c , &
+                     comdev    of wpd807c , &
+                     comnumcom of wpd807c   &
+                  to ciecle               , &                     
+                     foucle               , &
+                     comdev               , &
+                     comnumcom of *wpd807b    ; Fichier des montants facturés et de commissions payés par commande (projet).
+;
+; Tri des informations.
+;
+SORT on ciecle      of wpd807c   & ; Code de compagnie.
+     on foucle      of wpd807c   & ; Code d'agent.
+     on comdev      of wpd807c   & ; Code de devise dans lequel les montants sont transigés.
+     on comnumcom   of wpd807c   & ; Code de commande.
+     on t_mntcomdue of wpd807c d & ; Montant de commission dû.
+     on ftrnumfac   of wpd807c d & ; Numéro de facture.
+     on crhdat      of wpd807c d   ; Date de l'encaissement.
+;
+; Déclaration des variables de travail temporaires.
+;
+temporary t_mntcumpay float size 08 ; Montant de commissions payé cumulé par commande (projet).
+;
+; Calcul du montant de commissions payé en fonction de l'encaissement.
+;
+item t_mntcumpay =  t_mntcumpay + t_mntcompay of wpd807c reset at comnumcom
+;
+; Mise à jour du fichier des montants de commissions par facture et des encaissements
+;
+OUTPUT wpd807c update at comnumcom of wpd807c
+  item t_mntcompay of wpd807c final t_mntcompay of wpd807c + (t_mntcomcom of wpd807b - t_mntcumpay)
+  item t_mntbalpay of wpd807c final t_mntbalpay of wpd807c - (t_mntcomcom of wpd807b - t_mntcumpay)
+
+;-------------------------------------------------------------------------------------------------------------
+; Procédure permettant d'indentifier les commandes comportant au moins une fature hors balance (i.e. que le
+; montant de commission dû moins le montant de commission payé est différent de zéro).
+;
+; Identifier les commandes en balance mais pour lesquelles des commissions à payer sont à venir. ; MP-00-06-12_D67
+;
+; Création de la structure du fichier destiné au rapport non imprimé.
+;
+REQUEST ide_com_hrs_bal
+;
+; Accès aux fichiers de factures.
+;
+ACCESS *wpd807c link ciecle    of wpd807c , & ; Fichier des montants de commissions par facture et des encaissements.
+                     foucle    of wpd807c , &
+                     comdev    of wpd807c , &
+                     comnumcom of wpd807c   &
+                  to ciecle               , &                     
+                     foucle               , &
+                     comdev               , &
+                     comnumcom of *wpd807b    ; Fichier des montants facturés et de commissions payés par commande (projet).
+;
+; Tri des informations.
+;
+SORTED on ciecle    of wpd807c & ; Code de compagnie.
+       on foucle    of wpd807c & ; Code d'agent.
+       on comdev    of wpd807c & ; Code de devise dans lequel les montants sont transigés.
+       on comnumcom of wpd807c & ; Code de commande.
+       on ftrnumfac of wpd807c   ; Numéro de facture.
+;
+; Déclaration des variables de travail temporaires.
+;
+temporary t_mntcumcof float size 08 ; Montant de commissions dû (selon comptes de commissions)  cumulé par commande (projet). ; MP-00-06-12_D67
+temporary t_mntcumdue float size 08 ; Montant de commissions dû (selon montants d'encaissement) cumulé par commande (projet).
+;
+; Cumul des montants de commissions dûs (selon comptes de commissions) et dûs (selon montant d'encaissement) par commande (projet).
+;
+item t_mntcumcof subtotal t_mntcomfac of wpd807c at ftrnumfac reset at comnumcom ; MP-00-06-12_D67
+item t_mntcumdue subtotal t_mntcomdue of wpd807c              reset at comnumcom
+;
+; Mise à jour du fichier des montants de commissions par facture et des encaissements
+;
+OUTPUT wpd807b update at comnumcom of wpd807c
+  item t_flghrsbal of wpd807b final 1 if t_mntcumdue <> t_mntcomcom of wpd807b else 0 ; Déterminer quelles sont les commandes hors balance.
+  item t_flgbalres of wpd807b final 1 if t_mntcumdue  = t_mntcomcom of wpd807b  and & ; Déterminer quelles sont les commandes en balance mais ; MP-00-06-12_D67
+                                         t_mntcumcof <> t_mntcomcom of wpd807b else 0 ; pour lesquelles des commissions à payer sont à venir. ; MP-00-06-12_D67
+;
+; Variable de travail destinée à la création d'une structure d'enregistrement de 241 caractères.
+;
+temporary t_eng character size 241
+;
+; Fichier appellé à recevoir le rapport non-imprimé afin de déterminer le nombre de page exact par agent.
+;
+SUBFILE wpd807x keep if 1 = 2 include t_eng ; Condition bidon afin de ne pas créer d'enregistrement.
+
+
+BUILD pd807ta
+
+;---------------------------------------------------------------------------------------------------------------------------------
+
+RUN pd807tb
+
+;-------------------------------------------------------------------------------------------------------------
+; Procédure pour déterminer le nombre de pages par agent.
+;
+REQUEST det_nbr_pag_age
+
+ACCESS *wpd807x
+
+define d_ciecle character size 04 = t_eng of wpd807x [231:4]
+define d_foucle character size 06 = t_eng of wpd807x [235:6]
+define d_numpag integer   size 04 = nconvert(trunc(pack(t_eng of wpd807x [217:4])))
+
+SORT on d_ciecle & ; Code de compagnie.
+     on d_foucle & ; Code d'agent.
+     on d_numpag   ; Numéro de page.
+
+temporary t_ciecle    character size 04
+temporary t_foucle    character size 06
+temporary t_nbrpagage integer   size 04
+
+item t_ciecle    = t_eng of wpd807x [231:04] 
+item t_foucle    = t_eng of wpd807x [235:06] 
+item t_nbrpagage = nconvert(trunc(pack(t_eng of wpd807x [217:04])))
+
+SUBFILE wpd807d keep at d_foucle                &
+                include t_ciecle              , & ; Code de compagnie.
+                        t_foucle              , & ; Code d'agent.
+                        t_nbrpagage             & ; Nombre de page par agent.
+                  index wpd807d_idx             & 
+                segment t_ciecle              , & 
+                        t_foucle              
+
+
+BUILD pd807tb

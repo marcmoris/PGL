@@ -1,0 +1,231 @@
+;/T/ Immobilisation - Ajustements
+;
+;/P/ Programmeur..: Alain Côté
+;    Date création: 22 février 1994
+;
+;/V3.02.00/ Alain Côté, 22 février 1994, Immobilisation
+;
+;    Description..: Cet écran sert à comptabiliser les ajustements
+;                   de l'immobilisation.
+;
+;                   La montant d'ajustement correspond au montant à ajouter
+;                   ou à déduire du total du montant de l'immobilisation.
+;
+;
+;-----------------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN im001c FROM 7,1 TO 23,80 &
+              MODE LABEL "" AT 1,80 NOACTION    &
+              FIELDMARK RETAIN STARTUP     &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              ACTIVITIES FIND, CHANGE, ENTRY &
+              RECEIVING IMIMMOBILISATION , &
+                        T_CIECLEMNU      , &
+                        T_CIENOM
+
+;
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "IM001C"
+
+;
+; Documentation de l'écran.
+;
+USE im001c.hlp NOLIST
+
+USE ustrasse NOLIST       ;Transaction QUERY pour les sous-écran
+
+;-------------------------------------------------------------------------------
+;
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Compagnie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Numéro de compagnie du menu.
+
+;-------------------------------------------------------------------------------
+;
+FILE IMIMMOBILISATION MASTER
+
+FILE IMIMM_AJUSTEMENT PRIMARY &
+                      OCCURS 12 &
+                      NOITEM
+  ACCESS VIA CIECLE , &
+             IMMCLE   &
+         USING CIECLE OF IMIMM_AJUSTEMENT , &
+               IMMCLE OF IMIMM_AJUSTEMENT   &
+         ORDERBY CIECLE DESCENDING , &
+                 IMMCLE DESCENDING , &
+                 IMADAT DESCENDING
+
+  ITEM CIECLE   OF IMIMM_AJUSTEMENT INITIAL CIECLE OF IMIMMOBILISATION
+  ITEM IMMCLE   OF IMIMM_AJUSTEMENT INITIAL IMMCLE OF IMIMMOBILISATION
+
+
+;-------------------------------------------------------------------------------
+;
+USE ushilite NOLIST
+
+DRAW 01,01 TO 01,79
+DRAW 01,01 TO 17,01
+DRAW 17,01 TO 17,80
+DRAW 02,80 TO 17,80
+
+TITLE &
+@IF FRANCAIS
+      " Ajustements " &
+@ELSE
+      " %%%Ajustements " &
+@ENDIF
+      AT ,1 CENTERED
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+      "Raison                                          Montant          Date" &
+@ELSE
+      "%%%Raison                                       Montant          Date" &
+@ENDIF
+      AT ,5
+
+SKIP
+
+ALIGN (5,4,5) (,,50) (,,68)
+
+CLUSTER OCCURS WITH IMIMM_AJUSTEMENT ID BASE 05
+
+FIELD IMACOM OF IMIMM_AJUSTEMENT HIDDEN LABEL " " &
+        REQUIRED &
+        IF IMMDATALI OF IMIMMOBILISATION = 0
+
+FIELD IMAMNT OF IMIMM_AJUSTEMENT &
+        REQUIRED &
+        NOCHANGE &
+        IF IMMDATALI OF IMIMMOBILISATION = 0
+
+FIELD IMADAT OF IMIMM_AJUSTEMENT  FORMAT YYYYMMDD  PATTERN "####/##/##"&
+        DEFAULT SYSDATE &
+        IF IMMDATALI OF IMIMMOBILISATION = 0
+
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE INPUT IMACOM
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Maintenance du total des ajustements dans la fiche d'immobilisation.
+;
+;
+PROCEDURE EDIT IMAMNT
+BEGIN
+  ;
+  ; Validation du nombre de décimale.
+  ;
+  USE usvaldec NOLIST
+  ;
+  ; La formule suivante doit toujours être plus grande ou égale à zéro:
+  ; ==> Montant initial + ajustement - récupération - amort. accumulé.
+  ;
+  IF 0 > (   IMMMNTINI OF IMIMMOBILISATION &
+           + IMMMNTAJT OF IMIMMOBILISATION &
+           - OLDVALUE( IMAMNT OF IMIMM_AJUSTEMENT ) & ; Ajustement
+           + FIELDVALUE                             & ; Ajustement
+           - IMMMNTREC OF IMIMMOBILISATION &
+           - IMMAMTACC OF IMIMMOBILISATION &
+           - IMMMNTAMTANN OF IMIMMOBILISATION )
+  THEN ERROR 1621 ; Problème de montant, vérifier ceux-ci.
+
+  LET IMMMNTAJT OF IMIMMOBILISATION =   IMMMNTAJT OF IMIMMOBILISATION &
+                                      - OLDVALUE( IMAMNT OF IMIMM_AJUSTEMENT ) &
+                                      + FIELDVALUE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR IMIMM_AJUSTEMENT
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF IMIMM_AJUSTEMENT &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF IMIMM_AJUSTEMENT &
+       AND NOT NEWRECORD     OF IMIMM_AJUSTEMENT &
+       AND NOT DELETEDRECORD OF IMIMM_AJUSTEMENT &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+    ;
+    ; Le timbre de modification est mis à jour si l'usager modifie
+    ; la table IMIMM_AJUSTEMENT.
+    ;
+    IF        NEWRECORD OF IMIMM_AJUSTEMENT &
+       OR ALTEREDRECORD OF IMIMM_AJUSTEMENT &
+       OR DELETEDRECORD OF IMIMM_AJUSTEMENT
+    THEN BEGIN
+      LET IMMDATMOD OF IMIMMOBILISATION = SYSDATE
+      LET IMMHREMOD OF IMIMMOBILISATION = SYSTIME / 10000
+      LET IMMUSRMOD OF IMIMMOBILISATION = LOGONID
+    END
+  END
+END
+
+BUILD
+@IF FORMAT
+
+********************************* Ajustements *********************************x
+*                                                                              *
+*   Raison                                              Montant      Date      *
+*   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     xxxxxxxxxxxxxx    xxxxxxxx    *
+*   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     xxxxxxxxxxxxxx    xxxxxxxx    *
+*   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     xxxxxxxxxxxxxx    xxxxxxxx    *
+*   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     xxxxxxxxxxxxxx    xxxxxxxx    *
+*   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     xxxxxxxxxxxxxx    xxxxxxxx    *
+*   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     xxxxxxxxxxxxxx    xxxxxxxx    *
+*   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     xxxxxxxxxxxxxx    xxxxxxxx    *
+*   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     xxxxxxxxxxxxxx    xxxxxxxx    *
+*   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     xxxxxxxxxxxxxx    xxxxxxxx    *
+*   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     xxxxxxxxxxxxxx    xxxxxxxx    *
+*   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     xxxxxxxxxxxxxx    xxxxxxxx    *
+*   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     xxxxxxxxxxxxxx    xxxxxxxx    *
+*                                                                              *
+********************************************************************************
+@ENDIF

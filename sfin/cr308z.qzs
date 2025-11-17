@@ -1,0 +1,289 @@
+;/T/ Rapport de Vérification sommaires des encaissements
+;
+;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur...: Guy Chabot
+;    Date Création.: 30 juin 1994
+;
+;    Description...: La Liste de Verification des lots d'encaissements
+;                    non journalisé au Grand-Livre. Remarques que le
+;                    rapport peut être executer même si le lot a été
+;                    journalisé.
+;
+;/M/ Francois Richard, 1999-07-12
+;
+;    Ajustement pour le changement de siècle
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST   ; permet de faire les SET REPORT DEV....
+SET NOBLANK
+
+ACCESS *WCR308B &
+
+  LINK REFCIECLE OF WCR308B , &
+       REFCLETYP OF WCR308B , &
+       REFCLENUM OF WCR308B   &
+    TO REFCIECLE            , &
+       REFCLETYP            , &
+       REFCLENUM            OF MCREFERENCE OPTIONAL &
+
+  LINK CPTCLE    OF WCR308B   &
+    TO CPTCLE               OF VCPT_DSC    OPTIONAL &
+
+  LINK CIECLE    OF WCR308B , &
+       UNACLE    OF WCR308B   &
+    TO CIECLE               , &
+       UNACLE               OF MCUNITE_ADM OPTIONAL &
+
+  LINK CIECLE    OF WCR308B , &
+       PRJCLE    OF WCR308B   &
+    TO CIECLE               , &
+       PRJCLE               OF GPPROJETS    OPTIONAL &
+
+  LINK CIECLE    OF WCR308B , &
+       PRJCLE    OF WCR308B , &
+       PRACLE    OF WCR308B   &
+    TO CIECLE               , &
+       PRJCLE               , &
+       PRACLE               OF GPPRO_ACTIVITE  OPTIONAL &
+
+  LINK CIECLE OF WCR308B  , &
+       IMMCLE OF WCR308B    &
+    TO CIECLE             , &
+       IMMCLE             OF IMIMMOBILISATION OPTIONAL &
+
+  LINK LBQCPTENC OF WCR308B &
+    TO CPTCLE               OF VCPT_DSC ALIAS A_CPT_ENC OPTIONAL
+
+;
+; Détermine si on doit imprimer la description du nom du dépot ou de la
+; référence.
+;
+DEFINE D_REFNOM CHARACTER SIZE 20 = REFNOMABR OF MCREFERENCE &
+       IF 0 = SIZE(TRUNCATE(DPONOM OF WCR308B)) &
+       ELSE DPONOM OF WCR308B
+
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE CHARACTER SIZE 5 = "1" + PECCLE OF WCR308B &
+         IF PECCLE OF WCR308B[1:1] < "8" &
+         ELSE "0" + PECCLE OF WCR308B
+
+; Ajustement pour le changement de siècle
+DEFINE D_DPOCLE_TRI CHARACTER SIZE 13 = "1" + DPOCLE OF WCR308B &
+   IF DPOCLE OF WCR308B[1:1] < "8" &
+   ELSE "0" + DPOCLE OF WCR308B
+
+SORT ON CIECLE    OF WCR308B, &
+        D_PECCLE_SIE, &
+        LCRCLE    OF WCR308B, &
+        REFCLETYP OF WCR308B, &
+        REFCLENUM OF WCR308B, &
+        D_REFNOM            , &
+        LBQCPTENC OF WCR308B, &
+        D_DPOCLE_TRI        , &
+        DPOTYP    OF WCR308B, &
+        T_TYPDET  OF WCR308B, &
+        CARCLE    OF WCR308B, &
+        CCDCLELIG OF WCR308B, &
+        DPITIMSTP OF WCR308B
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 & ; Premier titre du rapport
+@IF FRANCAIS
+        = "Validation sommaire des encaissements"
+@ELSE
+        = "%%%idation sommaire des encaissements"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 & ; Deuxiemme titre du rapport
+        = " "
+
+DEFINE DZ_NUMRAP  CHARACTER SIZE 12 & ; numéro du rapport
+        = "CR308"
+
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 & ; Nom de la compagnie
+       = PARM
+
+USE usflgdet NOLIST ;Flag Bilingue (O/N)
+
+;
+;Indique si le lot est hors balance
+;
+DEFINE D_HRSBLC   CHARACTER SIZE 3 &
+        = DZ_FLGAFFO IF LCRNBRTRSERR OF WCR308B <> 0 ELSE &
+          DZ_FLGAFFN
+
+;
+; Indique si le lot est journalisé
+;
+DEFINE D_JOURNALISE CHAR SIZE 12 = &
+@IF FRANCAIS
+           "Journalisé" &
+@ELSE
+           "Posted" &
+@ENDIF
+           IF LCRDATJOU OF WCR308B <> 0
+
+;
+; Différence nbre transactions réel et nbre transactions évalué
+;
+DEFINE D_LCRNBRTRSDIF INTEGER SIZE 4 = LCRNBRTRSVER OF WCR308B - &
+                                       LCRNBRTRS    OF WCR308B
+
+;
+; Différence Montant transaction réel et Montant transaction évalué
+;
+DEFINE D_LCRCUMMNTDIF FLOAT SIZE 8 = LCRCUMMNTVER OF WCR308B - &
+                                     LCRCUMMNT    OF WCR308B
+
+;
+; On vérifie si montant de l'encaissement balance avec le total imputation et
+; de la ventilation factures.
+;
+DEFINE D_BALANCE  CHARACTER SIZE 1 = "*" IF DPOMNTPAM OF WCR308B <> &
+                                            ( DPOCUMMNT OF WCR308B + &
+                                              DPOMNTFAC OF WCR308B )
+;
+;Indique si le dépot est de type revenu direct ou client
+;
+DEFINE  D_DPODEPDIR CHARACTER SIZE 4 &
+        = "Dir." IF DPOTYP OF WCR308B <> "F" ELSE &
+          "Cli."
+;
+; On prend les descriptions si c'est un dépôt direct
+;
+DEFINE D_DPODSC1 CHARACTER SIZE 40 = &
+  DPODSC1 OF WCR308B IF DPOTYP OF WCR308B <> "F" ELSE ""
+
+DEFINE D_DPODSC2 CHARACTER SIZE 40 = &
+  DPODSC2 OF WCR308B IF DPOTYP OF WCR308B <> "F" ELSE ""
+
+USE ustit220 NOLIST  ; Titre standard pour l'application a 220
+SKIP 2 &
+@IF FRANCAIS
+    TAB 001 "Lot....: "   &
+@ELSE
+    TAB 001 "Batch..: "   &
+@ENDIF
+    TAB 011 LCRCLE OF WCR308B &
+    TAB 016 LCRDSC OF WCR308B &
+    TAB 061 "Hors balance = " &
+    TAB 076 D_HRSBLC          &
+  SKIP &
+@IF FRANCAIS
+    TAB 001 "Période: " &
+@ELSE
+    TAB 001 "Period.: " &
+@ENDIF
+    TAB 010 PECCLE OF WCR308B &
+    TAB 061 D_JOURNALISE      &
+  SKIP 2 &
+    TAB 001 "  Numéro Numéro       Date     Compte Type                     Numéro                                                               Ss-            Unité                           Refact" &
+  SKIP 1 &
+    TAB 001 "* client paie.        paiement encai. enc.    Montant enc. Dev facture          Montant à rec.    Escompte    Montant enc. Projet   prj Immobilis.   adm.     Compte  Montant imputé client" &
+  SKIP 1 &
+    TAB 001 "- ------ ------------ -------- ------ ---- --------------- --- --------------- --------------- ----------- --------------- -------- --- ------------ -------- ------ --------------- ------"
+
+REPORT &
+    TAB 001  D_BALANCE                    PRINT AT D_DPOCLE_TRI &
+    TAB 003  REFCLENUM   OF WCR308B       PRINT AT REFCLENUM &
+    TAB 010  D_REFNOM                     PRINT AT D_REFNOM  &
+    TAB 051  D_DPODSC1                    PRINT AT CARCLE    &
+    TAB 092  D_DPODSC2                    PRINT AT CARCLE    &
+  SKIP 1 &
+    TAB 010  DPOCLE      OF WCR308B PRINT AT D_DPOCLE_TRI &
+    TAB 023  DPODAT      OF WCR308B PRINT AT D_DPOCLE_TRI &
+    TAB 032  LBQCPTENC   OF WCR308B PRINT AT D_DPOCLE_TRI &
+    TAB 039  D_DPODEPDIR            PRINT AT D_DPOCLE_TRI &
+    TAB 044  DPOMNTPAM   OF WCR308B SUBTOTAL &
+       PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 5 PRINT AT D_DPOCLE_TRI &
+    TAB 060  DEVCLE      OF MCREFERENCE PRINT AT D_DPOCLE_TRI &
+
+    TAB 064  CARCLE      OF WCR308B PRINT AT CARCLE &
+    TAB 080  T_MNTCAR    OF WCR308B SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " &
+                                             SIGNIFICANCE 5 BWZ PRINT AT CARCLE &
+    TAB 096  CRHMNTESC   OF WCR308B SUBTOTAL PICTURE "^^^,^^^.^^ "     &
+                                             SIGNIFICANCE 5 BWZ PRINT AT CARCLE &
+    TAB 108  CRHMNTREC   OF WCR308B SUBTOTAL PICTURE "^^^,^^^.^^ "     &
+                                             SIGNIFICANCE 5 BWZ PRINT AT CARCLE &
+    TAB 124  PRJCLE      OF WCR308B &
+    TAB 133  PRACLE      OF WCR308B &
+    TAB 137  IMMCLE      OF WCR308B &
+    TAB 150  UNACLE      OF WCR308B &
+    TAB 159  CPTCLE      OF WCR308B &
+    TAB 166  DPIMNT      OF WCR308B  PICTURE "^^^,^^^,^^^.^^ " &
+                                     SIGNIFICANCE 5 BWZ &
+ SKIP
+
+FOOTING AT LCRCLE &
+  SKIP 2 &
+TAB 023 " Montant cumulé    Montant enc.                      Montant à rec.    Escompte    Montant rec.                                          Montant Imputé" &
+ SKIP &
+TAB 023 "--------------- ---------------                     --------------- ----------- ---------------                                         ---------------" &
+  SKIP &
+TAB 001 "Total du lot " &
+TAB 014 LCRCLE    OF WCR308B &
+TAB 023 LCRCUMMNT OF WCR308B  SUBTOTAL AT LCRCLE PICTURE "^^^,^^^,^^^.^^ " &
+                                                 SIGNIFICANCE 5 &
+TAB 039 DPOMNTPAM OF WCR308B  SUBTOTAL AT D_DPOCLE_TRI &
+                                                 PICTURE "^^^,^^^,^^^.^^ " &
+                                                 SIGNIFICANCE 5 &
+TAB 075 T_MNTCAR  OF WCR308B  SUBTOTAL AT CARCLE PICTURE "^^^,^^^,^^^.^^ " &
+                                                 SIGNIFICANCE 5 BWZ &
+TAB 091 CRHMNTESC OF WCR308B  SUBTOTAL AT CARCLE PICTURE "^^^,^^^.^^ "    &
+                                                 SIGNIFICANCE 5 BWZ &
+TAB 103 CRHMNTREC OF WCR308B  SUBTOTAL AT CARCLE PICTURE "^^^,^^^.^^ "     &
+                                                 SIGNIFICANCE 5 BWZ &
+TAB 159 DPIMNT    OF WCR308B  SUBTOTAL PICTURE "^^^,^^^,^^^.^^ "           &
+                                       SIGNIFICANCE 5 BWZ &
+  SKIP &
+TAB 023 "--------------- ---------------                     --------------- ----------- ---------------                                         ---------------" &
+  SKIP PAGE
+
+FINAL FOOTING &
+  SKIP 2 &
+TAB 023 " Montant cumulé    Montant enc.                      Montant à rec.    Escompte    Montant rec.                                          Montant Imputé" &
+ SKIP &
+TAB 023 "--------------- ---------------                     --------------- ----------- ---------------                                         ---------------" &
+  SKIP &
+TAB 001 "Total tous les lots " &
+TAB 023 LCRCUMMNT OF WCR308B  SUBTOTAL AT LCRCLE PICTURE "^^^,^^^,^^^.^^ " &
+                                                 SIGNIFICANCE 5 &
+TAB 039 DPOMNTPAM OF WCR308B  SUBTOTAL AT D_DPOCLE_TRI &
+                                                 PICTURE "^^^,^^^,^^^.^^ " &
+                                                 SIGNIFICANCE 5 &
+TAB 075 T_MNTCAR  OF WCR308B  SUBTOTAL AT CARCLE PICTURE "^^^,^^^,^^^.^^ " &
+                                                 SIGNIFICANCE 5 BWZ &
+TAB 091 CRHMNTESC OF WCR308B  SUBTOTAL AT CARCLE PICTURE "^^^,^^^.^^ "    &
+                                                 SIGNIFICANCE 5 BWZ &
+TAB 103 CRHMNTREC OF WCR308B  SUBTOTAL AT CARCLE PICTURE "^^^,^^^,^^^.^^ " &
+                                                 SIGNIFICANCE 5 BWZ &
+TAB 159 DPIMNT    OF WCR308B  SUBTOTAL PICTURE "^^^,^^^,^^^.^^ "           &
+                                       SIGNIFICANCE 5 BWZ &
+  SKIP &
+TAB 023 "--------------- ---------------                     --------------- ----------- ---------------                                         ---------------"
+
+
+BUILD cr308z
+
+;  Numéro Numéro       Date     Compte Type                     Numéro                                                               Ss-            Unité
+;* client paie.        paiement encai. enc.    Montant enc. Dev facture         Montant facture    Escompte    Montant enc. Projet   prj Équipement adm.     Compte  Montant imputé
+;- ------ ------------ -------- ------ ---- --------------- --- --------------- --------------- ----------- --------------- -------- --- ---------- -------- ------ ---------------
+;* 123456 123456789012345678901234567890 123456789012345678901234567890 123456789012345678901234567890
+;         XXXXXXXXXXXX 99/99/99 XXXXXX XXXX 999,999,999.99- XXX XXXXXXXXXXXXXXX 999,999,999.99- 999,999.99- 999,999,999.99- XXXXXXXX XXX XXXXXXXXXX XXXXXXXX XXXXXX 999,999,999.99-
+;
+;
+;
+;                       Montant cumulé    Montant enc.                      Montant à rec.    Escompte    Montant rec.                                          Montant Imputé
+;                      --------------- ---------------                     --------------- ----------- ---------------                                         ---------------
+;                      999,999,999.99- 999,999,999.99-                     999,999,999.99- 999,999.99- 999,999,999.99-                                         999,999,999.99-
+;                      --------------- ---------------                     --------------- ----------- ---------------                                         ---------------
+;

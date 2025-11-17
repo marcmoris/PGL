@@ -1,0 +1,632 @@
+;/T/ Enregistrer le redimensionnement de bloc.
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1994-09-12
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   le redimensionnement des blocs de granit de Granicor.
+;
+;/M/ François Déry, 12 mai 1999
+;       Ajout du in dict sur la transaction des séquences.
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd178 ACTIONBAR                    &
+             MODE LABEL "" AT 2,80        &
+             NOACTION                     &
+             ACTIVITIES CHANGE,FIND,ENTRY &
+             FIELDMARK RETAIN STARTUP     &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU ,      &
+                       T_CIENOM
+
+TRANSACTION NO_SEQ READ WRITE &
+                   RESERVING FOR PROTECTED WRITE PDSEQ_REDIM_BLOC IN DICT
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD178"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+USE pd178.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Redimentionnement               " ACTION DESIGNER D001
+  MENUITEM LABEL "Vérification                    " ACTION DESIGNER D002
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%Redimentionnement            " ACTION DESIGNER D001
+  MENUITEM LABEL "%%%Vérification                 " ACTION DESIGNER D002
+@ENDIF
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire à l'appel des dépisteurs
+;
+
+TEMPORARY T_BLONUMGRA001APR  CHARACTER SIZE 04
+TEMPORARY T_BLONUMGRA002APR  CHARACTER SIZE 05
+TEMPORARY T_BLORECAPR        CHARACTER SIZE 01
+TEMPORARY T_CHAMP            INTEGER UNSIGNED SIZE 01
+
+TEMPORARY T_COD              INTEGER UNSIGNED SIZE 02
+TEMPORARY T_STU              CHARACTER SIZE 1
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire au traitement
+;
+
+TEMPORARY T_SILTMP001 CHARACTER SIZE 1
+TEMPORARY T_SILTMP002 CHARACTER SIZE 1
+
+
+;-------------------------------------------------------------------------------
+;
+; Redimension de bloc
+;
+
+FILE PDREDIM_BLOC PRIMARY &
+                  NOITEM
+
+  ACCESS VIA     CIECLE,                                     &
+                 RDBNUMRED                                   &
+         USING   T_CIECLEMNU,                                &
+                 RDBNUMRED       OF PDREDIM_BLOC             &
+         REQUEST RDBNUMRED       OF PDREDIM_BLOC             &
+         ORDERBY CIECLE,                                     &
+                 RDBNUMRED
+
+  ACCESS VIA     CIECLE      &
+         USING   T_CIECLEMNU &
+         ORDERBY CIECLE,     &
+                 RDBNUMRED
+
+         ITEM CIECLE OF PDREDIM_BLOC INITIAL T_CIECLEMNU
+
+;-------------------------------------------------------------------------------
+;
+; Bloc
+;
+
+FILE PDBLOC SECONDARY &
+            NOITEM
+
+  ACCESS VIA     CIECLE,                                     &
+                 BLONUMGRA001APR,                            &
+                 BLONUMGRA002APR,                            &
+                 BLORECAPR                                   &
+         USING   T_CIECLEMNU,                                &
+                 BLONUMGRA001APR OF PDREDIM_BLOC,            &
+                 BLONUMGRA002APR OF PDREDIM_BLOC,            &
+                 BLORECAPR       OF PDREDIM_BLOC             &
+         ORDERBY CIECLE,                                     &
+                 BLONUMGRA001APR,                            &
+                 BLONUMGRA002APR,                            &
+                 BLORECAPR
+
+
+  ITEM CIECLE       OF PDBLOC INITIAL T_CIECLEMNU
+  ITEM BLONUMBLOAPR OF PDREDIM_BLOC FINAL BLONUMGRA001APR OF PDREDIM_BLOC + &
+                                          BLONUMGRA002APR OF PDREDIM_BLOC + &
+                                          BLORECAPR       OF PDREDIM_BLOC
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro séquentiel pour les bons de commande
+;
+
+FILE PDSEQ_REDIM_BLOC DESIGNER &
+                      TRANSACTION NO_SEQ
+
+
+;-------------------------------------------------------------------------------
+;
+; Définition de variable temporaire pour le traitement
+;
+DEFINE D_M3_BRU FLOAT SIZE 8 = (BLOLONBRU OF PDBLOC / 1000 ) * &
+                               (BLOHAUBRU OF PDBLOC / 1000 ) * &
+                               (BLOLARBRU OF PDBLOC / 1000 )
+
+DEFINE D_M3_NET FLOAT SIZE 8 = (BLOLONNET OF PDBLOC / 1000 ) * &
+                               (BLOHAUNET OF PDBLOC / 1000 ) * &
+                               (BLOLARNET OF PDBLOC / 1000 )
+
+DEFINE D_M3_PYE FLOAT SIZE 8 = (BLOLONPYE OF PDBLOC / 1000 ) * &
+                               (BLOHAUPYE OF PDBLOC / 1000 ) * &
+                               (BLOLARPYE OF PDBLOC / 1000 )
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Redimensionnement " &
+@ELSE
+      " %%%Redimensionnement " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+
+ALIGN (,3,19)
+
+
+FIELD RDBNUMRED OF PDREDIM_BLOC               &
+label "No redimension:"&
+        HIDDEN ID 05                          &
+        DISPLAY                               &
+        REFRESH
+
+
+FIELD RDBDATRED OF PDREDIM_BLOC                FORMAT YYYYMMDD &
+PATTERN "####/##/##"&
+label "Date redimen..:"&
+        HIDDEN ID 10                          &
+        DEFAULT SYSDATE
+
+
+FIELD RDBDSC001 OF PDREDIM_BLOC               &
+label "Description...:"&
+        HIDDEN ID 15
+
+
+FIELD RDBDSC002 OF PDREDIM_BLOC               &
+        ID SAME                               &
+        NOLABEL
+
+
+FIELD RDBDSC003 OF PDREDIM_BLOC               &
+        ID SAME                               &
+        NOLABEL
+
+
+SKIP TO LINE 11
+
+
+TITLE &
+@IF FRANCAIS
+      " Bloc redimensioné " &
+@ELSE
+      " %%%Bloc redimesioné " &
+@ENDIF
+      CENTERED AT ,1
+
+
+DRAW 11,2 TO 11,79
+
+
+TITLE "-" AT 13,23
+
+
+TITLE "-" AT 13,29
+
+
+SKIP TO LINE 13
+
+ALIGN (,3,19)(,,24)(,,30)(,38,54)
+
+
+FIELD BLONUMGRA001APR OF PDREDIM_BLOC         &
+        HIDDEN ID 20                          &
+        REQUIRED                              &
+        AUTONEXT                              &
+        NUMERIC                               &
+@IF FRANCAIS
+        LABEL "No bloc.......:"
+@ELSE
+        LABEL "%%%No bloc....:"
+@ENDIF
+
+
+FIELD BLONUMGRA002APR OF PDREDIM_BLOC         &
+        ID SAME                               &
+        NUMERIC                               &
+        AUTONEXT                              &
+        REQUIRED
+
+
+FIELD BLORECAPR       OF PDREDIM_BLOC         &
+        ID SAME                               &
+        DEFAULT " "
+
+
+FIELD T_SILTMP001                             &
+        SILENT                                &
+        LOOKUP ON PDBLOC                      &
+          VIA     CIECLE,                     &
+                  BLONUMGRA001APR,            &
+                  BLONUMGRA002APR,            &
+                  BLORECAPR                   &
+          USING   T_CIECLEMNU,                &
+                  BLONUMGRA001APR OF PDREDIM_BLOC, &
+                  BLONUMGRA002APR OF PDREDIM_BLOC, &
+                  BLORECAPR       OF PDREDIM_BLOC  &
+          MESSAGE 2943 ; Ce numéro de bloc n'existe pas
+
+
+FIELD BLOSTU          OF PDBLOC               &
+label "Statut........:"&
+        HIDDEN ID 25                          &
+        DISPLAY                               &
+        REFRESH
+
+
+
+SKIP TO LINE 15
+
+
+ALIGN (,3,19)
+
+
+FIELD BLOLONBRU OF PDBLOC                     &
+label "Longueur brut.:"&
+        HIDDEN ID 30     size 4                     &
+        DISPLAY
+
+
+FIELD BLOHAUBRU OF PDBLOC                     &
+label "Hauteur brut..:"&
+        HIDDEN ID 35    size 4                      &
+        DISPLAY
+
+
+FIELD BLOLARBRU OF PDBLOC                     &
+label "Largeur brut..:"&
+        HIDDEN ID 40       size 4                   &
+        DISPLAY
+
+
+FIELD BLOVOLMC3BRU     OF PDBLOC              &
+label "Total m3 brut.:"&
+        HIDDEN ID 45                          &
+        DISPLAY                         size 9
+
+
+SKIP TO LINE 15
+
+
+ALIGN (,29,45)
+
+
+FIELD BLOLONNET OF PDBLOC                     &
+label "Longueur nette:"&
+        HIDDEN ID 50      size 4                    &
+        DISPLAY
+
+
+FIELD BLOHAUNET OF PDBLOC                     &
+label "Hauteur nette.:"&
+        HIDDEN ID 55    size 4                      &
+        DISPLAY
+
+
+FIELD BLOLARNET OF PDBLOC                     &
+label "Largeur nette.:"&
+        HIDDEN ID 60       size 4                   &
+        DISPLAY
+
+
+FIELD BLOVOLMC3NET     OF PDBLOC              &
+label "Total m3 nette:"&
+        HIDDEN ID 65                          &
+        DISPLAY                      size 9
+
+
+SKIP TO LINE 15
+
+
+ALIGN (,55,71)
+
+
+FIELD BLOLONPYE OF PDBLOC                     &
+label "Longueur payer:"&
+        HIDDEN ID 70       size 4                   &
+        DISPLAY
+
+
+FIELD BLOHAUPYE OF PDBLOC                     &
+label "Hauteur payer.:"&
+        HIDDEN ID 75   size 4                       &
+        DISPLAY
+
+
+FIELD BLOLARPYE OF PDBLOC                     &
+label "Largeur payer.:"&
+        HIDDEN ID 80     size 4                     &
+        DISPLAY
+
+
+FIELD BLOVOLMC3PYE     OF PDBLOC              &
+label "Total m3 payer:"&
+        HIDDEN ID 85                          &
+        DISPLAY                        size 9
+
+
+FIELD T_SILTMP002                             &
+        SILENT
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel dépisteur No bloc (attemtion cet appel est particulier)
+;
+
+PROCEDURE INPUT BLONUMGRA001APR
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_BLONUMGRA001APR  = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_BLONUMGRA002APR  = ""
+    LET T_BLORECAPR        = ""
+    LET T_CHAMP            = 1
+    LET T_COD              = 2
+    LET T_STU              = ""
+    RUN SCREEN pd121 MODE F &
+                     PASSING T_BLONUMGRA001APR, &
+                             T_BLONUMGRA002APR, &
+                             T_BLORECAPR,       &
+                             T_CHAMP,           &
+                             T_COD,             &
+                             T_STU,             &
+                             T_CIECLEMNU
+    LET FIELDTEXT                 = TRUNCATE( T_BLONUMGRA001APR )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel dépisteur No bloc (attemtion cet appel est particulier)
+;
+
+PROCEDURE INPUT BLONUMGRA002APR
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_BLONUMGRA001APR  = BLONUMGRA001APR OF PDREDIM_BLOC
+    LET T_BLONUMGRA002APR  = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_BLORECAPR        = ""
+    LET T_CHAMP            = 2
+    LET T_COD              = 2
+    LET T_STU              = ""
+    RUN SCREEN pd121 MODE F &
+                     PASSING T_BLONUMGRA001APR, &
+                             T_BLONUMGRA002APR, &
+                             T_BLORECAPR,       &
+                             T_CHAMP,           &
+                             T_COD,             &
+                             T_STU,             &
+                             T_CIECLEMNU
+    LET BLONUMGRA001APR OF PDREDIM_BLOC = TRUNCATE( T_BLONUMGRA001APR )
+    LET FIELDTEXT                       = TRUNCATE( T_BLONUMGRA002APR )
+  END
+  IF 0 <> SIZE( TRUNCATE( T_BLONUMGRA002APR ) ) AND &
+     0 =  SIZE( TRUNCATE( FIELDTEXT) )
+  THEN BEGIN
+    LET FIELDTEXT                       = TRUNCATE( T_BLONUMGRA002APR )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel dépisteur No bloc (attemtion cet appel est particulier)
+;
+
+PROCEDURE INPUT BLORECAPR
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_BLONUMGRA001APR  = BLONUMGRA001APR OF PDREDIM_BLOC
+    LET T_BLONUMGRA002APR  = BLONUMGRA001APR OF PDREDIM_BLOC
+    LET T_BLORECAPR        = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_CHAMP            = 3
+    LET T_COD              = 2
+    LET T_STU              = ""
+    RUN SCREEN pd121 MODE F &
+                     PASSING T_BLONUMGRA001APR, &
+                             T_BLONUMGRA002APR, &
+                             T_BLORECAPR,       &
+                             T_CHAMP,           &
+                             T_COD,             &
+                             T_STU,             &
+                             T_CIECLEMNU
+    LET BLONUMGRA001APR OF PDREDIM_BLOC = TRUNCATE( T_BLONUMGRA001APR )
+    LET BLONUMGRA002APR OF PDREDIM_BLOC = TRUNCATE( T_BLONUMGRA002APR )
+    LET FIELDTEXT                       = TRUNCATE( T_BLORECAPR )
+  END
+  IF 0 <> SIZE( TRUNCATE( T_BLORECAPR ) ) AND &
+     0 = SIZE( TRUNCATE( FIELDTEXT) )
+  THEN BEGIN
+    LET FIELDTEXT                       = TRUNCATE( T_BLORECAPR )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que le bloc est en inventaire
+;
+PROCEDURE PROCESS T_SILTMP002
+BEGIN
+  IF BLOSTU OF PDBLOC <> "I"
+  THEN BEGIN
+    ERROR 2948 ; Le bloc n'est pas en inventaire
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDREDIM_BLOC &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDREDIM_BLOC &
+     AND NOT NEWRECORD     OF PDREDIM_BLOC &
+     AND NOT DELETEDRECORD OF PDREDIM_BLOC &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  ;-----------------------------------------------------------------------------
+  ;
+  ; Incrémentation du numéro de séquence
+  ;
+  IF 0 = RDBNUMRED OF PDREDIM_BLOC
+  THEN BEGIN
+    START TRANSACTION NO_SEQ
+    GET PDSEQ_REDIM_BLOC OPTIONAL       &
+      VIA   CIECLE                      &
+      USING T_CIECLEMNU
+    IF NOT ACCESSOK
+    THEN BEGIN
+      LET CIECLE OF PDSEQ_REDIM_BLOC = T_CIECLEMNU
+    END
+    LET RBQNUM    OF PDSEQ_REDIM_BLOC = RBQNUM    OF PDSEQ_REDIM_BLOC + 1
+    LET RDBNUMRED OF PDREDIM_BLOC     = RBQNUM    OF PDSEQ_REDIM_BLOC
+    PUT PDSEQ_REDIM_BLOC
+    DISPLAY RDBNUMRED OF PDREDIM_BLOC
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Redimension
+;
+
+PROCEDURE DESIGNER D001
+BEGIN
+  RUN SCREEN  pd178a &
+              PASSING T_CIECLEMNU,        &
+                      T_CIENOM,           &
+                      PDREDIM_BLOC,       &
+                      PDBLOC              &
+              MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Vérification
+;
+
+PROCEDURE DESIGNER D002
+BEGIN
+  RUN SCREEN  pd178b &
+              PASSING T_CIECLEMNU,       &
+                      T_CIENOM,          &
+                      PDBLOC             &
+              MODE F
+END
+
+
+BUILD
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+******************************* Redimesionnement *******************************
+*                                                                              *
+* No redimension: xxxxxxxxxxx                                                  *
+* Date redimen..: xxxxxxxx                                                     *
+* Description...: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                                                                              *
+********************************************************************************
+*                                                                              *
+* No bloc.......: xxxx-xxxxx-x       Statut........: x                         *
+*                                                                              *
+* Longueur brut.: xxxx      Longueur nette: xxxx      Longueur payer: xxxx     *
+* Hauteur brut..: xxxx      Hauteur nette.: xxxx      Hauteur payer.: xxxx     *
+* Largeur brut..: xxxx      Largeur nette.: xxxx      Largeur payer.: xxxx     *
+* Total m3 brut.: xxxxxxx   Total m3 nette: xxxxxxx   Total m3 payer: xxxxxxx  *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+********************************************************************************
+@ENDIF

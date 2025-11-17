@@ -1,0 +1,458 @@
+;/T/ Encaissements - Paramètres de sélection
+;
+;//M/GRA01/Francois Richard/1999-06-18
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur..: Alain Côté
+;    Date Création: 28 juin 1993
+;
+;    Description..: Cet écran permet de faire une sélection automatique
+;                   des factures a recevoir pour un client.
+;
+;                   Elle est faite de 2 facon soit par date ou numero de
+;                   facture. La date de validation permet de valider les
+;                   escomptes appliquable s'il y a lieu sur chacune des
+;                   factures.
+;
+;/M/ François Déry, 30 avril 1999
+;       Modifier l'accèss au fichier de séquence car il a
+;       été converti en format interbase au lieu d'indexé.
+;-------------------------------------------------------------------------------
+;/V/ 3.00.03    Guy Chabot 20 mai 1994 (234).
+;-------------------------------------------------------------------------------
+;/M/ remy demers 17 mars 1999
+;   validation de la periode de la facture
+;
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+
+
+SCREEN cr007c SLAVE &
+              AUTOUPDATE &
+              MODE LABEL "" AT  1,80 &
+              NOACTION FIELDMARK &
+              FROM 6,1 TO 17,80 &
+              MESSAGE ON 24 &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING CRDEPOT
+
+USE ussectmp   NOLIST
+    "CR007C"
+
+USE cr007c.hlp NOLIST
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE CRDPO_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+
+;-------------------------------------------------------------------------------
+;
+
+FILE CRDEPOT          MASTER
+
+;
+; Validation du type de sélection(bilingue).
+;
+DEFINE    D_DPOTYPSEL CHARACTER SIZE 16 = "DPOTYPSEL"
+TEMPORARY T_DPOTYPSEL CHARACTER SIZE 4
+;
+FILE VCBI_DSC         REFERENCE
+  ACCESS VIA XELNOM, &
+             CBICLE  &
+         USING D_DPOTYPSEL, &
+               DPOTYPSEL OF CRDEPOT
+
+;
+; Sélection des factures par date ou par numéro de facture.
+;
+FILE VCAR_CCD         DESIGNER OPEN READ
+
+  SELECT IF     CARDATJOU OF VCAR_CCD <> 0 &
+            AND 0 <> ( CCDMNT OF VCAR_CCD &
+                       + V_CCDMNTAUG OF VCAR_CCD &
+                       - V_CCDMNTDIM OF VCAR_CCD ) &
+            AND ( ( &
+                        CCDDATDUE OF VCAR_CCD >= DPODATSELDEB OF CRDEPOT &
+                    AND (    CCDDATDUE OF VCAR_CCD <= DPODATSELFIN OF CRDEPOT &
+                          OR 0 = DPODATSELFIN OF CRDEPOT ) &
+                    AND "D" = DPOTYPSEL    OF CRDEPOT &
+                  ) &
+                  OR &
+                  ( &
+                        CARCLE OF VCAR_CCD >= DPONUMSELDEB OF CRDEPOT &
+                    AND (    CARCLE    OF VCAR_CCD <= DPONUMSELFIN OF CRDEPOT &
+                          OR "" = TRUNCATE( DPONUMSELFIN OF CRDEPOT ) ) &
+                    AND "N" = DPOTYPSEL    OF CRDEPOT &
+                  ) &
+                )
+
+;
+; Ajout de la ventilation.
+;
+FILE CRCAR_HISTO      DESIGNER
+
+;
+; Pour le calcul de l'escompte.
+;
+FILE CRTERME          DESIGNER OPEN READ
+
+;
+; Numéro séquentiel des encaissements, fichier indexé.
+;
+FILE CRDPO_SEQ        DESIGNER &
+                      TRANSACTION GEN_NUM_SEQ
+
+FILE CRCPT_A_REC ALIAS A_CRCPT_A_REC DESIGNER
+;------------------------------------------------------------------------------
+
+TEMPORARY T_MNTESC    FLOAT     SIZE 8
+TEMPORARY  T_PECCLE_SIE     CHARACTER SIZE 5
+TEMPORARY  T_PECCLE_SIE_FAC CHARACTER SIZE 5
+
+
+;-------------------------------------------------------------------------------
+;
+DRAW 01,01 TO 01,79
+DRAW 01,01 TO 12,01
+DRAW 12,01 TO 12,80
+DRAW 02,80 TO 12,80
+
+USE ushilite NOLIST
+
+TITLE &
+@IF FRANCAIS
+      " Paramètres de sélection " &
+@ELSE
+      " Selection Parameters " &
+@ENDIF
+      CENTERED AT 1,1
+
+USE ustitoff NOLIST
+
+SKIP 1
+
+ALIGN(3,3,19) (,,21)
+
+FIELD DPOTYPSEL OF CRDEPOT HIDDEN ID 10 &
+        DEFAULT "M" &
+        LOOKUP ON VCBI_DSC &
+          MESSAGE 682 ; Code invalide
+
+FIELD CBIDSC OF VCBI_DSC &
+        DISPLAY
+
+SKIP 1
+
+FIELD DPODATSELVAL OF CRDEPOT  FORMAT YYYYMMDD PATTERN "####/##/##" ID SAME &
+        IF DPOTYPSEL OF CRDEPOT <> "M"
+
+SKIP TO LINE 5
+
+ALIGN(,45,64)
+
+FIELD DPODATSELDEB OF CRDEPOT  FORMAT YYYYMMDD PATTERN "####/##/##" ID SAME &
+        IF DPOTYPSEL OF CRDEPOT = "D"
+FIELD DPODATSELFIN OF CRDEPOT  FORMAT YYYYMMDD PATTERN "####/##/##" ID SAME &
+        IF DPOTYPSEL OF CRDEPOT = "D"
+
+SKIP 1
+
+FIELD DPONUMSELDEB OF CRDEPOT ID SAME &
+        IF DPOTYPSEL OF CRDEPOT = "N"
+FIELD DPONUMSELFIN OF CRDEPOT ID SAME &
+        IF DPOTYPSEL OF CRDEPOT = "N"
+
+
+;------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;------------------------------------------------------------------------------
+;
+;
+; Type de sélection.
+;
+;
+PROCEDURE INPUT DPOTYPSEL
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_DPOTYPSEL = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_DPOTYPSEL, &
+                                    T_DPOTYPSEL
+    LET FIELDTEXT = TRUNC(T_DPOTYPSEL)
+  END
+END
+
+
+;------------------------------------------------------------------------------
+;
+;
+PROCEDURE PROCESS DPOTYPSEL
+BEGIN
+  ;
+  ; Par date.
+  ;
+  IF DPOTYPSEL OF CRDEPOT = "D"
+  THEN BEGIN
+    LET DPONUMSELDEB OF CRDEPOT = ""
+    LET DPONUMSELFIN OF CRDEPOT = ""
+    DISPLAY DPONUMSELDEB OF CRDEPOT
+    DISPLAY DPONUMSELFIN OF CRDEPOT
+  END
+  ;
+  ; Par numéro de facture.
+  ;
+  IF DPOTYPSEL OF CRDEPOT = "N"
+  THEN BEGIN
+    LET DPODATSELDEB OF CRDEPOT = 0
+    LET DPODATSELFIN OF CRDEPOT = 0
+    DISPLAY DPODATSELDEB OF CRDEPOT
+    DISPLAY DPODATSELFIN OF CRDEPOT
+  END
+  ;
+  ; Manuel.
+  ;
+  IF DPOTYPSEL OF CRDEPOT = "M"
+  THEN BEGIN
+    LET DPODATSELVAL OF CRDEPOT = 0
+    LET DPODATSELDEB OF CRDEPOT = 0
+    LET DPODATSELFIN OF CRDEPOT = 0
+    LET DPONUMSELDEB OF CRDEPOT = ""
+    LET DPONUMSELFIN OF CRDEPOT = ""
+    DISPLAY DPODATSELVAL OF CRDEPOT
+    DISPLAY DPONUMSELDEB OF CRDEPOT
+    DISPLAY DPONUMSELFIN OF CRDEPOT
+    DISPLAY DPODATSELDEB OF CRDEPOT
+    DISPLAY DPODATSELFIN OF CRDEPOT
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;------------------------------------------------------------------------------
+;
+;
+PROCEDURE DESIGNER 10
+BEGIN
+  ACCEPT DPOTYPSEL OF CRDEPOT
+  DISPLAY CBIDSC OF VCBI_DSC
+
+  IF DPOTYPSEL OF CRDEPOT <> "M"
+  THEN ACCEPT DPODATSELVAL OF CRDEPOT
+
+  IF DPOTYPSEL OF CRDEPOT = "D"
+  THEN BEGIN
+    ACCEPT DPODATSELDEB OF CRDEPOT
+    ACCEPT DPODATSELFIN OF CRDEPOT
+  END
+
+  IF DPOTYPSEL OF CRDEPOT = "N"
+  THEN BEGIN
+    ACCEPT DPONUMSELDEB OF CRDEPOT
+    ACCEPT DPONUMSELFIN OF CRDEPOT
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Procédure de génération du detail du dépot.
+;
+;
+PROCEDURE INTERNAL GENERE_DETAIL
+BEGIN
+
+  WHILE RETRIEVING VCAR_CCD VIA REFCIECLE, &
+                                REFCLENUM, &
+                                CIECLE     &
+                            USING REFCIECLE OF CRDEPOT, &
+                                  REFCLENUM OF CRDEPOT, &
+                                  CIECLE    OF CRDEPOT
+  BEGIN
+    ;validation de la periode de la facture
+    ;
+
+    GET A_CRCPT_A_REC VIA CIECLE,CARCLE USING CIECLE OF VCAR_CCD,CARCLE OF VCAR_CCD OPT
+    IF ACCESSOK
+    THEN BEGIN
+
+       ; Ajustement pour le changement de siècle
+       IF PECCLE OF CRDEPOT[1:1] < "8"
+       THEN LET T_PECCLE_SIE = "1" + PECCLE OF CRDEPOT
+       ELSE LET T_PECCLE_SIE = "0" + PECCLE OF CRDEPOT
+
+       ; Ajustement pour le changement de siècle
+       IF PECCLE OF A_CRCPT_A_REC[1:1] < "8"
+       THEN LET T_PECCLE_SIE_FAC = "1" + PECCLE OF A_CRCPT_A_REC
+       ELSE LET T_PECCLE_SIE_FAC = "0" + PECCLE OF A_CRCPT_A_REC
+
+       IF T_PECCLE_SIE < T_PECCLE_SIE_FAC
+       THEN ERROR ="la periode de la facture est plus petit que celle de l'encaissement"
+    ELSE BEGIN
+    ;
+    ; Calcul d'escompte possible.
+    ;
+    ; Pour calculer de l'escompte il faut que :
+    ;   -la pièce possède qu'une seule ligne de cédule d'encaissement.
+    ;   -la pièce n'a jamais été payée ni en partie, ni en totalitée.
+    ;   -la date du premier escompte ou la date du deuxiemme escompte
+    ;    soit supérieure à la date de sélection.
+    ;
+    LET T_MNTESC = 0
+
+    IF     DPODATSELVAL OF CRDEPOT <> 0 &
+       AND CARFLGCED    OF VCAR_CCD =  "0" &
+       AND 0 = V_CCDMNTDIM OF VCAR_CCD
+    THEN BEGIN
+      IF CARDATESC1 OF VCAR_CCD >= DPODATSELVAL OF CRDEPOT
+      THEN BEGIN
+        GET CRTERME VIA   TMECLE &
+                    USING CARTERESC1 OF VCAR_CCD &
+                    OPTIONAL
+        IF ACCESSOK
+        THEN LET T_MNTESC = ROUND( CARMNTNET OF VCAR_CCD &
+                                   * TMEPCT    OF CRTERME )
+      END
+      ELSE BEGIN
+        IF CARDATESC2 OF VCAR_CCD >= DPODATSELVAL OF CRDEPOT
+        THEN BEGIN
+          GET CRTERME VIA   TMECLE &
+                      USING CARTERESC2 OF VCAR_CCD &
+                      OPTIONAL
+          IF ACCESSOK
+          THEN LET T_MNTESC = ROUND( CARMNTNET OF VCAR_CCD &
+                                     * TMEPCT    OF CRTERME)
+        END
+      END
+    END
+
+    LET CIECLE    OF CRCAR_HISTO = CIECLE    OF VCAR_CCD
+    LET CARCLE    OF CRCAR_HISTO = CARCLE    OF VCAR_CCD
+    LET CRHTIMSTP OF CRCAR_HISTO = SYSDATE * 1000000 + ROUND(SYSTIME / 100)
+    LET CRHCLE1   OF CRCAR_HISTO = CIECLE    OF CRDEPOT
+    LET CRHCLE2   OF CRCAR_HISTO = DPOCLE    OF CRDEPOT
+    LET CRHTYPECR OF CRCAR_HISTO = DPOTYPECR OF CRDEPOT
+    LET CRHTYPTRA OF CRCAR_HISTO = DPOTYPECR OF CRDEPOT
+    LET CCDCLELIG OF CRCAR_HISTO = CCDCLELIG OF VCAR_CCD
+    LET CRHDAT    OF CRCAR_HISTO = DPODAT    OF CRDEPOT
+    LET PECCLE    OF CRCAR_HISTO = PECCLE    OF CRDEPOT
+    LET LCRCLE    OF CRCAR_HISTO = LCRCLE    OF CRDEPOT
+    ;
+    ; Montant qui affecte le compte à recevoir(inclus l'escompte).
+    ;
+    LET CRHMNTCAR OF CRCAR_HISTO = CCDMNT OF VCAR_CCD &
+                                   + V_CCDMNTAUG OF VCAR_CCD &
+                                   - V_CCDMNTDIM OF VCAR_CCD
+    ;
+    ; Montant d'escompte.
+    ;
+    LET CRHMNTESC OF CRCAR_HISTO = T_MNTESC
+    ;
+    ; Montant reçu(exclus l'escomtpe).
+    ;
+    LET CRHMNTREC OF CRCAR_HISTO = CRHMNTCAR OF CRCAR_HISTO - &
+                                   CRHMNTESC OF CRCAR_HISTO
+
+    LET DPOMNTFAC OF CRDEPOT = DPOMNTFAC OF CRDEPOT        + &
+                               CRHMNTREC OF CRCAR_HISTO
+
+    LET DPOMNTESC OF CRDEPOT = DPOMNTESC OF CRDEPOT        + &
+                               CRHMNTESC OF CRCAR_HISTO
+    PUT CRCAR_HISTO RESET
+  END
+ END
+ END
+END
+;-------------------------------------------------------------------------------
+;
+;
+; Si le type de sélection est Manuel, il ne faut pas mettre à jour la
+; relation CRDEPOT car l'usager pourrait ne pas saisir de ventilation
+; facture.
+;
+;
+PROCEDURE UPDATE
+BEGIN
+  IF DPOTYPSEL OF CRDEPOT <> "M"
+  THEN BEGIN
+    ;
+    ; On incrémente le numéro d'encaissment.
+    ;
+    IF DPOCLE OF CRDEPOT = ""
+    THEN BEGIN
+      START TRANSACTION GEN_NUM_SEQ
+      GET CRDPO_SEQ VIA CIECLE, &
+                        PECCLE, &
+                        LCRCLE  &
+                    USING CIECLE OF CRDEPOT, &
+                          PECCLE OF CRDEPOT, &
+                          LCRCLE OF CRDEPOT  &
+                    OPTIONAL
+      LET CIECLE    OF CRDPO_SEQ = CIECLE    OF CRDEPOT
+      LET PECCLE    OF CRDPO_SEQ = PECCLE    OF CRDEPOT
+      LET LCRCLE    OF CRDPO_SEQ = LCRCLE    OF CRDEPOT
+      ;LET DPSNUMSEQ OF CRDPO_SEQ = DPSNUMSEQ OF CRDPO_SEQ + 1
+;an 2000
+      if newrecord of crdpo_seq
+      then LET DPSNUMSEQ OF CRDPO_SEQ = 0
+      LET DPSNUMSEQ OF CRDPO_SEQ = DPSNUMSEQ OF CRDPO_SEQ + 1
+
+      LET DPOCLE    OF CRDEPOT   = PECCLE    OF CRDEPOT + &
+                                   LCRCLE    OF CRDEPOT + &
+                            ASCII(DPSNUMSEQ OF CRDPO_SEQ,DPSLONNUM OF CRDPO_SEQ -2)
+      PUT CRDPO_SEQ
+      COMMIT TRANSACTION GEN_NUM_SEQ
+    END
+
+    DO INTERNAL GENERE_DETAIL
+
+    PUT CRDEPOT
+  END
+
+  ;
+  ; Sortie automatique du sous-écran après mise à jour.
+  ;
+  RETURN
+END
+
+BUILD
+
+;*************************** Paramètres de sélection ***************************x
+;*                                                                              *
+;* Sélection.....: x xxxxxxxxxxxxxxxxxxxxxxxxx                                  *
+;*                                                                              *
+;* Date valid....: xxxxxxxx                  Date début....:    xxxxxxxx        *
+;*                                           Date de fin...:    xxxxxxxx        *
+;*                                                                              *
+;*                                           Num. début....:    xxxxxxxxxxxxxxx *
+;*                                           Num. fin......:    xxxxxxxxxxxxxxx *
+;*                                                                              *
+;*                                                                              *
+;********************************************************************************

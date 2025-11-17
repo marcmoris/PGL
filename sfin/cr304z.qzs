@@ -1,0 +1,264 @@
+;/T/ Historique des comptes à recevoir
+;
+;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur...: Alain Côté
+;    Date Création.: 27 juillet 1993
+;
+;    Description...: Impression de l'historique des transactions d'un client
+;                    pour un interval de période. Cet historique imprime toutes
+;                    les factures(FA,CR,NA) avec les transactions associées à
+;                    celles-ci.
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST
+SET NOBLANKS
+
+
+ACCESS *WCR304A
+
+
+;
+; Indique si la facture ou une transaction associées n'est pas journalisées.
+;
+DEFINE D_FLGJOU CHARACTER SIZE 1 = "*" IF    CARDATJOU OF WCR304A = 0 &
+                                          OR (     CRHDATJOU OF WCR304A = 0 &
+                                               AND CRHCLE2 OF WCR304A <> "" )
+;
+; Il faut prendre le montant du compte à recevoir une seule par transaction
+; maitre(facture), donc on prend le montant que pour la ligne 1.
+;
+DEFINE D_TOTCAR FLOAT SIZE 8 = CARMNT OF WCR304A IF T_CNTCAR OF WCR304A = 1
+
+;
+; Montant de correction. On inclus dans ce montant les ajustements et les
+; notes de crédits.
+;
+DEFINE D_TOTAJT FLOAT SIZE 8 = CRHMNTCAR OF WCR304A &
+                                 IF    CRHTYPTRA OF WCR304A = "AJ" &
+                                    OR CRHTYPTRA OF WCR304A = "NC"
+
+;
+; Montant encaissé. On inclus dans ce montant les encaissements et les
+; mauvaises créances.
+;
+DEFINE D_TOTENC FLOAT SIZE 8 = CRHMNTREC OF WCR304A &
+                                 IF    CRHTYPTRA OF WCR304A = "EN" &
+                                    OR CRHTYPTRA OF WCR304A = "MC"
+
+;
+; Momtant d'escompte. Ce montant peut provenir que des encaissements.
+;
+DEFINE D_TOTESC FLOAT SIZE 8 = CRHMNTESC OF WCR304A &
+                                 IF CRHTYPTRA OF WCR304A = "EN"
+
+;
+; Pour le calcul du solde du client.
+;
+DEFINE D_TOTMNT FLOAT SIZE 8 = D_TOTCAR &
+                               + D_TOTAJT &
+                               - D_TOTENC &
+                               - D_TOTESC
+
+;
+; Je converti la période de caractère à numérique pour utiliser l'option
+; BWZ lors de l'impression, sinon lorsque la période est à blanc il
+; imprime le tiret quand même.
+;
+;DEFINE D_CRH_PECCLE INTEGER SIZE 2 = NCONVERT( CRH_PECCLE OF WCR304A )
+; Ajustement pour le changement de siècle
+DEFINE D_CRH_PECCLE CHARACTER SIZE 5 = &
+     (CRH_PECCLE OF WCR304A[1:2] + "-" + CRH_PECCLE OF WCR304A[3:2]) &
+     IF 0 <> SIZE(TRUNC(CRH_PECCLE OF WCR304A)) &
+     ELSE ""
+
+;
+; Titre du rapport.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+        "Historique des comptes à recevoir"
+@ELSE
+        "Transaction history"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = ""
+
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "CR304"
+
+;
+; Nom de la compagnie du menu.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM
+
+
+;
+; *** Le tri doit être identique à celui effectué dans le QTP.
+;
+SORTED ON CLICLE OF WCR304A, & ; Numéro de client
+          CARDAT OF WCR304A, & ; Date de la facture
+          CARCLE OF WCR304A, & ; Numéro de facture
+          CRHDAT OF WCR304A    ; Date de l'historique
+
+
+;
+; Impression de l'en-tête.
+;
+USE ustitstd NOLIST
+@IF FRANCAIS
+  TAB 045 "de la période : " &
+@ELSE
+  TAB 045 "from period : "   &
+@ENDIF
+  TAB 061 G_PECDEB           &
+@IF FRANCAIS
+  TAB 068 "à la période : "  &
+@ELSE
+  TAB 068 "to period : "     &
+@ENDIF
+  TAB 083 G_PECFIN           &
+SKIP 2 &
+
+  TAB 001 "Client.........:" &
+  TAB 018 CLICLE OF WCR304A  &
+  TAB 025 CLINOM OF WCR304A  &
+ SKIP &
+@IF FRANCAIS
+  TAB 001 "Devise.........:" &
+@ELSE
+  TAB 001 "Currency.......:" &
+@ENDIF
+  TAB 018 DEVCLE OF WCR304A  &
+SKIP 2                       &
+
+  TAB 001 &
+@IF FRANCAIS
+"    No        No                                 Montant         Montant        Montant       Transactions        No    No    Date" &
+@ELSE
+"%%% No        No                                 Montant         Montant        Montant       Transactions        No    No    Date" &
+@ENDIF
+SKIP &
+
+  TAB 001 &
+@IF FRANCAIS
+"  facture     pér    Date   *   Montant brut    correction    encaissement      escompte        associés    Type  pér  lot   trans." &
+@ELSE
+"%%%acture     pér    Date   *   Montant brut    correction    encaissement      escompte        associés    Type  pér  lot   trans." &
+@ENDIF
+SKIP &
+
+  TAB 001 &
+"------------ ----- -------- - --------------- -------------- --------------- -------------- --------------- ---- ----- ---- --------"
+
+
+REPORT &
+  TAB 001 CARCLE    OF WCR304A PRINT AT CARCLE OF WCR304A &
+            PICTURE "^^^^^^^^^^^^" &
+  TAB 014 PECCLE    OF WCR304A PRINT AT CARCLE OF WCR304A &
+  TAB 020 CARDAT    OF WCR304A PRINT AT CARCLE OF WCR304A &
+  TAB 029 D_FLGJOU                                        &
+  TAB 031 D_TOTCAR             PRINT AT CARCLE OF WCR304A &
+                               PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+  TAB 047 D_TOTAJT             PICTURE  "^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 BWZ &
+  TAB 062 D_TOTENC             PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 BWZ &
+  TAB 078 D_TOTESC             PICTURE  "^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 BWZ &
+  TAB 093 CRHCLE2    OF WCR304A  &
+  TAB 110 CRHTYPTRA  OF WCR304A  &
+  TAB 114 D_CRH_PECCLE      &
+  TAB 120 CRH_LCRCLE OF WCR304A  &
+  TAB 125 CRHDAT     OF WCR304A
+
+
+FOOTING AT CARCLE &
+  SKIP 2
+
+FOOTING AT CLICLE &
+  TAB 031 "---------------" &
+  TAB 047 "--------------"  &
+  TAB 062 "---------------" &
+  TAB 078 "--------------"  &
+SKIP &
+  TAB 031 D_TOTCAR SUBTOTAL    PICTURE "^^^,^^^,^^^.^^ "  TRAILING SIGN "-" SIGNIFICANCE 5 &
+  TAB 047 D_TOTAJT SUBTOTAL    PICTURE  "^^,^^^,^^^.^^ "  TRAILING SIGN "-" SIGNIFICANCE 5 &
+  TAB 062 D_TOTENC SUBTOTAL    PICTURE "^^^,^^^,^^^.^^ "  TRAILING SIGN "-" SIGNIFICANCE 5 &
+  TAB 078 D_TOTESC SUBTOTAL    PICTURE  "^^,^^^,^^^.^^ "  TRAILING SIGN "-" SIGNIFICANCE 5 &
+@IF FRANCAIS
+  TAB 095 "Solde :" &
+@ELSE
+  TAB 095 "Balance:"  &
+@ENDIF
+  TAB 105 D_TOTMNT SUBTOTAL    PICTURE "^^^,^^^,^^^.^^ "  TRAILING SIGN "-" SIGNIFICANCE 5 &
+ SKIP 1 &
+  TAB 031 "===============" &
+  TAB 047 "=============="  &
+  TAB 062 "===============" &
+  TAB 078 "==============" &
+ SKIP PAGE
+
+
+PAGE FOOTING &
+  TAB 001 &
+@IF FRANCAIS
+  " * La facture n'est pas journalisée ou bien les transactions associées ne sont pas journalisées."
+@ELSE
+  " * Unposted invoice or some unposted transactions exists on this invoice."
+@ENDIF
+
+
+BUILD cr304z
+
+@IF FORMAT
+
+CR304                                         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                    Page: 9999
+99/99/99 HH:MM xxxxxxxxxxxx                         Historique des comptes à recevoir
+                                               de la période 99-99 à la période 99-99
+
+Client.........: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+Devise.........: xxx
+
+    No        No                                 Montant         Montant        Montant       Transactions        No    No    Date
+  facture     pér    Date   *   Montant brut    correction    encaissement      escompte        associés    Type  pér  lot   trans.
+------------ ----- -------- - --------------- -------------- --------------- -------------- --------------- ---- ----- ---- --------
+123456789012 xx-xx 99/99/99 x 999,999,999.99- 99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+                                              99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+                                              99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+
+123456789012 xx-xx 99/99/99 x 999,999,999.99- 99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+                                              99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+
+123456789012 xx-xx 99/99/99 x 999,999,999.99- 99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+
+123456789012 xx-xx 99/99/99 x 999,999,999.99-
+
+123456789012 xx-xx 99/99/99 x 999,999,999.99- 99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+                                              99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+
+123456789012 xx-xx 99/99/99 x 999,999,999.99- 99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+
+123456789012 xx-xx 99/99/99 x 999,999,999.99- 99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+
+123456789012 xx-xx 99/99/99 x 999,999,999.99- 99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+                                              99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+
+123456789012 xx-xx 99/99/99 x 999,999,999.99-
+
+123456789012 xx-xx 99/99/99 x 999,999,999.99- 99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+                                              99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+                                              99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+
+                              --------------- -------------- --------------- --------------
+                              999,999,999.99- 99,999,999.99- 999,999,999.99- 99,999,999.99-   Solde :   999,999,999.99
+                              =============== ============== =============== ==============
+
+
+ * La facture n'est pas journalisée ou bien les transactions associées ne sont pas journalisées.
+@ENDIF

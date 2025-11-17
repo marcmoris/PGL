@@ -1,0 +1,865 @@
+;/T/ 2.5.8 Retour de marchandises (Tranche).
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1995-10-30
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   les retours de marchandises de tranche.
+;
+;/M/ François Déry, 12 mai 1999
+;       Ajout du in dict sur la transaction des séquences.
+;
+;/M/ Programmeur..: Nancy Breton
+;    Date modif...: 1998-10-05
+;    Description..: On doit enlever le lien avec la table PDEMBAL_TRANCHE
+;                   lorsque l'on effectue un retour. Le code existait mais il
+;                   était en commentaire car le lien avec la table ne tenait pas
+;                   compte du caisson. (SOS #525)
+;
+;/M/ Programmeur..: Nancy Breton
+;    Date modif...: 1998-12-23
+;    Description..: Enlever de la procédure OUTPUT TRFINDRETINV la condition
+;                   suivante IF TRFINDRETINV OF PDTRANCHE_RETOUR = "1"
+;                   (SOS #567)
+;
+;/M/ Programmeur..: RéMY DEMERS
+;    Date modif...: 1999-01-12
+;    Description..: CORRIGER LA PROCEDURE OUTPUT TRFINDRETINV (DELETE) .
+;                   PERMETTRE LA MODIFICATION DU DETAIL DES TRANCHE.
+;                   AFFICHER "O" PAR DEFAULT POUR TRFINDRETINV
+; 
+;
+;/M/ Programmeur.: Claudie Doyon
+;    Date modif..: 1999-12-10
+;    Description.: Modification de la procédure préupdate pour qu'elle
+;                  detruise l'enregistrement dans la table pdembal_tranche
+;                  lors d'une mise à jour du retour.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd222b ACTIONBAR                     &
+              MODE LABEL "" AT 2,80         &
+              NOACTION                      &
+              FIELDMARK RETAIN STARTUP      &
+              HELP POPUP FROM 4,9 TO 20,72  &
+              RECEIVING T_CIECLEMNU,        &
+                        T_CIENOM,           &
+                        PDRETOUR
+
+
+;-------------------------------------------------------------------------------
+;
+; Déclaration de la transaction pour donner un numéro séquentiel
+;
+
+TRANSACTION NO_SEQ READ WRITE &
+                   RESERVING FOR PROTECTED WRITE PDSEQ_RETOUR IN DICT
+
+
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD222B"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+USE pd222b.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+TEMPORARY T-T INTEGER SIZE 4
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire au traitement
+;
+TEMPORARY T_TYFCODFIN        CHARACTER SIZE 04
+
+TEMPORARY T_TYPE_PROD        CHARACTER SIZE 02 INITIAL "TR" RESET AT STARTUP ; Type de produit traiter par l'écran
+TEMPORARY T_SILENT_1         CHARACTER SIZE 01
+TEMPORARY T_RARCODRET        CHARACTER        SIZE 03 ; Popup raison retour
+TEMPORARY T_TRANUMTRA002     CHARACTER SIZE 07
+
+
+;-------------------------------------------------------------------------------
+;
+; Sert à valider les codes bilingue et pour les sous-écrans de consultation
+;
+DEFINE    D_FTRTYPFAC CHARACTER SIZE 16 = "FTRTYPFAC"
+TEMPORARY T_FTRTYPFAC CHARACTER SIZE 04
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du volume d'une pièce de granit
+;
+
+USE usvarvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du prix d'une ligne de détail bon de commande
+;
+USE usvarprigra NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Retour de marchandises
+;
+
+FILE PDRETOUR MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Retour de tranche
+;
+
+FILE PDTRANCHE_RETOUR PRIMARY &
+                       NOITEM &
+                       OCCURS 11 TIMES
+
+  ACCESS VIA     CIECLE,          &
+                 RTONUMSEQ        &
+         USING   T_CIECLEMNU,     &
+                 RTONUMSEQ        OF PDRETOUR  &
+         ORDERBY CIECLE,          &
+                 RTONUMSEQ,       &
+                 TRANUMTRA002
+
+
+    ITEM CIECLE OF PDTRANCHE_RETOUR    INITIAL T_CIECLEMNU FIXED
+    ITEM RTONUMSEQ OF PDTRANCHE_RETOUR INITIAL RTONUMSEQ OF PDRETOUR FIXED
+    ITEM CAINUMCAI OF PDTRANCHE_RETOUR INITIAL " "
+    ITEM TRFINDRETINV OF PDTRANCHE_RETOUR INITIAL "O"
+
+;-------------------------------------------------------------------------------
+;
+; Numéro séquentiel pour les factures
+;
+
+FILE PDSEQ_RETOUR DESIGNER &
+                  TRANSACTION NO_SEQ
+
+;---------------------------------------------
+FILE PDTYPE_FINI DESIGNER
+;-----------------------------------------------------------------------------
+FILE PDLIVRE_CAISSON DESIGNER
+
+;-----------------------------------------------------------------------
+
+FILE PDSORTIE_TRANCHE DESIGNER
+;-------------------------------------------------------------------------------
+;
+; Emballage de tranche
+;
+
+FILE PDEMBAL_TRANCHE DESIGNER
+
+;----------------------------------------------------------------------------
+
+FILE PDTRANCHE_FAC DESIGNER 
+
+;-------------------------------------------------------------------------------
+;
+; Raison retour
+;
+
+FILE PDRAISON_RETOUR REFERENCE OCCURS WITH PDTRANCHE_RETOUR
+
+  ACCESS VIA   CIECLE,          &
+               RARCODRET        &
+         USING T_CIECLEMNU,     &
+               RARCODRET        OF PDTRANCHE_RETOUR
+;-------------------------------------------------------------------------------
+;
+; Type de produit
+;
+
+FILE PDTYPE_PRODUIT DESIGNER
+
+  ACCESS VIA     TPDTYPPRD        &
+         USING   T_TYPE_PROD
+;-------------------------------------------------------------------------------
+
+FILE PDTRANCHE DESIGNER ALIAS A_PDTRANCHE
+;-------------------------------------------------------------------------------
+;
+; Tranche
+;
+
+FILE PDTRANCHE DESIGNER OCCURS WITH PDTRANCHE_RETOUR
+
+  ACCESS VIA   CIECLE,          &
+               TRANUMTRA002 &
+         USING T_CIECLEMNU,     &
+               TRANUMTRA002         OF PDTRANCHE_RETOUR
+
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+
+SKIP
+
+
+TITLE &
+@IF FRANCAIS
+      " Retour de marchandises " &
+@ELSE
+      " %%%Retour de marchandises " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP TO LINE 5
+
+ALIGN ( ,3,19) (41,41,57)
+
+FIELD RTONUMSEQ        OF PDRETOUR         &
+label "Num. séquence.:"&
+        FIXED
+
+FIELD EXPNUMEXP OF PDRETOUR &
+label "Num expédi...:"&
+       FIXED
+
+FIELD SPRNUMSOR OF PDRETOUR &
+label "No sortie....:"&
+       FIXED
+
+FIELD BLINUMBLI OF PDRETOUR &
+label "Bon livraison:"&
+       FIXED
+
+FIELD RTODATRET        OF PDRETOUR          FORMAT YYYYMMDD &
+PATTERN "####/##/##"&
+label "Date retour...:"&
+        FIXED
+
+DRAW 08,2 TO 08,79
+
+SKIP TO LINE 08
+
+
+TITLE &
+@IF FRANCAIS
+      " Tranche " &
+@ELSE
+      " %%%Tranche " &
+@ENDIF
+      CENTERED AT ,1
+
+
+SKIP TO LINE 10
+
+
+TITLE &
+@IF FRANCAIS
+   "Tranche Caisson   Lon  Hau  Epa  Gra Fin S Inv  Rai Description" &
+@ELSE
+   "%%%nche Caisson   Lon  Hau  Epa  Gra Fin S Inv  Rai Description" &
+@ENDIF
+      AT ,3
+
+
+ALIGN (02,02,03) (,,11) (,,21) (,,26) (,,31) (,,36) (,,40) (,,44) (,,46) (,,51) (,,55)
+
+
+CLUSTER OCCURS WITH PDTRANCHE_RETOUR ID BASE 90
+
+
+FIELD TRANUMTRA002     OF PDTRANCHE_RETOUR &
+        HIDDEN                             &
+        LABEL " "                          &
+        REQUIRED  &
+        NUMERIC
+
+
+FIELD T_SILENT_1  &
+       SILENT
+
+FIELD CAINUMCAI        OF PDTRANCHE_RETOUR &
+        HIDDEN
+
+
+FIELD TRALON OF PDTRANCHE &
+        HIDDEN                             &
+        LABEL ""                           &
+        size 4
+
+
+FIELD TRAHAU OF PDTRANCHE &
+        HIDDEN                             &
+        LABEL ""                           &
+        size 4
+
+FIELD TRAEPA OF PDTRANCHE &
+        HIDDEN                             &
+        LABEL ""                           &
+        size 4
+
+FIELD TGRCODGRA OF PDTRANCHE &
+        HIDDEN                             &
+        DISPLAY &
+        LABEL ""
+
+
+FIELD TYFCODFIN OF PDTRANCHE &
+        HIDDEN                             &
+        LABEL ""
+
+
+FIELD TRASTU OF PDTRANCHE &
+        HIDDEN                             &
+        LABEL ""                           &
+        DISPLAY
+
+FIELD TRFINDRETINV OF PDTRANCHE_RETOUR &
+        LABEL ""                          &
+      HIDDEN
+
+FIELD RARCODRET        OF PDTRANCHE_RETOUR &
+        HIDDEN                             &
+        LABEL ""                          &
+        LOOKUP ON PDRAISON_RETOUR          &
+          MESSAGE 2976 ; Cette raison n'existe pas
+
+
+FIELD TRFDSCRAIRET     OF PDTRANCHE_RETOUR &
+        HIDDEN                             &
+        LABEL ""                          &
+        FOR ,15
+
+
+CLUSTER
+;--------------------------------------------------------------------------
+PROCEDURE EDIT TRALON
+BEGIN
+ IF TRALON OF PDTRANCHE > OLDVALUE(TRALON OF PDTRANCHE)
+ THEN ERROR = "LA DISMENSION PLUS GRANDE QUE L'ORIGINE"
+END
+;----------------------------------------------------
+PROCEDURE EDIT TRAHAU
+BEGIN
+ IF TRAHAU OF PDTRANCHE > OLDVALUE(TRAHAU OF PDTRANCHE)
+ THEN ERROR = "LA DISMENSION PLUS GRANDE QUE L'ORIGINE"
+END
+
+;---------------------------------------------------
+PROCEDURE EDIT TRAEPA
+BEGIN
+ IF TRAEPA OF PDTRANCHE > OLDVALUE(TRAEPA OF PDTRANCHE)
+ THEN ERROR = "LA DISMENSION PLUS GRANDE QUE L'ORIGINE"
+END
+
+;------------------------------------------
+PROCEDURE INPUT TYFCODFIN
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TYFCODFIN = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd101 MODE F &
+                     PASSING T_TYFCODFIN, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_TYFCODFIN )
+  END
+END
+;--------------------------------------------
+PROCEDURE EDIT TYFCODFIN
+BEGIN
+  GET PDTYPE_FINI OPTIONAL &
+    VIA   CIECLE,          &
+          TYFCODFIN        &
+    USING T_CIECLEMNU,     &
+          TYFCODFIN  OF PDTRANCHE
+  IF NOT ACCESSOK
+  THEN BEGIN
+    ERROR = "Ce type de fini n'exsite pas"
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul du volume d'une pièce de granit
+;
+
+USE uscalvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul du prix d'une ligne de détail bon commande
+;
+
+USE uscalprigra NOLIST
+;----------------------------------------------------------------------------
+PROCEDURE EDIT TRANUMTRA002
+BEGIN
+    IF EXPNUMEXP OF PDRETOUR <> 0
+    THEN BEGIN
+        GET PDEMBAL_TRANCHE OPT &
+        VIA CIECLE,TRANUMTRA002 USING &
+            T_CIECLEMNU,TRANUMTRA002 OF PDTRANCHE_RETOUR
+          IF ACCESSOK
+          THEN BEGIN
+           GET PDLIVRE_CAISSON OPT &
+             VIA CIECLE,EXPNUMEXP,BLINUMBLI,CAINUMCAI USING &
+                     T_CIECLEMNU,EXPNUMEXP OF PDRETOUR,BLINUMBLI OF PDRETOUR, &
+                     CAINUMCAI OF PDEMBAL_TRANCHE
+             IF NOT ACCESSOK
+           THEN ERROR = "Cette TRANCHE n'appartient pas à ce bon de livraison"
+         END
+     END
+END
+;----------------------------------------------------------------------------
+PROCEDURE EDIT T_SILENT_1
+BEGIN
+  IF BLINUMBLI OF PDRETOUR <> ""
+  THEN BEGIN
+        GET PDEMBAL_TRANCHE OPT &
+        VIA CIECLE,TRANUMTRA002 USING &
+            T_CIECLEMNU,TRANUMTRA002 OF PDTRANCHE_RETOUR
+          IF ACCESSOK
+          THEN BEGIN
+           GET PDLIVRE_CAISSON OPT &
+             VIA CIECLE,EXPNUMEXP,BLINUMBLI,CAINUMCAI USING &
+                     T_CIECLEMNU,EXPNUMEXP OF PDRETOUR,BLINUMBLI OF PDRETOUR, &
+                     CAINUMCAI OF PDEMBAL_TRANCHE
+            IF ACCESSOK
+            THEN BEGIN
+              GET PDTRANCHE OPT &
+              VIA CIECLE,TRANUMTRA002 USING T_CIECLEMNU,TRANUMTRA002 OF PDTRANCHE_RETOUR
+              DISPLAY TRALON    OF PDTRANCHE
+              DISPLAY TRAHAU    OF PDTRANCHE
+              DISPLAY TRAEPA    OF PDTRANCHE
+              DISPLAY TGRCODGRA OF PDTRANCHE
+              DISPLAY TYFCODFIN OF PDTRANCHE
+              DISPLAY TRASTU    OF PDTRANCHE
+            END
+           ELSE ERROR = "CETTE TRANCHE NE FAIT PAS PARTIE DE CETTE EXPEDITION"
+        END
+    END
+    ELSE
+    IF SPRNUMSOR OF PDRETOUR <> 0
+    THEN BEGIN
+     GET PDSORTIE_TRANCHE OPT &
+     VIA CIECLE,SPRNUMSOR,TRANUMTRA002 USING &
+           T_CIECLEMNU,SPRNUMSOR OF PDRETOUR,TRANUMTRA002 OF PDTRANCHE_RETOUR
+      IF ACCESSOK
+       THEN BEGIN
+         GET PDTRANCHE OPT &
+         VIA CIECLE,TRANUMTRA002 USING T_CIECLEMNU,TRANUMTRA002 OF PDTRANCHE_RETOUR
+          DISPLAY TRALON    OF PDTRANCHE
+          DISPLAY TRAHAU    OF PDTRANCHE
+          DISPLAY TRAEPA    OF PDTRANCHE
+          DISPLAY TGRCODGRA OF PDTRANCHE
+          DISPLAY TYFCODFIN OF PDTRANCHE
+          DISPLAY TRASTU    OF PDTRANCHE
+       END
+       ELSE ERROR = "CETTE TRANCHE NE FAIT PAS PARTIE DE CETTE SORTIE"
+   END
+    ELSE BEGIN
+         GET PDTRANCHE OPT &
+         VIA CIECLE,TRANUMTRA002 USING T_CIECLEMNU,TRANUMTRA002 OF PDTRANCHE_RETOUR
+         IF ACCESSOK
+         THEN BEGIN
+          DISPLAY TRALON    OF PDTRANCHE
+          DISPLAY TRAHAU    OF PDTRANCHE
+          DISPLAY TRAEPA    OF PDTRANCHE
+          DISPLAY TGRCODGRA OF PDTRANCHE
+          DISPLAY TYFCODFIN OF PDTRANCHE
+          DISPLAY TRASTU    OF PDTRANCHE
+         END
+         ELSE ERROR = "TRANCHE INCONNU"
+   END
+IF NEWRECORD OF PDTRANCHE_RETOUR
+ THEN LET RTOSURMC2TRA OF PDRETOUR = RTOSURMC2TRA OF PDRETOUR + &
+                                              TRASURMC2 OF PDTRANCHE
+END
+;----------------------------------------------------------------------------
+PROCEDURE INPUT CAINUMCAI
+BEGIN
+  IF 0 <> SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    LET FIELDTEXT = ASCII(NCONVERT(FIELDTEXT),9)
+  END
+END
+;-------------------------------------------------------------------------------
+;
+; Valide le format du numéro de caisson
+;
+
+PROCEDURE EDIT CAINUMCAI
+BEGIN
+  IF     0 = SIZE(TRUNCATE(FIELDTEXT)) &
+     AND NOT MATCHPATTERN(FIELDTEXT,"#########")
+  THEN BEGIN
+    ERROR 9999
+  END
+ IF 0 <> SIZE(TRUNC(CAINUMCAI OF PDTRANCHE_RETOUR))
+ THEN BEGIN
+       GET PDEMBAL_TRANCHE OPT &
+       VIA CIECLE,CAINUMCAI,TRANUMTRA002 USING &
+           T_CIECLEMNU,CAINUMCAI OF PDTRANCHE_RETOUR,TRANUMTRA002 OF PDTRANCHE_RETOUR
+       IF NOT ACCESSOK
+       THEN ERROR = "LE CAISSON NE CONTIEN PAS CETTE TRANCHE"
+  END
+END
+
+;-------------------------------------------------------
+PROCEDURE OUTPUT CAINUMCAI
+BEGIN
+  LET FIELDTEXT = ASCII(NCONVERT(FIELDTEXT),9)
+END
+;-------------------------------------------------------------------------
+;-----------------------------------------------------------
+;
+; Traitement pour les indicateurs dont la valeur est Oui ou Non.
+;
+
+PROCEDURE INPUT TRFINDRETINV
+BEGIN
+  USE usflginp NOLIST
+END
+;-------------------------------------------------------------------------------
+;
+; Simule l'option REQUIRED
+;
+
+PROCEDURE EDIT TRFINDRETINV
+BEGIN
+  IF 0 = SIZE(TRUNCATE(FIELDTEXT)) &
+     AND &
+     0 = SIZE(TRUNCATE(TRFINDRETINV OF PDTRANCHE_RETOUR ))
+  THEN BEGIN
+    ERROR 3044 ; Ce champ est requis
+  END
+  GET PDEMBAL_TRANCHE OPT &
+    VIA CIECLE,CAINUMCAI,TRANUMTRA002 USING &
+        T_CIECLEMNU,CAINUMCAI OF PDTRANCHE_RETOUR,TRANUMTRA002 OF PDTRANCHE_RETOUR
+  IF ACCESSOK
+  THEN BEGIN
+    DELETE PDEMBAL_TRANCHE
+    PUT PDEMBAL_TRANCHE
+  END
+END
+;-------------------------------------------------------------------------------
+;
+; Traitement pour les indicateurs dont la valeur est Oui ou Non.
+;
+
+PROCEDURE OUTPUT TRFINDRETINV
+BEGIN
+  USE usflgout3 NOLIST
+END
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur pour le champ
+;
+
+PROCEDURE INPUT RARCODRET
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_RARCODRET = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd137 MODE F &
+                     PASSING T_RARCODRET,&
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_RARCODRET )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Initialisation du champ par défaut
+;
+
+PROCEDURE INPUT TRFDSCRAIRET
+BEGIN
+  IF     0 = SIZE( TRUNCATE( FIELDTEXT)) &
+     AND 0 = SIZE( TRUNCATE( TRFDSCRAIRET OF PDTRANCHE_RETOUR ))
+  THEN BEGIN
+    LET FIELDTEXT = RARDSCFRA OF PDRAISON_RETOUR
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procedure de mise à jour
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  FOR PDTRANCHE_RETOUR
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF PDTRANCHE_RETOUR &
+       AND TZ_SECDEL = "0"
+    THEN BEGIN
+      ERROR 1
+    END
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF PDTRANCHE_RETOUR &
+       AND NOT NEWRECORD     OF PDTRANCHE_RETOUR &
+       AND NOT DELETEDRECORD OF PDTRANCHE_RETOUR &
+       AND TZ_SECMOD = "0"
+    THEN BEGIN
+      ERROR 2
+    END
+
+
+    IF NOT DELETEDRECORD OF PDTRANCHE_RETOUR
+    THEN BEGIN
+      ;
+      ; MISE A JOUR DES INFO DE LA TRANCHE
+           PUT PDTRANCHE RESET
+       ;
+      ; Mise à jour du statut du bloc
+      ;
+      IF TRFINDRETINV OF PDTRANCHE_RETOUR <> "0"
+      THEN BEGIN
+        ;
+        ; Mise à jour du statut de la tranche
+        ;
+        GET A_PDTRANCHE &
+          VIA   CIECLE,      &
+                TRANUMTRA002 &
+          USING T_CIECLEMNU, &
+                TRANUMTRA002 OF PDTRANCHE_RETOUR
+
+        IF ACCESSOK
+        THEN BEGIN
+          IF TRASTU OF A_PDTRANCHE <> "I"
+          THEN BEGIN
+            LET TRASTU OF A_PDTRANCHE = "I"
+            PUT A_PDTRANCHE RESET
+          END
+        END
+      END
+    END
+  END
+  ;
+  ; Incrémentation du numéro de séquence
+  ;
+  IF 0 = RTONUMSEQ OF PDRETOUR
+  THEN BEGIN
+    START TRANSACTION NO_SEQ
+    GET PDSEQ_RETOUR OPTIONAL           &
+      VIA   CIECLE                      &
+      USING T_CIECLEMNU
+    IF NOT ACCESSOK
+    THEN BEGIN
+      LET CIECLE OF PDSEQ_RETOUR = T_CIECLEMNU
+    END
+    LET SETNUMRAP        OF PDSEQ_RETOUR     = SETNUMRAP        OF PDSEQ_RETOUR  + 1
+    LET RTONUMSEQ        OF PDRETOUR         = SETNUMRAP        OF PDSEQ_RETOUR
+    PUT PDSEQ_RETOUR
+    DISPLAY RTONUMSEQ OF PDRETOUR
+  END
+
+  FOR PDTRANCHE_RETOUR
+  BEGIN
+    IF 0 <> SIZE(TRUNC(T_TRANUMTRA002))
+    THEN BEGIN
+           IF T_TRANUMTRA002 = TRANUMTRA002 OF PDTRANCHE_RETOUR
+           THEN &
+           ERROR "Vous ne pouvez pas saisir une même tranche plus d'une fois !"
+    END
+    LET T_TRANUMTRA002 = TRANUMTRA002 OF PDTRANCHE_RETOUR
+  END
+
+  FOR PDTRANCHE_RETOUR
+  BEGIN
+     GET PDEMBAL_TRANCHE OPT & 
+     VIA   CIECLE,      &
+           CAINUMCAI,   &  
+           TRANUMTRA002 &
+     USING T_CIECLEMNU, &
+           CAINUMCAI  , &  
+           TRANUMTRA002 OF PDTRANCHE_RETOUR
+     IF ACCESSOK
+     THEN BEGIN
+          DELETE PDEMBAL_TRANCHE
+          PUT    PDEMBAL_TRANCHE
+     END
+  END
+
+  FOR PDTRANCHE_RETOUR
+  BEGIN
+     GET PDTRANCHE_FAC OPT &
+     VIA  CIECLE , &
+          TRANUMTRA002 &
+     USING T_CIECLEMNU ,&
+           TRANUMTRA002 OF PDTRANCHE_RETOUR
+
+    IF ACCESSOK
+    THEN BEGIN
+         DELETE PDTRANCHE_FAC
+         PUT PDTRANCHE_FAC
+    END
+  END 
+
+END
+
+
+PROCEDURE DELETE
+BEGIN
+  ;FOR PDTRANCHE_RETOUR
+  ;BEGIN
+    IF NOT DELETEDRECORD OF PDTRANCHE_RETOUR
+    THEN BEGIN
+      ;
+      ; Mise à jour du statut du bloc
+      ;
+      GET A_PDTRANCHE &
+          VIA   CIECLE,      &
+                TRANUMTRA002 &
+          USING T_CIECLEMNU, &
+                TRANUMTRA002 OF PDTRANCHE_RETOUR
+
+      IF ACCESSOK
+      THEN BEGIN
+        IF TRASTU OF A_PDTRANCHE <> "T"
+        THEN BEGIN
+          LET TRASTU OF A_PDTRANCHE = "T"
+          PUT A_PDTRANCHE RESET
+        END
+      END
+
+      LET RTOSURMC2TRA OF PDRETOUR = RTOSURMC2TRA OF PDRETOUR - &
+                                     TRASURMC2 OF PDTRANCHE
+      LET RARCODRET    OF PDTRANCHE_RETOUR = " "
+      LET TRFDSCRAIRET OF PDTRANCHE_RETOUR = " "
+      DELETE PDTRANCHE_RETOUR
+    END
+END
+
+PROCEDURE POSTFIND
+BEGIN
+ FOR PDTRANCHE_RETOUR
+ BEGIN
+  GET PDTRANCHE
+   DISPLAY TRALON    OF PDTRANCHE
+   DISPLAY TRAHAU    OF PDTRANCHE
+   DISPLAY TRAEPA    OF PDTRANCHE
+   DISPLAY TGRCODGRA OF PDTRANCHE
+   DISPLAY TYFCODFIN OF PDTRANCHE
+ END
+END
+
+ PROCEDURE APPEND
+    BEGIN
+      ACCEPT TRANUMTRA002 OF PDTRANCHE_RETOUR
+      EDIT T_SILENT_1
+      DISPLAY TRFINDRETINV OF PDTRANCHE_RETOUR
+      ACCEPT CAINUMCAI OF PDTRANCHE_RETOUR
+      ACCEPT TRALON OF PDTRANCHE
+      ACCEPT TRAHAU OF PDTRANCHE
+      ACCEPT TRAEPA OF PDTRANCHE
+      ;ACCEPT TGRCODGRA OF PDTRANCHE
+      ACCEPT TYFCODFIN OF PDTRANCHE
+      DISPLAY TRASTU OF PDTRANCHE
+      ACCEPT TRFINDRETINV OF PDTRANCHE_RETOUR
+      ACCEPT RARCODRET OF PDTRANCHE_RETOUR
+      ACCEPT TRFDSCRAIRET OF PDTRANCHE_RETOUR
+      END
+  PROCEDURE ENTRY
+    BEGIN
+      FOR PDTRANCHE_RETOUR
+        BEGIN
+          PERFORM APPEND
+         END
+    END
+
+BUILD DETAIL LIST
+
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+**************************** Retour de marchandises ****************************
+*                                                                              *
+* Num. séquence.: xxxxxxxxx             No. facture...: xxxxxxx                *
+* Date retour...: xxxxxxxx              Type facture..: x xxxxxxxxxxxxxxxxx    *
+*                                                                              *
+*********************************** Tranche ************************************
+*                                                                              *
+* Tranche   Caisson     Prix vente U/M Inv         Montant Rai Description     *
+* xxxxxxx xxxxxxxxx xxxxxxxxxxxxxxx xx xxx xxxxxxxxxxxxxxx xxx xxxxxxxxxxxxxxx *
+* xxxxxxx xxxxxxxxx xxxxxxxxxxxxxxx xx xxx xxxxxxxxxxxxxxx xxx xxxxxxxxxxxxxxx *
+* xxxxxxx xxxxxxxxx xxxxxxxxxxxxxxx xx xxx xxxxxxxxxxxxxxx xxx xxxxxxxxxxxxxxx *
+* xxxxxxx xxxxxxxxx xxxxxxxxxxxxxxx xx xxx xxxxxxxxxxxxxxx xxx xxxxxxxxxxxxxxx *
+* xxxxxxx xxxxxxxxx xxxxxxxxxxxxxxx xx xxx xxxxxxxxxxxxxxx xxx xxxxxxxxxxxxxxx *
+* xxxxxxx xxxxxxxxx xxxxxxxxxxxxxxx xx xxx xxxxxxxxxxxxxxx xxx xxxxxxxxxxxxxxx *
+* xxxxxxx xxxxxxxxx xxxxxxxxxxxxxxx xx xxx xxxxxxxxxxxxxxx xxx xxxxxxxxxxxxxxx *
+* xxxxxxx xxxxxxxxx xxxxxxxxxxxxxxx xx xxx xxxxxxxxxxxxxxx xxx xxxxxxxxxxxxxxx *
+* xxxxxxx xxxxxxxxx xxxxxxxxxxxxxxx xx xxx xxxxxxxxxxxxxxx xxx xxxxxxxxxxxxxxx *
+* xxxxxxx xxxxxxxxx xxxxxxxxxxxxxxx xx xxx xxxxxxxxxxxxxxx xxx xxxxxxxxxxxxxxx *
+* xxxxxxx xxxxxxxxx xxxxxxxxxxxxxxx xx xxx xxxxxxxxxxxxxxx xxx xxxxxxxxxxxxxxx *
+*                                                                              *
+********************************************************************************
+@ENDIF

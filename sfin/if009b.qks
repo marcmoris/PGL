@@ -1,0 +1,211 @@
+;/T/ Ajustement de la facture
+;
+; ECRAN: FACAJUS.QKS
+; FONC.: PERMET D'ENREGISTRES DES AJUSTEMENTS A LA FACTURE SI ELLE N'EST
+;        PAS FINALE.
+;
+;/M/ François Déry, 25 mai 1999
+;       Conversion unix/interbase.
+;
+SCREEN if009b ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLE, &
+                       T_CIENOM, &
+                       IFFACTURE
+
+USE ussectmp  NOLIST
+    "IF009B"
+
+USE if009b.hlp NOLIST
+
+USE usactecr  NOLIST
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_CIECLE CHARACTER SIZE 4  ; Numéro de cie
+TEMPORARY T_CIENOM CHARACTER SIZE 40 ; Nom de la compagnie
+
+FILE IFFACTURE MASTER
+;
+FILE IFFACTURE_AJUST PRIMARY OCCURS 15 NOITEM
+  ACCESS VIA   CIECLE, &
+               FCECLE  &
+         USING T_CIECLE, &
+               FCECLE OF IFFACTURE
+  ITEM CIECLE OF IFFACTURE_AJUST INITIAL T_CIECLE
+  ITEM FCECLE OF IFFACTURE_AJUST INITIAL FCECLE OF IFFACTURE
+
+TEMP T-MNT-TPS-FED  FLOAT SIZE 4 OCCURS WITH IFFACTURE_AJUST
+TEMP T-MNT-TVQ-PRO  FLOAT SIZE 4 OCCURS WITH IFFACTURE_AJUST
+
+FILE IFCLIENT         REFERENCE
+  ACCESS VIA   CIECLE, &
+               CLTCLE  &
+         USING T_CIECLE, &
+               CLTCLE OF IFFACTURE
+;
+; Information du client par compagnie
+;
+FILE CRCLI_CIE        REFERENCE
+  ACCESS VIA   CLICIECLE, &
+               CLICLE, &
+               CIECLE  &
+         USING CLICIECLE OF IFCLIENT, &
+               CLICLE OF IFCLIENT, &
+               T_CIECLE
+;
+; % de taxe fédéral
+;
+FILE VTAX_DSC         REFERENCE ALIAS A_TAXFED
+  ACCESS VIA   TAXCLETYP, &
+               TAXCLECOD &
+         USING CLCTAXTYPTPS OF CRCLI_CIE, &
+               CLCTAXCODTPS OF CRCLI_CIE
+;
+; % de taxe provincial
+;
+FILE VTAX_DSC         REFERENCE ALIAS A_TAXPRO
+  ACCESS VIA   TAXCLETYP, &
+               TAXCLECOD &
+         USING CLCTAXTYPTVP OF CRCLI_CIE, &
+               CLCTAXCODTVP OF CRCLI_CIE
+
+DEF  T-TOTAL-AJU  INT SIZE 4 = FAJAJUST OF IFFACTURE_AJUST + &
+                      FAJMNTTPSFED OF IFFACTURE_AJUST + &
+                      FAJMNTTVQPRO OF IFFACTURE_AJUST
+
+
+;-------------------------------------------------------------------------------
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4  = T_CIECLE
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+      "Ajustements de la facture" &
+      CENTERED AT ,1
+SKIP TO LINE 4
+TITLE " Description ajustement     Montant      TPS         TVQ       Total    Dev" AT ,4
+SKIP
+TITLE "                                              %           %" AT ,4
+FIELD TAXPCT OF A_TAXFED NOID NOLABEL DISPLAY DATA AT 5,42
+FIELD TAXPCT OF A_TAXPRO NOID NOLABEL DISPLAY DATA AT 5,54
+SKIP 1
+
+ALIGN(2,,5)(,,31)(,,41)(,,53)(,,65)(,,76)
+CLUSTER OCCURS WITH IFFACTURE_AJUST
+FIELD FAJDESCAJUST OF IFFACTURE_AJUST  REQUIRED
+FIELD FAJAJUST OF IFFACTURE_AJUST  REQUIRED
+FIELD FAJMNTTPSFED OF IFFACTURE_AJUST NOLABEL NOENTRY
+FIELD FAJMNTTVQPRO OF IFFACTURE_AJUST NOLABEL NOENTRY
+FIELD T-TOTAL-AJU NOID NOLABEL DISPLAY PIC "^^^,^^^.^^"
+FIELD DEVCLE OF IFFACTURE DISPLAY
+CLUSTER
+
+PROCEDURE EDIT FAJAJUST
+BEGIN
+   IF FAJAJUST <> OLDVALUE(FAJAJUST)
+   THEN BEGIN
+     LET FCETOTAL OF IFFACTURE = FCETOTAL OF IFFACTURE - OLDVALUE(FAJAJUST)  &
+                                + FAJAJUST
+
+     LET T-MNT-TPS-FED = FAJMNTTPSFED OF IFFACTURE_AJUST
+     LET T-MNT-TVQ-PRO = FAJMNTTVQPRO OF IFFACTURE_AJUST
+
+     LET FAJMNTTPSFED OF IFFACTURE_AJUST = ROUND(FAJAJUST OF IFFACTURE_AJUST * &
+         TAXPCT OF A_TAXFED )
+     LET FAJMNTTVQPRO OF IFFACTURE_AJUST = ROUND((FAJAJUST OF IFFACTURE_AJUST +&
+         FAJMNTTPSFED OF IFFACTURE_AJUST) * TAXPCT OF A_TAXPRO)
+
+     IF FAJMNTTPSFED <> T-MNT-TPS-FED
+     THEN BEGIN
+       LET FCEMNTTPSFED OF IFFACTURE = FCEMNTTPSFED OF IFFACTURE &
+           - T-MNT-TPS-FED + FAJMNTTPSFED
+     END
+
+     IF FAJMNTTVQPRO <> T-MNT-TVQ-PRO
+     THEN BEGIN
+       LET FCEMNTTVQPRO OF IFFACTURE = FCEMNTTVQPRO OF IFFACTURE &
+           - T-MNT-TVQ-PRO + FAJMNTTVQPRO
+     END
+   END
+END
+
+PROCEDURE EDIT FAJMNTTPSFED
+BEGIN
+  LET FAJMNTTPSFED OF IFFACTURE_AJUST = ROUND(FAJAJUST OF IFFACTURE_AJUST * &
+      TAXPCT OF A_TAXFED)
+  LET FAJMNTTVQPRO OF IFFACTURE_AJUST = ROUND((FAJAJUST OF IFFACTURE_AJUST +&
+      FAJMNTTPSFED OF IFFACTURE_AJUST) * TAXPCT OF A_TAXPRO )
+  DISPLAY FAJMNTTPSFED
+  DISPLAY FAJMNTTVQPRO
+  DISPLAY T-TOTAL-AJU
+END
+
+PROCEDURE EDIT FAJMNTTVQPRO
+BEGIN
+  LET FAJMNTTVQPRO OF IFFACTURE_AJUST = ROUND((FAJAJUST OF IFFACTURE_AJUST +&
+      FAJMNTTPSFED OF IFFACTURE_AJUST) * TAXPCT OF A_TAXPRO )
+  DISPLAY FAJMNTTVQPRO
+  DISPLAY T-TOTAL-AJU
+END
+
+
+PROCEDURE PROCESS FAJAJUST
+BEGIN
+     DISPLAY FAJAJUST
+     DISPLAY FAJMNTTPSFED
+     DISPLAY FAJMNTTVQPRO
+     DISPLAY T-TOTAL-AJU
+END
+
+
+PROCEDURE PREUPDATE
+BEGIN
+   IF FCEFIN OF IFFACTURE = "O"
+   THEN ERROR "*E* AJUSTEMENT INTERDIT CAR IFFACTURE FINALE..."
+END
+PROCEDURE DELETE
+BEGIN
+     LET FCETOTAL OF IFFACTURE = FCETOTAL OF IFFACTURE - FAJAJUST
+     LET FCEMNTTPSFED OF IFFACTURE = FCEMNTTPSFED OF IFFACTURE &
+         - FAJMNTTPSFED OF IFFACTURE_AJUST
+     LET FCEMNTTVQPRO OF IFFACTURE = FCEMNTTVQPRO OF IFFACTURE &
+         - FAJMNTTVQPRO OF IFFACTURE_AJUST
+     DELETE IFFACTURE_AJUST
+     DISPLAY T-TOTAL-AJU
+END
+BUILD
+@IF FORMAT
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+***************************Ajustements de la facture****************************
+*   Description ajustement     Montant      TPS         TVQ       Total    Dev *
+*                                        xxxxxx  %   xxxxxx  %                 *
+*                                                                              *
+*01 xxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxx xxx *
+*02 xxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxx xxx *
+*03 xxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxx xxx *
+*04 xxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxx xxx *
+*05 xxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxx xxx *
+*06 xxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxx xxx *
+*07 xxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxx xxx *
+*08 xxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxx xxx *
+*09 xxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxx xxx *
+*10 xxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxx xxx *
+*11 xxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxx xxx *
+*12 xxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxx xxx *
+*13 xxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxx xxx *
+*14 xxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxx xxx *
+*15 xxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxx xxx *
+*                                                                              *
+********************************************************************************
+@ENDIF

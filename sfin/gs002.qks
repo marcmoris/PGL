@@ -1,0 +1,568 @@
+;/T/ Programmes
+;
+;/P/ Prosig informatique inc.
+;
+; Cet écran sert a saisir un module et ses parametres
+;
+;/M/ François Déry, 11 mai 1999
+;       Changer l'appel du popup des queues batch
+;
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+;
+SCREEN gs002 ACTIONBAR NOMODE NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72
+
+USE usactecr NOLIST
+
+@IF FRANCAIS
+  ACTIONMENU LABEL "Sous-Ecrans"
+     MENUITEM LABEL "Paramètres d'exécut." ACTION DESIGNER PARA
+     MENUITEM LABEL "Documentation d'aide" ACTION DESIGNER DOCU
+@ELSE
+  ACTIONMENU LABEL "Subscreens"
+     MENUITEM LABEL "Exec. Parameters" ACTION DESIGNER PARA
+     MENUITEM LABEL "Help" ACTION DESIGNER DOCU
+@ENDIF
+
+USE ussectmp NOLIST ; Variables pour la sécurite
+"GS002"             ; Nom de l'écran
+
+TEMP TCIE    CHAR SIZE 3
+DEF  DCIENOM CHAR SIZE 15 = "Prosig info."
+
+;-------------------------------------------------------------------------------
+
+DEF DZNOMECRAN CHAR SIZE  7 = "GS002"
+DEF DZTITLE     CHAR SIZE 78 = &
+                " Maintenance de programme "
+;-------------------------------------------------------------------------------
+
+FILE GSPROGRAMME
+  ACCESS VIAINDEX XPR_R02 REQUEST XPRNOM USING XPRNOM
+  ACCESS VIAINDEX XPR_R01 REQUEST XMOCOD, XPRRNG USING XMOCOD, XPRRNG
+  ACCESS VIAINDEX XPR_R01 REQUEST XMOCOD USING XMOCOD
+  ACCESS VIAINDEX XPR_R01 SEQUENTIAL
+  ITEM XPRUSRCRE  OF GSPROGRAMME INIT LOGONID
+  ITEM XPRDATMOD  OF GSPROGRAMME INIT SYSDATE FIXED
+  ITEM XPRUSRMOD  OF GSPROGRAMME FINAL LOGONID
+
+;-------------------------------------------------------------------------------
+; Destruction de tous les lignes de code pour le programme si celui-ci
+; est détruit.
+;
+FILE GSPR_DETAIL DELETE NOITEM
+  ACCESS VIAINDEX XPD_R01 USING XPRNOM OF GSPROGRAMME
+
+;-------------------------------------------------------------------------------
+; Sert losque le nom du programme est modifié et qu'il y avait des lignes de
+; détail.
+;
+FILE GSPR_DETAIL DESIGNER ALIAS GSPR_DETAIL_RENAME OPEN 2
+
+;-------------------------------------------------------------------------------
+; Pour valider que le nom du programme soit unique, il peut etre à blanc
+; pour insérer des lignes blanche dans les menus.
+;
+FILE GSPROGRAMME DESIGNER ALIAS PRG-EXISTE
+
+;-------------------------------------------------------------------------------
+; Pour valider et afficher la description du module
+;
+FILE GSMODULE REFERENCE
+
+;-------------------------------------------------------------------------------
+; Recherche de la langue de l'usager
+;
+FILE GSUSAGER REFERENCE
+  ACCESS VIA USRCLE USING LOGONID
+
+;-------------------------------------------------------------------------------
+; Pour valider et afficher le code d'imprimante
+;
+FILE GSIMPRIMANTE REFERENCE
+ACCESS VIA XIMCOD USING XIMCOD OF GSPROGRAMME
+
+@IF FRANCAIS
+DEFINE D_XIMDSC CHARACTER SIZE 30 = &
+          XIMDSCFRA OF GSIMPRIMANTE
+@ELSE
+          XIMDSCANG OF GSIMPRIMANTE
+@ENDIF
+
+;-------------------------------------------------------------------------------
+; Validation de l'existance de la queue batch (ou du jobfence pour MPE)
+;
+FILE GSQUEUE_BATCH REFERENCE
+
+DEFINE D_XQBDSC CHARACTER SIZE 20 = &
+@IF FRANCAIS
+          XQBDSCFRA OF GSQUEUE_BATCH
+@ELSE
+          XQBDSCANG OF GSQUEUE_BATCH
+@ENDIF
+
+;-------------------------------------------------------------------------------
+; Validation de l'existance de la form d'impression
+;
+FILE GSFORME REFERENCE
+
+;-------------------------------------------------------------------------------
+;
+; Validation des codes bilingue
+;
+FILE VCBI_DSC         REFERENCE
+
+TEMP T-XPRNOM-ANC  CHAR SIZE 7  ; Sert a conserver l'ancien Nom du programme
+                               ; dans le cas ou l'usager modifi celui-ci
+
+TEMP T-IND         INT  SIZE 2   ; Indice de la position du nom
+TEMP T-XMOCLE      CHAR SIZE 4 ; Pour le sous-écran de consultation
+TEMP T_XMOCOD     CHAR SIZE 4 ; Pour le sous-écran de consultation
+TEMP T_XIMCOD     CHAR SIZE 4 ; Pour le sous-écran de consultation
+
+;
+; Pour le sous-écran de description
+;
+DEF D_XDECODMNE CHAR SIZE 3 = "XPR" ; Mnémonique de la table
+DEF D_XDENOM    CHAR SIZE 16= XPRNOM OF GSPROGRAMME ; Nom de l'entité
+
+DEFINE D_XPRFLGEXE CHAR SIZE 16 = "XPRFLGEXE"
+TEMP   T_XPRFLGEXE CHAR SIZE 4
+
+;
+; Longueur du nom de programme, il est de 6 si le tiret fait partie du nom
+; sinon il est de 5(voir les normes de programmation)
+;
+DEFINE D-LONG INT SIZE 2 = 6 IF "-" = XPRNOM OF GSPROGRAMME[3:1] &
+                      ELSE 5
+
+TEMPORARY  T_CBIFLGEXE CHAR SIZE 15
+
+@IF FRANCAIS
+
+DEFINE  D-LISTEPARM CHAR SIZE 2 &
+        = "ui" IF XPRFLGLSTPAR OF GSPROGRAMME = "1" ELSE "on"
+
+DEFINE  D-PRINT CHAR SIZE 2 &
+        = "ui" IF XPRFLGIMP OF GSPROGRAMME = "1" ELSE "on"
+@ELSE
+
+DEFINE  D-LISTEPARM CHAR SIZE 2 &
+        = "es" IF XPRFLGLSTPAR OF GSPROGRAMME = "1" ELSE "o "
+
+DEFINE  D-PRINT CHAR SIZE 2 &
+        = "es" IF XPRFLGIMP OF GSPROGRAMME = "1" ELSE "o "
+@ENDIF
+
+TEMPORARY T_XFRCLE CHARACTER SIZE 4
+TEMPORARY T_XQBCLE CHARACTER SIZE 4
+TEMPORARY T_FLGQUE CHARACTER SIZE 1
+
+USE ushilite NOLIST
+USE usdrwecr NOLIST
+
+@IF FRANCAIS
+    TITLE " Maintenance de programme " CENTERED AT 2,1
+@ELSE
+    TITLE " Program Maintenance  " CENTERED AT 2,1
+@ENDIF
+
+USE ustitoff NOLIST
+
+SKIP 1
+
+ALIGN(,2,18) (,,23)
+FIELD XMOCOD OF GSPROGRAMME ID 5 HIDDEN REQUIRED &
+label "Module........:"&
+        LOOKUP ON GSMODULE VIAINDEX XMO_U01 USING XMOCOD OF GSPROGRAMME &
+          MESSAGE "*E* Ce code de module n'existe pas..."
+FIELD XMOTITFRA OF GSMODULE DISPLAY SIZE 53
+FIELD XPRRNG  OF GSPROGRAMME ID 10 HIDDEN REQUIRED &
+label "Rang ds menu..:"
+
+ALIGN(,2,18)(,28,44)
+FIELD XPRNOM     OF GSPROGRAMME ID 15 HIDDEN REQUIRED &
+label "Nom Programme.:"
+FIELD XPRGNR     OF GSPROGRAMME ID 20 HIDDEN DEFAULT "R" &
+label "Genre.........:"
+
+
+ALIGN(,2,18)
+FIELD XPRDSCFRA  OF GSPROGRAMME ID 25 HIDDEN         &
+label "Descrip. Fra..:"
+FIELD XPRDSCANG  OF GSPROGRAMME ID SAME &
+label "Descrip. Ang..:"
+SKIP 1
+ALIGN(,2,18)(,,21)
+@IF FRANCAIS
+FIELD XPRFLGEXE OF GSPROGRAMME ID 30 HIDDEN DEFAULT "L" &
+label "Intéractif....:"&
+      LOOKUP ON VCBI_DSC VIA XELNOM, CBICLE &
+             USING D_XPRFLGEXE, XPRFLGEXE &
+      MESSAGE 657; ce statut est inexistante
+@ELSE
+FIELD XPRFLGEXE OF GSPROGRAMME ID 35 HIDDEN DEFAULT "L" &
+label "Intéractif....:"&
+      LOOKUP ON VCBI_DSC VIA XELNOM, CBICLE &
+             USING D_XPRFLGEXE, XPRFLGEXE &
+      MESSAGE 657; ce statut est inexistante
+@ENDIF
+FIELD CBIDSC OF VCBI_DSC DISPLAY
+@IF FRANCAIS
+FIELD XPRFLGLSTPAR OF GSPROGRAMME ID 40 HIDDEN DEFAULT "O" &
+label "Liste paramèt.:"
+@ELSE
+FIELD XPRFLGLSTPAR OF GSPROGRAMME ID 45 HIDDEN DEFAULT "Y" &
+label "Liste paramèt.:"
+
+@ENDIF
+FIELD D-LISTEPARM DISPLAY
+
+ALIGN(,2,18) (,,23)
+@IF MPEXL
+FIELD XQBCLE OF GSPROGRAMME &
+      ID 50 HIDDEN &
+      LABEL "'Job Fence'...:" &
+      DEFAULT "7" &
+      LOOKUP ON GSQUEUE_BATCH &
+        VIA XQBCLE &
+        USING XQBCLE OF GSPROGRAMME &
+        MESSAGE 33 ; Valeur de 'Job fence' non autorisée
+
+FIELD T_XQBDSC DISPLAY
+
+@ELSE
+
+SKIP
+
+FIELD XQBCLE OF GSPROGRAMME &
+label "File d'attente:"&
+      ID 55 HIDDEN &
+      LOOKUP ON GSQUEUE_BATCH &
+        VIA XQBCLE &
+        USING XQBCLE OF GSPROGRAMME &
+        MESSAGE 32 ; File de traitement inconnue
+
+FIELD D_XQBDSC DISPLAY
+
+@ENDIF
+
+
+SKIP
+
+FIELD XFRCLE OF GSPROGRAMME &
+label "Forme........:"&
+      ID 65 HIDDEN
+
+@IF FRANCAIS
+FIELD XFRDSCFRA DISPLAY
+@ELSE
+FIELD XFRDSCANG DISPLAY
+@ENDIF
+
+FIELD XIMCOD OF GSPROGRAMME &
+label "Code d'imprim.:" &
+      ID 70 HIDDEN &
+      REQUIRED &
+      LOOKUP ON GSIMPRIMANTE &
+        VIA XIMCOD USING XIMCOD OF GSPROGRAMME &
+          MESSAGE "*E* Ce code d'imprimante n'existe pas..."
+
+FIELD D_XIMDSC DISPLAY
+ALIGN(,2,18)(,,23)
+FIELD XPRNBRCOP   OF GSPROGRAMME DEFAULT 1 &
+label "Nbre Copies..:"
+
+SKIP
+FIELD XPRPARIMP OF GSPROGRAMME ID 75 HIDDEN FOR ,50 &
+label "Paramèt. PRINT:"
+;                                  DEFAULT "-o landscape"
+ALIGN(,2,18)(,,21)(,50,66)
+@IF FRANCAIS
+FIELD XPRFLGIMP       OF GSPROGRAMME ID 80 HIDDEN DEFAULT "O" &
+label "PRINT standard:"
+@ELSE
+FIELD XPRFLGIMP       OF GSPROGRAMME ID 80 HIDDEN DEFAULT "Y" &
+label "PRINT standard:"
+@ENDIF
+FIELD D-PRINT DISPLAY
+FIELD XPRUSRCRE OF GSPROGRAMME DISPLAY &
+label "Créé par.....:"
+ALIGN(2,2,18)(,50,66)
+FIELD XPRIMPPRI OF GSPROGRAMME &
+label "Prio. d'impres:"
+FIELD XPRUSRMOD OF GSPROGRAMME DISPLAY &
+label "Modifié par...:"
+ALIGN(,50,66)
+FIELD XPRDATMOD OF GSPROGRAMME  FORMAT YYYYMMDD PATTERN "####/##/##" DISPLAY &
+label "Dat. modifica.:"
+FIELD XPRDATFIN OF GSPROGRAMME  FORMAT YYYYMMDD PATTERN "####/##/##" DISPLAY &
+label "Dat. fin......:"
+
+;SUBSCREEN gs002a LABEL "Paramètres d'exécution" PASSING GSPROGRAMME &
+;                  MODE SAME AUTO ID 90 HIDDEN &
+;                  IF XPRNOM OF GSPROGRAMME <> ""
+;SUBSCREEN gd012 LABEL "Documentation d'aide" &
+;                  PASSING D_XDECODMNE, D_XDENOM MODE SAME AUTO &
+;                  ID 95 HIDDEN
+
+;-------------------------------------------------------------------------------
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-------------------------------------------------------------------------------
+
+PROCEDURE DESIGNER PARA
+BEGIN
+  IF XPRNOM OF GSPROGRAMME <> ""
+  THEN BEGIN
+     RUN SCREEN gs002a PASSING GSPROGRAMME MODE SAME
+  END
+END
+
+;-------------------------------------------------------------------------------
+
+PROCEDURE DESIGNER DOCU
+BEGIN
+  RUN SCREEN gs012 PASSING D_XDECODMNE, D_XDENOM MODE SAME
+END
+
+;-------------------------------------------------------------------------------
+;
+; Sous-écran de consultation des codes de module
+;
+PROCEDURE INPUT XMOCOD OF GSPROGRAMME
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_XMOCOD  = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gs111 MODE F PASSING T_XMOCOD
+    LET FIELDTEXT = TRUNC(T_XMOCOD)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Pour vérifier que le nom du programme soit unique.
+;
+;
+PROCEDURE EDIT XPRNOM
+BEGIN
+  IF 0 <> SIZE(TRUNC(FIELDTEXT))
+  THEN BEGIN
+    GET PRG-EXISTE VIAINDEX XPR_R02 USING FIELDTEXT OPTIONAL
+    IF ACCESSOK
+    THEN WARNING "*I* CE NOM DE PROGRAMME EXISTE DEJA..."
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Sous-écran de consultation des codes de module
+;
+PROCEDURE INPUT XIMCOD OF GSPROGRAMME
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_XIMCOD  = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gs112 MODE F PASSING T_XIMCOD
+    LET FIELDTEXT = TRUNC(T_XIMCOD)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Sous-écran de consultation des codes de module
+;
+PROCEDURE INPUT XQBCLE
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_XQBCLE  = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gs110 MODE F PASSING T_XQBCLE, T_FLGQUE
+    LET FIELDTEXT = TRUNC(T_XQBCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+; Traitement spécifique pour Etat de compte (CLIETACPT)
+;-------------------------------------------------------------------------------
+; *** FLAG Oui et Non ***
+;
+; Traitement pour les indicateurs dont la valeur est Oui ou Non.
+; Le procédure EDIT transpose les valeurs sous un code universel soit 1 et 0.
+;
+
+PROCEDURE EDIT XPRFLGLSTPAR
+BEGIN
+  IF FIELDTEXT = "O" OR FIELDTEXT = "Y"
+  THEN LET FIELDTEXT = "1"
+  ELSE LET FIELDTEXT = "0"
+END
+
+;-------------------------------------------------------------------------------
+;
+; On affiche l'indicateur sous la langue de l'usager.
+;
+;              Français  Anglais  Condition
+; Valeurs: 1 =   Oui       Yes      Vrai
+;          0 =   Non       No       Faux
+;
+PROCEDURE OUTPUT XPRFLGLSTPAR
+BEGIN
+@IF FRANCAIS
+  IF FIELDTEXT = "1"
+  THEN LET FIELDTEXT = "O"
+  ELSE LET FIELDTEXT = "N"
+@ELSE
+  IF FIELDTEXT = "1"
+  THEN LET FIELDTEXT = "Y"
+  ELSE LET FIELDTEXT = "N"
+@ENDIF
+END
+
+
+;-------------------------------------------------------------------------------
+; Traitement spécifique pour Etat de compte (CLIETACPT)
+;-------------------------------------------------------------------------------
+; *** FLAG Oui et Non ***
+;
+; Traitement pour les indicateurs dont la valeur est Oui ou Non.
+; Le procédure EDIT transpose les valeurs sous un code universel soit 1 et 0.
+;
+PROCEDURE EDIT XPRFLGIMP
+BEGIN
+  IF FIELDTEXT = "O" OR FIELDTEXT = "Y"
+  THEN LET FIELDTEXT = "1"
+  ELSE LET FIELDTEXT = "0"
+END
+
+;-------------------------------------------------------------------------------
+;
+; On affiche l'indicateur sous la langue de l'usager.
+;
+;              Français  Anglais  Condition
+; Valeurs: 1 =   Oui       Yes      Vrai
+;          0 =   Non       No       Faux
+;
+PROCEDURE OUTPUT XPRFLGIMP
+BEGIN
+@IF FRANCAIS
+  IF FIELDTEXT = "1"
+  THEN LET FIELDTEXT = "O"
+  ELSE LET FIELDTEXT = "N"
+@ELSE
+  IF FIELDTEXT = "1"
+  THEN LET FIELDTEXT = "Y"
+  ELSE LET FIELDTEXT = "N"
+@ENDIF
+END
+
+;-------------------------------------------------------------------------------
+;
+; Consultation des codes bilingue pour le Flag d'éxécution.
+;
+PROCEDURE INPUT XPRFLGEXE ;ok
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_XPRFLGEXE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_XPRFLGEXE, T_XPRFLGEXE
+    LET FIELDTEXT = TRUNC(T_XPRFLGEXE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Consultation et validation de la forme d'impression
+;
+PROCEDURE INPUT XFRCLE
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_XFRCLE  = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gs109 MODE F PASSING T_XFRCLE
+    LET FIELDTEXT = TRUNC(T_XFRCLE)
+  END
+END
+
+PROCEDURE EDIT XFRCLE
+BEGIN
+  IF 0 <> SIZE(TRUNCATE(XFRCLE OF GSPROGRAMME))
+  THEN BEGIN
+    GET GSFORME VIA XFRCLE USING XFRCLE OF GSPROGRAMME OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 34 ; Forme d'impression inconnue
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Il faut garder l'ancien nom du programme
+; car l'usager peut le modifier.
+;
+;
+PROCEDURE POSTFIND
+BEGIN
+  LET T-XPRNOM-ANC = XPRNOM    OF GSPROGRAMME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Pour ne pas perdre PROG_CODE dans le cas ou l'usager modifi le numéro
+; du programme, il faut rechercher le détail avec l'ancien numéro et mettre
+; le nouveau à la place.
+;
+;
+PROCEDURE POSTUPDATE
+BEGIN
+  ;
+  IF T-XPRNOM-ANC <> XPRNOM OF GSPROGRAMME AND &
+     NOT DELETEDRECORD OF GSPROGRAMME
+  THEN BEGIN
+    ;
+    ; Lecture de PROG_CODE avec l'ancien nom de programme.
+    ;
+    WHILE RETRIEVING GSPR_DETAIL_RENAME &
+                     VIAINDEX XPD_R01 USING T-XPRNOM-ANC
+    BEGIN
+      LET XPRNOM OF GSPR_DETAIL_RENAME = XPRNOM OF GSPROGRAMME
+      ;
+      ; Recherche les EXE MMXXX et change la valeur par la nouvelle
+      ;
+      LET T-IND = IND(XPDCMD OF GSPR_DETAIL_RENAME,TRUNC(T-XPRNOM-ANC[1:D-LONG]))
+      IF 0 <> T-IND
+      THEN BEGIN
+        LET XPDCMD OF GSPR_DETAIL_RENAME = &
+          XPDCMD OF GSPR_DETAIL_RENAME[1: T-IND - 1] + &
+          TRUNC(XPRNOM OF GSPROGRAMME[1:D-LONG]) + &
+          XPDCMD OF GSPR_DETAIL_RENAME[T-IND + &
+            SIZE(TRUNC(T-XPRNOM-ANC[1:D-LONG])) :70]
+      END
+      ;
+      ; Recherche les DELETE W-XXXXX et change le nom du fichier
+      ; a effacer par le nouveau
+      ; Le nom à chercher doit être sans tiret.
+      ;
+      LET T-IND = IND(XPDCMD OF GSPR_DETAIL_RENAME, &
+                      (T-XPRNOM-ANC[1:2] + T-XPRNOM-ANC[D-LONG - 2:3]))
+      IF 0 <> T-IND
+      THEN BEGIN
+        LET XPDCMD OF GSPR_DETAIL_RENAME = &
+          XPDCMD OF GSPR_DETAIL_RENAME[1: T-IND - 1] + &
+          XPRNOM OF GSPROGRAMME[1:2] + &
+          XPRNOM OF GSPROGRAMME[D-LONG - 2:3] + &
+          XPDCMD OF GSPR_DETAIL_RENAME[T-IND + 5 :70]
+      END
+      PUT GSPR_DETAIL_RENAME
+    END
+  END
+  LET T-XPRNOM-ANC = XPRNOM OF GSPROGRAMME
+END
+
+BUILD

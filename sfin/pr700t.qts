@@ -1,0 +1,457 @@
+;/T/ Sommarisation et calcul des formats
+;;
+;/P/ Prosig Informatique, Marc Morissette
+;
+; Adaptation par Nancy Marceau 94/02/17
+;
+;    - Permettre l'exécution par projet, sous-projet ou équipement
+;    - Ajout de paramètres dans l'exécution
+
+SET PROCESS NOLIMIT
+SET SCRATCH  ; pour obliger QTP à utiliser un fichier intermédiaire
+
+RUN pr700t
+
+;-------------------------------------------------------------------------------
+;
+; Prend les projet qui ont un format
+;
+;
+REQUEST CHERCHE-PROJET-NUIT
+
+ACCESS GPPROJET
+
+CHOOSE CIECLE PARM, &  ; Compagnie
+       PROCLE PARM     ; Projet
+
+DEFINE D_FORCLE CHARACTER SIZE 5 = PARM  ; Clé format
+
+SELECT GPPROJET IF ( D_FORCLE = ""   AND  &
+                     ( PROFRM1 <> "" OR   &
+                       PROFRM2 <> "" OR   &
+                       PROFRM3 <> ""      &
+                     )                    &
+                   )                  OR  &
+                   D_FORCLE = PROFRM1 OR  &
+                   D_FORCLE = PROFRM2 OR  &
+                   D_FORCLE = PROFRM3
+
+
+SUBFILE WPR700P IF ( PROFRM1 <> "" AND &
+                     D_FORCLE = ""     &
+                   )                OR &
+                   ( D_FORCLE = PROFRM1 AND &
+                     PROFRM1 <> ""          &
+                   )                        &
+
+INCLUDE CIECLE   OF GPPROJET, &
+        PROCLE   OF GPPROJET, &
+        PROFRM1  OF GPPROJET ALIAS FORCLE
+
+
+OUTPUT *WPR700P ADD ALIAS A_WPR700P IF ( PROFRM2 <> ""      AND   &
+                                         PROFRM2 <> PROFRM1 AND   &
+                                         D_FORCLE = ""            &
+                                       )                     OR   &
+                                       ( D_FORCLE = PROFRM2 AND   &
+                                         PROFRM2 <> ""      AND   &
+                                         PROFRM2 <> PROFRM1       &
+                                       )
+
+  ITEM CIECLE OF A_WPR700P FINAL CIECLE OF GPPROJET
+  ITEM PROCLE OF A_WPR700P FINAL PROCLE OF GPPROJET
+  ITEM FORCLE OF A_WPR700P FINAL PROFRM2 OF GPPROJET
+
+OUTPUT *WPR700P ADD ALIAS A2_WPR700P IF ( PROFRM3 <> ""      AND &
+                                          PROFRM3 <> PROFRM1 AND &
+                                          PROFRM3 <> PROFRM2 AND &
+                                          D_FORCLE = ""          &
+                                        )                     OR &
+                                        ( D_FORCLE = PROFRM2 AND &
+                                          PROFRM3 <> ""      AND &
+                                          PROFRM3 <> PROFRM1 AND &
+                                          PROFRM3 <> PROFRM2     &
+                                        )
+
+  ITEM CIECLE OF A2_WPR700P FINAL CIECLE OF GPPROJET
+  ITEM PROCLE OF A2_WPR700P FINAL PROCLE OF GPPROJET
+  ITEM FORCLE OF A2_WPR700P FINAL PROFRM3 OF GPPROJET
+
+;-------------------------------------------------------------------------------
+REQUEST DETRUIT_PRO_FORMAT
+
+ACCESS GPPRO_FORMAT
+
+CHOOSE CIECLE PARM, &  ; Compagnie
+       PROCLE PARM     ; Projet
+
+DEFINE D_FORCLE CHARACTER SIZE 5 = PARM ; Clé format
+
+SELECT IF D_FORCLE = "" OR D_FORCLE = FORCLE OF GPPRO_FORMAT
+
+OUTPUT GPPRO_FORMAT DELETE
+
+;-------------------------------------------------------------------------------
+REQUEST CREATION_FORMAT_PRESENTATION
+
+ACCESS *WPR700P &
+  LINK FORCLE  TO FORCLE OF GPFOR_DETAIL
+
+SELECT GPFOR_DETAIL IF FODTYP OF GPFOR_DETAIL[1:1] <> "C"
+
+OUTPUT GPPRO_FORMAT  ADD
+  ITEM CIECLE  OF GPPRO_FORMAT = CIECLE OF WPR700P
+  ITEM PROCLE  OF GPPRO_FORMAT = PROCLE OF WPR700P
+  ITEM FORCLE  OF GPPRO_FORMAT = FORCLE OF WPR700P
+  ITEM FODLIG  OF GPPRO_FORMAT = FODLIG OF GPFOR_DETAIL
+  ITEM FODDSC  OF GPPRO_FORMAT = FODDSC OF GPFOR_DETAIL
+  ITEM FOIMNT  OF GPPRO_FORMAT = 0
+  ITEM FOIDAT  OF GPPRO_FORMAT = SYSDATE
+  ITEM FODTYP  OF GPPRO_FORMAT = FODTYP OF GPFOR_DETAIL
+
+;-------------------------------------------------------------------------------
+REQUEST CALCUL-GPFORMAT-GPPROJET
+
+ACCESS *WPR700P &
+  LINK FORCLE  TO FORCLE OF GPFOR_DETAIL &
+  LINK CIECLE, PROCLE TO &
+       CIECLE, PROCLE OF GPPRO_TRANS &
+  LINK CPTCLE OF GPPRO_TRANS &
+    TO CPTCLE OF MCCOMPTE
+
+SELECT GPFOR_DETAIL IF FODTYP OF GPFOR_DETAIL[1:1] = "C"
+
+SELECT GPPRO_TRANS IF CPTCLE OF GPPRO_TRANS    >= FODCPTDUE AND &
+                      CPTCLE OF GPPRO_TRANS    <= FODCPTAVA
+
+TEMPORARY T_MNTTOT      FLOAT SIZE 8
+TEMPORARY T_MNT         FLOAT SIZE 8
+
+SORT   ON CIECLE OF WPR700P &
+       ON PROCLE OF WPR700P &
+       ON FORCLE OF WPR700P &
+       ON FODLIG OF GPFOR_DETAIL
+
+ITEM T_MNT    = TRDMNT OF GPPRO_TRANS IF FODCODDC OF GPFOR_DETAIL = CPTCODDC OF MCCOMPTE &
+           ELSE 0 - TRDMNT OF GPPRO_TRANS
+
+ITEM T_MNTTOT SUBTOTAL T_MNT RESET AT FODLIG
+
+OUTPUT GPPRO_FORMAT  ADD AT FODLIG
+  ITEM CIECLE  OF GPPRO_FORMAT = CIECLE OF WPR700P
+  ITEM PROCLE  OF GPPRO_FORMAT = PROCLE OF WPR700P
+  ITEM FORCLE  OF GPPRO_FORMAT = FORCLE OF WPR700P
+  ITEM FODLIG  OF GPPRO_FORMAT = FODLIG OF GPFOR_DETAIL
+  ITEM FODDSC  OF GPPRO_FORMAT = FODDSC OF GPFOR_DETAIL
+  ITEM FOIMNT  OF GPPRO_FORMAT =    T_MNTTOT
+  ITEM FOIDAT  OF GPPRO_FORMAT = SYSDATE
+  ITEM FODTYP  OF GPPRO_FORMAT = FODTYP OF GPFOR_DETAIL
+
+BUILD
+;****************************************************
+; Traitement identique pour les sous-projet (activite )
+;****************************************************
+RUN pr700tb
+
+;-------------------------------------------------------------------------------
+;
+; Prend les projet qui ont un format
+;
+;
+REQUEST CHERCHE-ACTIVITE-NUIT
+
+ACCESS GPACTIVITE
+
+CHOOSE CIECLE PARM, &  ; Compagnie
+       PROCLE PARM, &  ; Projet
+       ACTCLE PARM     ; Sous-projet
+
+
+DEFINE D_FORCLE CHARACTER SIZE 5 = PARM  ; Clé format
+
+SELECT GPACTIVITE IF ( D_FORCLE = ""   AND  &
+                     ( ACTFRM1 <> "" OR   &
+                       ACTFRM2 <> "" OR   &
+                       ACTFRM3 <> ""      &
+                     )                    &
+                   )                  OR  &
+                   D_FORCLE = ACTFRM1 OR  &
+                   D_FORCLE = ACTFRM2 OR  &
+                   D_FORCLE = ACTFRM3
+
+
+
+SUBFILE WPR700A IF ( ACTFRM1 <> "" AND &
+                     D_FORCLE = ""     &
+                   )                OR &
+                   ( D_FORCLE = ACTFRM1 AND &
+                     ACTFRM1 <> ""          &
+                   )                        &
+
+
+INCLUDE CIECLE   OF GPACTIVITE, &
+        PROCLE   OF GPACTIVITE, &
+        ACTCLE   OF GPACTIVITE, &
+        ACTFRM1  OF GPACTIVITE ALIAS FORCLE
+
+
+OUTPUT *WPR700A ADD ALIAS A_WPR700A IF ( ACTFRM2 <> ""      AND   &
+                                         ACTFRM2 <> ACTFRM1 AND   &
+                                         D_FORCLE = ""            &
+                                       )                     OR   &
+                                       ( D_FORCLE = ACTFRM2 AND   &
+                                         ACTFRM2 <> ""      AND   &
+                                         ACTFRM2 <> ACTFRM1       &
+                                       )
+
+  ITEM CIECLE OF A_WPR700A FINAL CIECLE OF GPACTIVITE
+  ITEM PROCLE OF A_WPR700A FINAL PROCLE OF GPACTIVITE
+  ITEM ACTCLE OF A_WPR700A FINAL ACTCLE OF GPACTIVITE
+  ITEM FORCLE OF A_WPR700A FINAL ACTFRM2 OF GPACTIVITE
+
+OUTPUT *WPR700A ADD ALIAS A2_WPR700A IF ( ACTFRM3 <> ""      AND &
+                                          ACTFRM3 <> ACTFRM1 AND &
+                                          ACTFRM3 <> ACTFRM2 AND &
+                                          D_FORCLE = ""          &
+                                        )                     OR &
+                                        ( D_FORCLE = ACTFRM2 AND &
+                                          ACTFRM3 <> ""      AND &
+                                          ACTFRM3 <> ACTFRM1 AND &
+                                          ACTFRM3 <> ACTFRM2     &
+                                        )
+
+  ITEM CIECLE OF A2_WPR700A FINAL CIECLE OF GPACTIVITE
+  ITEM PROCLE OF A2_WPR700A FINAL PROCLE OF GPACTIVITE
+  ITEM ACTCLE OF A2_WPR700A FINAL ACTCLE OF GPACTIVITE
+  ITEM FORCLE OF A2_WPR700A FINAL ACTFRM3 OF GPACTIVITE
+
+;-------------------------------------------------------------------------------
+REQUEST DETRUIT_ACT_FORMAT
+
+ACCESS GPACT_FORMAT
+
+CHOOSE CIECLE PARM,  &  ; Compagnie
+       PROCLE PARM,  &  ; Projet
+       ACTCLE PARM      ; Sous-projet
+
+DEFINE D_FORCLE CHARACTER SIZE 5 = PARM ; Clé format
+
+SELECT IF D_FORCLE = "" OR D_FORCLE = FORCLE OF GPACT_FORMAT
+
+OUTPUT GPACT_FORMAT DELETE
+
+;-------------------------------------------------------------------------------
+REQUEST CREATION_FORMAT_PRESENTATION
+
+ACCESS *WPR700A &
+  LINK FORCLE  TO FORCLE OF GPFOR_DETAIL
+
+SELECT GPFOR_DETAIL IF FODTYP OF GPFOR_DETAIL[1:1] <> "C"
+
+OUTPUT GPACT_FORMAT  ADD
+  ITEM CIECLE  OF GPACT_FORMAT = CIECLE OF WPR700A
+  ITEM PROCLE  OF GPACT_FORMAT = PROCLE OF WPR700A
+  ITEM ACTCLE  OF GPACT_FORMAT = ACTCLE OF WPR700A
+  ITEM FORCLE  OF GPACT_FORMAT = FORCLE OF WPR700A
+  ITEM FODLIG  OF GPACT_FORMAT = FODLIG OF GPFOR_DETAIL
+  ITEM FODDSC  OF GPACT_FORMAT = FODDSC OF GPFOR_DETAIL
+  ITEM FOIMNT  OF GPACT_FORMAT = 0
+  ITEM FOIDAT  OF GPACT_FORMAT = SYSDATE
+  ITEM FODTYP  OF GPACT_FORMAT = FODTYP OF GPFOR_DETAIL
+
+;-------------------------------------------------------------------------------
+REQUEST CALCUL-GPFORMAT-GPACTIVITE
+
+ACCESS *WPR700A &
+  LINK FORCLE  TO FORCLE OF GPFOR_DETAIL &
+  LINK CIECLE, PROCLE, ACTCLE TO &
+       CIECLE, PROCLE, ACTCLE OF GPACT_TRANS &
+  LINK CPTCLE OF GPACT_TRANS &
+    TO CPTCLE OF MCCOMPTE
+
+
+SELECT GPFOR_DETAIL IF FODTYP OF GPFOR_DETAIL[1:1] = "C"
+
+SELECT GPACT_TRANS  IF CPTCLE OF GPACT_TRANS    >= FODCPTDUE AND &
+                       CPTCLE OF GPACT_TRANS    <= FODCPTAVA
+
+TEMPORARY T_MNTTOT      FLOAT SIZE 8
+TEMPORARY T_MNT         FLOAT SIZE 8
+
+SORT   ON CIECLE OF WPR700A &
+       ON PROCLE OF WPR700A &
+       ON ACTCLE OF WPR700A &
+       ON FORCLE OF WPR700A &
+       ON FODLIG OF GPFOR_DETAIL
+
+ITEM T_MNT    = TRDMNT OF GPACT_TRANS IF FODCODDC OF GPFOR_DETAIL = CPTCODDC OF MCCOMPTE &
+           ELSE 0 - TRDMNT OF GPACT_TRANS
+
+ITEM T_MNTTOT SUBTOTAL T_MNT RESET AT FODLIG
+
+OUTPUT GPACT_FORMAT  ADD AT FODLIG
+  ITEM CIECLE  OF GPACT_FORMAT = CIECLE OF WPR700A
+  ITEM PROCLE  OF GPACT_FORMAT = PROCLE OF WPR700A
+  ITEM ACTCLE  OF GPACT_FORMAT = ACTCLE OF WPR700A
+  ITEM FORCLE  OF GPACT_FORMAT = FORCLE OF WPR700A
+  ITEM FODLIG  OF GPACT_FORMAT = FODLIG OF GPFOR_DETAIL
+  ITEM FODDSC  OF GPACT_FORMAT = FODDSC OF GPFOR_DETAIL
+  ITEM FOIMNT  OF GPACT_FORMAT =    T_MNTTOT
+  ITEM FOIDAT  OF GPACT_FORMAT = SYSDATE
+  ITEM FODTYP  OF GPACT_FORMAT = FODTYP OF GPFOR_DETAIL
+
+
+BUILD
+;****************************************************
+; Traitement identique pour les équipements ( GPUnite )
+;****************************************************
+RUN pr700tc
+;-------------------------------------------------------------------------------
+;
+; Prend les projet qui ont un format
+;
+;
+REQUEST CHERCHE-ACTIVITE-NUIT
+
+ACCESS GPUNITE
+
+CHOOSE CIECLE PARM, &  ; Compagnie
+       UNICAT PARM, &  ; Catégorie équipement
+       UNICLE PARM     ; Clé équipement
+
+
+DEFINE D_FORCLE CHARACTER SIZE 5 = PARM  ; Clé format
+
+SELECT GPUNITE IF ( D_FORCLE = ""   AND  &
+                     ( UNIFRM1 <> "" OR   &
+                       UNIFRM2 <> "" OR   &
+                       UNIFRM3 <> ""      &
+                     )                    &
+                   )                  OR  &
+                   D_FORCLE = UNIFRM1 OR  &
+                   D_FORCLE = UNIFRM2 OR  &
+                   D_FORCLE = UNIFRM3
+
+
+SUBFILE WPR700S IF ( UNIFRM1 <> "" AND &
+                     D_FORCLE = ""     &
+                   )                OR &
+                   ( D_FORCLE = UNIFRM1 AND &
+                     UNIFRM1 <> ""          &
+                   )                        &
+
+INCLUDE CIECLE   OF GPUNITE, &
+        UNICAT   OF GPUNITE, &
+        UNICLE   OF GPUNITE, &
+        UNIFRM1  OF GPUNITE ALIAS FORCLE
+
+
+OUTPUT *WPR700S ADD ALIAS A_WPR700S IF ( UNIFRM2 <> ""      AND   &
+                                         UNIFRM2 <> UNIFRM1 AND   &
+                                         D_FORCLE = ""            &
+                                       )                     OR   &
+                                       ( D_FORCLE = UNIFRM2 AND   &
+                                         UNIFRM2 <> ""      AND   &
+                                         UNIFRM2 <> UNIFRM1       &
+                                       )
+
+
+  ITEM CIECLE OF A_WPR700S FINAL CIECLE OF GPUNITE
+  ITEM UNICAT OF A_WPR700S FINAL UNICAT OF GPUNITE
+  ITEM UNICLE OF A_WPR700S FINAL UNICLE OF GPUNITE
+  ITEM FORCLE OF A_WPR700S FINAL UNIFRM2 OF GPUNITE
+
+OUTPUT *WPR700S ADD ALIAS A2_WPR700S IF ( UNIFRM3 <> ""      AND &
+                                          UNIFRM3 <> UNIFRM1 AND &
+                                          UNIFRM3 <> UNIFRM2 AND &
+                                          D_FORCLE = ""          &
+                                        )                     OR &
+                                        ( D_FORCLE = UNIFRM2 AND &
+                                          UNIFRM3 <> ""      AND &
+                                          UNIFRM3 <> UNIFRM1 AND &
+                                          UNIFRM3 <> UNIFRM2     &
+                                        )
+
+  ITEM CIECLE OF A2_WPR700S FINAL CIECLE OF GPUNITE
+  ITEM UNICAT OF A2_WPR700S FINAL UNICAT OF GPUNITE
+  ITEM UNICLE OF A2_WPR700S FINAL UNICLE OF GPUNITE
+  ITEM FORCLE OF A2_WPR700S FINAL UNIFRM3 OF GPUNITE
+
+;-------------------------------------------------------------------------------
+REQUEST DETRUIT_UNI_FORMAT
+
+ACCESS GPUNI_FORMAT
+
+CHOOSE CIECLE PARM, &  ; Compagnie
+       UNICAT PARM, &  ; Catégorie équipement
+       UNICLE PARM     ; Clé équipement
+
+
+DEFINE D_FORCLE CHARACTER SIZE 5 = PARM  ; Clé format
+
+SELECT IF D_FORCLE = "" OR D_FORCLE = FORCLE OF GPUNI_FORMAT
+
+OUTPUT GPUNI_FORMAT DELETE
+
+
+;-------------------------------------------------------------------------------
+REQUEST CREATION_FORMAT_PRESENTATION
+
+ACCESS *WPR700S &
+  LINK FORCLE  TO FORCLE OF GPFOR_DETAIL
+
+SELECT GPFOR_DETAIL IF FODTYP OF GPFOR_DETAIL[1:1] <> "C"
+
+OUTPUT GPUNI_FORMAT  ADD
+  ITEM CIECLE  OF GPUNI_FORMAT = CIECLE OF WPR700S
+  ITEM UNICAT  OF GPUNI_FORMAT = UNICAT OF WPR700S
+  ITEM UNICLE  OF GPUNI_FORMAT = UNICLE OF WPR700S
+  ITEM FORCLE  OF GPUNI_FORMAT = FORCLE OF WPR700S
+  ITEM FODLIG  OF GPUNI_FORMAT = FODLIG OF GPFOR_DETAIL
+  ITEM FODDSC  OF GPUNI_FORMAT = FODDSC OF GPFOR_DETAIL
+  ITEM FOIMNT  OF GPUNI_FORMAT = 0
+  ITEM FOIDAT  OF GPUNI_FORMAT = SYSDATE
+  ITEM FODTYP  OF GPUNI_FORMAT = FODTYP OF GPFOR_DETAIL
+
+
+;-------------------------------------------------------------------------------
+REQUEST CALCUL-GPFORMAT-GPUNITE
+
+ACCESS *WPR700S &
+  LINK FORCLE  TO FORCLE OF GPFOR_DETAIL &
+  LINK CIECLE, UNICAT, UNICLE TO &
+       CIECLE, UNICAT, UNICLE OF GPUNI_TRANS &
+  LINK CPTCLE OF GPUNI_TRANS &
+    TO CPTCLE OF MCCOMPTE
+
+SELECT GPFOR_DETAIL IF FODTYP OF GPFOR_DETAIL[1:1] = "C"
+
+SELECT GPUNI_TRANS IF CPTCLE OF GPUNI_TRANS    >= FODCPTDUE AND &
+                      CPTCLE OF GPUNI_TRANS    <= FODCPTAVA
+
+TEMPORARY T_MNTTOT      FLOAT SIZE 8
+TEMPORARY T_MNT         FLOAT SIZE 8
+
+SORT ON CIECLE OF WPR700S &
+     ON UNICAT OF WPR700S &
+     ON UNICLE OF WPR700S &
+     ON FORCLE OF WPR700S &
+     ON FODLIG OF GPFOR_DETAIL
+
+ITEM T_MNT    = TRDMNT OF GPUNI_TRANS IF FODCODDC OF GPFOR_DETAIL = CPTCODDC OF MCCOMPTE &
+           ELSE 0 - TRDMNT OF GPUNI_TRANS
+
+ITEM T_MNTTOT SUBTOTAL T_MNT RESET AT FODLIG
+
+OUTPUT GPUNI_FORMAT  ADD AT FODLIG
+  ITEM CIECLE  OF GPUNI_FORMAT = CIECLE OF WPR700S
+  ITEM UNICAT  OF GPUNI_FORMAT = UNICAT OF WPR700S
+  ITEM UNICLE  OF GPUNI_FORMAT = UNICLE OF WPR700S
+  ITEM FORCLE  OF GPUNI_FORMAT = FORCLE OF WPR700S
+  ITEM FODLIG  OF GPUNI_FORMAT = FODLIG OF GPFOR_DETAIL
+  ITEM FODDSC  OF GPUNI_FORMAT = FODDSC OF GPFOR_DETAIL
+  ITEM FOIMNT  OF GPUNI_FORMAT =    T_MNTTOT
+  ITEM FOIDAT  OF GPUNI_FORMAT = SYSDATE
+  ITEM FODTYP  OF GPUNI_FORMAT = FODTYP OF GPFOR_DETAIL
+
+BUILD

@@ -1,0 +1,283 @@
+;/T/ Paramètres de gestion de projets
+;
+;/P/ Programmeur..: Nancy Marceau
+;    Date Création: 24 mars 1994
+;
+;    Description..: Cet écran permet de définir pour chaque compagnie un projet,
+;                   un sous-projet et un équipement qui seront utilisés par
+;                   défaut lors de la saisie des imputations.
+;
+;/M/ Modifié par..: Guy Chabot le 12 Avril 1994
+;    Impact.......: Retirer l'équipement par défaut, mais le champ est
+;                   demeuré dans la table GPPARAMETRE.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pr036 ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             ACTIVITIES ENTRY  , &
+                        FIND   , &
+                        CHANGE   &
+             RECEIVING T_CIECLEMNU, &
+                       T_CIENOM
+
+
+USE ussectmp NOLIST     ; Variable pour la sécurité
+    "PR036"             ; Nom de l'écran
+
+USE pr036.hlp ; Use servant à la documentation de l'écran
+
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-écrans
+
+;-------------------------------------------------------------------------------
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de cie
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de compagnie
+;-------------------------------------------------------------------------------
+
+
+FILE GPPARAMETRE    PRIMARY
+  ACCESS VIA   CIECLE &
+         USING T_CIECLEMNU
+
+  ITEM CIECLE OF GPPARAMETRE INITIAL T_CIECLEMNU
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation du projet.
+;
+FILE GPPROJET         REFERENCE
+  ACCESS VIA CIECLE, &
+             PROCLE  &
+         USING T_CIECLEMNU, &
+               PROCLE OF GPPARAMETRE
+
+;-------------------------------------------------------------------------------
+;
+; Validation de l'activité.
+;
+FILE GPACTIVITE       REFERENCE
+  ACCESS VIA CIECLE, &
+             PROCLE, &
+             ACTCLE  &
+         USING T_CIECLEMNU, &
+               PROCLE OF GPPARAMETRE, &
+               ACTCLE OF GPPARAMETRE
+
+
+;
+; Paramètres pour la compagnie consolidé(holding)
+;
+FILE MCHOLDING REFERENCE
+  ACCESS VIA CIENMC USING "1"
+
+
+
+;------------------------------------------------------------------------------
+TEMPORARY T_PROCLE    CHARACTER SIZE 8 ; Popup sur les projets.
+TEMPORARY T_PROSTUPAT CHARACTER SIZE 8 ; Popup sur les projets.
+
+TEMPORARY T_ACTCLE    CHARACTER SIZE 3 ; Popup sur les activités.
+TEMPORARY T_ACTSTUPAT CHARACTER SIZE 5 ; Popup sur les activités.
+
+;-------------------------------------------------------------------------------
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER(T_CIENOM)
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST     ; Draw pour les écrans pleine page
+USE ustitstd NOLIST     ; En-tête pour les écrans pleine page
+USE ushilite NOLIST     ; Hilite pour tous les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Maintenance des paramètres " &
+@ELSE
+      " %%%Parameters management " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+;-------------------------------------------------------------------------------
+
+SKIP 5
+ALIGN (24,24,40)
+
+FIELD PROCLE OF GPPARAMETRE &
+        HIDDEN ID 5 &
+        REQUIRED    &
+        LOOKUP ON GPPROJET &
+          MESSAGE 512   ; Ce projet n'existe pas
+
+SKIP 1
+ALIGN (24,24,40)
+
+FIELD ACTCLE OF GPPARAMETRE &
+        HIDDEN ID 10 &
+        REQUIRED     &
+@IF FRANCAIS
+        LABEL "Sous-projet...:" &
+@ELSE
+        LABEL "%%%Sous-projet...:" &
+@ENDIF
+        LOOKUP ON GPACTIVITE &
+          MESSAGE 471   ; Ce sous-projet n'existe pas.
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les projets.
+;
+;
+PROCEDURE INPUT PROCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PROSTUPAT = "A"
+    LET T_PROCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pr101 MODE F PASSING T_CIECLEMNU, &
+                                    T_PROCLE   , &
+                                    T_PROSTUPAT WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_PROCLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation que le projet est actif.
+;
+;
+PROCEDURE EDIT PROCLE
+BEGIN
+    IF PROSTU OF GPPROJET <> "A"
+    THEN ERROR 514 ; Ce projet n'est pas actif.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT ACTCLE
+BEGIN
+  ;
+  ; Popup sur les activités.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PROCLE    = PROCLE OF GPPARAMETRE
+    LET T_ACTSTUPAT = "A"
+    LET T_ACTCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pr102 MODE F PASSING T_CIECLEMNU, &
+                                    T_PROCLE   , &
+                                    T_ACTCLE   , &
+                                    T_ACTSTUPAT WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_ACTCLE)
+  END
+  ;
+  ; Force la validation de l'activité, car l'usager peut modifier le numéro de
+  ; compagnie ou le numéro de projet sur la ligne.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(ACTCLE OF GPPARAMETRE))
+  THEN LET FIELDTEXT = ACTCLE OF GPPARAMETRE
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation que l'activité est active.
+;
+;
+PROCEDURE EDIT ACTCLE
+BEGIN
+    IF ACTSTU OF GPACTIVITE <> "A"
+    THEN ERROR 520 ; Cette activité est inactive.
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF GPPARAMETRE &
+     AND NOT NEWRECORD     OF GPPARAMETRE &
+     AND NOT DELETEDRECORD OF GPPARAMETRE &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+END
+
+
+
+BUILD
+
+@IF FORMAT
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+************************** Maintenance des paramètres **************************
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                      Projet........: xxxxxxxx                                *
+*                                                                              *
+*                      Sous-projet...: xxx                                     *
+*                                                                              *
+*                      Equipement....: xxxxxxxxxx                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+********************************************************************************
+@ENDIF
+

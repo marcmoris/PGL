@@ -1,0 +1,255 @@
+;/T/ Historique des comptes à payer
+;
+;/P/ Programmeur...: Alain Côté / adapté pour les CP par Thomas BRENNEUR
+;    Date Création.: 5 Aout 1993
+;
+;    Description...: Impression de l'historique des comptes à payer d'un
+;                    fournisseur pour un interval de période. Cet historique
+;                    imprime toutes les factures(FA,CR,NA) avec les
+;                    transactions associées à celles-ci.
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST
+SET NOBLANKS
+
+
+ACCESS *WCP343A
+
+
+;
+; Indique si la facture ou une transaction associées n'est pas journalisées.
+;
+DEFINE D_FLGJOU CHARACTER SIZE 1 = "*" IF    CAPDATJOU OF WCP343A = 0 &
+                                          OR (     CPHDATJOU OF WCP343A = 0 &
+                                               AND CPHCLE3 OF WCP343A <> "" )
+;
+; Il faut prendre le montant du compte à payer une seule fois par transaction
+; maitre(facture), donc on prend le montant que pour la ligne 1.
+;
+DEFINE D_TOTCAP FLOAT SIZE 8 = CAPMNT OF WCP343A IF T_CNTCAP OF WCP343A = 1
+
+;
+; Montant de correction. On inclus dans ce montant les ajustements et les
+; notes de crédits.
+;
+DEFINE D_TOTAJT FLOAT SIZE 8 = CPHMNTCAP OF WCP343A &
+                                 IF    CPHTYPTRA OF WCP343A = "AJ" &
+                                    OR CPHTYPTRA OF WCP343A = "NC"
+
+;
+; Montant payé. On inclus dans ce montant les chèques et les
+; chèques annulés.
+;
+DEFINE D_TOTPYE FLOAT SIZE 8 = CPHMNTPYE OF WCP343A &
+                                 IF    CPHTYPTRA OF WCP343A = "CH" &
+                                    OR CPHTYPTRA OF WCP343A = "CA"
+
+;
+; Montant d'escompte.
+;
+DEFINE D_TOTESC FLOAT SIZE 8 = CPHMNTESC OF WCP343A &
+                                 IF    CPHTYPTRA OF WCP343A = "CH" &
+                                    OR CPHTYPTRA OF WCP343A = "CA"
+
+;
+; Pour le calcul du solde du fournisseur.
+;
+DEFINE D_TOTMNT FLOAT SIZE 8 = D_TOTCAP &
+                               + D_TOTAJT &
+                               - D_TOTPYE &
+                               - D_TOTESC
+
+;
+; Je convertis la période de caractère à numérique pour utiliser l'option
+; BWZ lors de l'impression, sinon lorsque la période est à blanc il
+; imprime le tiret quand même.
+;
+DEFINE D_CPH_PECCLE INTEGER SIZE 2 = NCONVERT( CPH_PECCLE OF WCP343A )
+
+;
+; Titre du rapport.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+        "Historique des comptes à payer"
+@ELSE
+        "%%%Historique des comptes à payer"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = ""
+
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "CP343"
+
+;
+; Nom de la compagnie du menu.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM
+
+
+;
+; *** Le tri doit être identique à celui effectué dans le QTP.
+;
+SORTED ON FOUCLE OF WCP343A, & ; Numéro de fournisseur
+          CAPDAT OF WCP343A, & ; Date de la facture
+          CAPCLE OF WCP343A, & ; Numéro de facture
+          CPHDAT OF WCP343A    ; Date de l'historique
+
+
+;
+; Impression de l'en-tête.
+;
+USE ustitstd NOLIST
+@IF FRANCAIS
+    TAB 045 "de la période : " &
+@ELSE
+    TAB 045 "from period : "   &
+@ENDIF
+    TAB 061 G_PECDEB           &
+@IF FRANCAIS
+    TAB 068 "à la période : "  &
+@ELSE
+    TAB 068 "to period : "     &
+@ENDIF
+    TAB 083 G_PECFIN           &
+  SKIP 2 &
+@IF FRANCAIS
+    TAB 001 "Fournisseur....:" &
+@ELSE
+    TAB 001 "Suplyer........:" &
+@ENDIF
+    TAB 018 FOUCLE OF WCP343A  &
+    TAB 025 FOUNOM OF WCP343A  &
+  SKIP &
+@IF FRANCAIS
+    TAB 001 "Devise.........:" &
+@ELSE
+    TAB 001 "Currency.......:" &
+@ENDIF
+    TAB 018 DEVCLE OF WCP343A  &
+  SKIP 2                       &
+    TAB 001 &
+@IF FRANCAIS
+            "    No        No                                 Montant         Montant        Montant       Transactions        No    No    Date" &
+@ELSE
+            "%%% No        No                                 Montant         Montant        Montant       Transactions        No    No    Date" &
+@ENDIF
+  SKIP &
+    TAB 001 &
+@IF FRANCAIS
+            "  facture     pér    Date   *   Montant brut    correction        payé          escompte        associés    Type  pér  lot   trans." &
+@ELSE
+            "%%%acture     pér    Date   *   Montant brut    correction        payé          escompte        associés    Type  pér  lot   trans." &
+@ENDIF
+  SKIP &
+    TAB 001 &
+            "------------ ----- -------- - --------------- -------------- --------------- -------------- --------------- ---- ----- ---- --------"
+
+
+REPORT &
+    TAB 001 CAPCLE    OF WCP343A PRINT AT CAPCLE OF WCP343A &
+                      PICTURE "^^^^^^^^^^^^" &
+    TAB 014 PECCLE    OF WCP343A PRINT AT CAPCLE OF WCP343A &
+    TAB 020 CAPDAT    OF WCP343A PRINT AT CAPCLE OF WCP343A &
+    TAB 029 D_FLGJOU                                        &
+    TAB 031 D_TOTCAP             PRINT AT CAPCLE OF WCP343A &
+                                 PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+    TAB 047 D_TOTAJT             PICTURE  "^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 BWZ &
+    TAB 062 D_TOTPYE             PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 BWZ &
+    TAB 078 D_TOTESC             PICTURE  "^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 BWZ &
+    TAB 093 CPHCLE3    OF WCP343A  &
+    TAB 110 CPHTYPTRA  OF WCP343A  &
+    TAB 114 D_CPH_PECCLE      &
+            PICTURE "^^-^^" &
+            BWZ             &
+    TAB 120 CPH_LCPCLE OF WCP343A  &
+    TAB 125 CPHDAT     OF WCP343A
+
+
+FOOTING AT CAPCLE &
+  SKIP 2
+
+FOOTING AT FOUCLE &
+    TAB 031 "---------------" &
+    TAB 047 "--------------"  &
+    TAB 062 "---------------" &
+    TAB 078 "--------------"  &
+  SKIP &
+    TAB 031 D_TOTCAP SUBTOTAL    PICTURE "^^^,^^^,^^^.^^ "  TRAILING SIGN "-" SIGNIFICANCE 5 &
+    TAB 047 D_TOTAJT SUBTOTAL    PICTURE  "^^,^^^,^^^.^^ "  TRAILING SIGN "-" SIGNIFICANCE 5 &
+    TAB 062 D_TOTPYE SUBTOTAL    PICTURE "^^^,^^^,^^^.^^ "  TRAILING SIGN "-" SIGNIFICANCE 5 &
+    TAB 078 D_TOTESC SUBTOTAL    PICTURE  "^^,^^^,^^^.^^ "  TRAILING SIGN "-" SIGNIFICANCE 5 &
+@IF FRANCAIS
+    TAB 095 "Solde :" &
+@ELSE
+    TAB 095 "Balance:"  &
+@ENDIF
+    TAB 105 D_TOTMNT SUBTOTAL    PICTURE "^^^,^^^,^^^.^^ "  TRAILING SIGN "-" SIGNIFICANCE 5 &
+  SKIP 1 &
+    TAB 031 "===============" &
+    TAB 047 "=============="  &
+    TAB 062 "===============" &
+    TAB 078 "==============" &
+  SKIP PAGE
+
+
+PAGE FOOTING &
+    TAB 001 &
+@IF FRANCAIS
+            " * La facture n'est pas journalisée ou bien la transactions associés n'est pas journalisées."
+@ELSE
+            " * Unposted invoice or some unposted transactions exists on this invoice."
+@ENDIF
+
+
+BUILD cp343z
+
+@IF FORMAT
+
+CP343                                         xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                    Page: 9999
+99/99/99 HH:MM xxxxxxxxxxxx                         Historique des transactions
+                                               de la période 99-99 à la période 99-99
+
+Fournisseur....: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+Devise.........: xxx
+
+    No        No                                 Montant         Montant        Montant       Transactions        No    No    Date
+  facture     pér    Date   *   Montant brut    correction        payé          escompte        associés    Type  pér  lot   trans.
+------------ ----- -------- - --------------- -------------- --------------- -------------- --------------- ---- ----- ---- --------
+123456789012 xx-xx 99/99/99 x 999,999,999.99- 99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+                                              99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+                                              99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+
+123456789012 xx-xx 99/99/99 x 999,999,999.99- 99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+                                              99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+
+123456789012 xx-xx 99/99/99 x 999,999,999.99- 99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+
+123456789012 xx-xx 99/99/99 x 999,999,999.99-
+
+123456789012 xx-xx 99/99/99 x 999,999,999.99- 99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+                                              99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+
+123456789012 xx-xx 99/99/99 x 999,999,999.99- 99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+
+123456789012 xx-xx 99/99/99 x 999,999,999.99- 99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+
+123456789012 xx-xx 99/99/99 x 999,999,999.99- 99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+                                              99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+
+123456789012 xx-xx 99/99/99 x 999,999,999.99-
+
+123456789012 xx-xx 99/99/99 x 999,999,999.99- 99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+                                              99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+                                              99,999,999.99- 999,999,999.99- 99,999,999.99- 123456789012345  xx  99-99 xxxx xx/xx/xx
+
+                              --------------- -------------- --------------- --------------
+                              999,999,999.99- 99,999,999.99- 999,999,999.99- 99,999,999.99-   Solde :   999,999,999.99
+                              =============== ============== =============== ==============
+
+
+ * La facture n'est pas journalisée ou bien la transactions associés n'est pas journalisées.
+@ENDIF

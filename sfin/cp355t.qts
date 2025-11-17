@@ -1,0 +1,290 @@
+;/T/ COPIE  des chèques des comptes à payer
+;
+;/P/ Programmeur...: Steve des Rosiers
+;    Date Création.: 15 decembre 1994
+;
+;    Description...: Copie des chèques des comptes à payer
+;
+
+RUN cp355t
+
+;
+; Nombre de lignes utilisable pour l'impression de la ventilation par
+; facture ou du talon du chèque. Ce nombre sert à calculer le nombre de
+; pages utilisés pour imprimer le chèque. (Voir la numérotation des paiements)
+;
+GLOBAL TEMPORARY G_NBRLIGPAG  INTEGER   SIZE 2  INITIAL 30
+
+
+;---------------------------------------------------------------------
+;
+; Sélection des chèques à imprimer :
+;
+
+REQUEST SELECTION_PAIEMENTS
+
+ACCESS  CPPAIEMENT &
+
+  ;
+  ; On retrouve la devise du grand-livre
+  ;
+  LINK  "1" &
+    TO  CIENMC                    OF MCHOLDING &
+
+  ;
+  ; On retrouve la référence du paiement
+  ;
+  LINK  REFCIECLE OF CPPAIEMENT, &
+        REFCLETYP OF CPPAIEMENT, &
+        REFCLENUM OF CPPAIEMENT, &
+        RADCLE    OF CPPAIEMENT  &
+    TO  REFCIECLE, &
+        REFCLETYP, &
+        REFCLENUM, &
+        RADCLE                    OF VRAD_01 &
+
+  ;
+  ; On retrouve la ventilation par facture du paiement (sauf dans le cas
+  ; des paiements automatiques. Dans leur cas, on n'imprime que le talon)
+  ;
+
+  LINK  CIECLE    OF CPPAIEMENT, &
+        LBQCPTENC OF CPPAIEMENT, &
+        PAMCLE    OF CPPAIEMENT  &
+    TO  CPHCLE1, &
+        CPHCLE2, &
+        CPHCLE3                   OF CPCAP_HISTO &
+  OPTIONAL &
+
+  ;
+  ; On retrouve le talon du paiement pour les paiements automatiques et
+  ; les paiements directs.
+  ;
+
+  LINK  CIECLE    OF CPPAIEMENT, &
+        LBQCPTENC OF CPPAIEMENT, &
+        PAMCLE    OF CPPAIEMENT  &
+    TO  CIECLE   , &
+        LBQCPTENC, &
+        PAMCLE                    OF CPPAM_TALON &
+  OPTIONAL &
+
+  ;
+  ; On retrouve le compte à payer associé à la ventilation pour pouvoir
+  ; récupérer le montant initial du paiement.
+  ;
+
+  LINK  FOUCIECLE OF CPCAP_HISTO, &
+        FOUCLE    OF CPCAP_HISTO, &
+        CAPCLE    OF CPCAP_HISTO  &
+    TO  FOUCIECLE, &
+        FOUCLE   , &
+        CAPCLE                    OF CPCPT_A_PAYER &
+  OPTIONAL &
+
+  ;
+  ; On retrouve la somme des transactions affectant ce compte à payer
+  ; pour pouvoir calculer le solde réel du compte à payer
+  ;
+
+  LINK  FOUCIECLE OF CPCAP_HISTO, &
+        FOUCLE    OF CPCAP_HISTO, &
+        CAPCLE    OF CPCAP_HISTO  &
+    TO  FOUCIECLE, &
+        FOUCLE   , &
+        CAPCLE                    OF VCAP_SLD &
+  OPTIONAL
+
+
+CHOOSE CIECLE    PARM       , &  ; Compagnie
+       PAMCLE    PARM  RANGE     ; No chèque (de - à)
+
+
+SELECT  CPPAIEMENT &
+        IF    ( PAMCODANN OF CPPAIEMENT = "0"                &
+                AND PAMFLGIMP OF CPPAIEMENT = "1" )
+
+;
+; Temporaire permettant de réserver de la place dans le subfile pour les
+; request suivants
+;
+TEMPORARY T_FLGDER  CHARACTER SIZE 1  ; Flag indiquant la dernière ligne
+
+  ITEM T_FLGDER RESET AT INITIAL TO "0"
+
+;
+; Type de chèque :
+;
+;     1 = Chèque avec ventilation par facture
+;     2 = Chèque avec talon
+;
+
+TEMPORARY T_TYPCHQ CHARACTER SIZE 1
+
+  ITEM  T_TYPCHQ = "1" IF PAMFLGPA OF CPPAIEMENT = "0"
+  ITEM  T_TYPCHQ = "2" IF     PAMFLGPA  OF CPPAIEMENT = "1" &
+                          OR  PAMDEPDIR OF CPPAIEMENT = "1"
+
+;
+; Solde du compte à payer
+;
+TEMPORARY T_CAPMNT  FLOAT SIZE 8
+
+  ITEM T_CAPMNT = CAPMNT      OF CPCPT_A_PAYER &
+                + V_CAPMNTAJT OF VCAP_SLD      &
+                + V_CAPMNTCRT OF VCAP_SLD
+
+TEMPORARY T_TRI CHARACTER SIZE 1
+;
+; On enregistre le chèque et sa ventilation par facture
+;
+SUBFILE WCP355A &
+  IF T_TYPCHQ = "1" &
+  INCLUDE CIECLE    OF CPPAIEMENT                 , &
+          LBQCPTENC OF CPPAIEMENT                 , &
+          PAMCLE    OF CPPAIEMENT                 , &
+          REFCIECLE OF CPPAIEMENT                 , &
+          REFCLETYP OF CPPAIEMENT                 , &
+          REFCLENUM OF CPPAIEMENT                 , &
+          RADNOM    OF VRAD_01                    , &
+          RADADR1   OF VRAD_01                    , &
+          RADADR2   OF VRAD_01                    , &
+          RADADR3   OF VRAD_01                    , &
+          RADADR4   OF VRAD_01                    , &
+          RADCP     OF VRAD_01                    , &
+          DEVCLE    OF VRAD_01                    , &
+          PAMDSC1   OF CPPAIEMENT                 , &
+          PAMDSC2   OF CPPAIEMENT                 , &
+          PAMDAT    OF CPPAIEMENT                 , &
+          PAMDATJOU OF CPPAIEMENT                 , &
+          PAMMNT    OF CPPAIEMENT                 , &
+          T_TYPCHQ                                , &
+          CAPCLE    OF CPCAP_HISTO                , &
+          CAPDAT    OF CPCPT_A_PAYER              , &
+          T_CAPMNT                    ALIAS CAPMNT, &
+          CPHMNTCAP OF CPCAP_HISTO                , &
+          CPHMNTESC OF CPCAP_HISTO                , &
+          CPHMNTPYE OF CPCAP_HISTO                , &
+          PTACLELIG OF CPPAM_TALON                , &
+          T_TRI                                   , &
+          PTADSC    OF CPPAM_TALON                , &
+          T_FLGDER
+
+;
+; On enregistre le chèque et son talon
+;
+OUTPUT *WCP355A ALIAS A_WCP355C ADD NOITEM IF T_TYPCHQ = "2"
+
+  ITEM CIECLE     OF A_WCP355C FINAL CIECLE    OF CPPAIEMENT
+  ITEM LBQCPTENC  OF A_WCP355C FINAL LBQCPTENC OF CPPAIEMENT
+  ITEM PAMCLE     OF A_WCP355C FINAL PAMCLE    OF CPPAIEMENT
+  ITEM REFCLETYP  OF A_WCP355C FINAL REFCLETYP OF CPPAIEMENT
+  ITEM REFCLENUM  OF A_WCP355C FINAL REFCLENUM OF CPPAIEMENT
+  ITEM RADNOM     OF A_WCP355C FINAL RADNOM    OF VRAD_01
+  ITEM RADADR1    OF A_WCP355C FINAL RADADR1   OF VRAD_01
+  ITEM RADADR2    OF A_WCP355C FINAL RADADR2   OF VRAD_01
+  ITEM RADADR3    OF A_WCP355C FINAL RADADR3   OF VRAD_01
+  ITEM RADADR4    OF A_WCP355C FINAL RADADR4   OF VRAD_01
+  ITEM RADCP      OF A_WCP355C FINAL RADCP     OF VRAD_01
+  ITEM DEVCLE     OF A_WCP355C FINAL DEVCLE    OF VRAD_01
+  ITEM PAMDSC1    OF A_WCP355C FINAL PAMDSC1   OF CPPAIEMENT
+  ITEM PAMDSC2    OF A_WCP355C FINAL PAMDSC2   OF CPPAIEMENT
+  ITEM PAMDAT     OF A_WCP355C FINAL PAMDAT    OF CPPAIEMENT
+  ITEM PAMDATJOU  OF A_WCP355C FINAL PAMDATJOU OF CPPAIEMENT
+  ITEM PAMMNT     OF A_WCP355C FINAL PAMMNT    OF CPPAIEMENT
+  ITEM T_TYPCHQ   OF A_WCP355C FINAL T_TYPCHQ
+  ITEM PTACLELIG  OF A_WCP355C FINAL PTACLELIG OF CPPAM_TALON
+  ITEM T_TRI      OF A_WCP355C FINAL "B"
+  ITEM PTADSC     OF A_WCP355C FINAL ""
+
+
+;
+; On enregistre le chèque et son talon
+;
+OUTPUT *WCP355A ALIAS A_WCP355A ADD NOITEM IF T_TYPCHQ = "2"
+
+  ITEM CIECLE     OF A_WCP355A FINAL CIECLE    OF CPPAIEMENT
+  ITEM LBQCPTENC  OF A_WCP355A FINAL LBQCPTENC OF CPPAIEMENT
+  ITEM PAMCLE     OF A_WCP355A FINAL PAMCLE    OF CPPAIEMENT
+  ITEM REFCLETYP  OF A_WCP355A FINAL REFCLETYP OF CPPAIEMENT
+  ITEM REFCLENUM  OF A_WCP355A FINAL REFCLENUM OF CPPAIEMENT
+  ITEM RADNOM     OF A_WCP355A FINAL RADNOM    OF VRAD_01
+  ITEM RADADR1    OF A_WCP355A FINAL RADADR1   OF VRAD_01
+  ITEM RADADR2    OF A_WCP355A FINAL RADADR2   OF VRAD_01
+  ITEM RADADR3    OF A_WCP355A FINAL RADADR3   OF VRAD_01
+  ITEM RADADR4    OF A_WCP355A FINAL RADADR4   OF VRAD_01
+  ITEM RADCP      OF A_WCP355A FINAL RADCP     OF VRAD_01
+  ITEM DEVCLE     OF A_WCP355A FINAL DEVCLE    OF VRAD_01
+  ITEM PAMDSC1    OF A_WCP355A FINAL PAMDSC1   OF CPPAIEMENT
+  ITEM PAMDSC2    OF A_WCP355A FINAL PAMDSC2   OF CPPAIEMENT
+  ITEM PAMDAT     OF A_WCP355A FINAL PAMDAT    OF CPPAIEMENT
+  ITEM PAMDATJOU  OF A_WCP355A FINAL PAMDATJOU OF CPPAIEMENT
+  ITEM PAMMNT     OF A_WCP355A FINAL PAMMNT    OF CPPAIEMENT
+  ITEM T_TYPCHQ   OF A_WCP355A FINAL T_TYPCHQ
+  ITEM PTACLELIG  OF A_WCP355A FINAL PTACLELIG OF CPPAM_TALON
+  ITEM T_TRI      OF A_WCP355C FINAL "A"
+  ITEM PTADSC     OF A_WCP355A FINAL PTADSC    OF CPPAM_TALON
+
+;-------------------------------------------------------------------------------
+;
+; Ce request sert à trier le subfile AVANT de mettre le flag
+; indiquant la dernière ligne du paiement. Ceci est nécéssaire
+; car sinon il n'est pas possible de synchroniser la mise à jour
+; du subfile avec le tri dans le même request
+;
+REQUEST TRI_SUBFILE
+
+ACCESS *WCP355A
+
+SORT ON PAMCLE    OF WCP355A, &
+        CAPCLE    OF WCP355A, &
+        PTACLELIG OF WCP355A, &
+        T_TRI
+
+TEMPORARY T_NBRLIG INTEGER SIZE 2
+
+ ITEM T_NBRLIG COUNT RESET AT PAMCLE
+
+SUBFILE WCP355B &
+        KEEP &
+        INCLUDE WCP355A, &
+                T_NBRLIG
+
+;-------------------------------------------------------------------------
+;
+; Calcul du nombre de pages utilisés par chaque chèque.
+;
+;   Comme on ne fait pas de numérotation lors de l'impression des chèques,
+;   il faut compter le nombre de pages utilisés pour imprimer chaque
+;   chèque. Ce nombre va servir lors de la numérotation ( CP012 ) pour
+;   calculer la valeur à ajouter au nombre physique pour trouver le
+;   numéro pré-imprimé du chèque.
+;
+REQUEST CALCUL_NBR_PAGES
+
+;
+; Lecture des paiements sélectionnés
+;
+ACCESS *WCP355B
+
+SORTED  ON  PAMCLE    OF WCP355B, &
+            CAPCLE    OF WCP355B, &
+            PTACLELIG OF WCP355B, &
+            T_TRI
+;
+; On compte le nombre de lignes utilisé par le chèque
+;
+TEMPORARY T_NBRLIG INTEGER SIZE 2
+
+ ITEM T_NBRLIG COUNT RESET AT PAMCLE
+
+;
+; On marque la dernière ligne. Car c'est sur la page qui contiendra cette
+; dernière ligne que sera imprimé le chèque.
+;
+OUTPUT WCP355B UPDATE AT PAMCLE
+
+ ITEM T_FLGDER OF WCP355B FINAL "1"
+ ITEM T_NBRLIG OF WCP355B FINAL T_NBRLIG
+
+BUILD cp355t

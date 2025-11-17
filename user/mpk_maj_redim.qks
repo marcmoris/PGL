@@ -1,0 +1,95 @@
+; *** un backup a ete pris via mpp_maj_redim.qts ***
+
+scre maj_redim
+file mccompagnie                       primary
+file pdbloc       alias a1_pdbloc      designer open 2
+file pdbloc       alias a2_pdbloc      designer open 3
+file pdredim_bloc alias a_pdredim_bloc designer
+file pdreception_bloc                  designer 
+
+temp t_cpt                 integer   size 08
+
+temporary t_blonumblo      character size 10 reset at startup
+temporary t_blonumblo_occ  character size 10 occurs 100 times
+temporary t_occ_nb         integer   size 04 reset at startup
+
+field ciecle of mccompagnie
+field cienom of mccompagnie
+
+procedure internal i_occ_blo
+begin
+  for each t_blonumblo_occ
+  begin
+    if t_occ_nb = occurrence of t_blonumblo_occ
+    then let t_blonumblo_occ = blonumbloapr of a2_pdbloc ; conserver les blocs "fils"
+  end
+end
+
+procedure internal i_maj_prx
+begin
+  get a1_pdbloc via ciecle                    , & ; recherche du bloc "père" ou "fils"
+                    blonumbloapr                &
+              using ciecle of pdreception_bloc, &
+                    t_blonumblo                 optional
+  if accessok
+  then begin
+    get a_pdredim_bloc via ciecle             , & ; recherche du bloc redimensionné associé
+                           blonumbloapr         &
+                     using ciecle of a1_pdbloc, &
+                           t_blonumblo          optional
+    if accessok
+    then begin
+      let rebprimc3    of a_pdredim_bloc = rebprimc3    of pdreception_bloc
+      let rebprimc3ven of a_pdredim_bloc = rebprimc3ven of pdreception_bloc
+
+      put a_pdredim_bloc reset ; mise à jour du bloc redimensionné associé
+    end
+
+    let rebprimc3    of a1_pdbloc = rebprimc3    of pdreception_bloc
+    let rebprimc3ven of a1_pdbloc = rebprimc3ven of pdreception_bloc
+
+    put a1_pdbloc ; mise à jour du bloc "père" ou "fils"
+  end
+
+  while retrieving a2_pdbloc via ciecle              , & ; recherche des blocs "fils"
+                                 blonumbloavt          &
+                           using ciecle of a1_pdbloc , &
+                                 t_blonumblo               
+  begin
+    let t_occ_nb = t_occ_nb + 1 ; incrémentation du compteur de blocs "fils"
+    do internal i_occ_blo       ; appel de la procédure conservant les blocs fils
+  end
+end
+
+procedure internal ip_maj_prx
+begin
+  let t_occ_nb    = 0   ; initialisation du compteur de blocs "père" et "fils"
+  let t_blonumblo = " " ; assignation du bloc "fils"
+
+  let t_blonumblo = blonumgra001apr of pdreception_bloc + & ; assignation du bloc "père"
+                    blonumgra002apr of pdreception_bloc + &
+                    blorecapr       of pdreception_bloc
+
+  do internal i_maj_prx ; appel de la procédure de mise à jour des prix au mètre cube
+
+  for each t_blonumblo_occ ; mise à jour des prix au mètre cube pour les blocs "fils"
+  begin
+    if t_blonumblo_occ <> " "
+    then begin
+      let t_blonumblo = t_blonumblo_occ  ; assignation du bloc "fils"
+      do internal i_maj_prx              ; appel de la procédure de mise à jour des prix au mètre cube
+      let t_blonumblo_occ = " "          ; réinitialisation de l'occurence du bloc "fils"
+    end
+  end
+end
+
+procedure designer maj 
+begin
+  while retrieving pdreception_bloc sequential
+  begin
+    let t_cpt = t_cpt + 1
+    info = "(" + asc(t_cpt,6) + ")" now
+
+    do internal ip_maj_prx
+  end
+end

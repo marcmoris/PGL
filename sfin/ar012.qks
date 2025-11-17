@@ -1,0 +1,658 @@
+;/T/ Gestion des mémos.
+;
+;/P/ Programmeur..: Alain Coté adapté par Guy Chabot
+;    Date Création: 2 septembre 1994
+;
+;    Description..: Saisie des mémos pour les achats.
+;
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN ar012 ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU, &
+                       T_CIENOM   , &
+                       T_ARMTYPFND, &
+                       T_NUMREFFND, &
+                       T_FOUCIECLE, &
+                       T_FOUCLEFND
+
+USE ustrasse NOLIST
+
+USE ussectmp NOLIST
+    "AR012"
+
+USE ar012.hlp
+
+USE usactecr NOLIST
+
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de compagnie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie du menu.
+TEMPORARY T_FOUCIECLE CHARACTER SIZE 4  ; Compagnie du fournisseur.
+TEMPORARY T_FOUCLEFND CHARACTER SIZE 6  ; Numéro de fournisseur à rechercher.
+TEMPORARY T_ARMTYPFND CHARACTER SIZE 1  ; Type de référence.
+TEMPORARY T_NUMREFFND CHARACTER SIZE 12 ; Numéro de la référence.
+TEMPORARY T_ARMNUMREF CHARACTER SIZE 12 ; Numéro de la référence.
+
+;-------------------------------------------------------------------------------
+;
+; Relation mémo.
+;
+;   *** ATTENTION : les procédures path & find ont été réécrites ! ***
+;
+FILE ARMEMO      PRIMARY
+
+  ITEM CIECLE    OF ARMEMO INITIAL T_CIECLEMNU
+  ITEM ARMTIMSTP OF ARMEMO INITIAL SYSDATE * 1000000 + ROUND(SYSTIME / 100)
+  ITEM FOUCIECLE OF ARMEMO INITIAL T_FOUCIECLE
+  ;
+  ; Piste de vérification.
+  ;
+  ITEM ARMDATCRE OF ARMEMO INITIAL SYSDATE
+  ITEM ARMHRECRE OF ARMEMO INITIAL SYSTIME / 10000
+  ITEM ARMUSRCRE OF ARMEMO INITIAL TZ_LOGONID
+  ;
+  ; On enregistre la date, et heure de modification, ainsi que l'usager
+  ; qui modifie le mémo
+  ;
+  ITEM ARMDATMOD OF ARMEMO FINAL   SYSDATE        &
+                                        IF NOT NEWRECORD OF ARMEMO AND &
+                                           ALTEREDRECORD OF ARMEMO
+  ITEM ARMHREMOD OF ARMEMO FINAL   SYSTIME / 10000 &
+                                        IF NOT NEWRECORD OF ARMEMO AND &
+                                           ALTEREDRECORD OF ARMEMO
+  ITEM ARMUSRMOD OF ARMEMO FINAL   TZ_LOGONID         &
+                                        IF NOT NEWRECORD OF ARMEMO AND &
+                                           ALTEREDRECORD OF ARMEMO
+
+;-------------------------------------------------------------------------------
+;
+; Détail du mémo.
+;
+;   *** ATTENTION : les procédures path & find ont été réécrites ! ***
+;
+FILE ARARM_LIGNE       DETAIL &
+                      OCCURS 12 &
+                      NOITEM
+
+  ITEM CIECLE    OF ARARM_LIGNE INITIAL CIECLE    OF ARMEMO
+  ITEM ARMTIMSTP OF ARARM_LIGNE INITIAL ARMTIMSTP OF ARMEMO
+
+;
+; On détruit toutes les lignes si le maitre est détruit.
+;
+FILE ARARM_LIGNE       DELETE &
+                      NOITEM &
+                      ALIAS A_ARL_DELETE
+
+  ACCESS VIA    CIECLE, &
+                ARMTIMSTP &
+         USING  CIECLE    OF ARMEMO, &
+                ARMTIMSTP OF ARMEMO
+  
+;-------------------------------------------------------------------------------
+;
+; Table des Codes Bilingue pour le type de la référence. Il n'y a pas
+; de lookup il est simulé dans la procédure edit.
+;
+DEFINE    D_ARMTYP CHARACTER SIZE 16 = "ARMTYP"
+TEMPORARY T_ARMTYP CHARACTER SIZE  4
+
+FILE VCBI_DSC    REFERENCE &
+                ALIAS A_CBI_ARMTYP
+
+  ACCESS  VIA   XELNOM, &
+                CBICLE  &
+          USING D_ARMTYP, &
+                ARMTYP OF ARMEMO
+
+;-------------------------------------------------------------------------------
+;
+; Permet d'avoir l'information du fournisseur pour la cie de transaction.
+;
+FILE VFOC_FOU            REFERENCE &
+                        NOITEM
+
+  ACCESS VIA   FOUCIECLE, &
+               FOUCLE   , &
+               FOCCIECLE  &
+         USING FOUCIECLE OF ARMEMO, &
+               FOUCLE    OF ARMEMO, &
+               CIECLE    OF ARMEMO
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_FOUCLE      CHARACTER SIZE  6 ; Pour les popup
+TEMPORARY T_REQCLE      CHARACTER SIZE  9 ; Pour les popup
+TEMPORARY T_CMDCLE      CHARACTER SIZE  9 ; Pour les popup
+TEMPORARY T_RECCLE      CHARACTER SIZE 12 ; Pour les popup
+TEMPORARY T_FACCLE      CHARACTER SIZE 12 ; Pour les popup
+
+TEMPORARY T_NUMLIG INTEGER UNSIGNED SIZE 2 & ; Numérotation auto. des lignes.
+                   OCCURS WITH ARMEMO
+
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Gestion des mémos " &
+@ELSE
+      " %%% " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST
+
+SKIP
+
+ALIGN(3,3,19) (,,26)
+
+FIELD ARMTYP    OF ARMEMO &
+        HIDDEN ID 05 &
+        REQUIRED &
+        NOCHANGE &
+        IF 0 <> SIZE(TRUNCATE(T_ARMTYPFND)) &
+        LOOKUP ON A_CBI_ARMTYP &
+          MESSAGE 1370         ; Ce statut est invalide
+FIELD CBIDSC    OF A_CBI_ARMTYP
+FIELD ARMNUMREF OF ARMEMO &
+        HIDDEN ID 10 &
+        REQUIRED &
+        NOCHANGE &
+        IF 0 <> SIZE(TRUNCATE(T_NUMREFFND))
+
+SKIP TO GROUP 1
+
+FIELD FOUCLE    OF ARMEMO &
+        HIDDEN ID 15 &
+        REQUIRED &
+        NOCHANGE &
+        IF 0 <> SIZE(TRUNCATE(T_FOUCLEFND)) &
+        LOOKUP ON VFOC_FOU &
+          MESSAGE 1347 ; Ce fournisseur n'existe pas...
+FIELD FOUNOM    OF VFOC_FOU &
+        DISPLAY
+
+SKIP 1
+
+FIELD ARMDAT OF ARMEMO  FORMAT YYYYMMDD HIDDEN ID 20 &
+        DEFAULT SYSDATE
+
+
+SKIP
+DRAW ,1 TO ,80
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+      "Texte                                                         Ligne" &
+@ELSE
+      "Text                                                          Line " &
+@ENDIF
+      AT ,3
+
+SKIP
+
+ALIGN (3,2,3) (,,65)
+
+CLUSTER OCCURS WITH ARARM_LIGNE ID BASE 25
+
+FIELD ARLTXT    OF ARARM_LIGNE                                 &
+      HIDDEN                                                   &
+      LABEL " "                                                &
+      PIC '^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^' &
+      SIZE 50
+
+FIELD ARLCLELIG OF ARARM_LIGNE
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour le code bilingue type de pièce.
+;
+PROCEDURE INPUT ARMTYP
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_ARMTYP = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_ARMTYP, T_ARMTYP
+    LET FIELDTEXT = TRUNCATE(T_ARMTYP)
+  END
+END
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour la pièce.
+;
+PROCEDURE INPUT ARMNUMREF
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    IF ARMTYP OF ARMEMO = "6"
+    THEN BEGIN
+      LET T_REQCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+      LET T_FOUCLE = ""
+      RUN SCREEN ar114 MODE F PASSING T_CIECLEMNU, T_FOUCLE, T_REQCLE
+      LET FIELDTEXT   = TRUNCATE(T_REQCLE)
+      LET T_FOUCLEFND = T_FOUCLE
+    END
+    IF ARMTYP OF ARMEMO = "1"
+    THEN BEGIN
+      LET T_REQCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+      LET T_FOUCLE = ""
+      RUN SCREEN ar115 MODE F PASSING T_CIECLEMNU, T_FOUCLE, T_REQCLE
+      LET FIELDTEXT   = TRUNCATE(T_REQCLE)
+      LET T_FOUCLEFND = T_FOUCLE
+    END
+    IF ARMTYP OF ARMEMO = "2"
+    THEN BEGIN
+      LET T_CMDCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+      LET T_FOUCLE = ""
+      RUN SCREEN ar116 MODE F PASSING T_CIECLEMNU, T_FOUCLE, T_CMDCLE
+      LET FIELDTEXT   = TRUNCATE(T_CMDCLE)
+      LET T_FOUCLEFND = T_FOUCLE
+    END
+    IF ARMTYP OF ARMEMO = "3"
+    THEN BEGIN
+      LET T_RECCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+      LET T_FOUCLE = ""
+      RUN SCREEN ar117 MODE F PASSING T_CIECLEMNU, T_FOUCLE, T_RECCLE
+      LET FIELDTEXT   = TRUNCATE(T_RECCLE)
+      LET T_FOUCLEFND = T_FOUCLE
+    END
+    IF ARMTYP OF ARMEMO = "4"
+    THEN BEGIN
+      LET T_FACCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+      LET T_FOUCLE = ""
+      RUN SCREEN ar118 MODE F PASSING T_CIECLEMNU, T_FOUCLE, T_FACCLE
+      LET FIELDTEXT   = TRUNCATE(T_FACCLE)
+      LET T_FOUCLEFND = T_FOUCLE
+    END
+  END
+END
+;-------------------------------------------------------------------------------
+;
+; Pour le choix du fournisseur
+;
+PROCEDURE INPUT FOUCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*") 
+  THEN BEGIN
+    LET T_FOUCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cp104 MODE F PASSING T_FOUCIECLE, T_FOUCLE, T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE(T_FOUCLE)
+  END
+END
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+PROCEDURE INPUT ARLTXT
+BEGIN
+  USE ussecent NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Assigne un numéro de ligne automatiquement.
+;
+PROCEDURE INPUT ARLCLELIG
+BEGIN
+  IF     0 = SIZE( FIELDTEXT ) &
+     AND 0 = ARLCLELIG OF ARARM_LIGNE &
+     AND NOT FINDMODE
+  THEN LET FIELDTEXT = ASCII( ( T_NUMLIG + 100 ) / 100 )
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Incrémente le numéro de ligne.
+;
+PROCEDURE PROCESS ARLCLELIG
+BEGIN
+  IF T_NUMLIG < ARLCLELIG OF ARARM_LIGNE
+  THEN LET T_NUMLIG = ARLCLELIG OF ARARM_LIGNE + 100
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Procédure d'insertion de mémo.
+;
+PROCEDURE APPEND
+BEGIN
+  ACCEPT ARLTXT    OF ARARM_LIGNE
+  ACCEPT ARLCLELIG OF ARARM_LIGNE
+END
+
+PROCEDURE ENTRY
+BEGIN
+
+IF 0 = SIZE(TRUNCATE(T_ARMTYPFND))
+THEN ACCEPT ARMTYP OF ARMEMO
+ELSE BEGIN
+  LET ARMTYP OF ARMEMO = T_ARMTYPFND
+  DISPLAY ARMTYP OF ARMEMO
+END
+DISPLAY CBIDSC OF A_CBI_ARMTYP
+
+IF 0 = SIZE(TRUNCATE(T_NUMREFFND))
+THEN ACCEPT ARMNUMREF OF ARMEMO
+ELSE BEGIN
+  LET ARMNUMREF OF ARMEMO = T_NUMREFFND
+  DISPLAY ARMNUMREF OF ARMEMO
+END
+
+IF 0 = SIZE(TRUNCATE(T_FOUCLEFND))
+THEN ACCEPT FOUCLE OF ARMEMO
+ELSE BEGIN
+  LET FOUCLE OF ARMEMO = T_FOUCLEFND
+  DISPLAY FOUCLE OF ARMEMO
+END
+DISPLAY FOUNOM OF VFOC_FOU
+
+ACCEPT ARMDAT OF ARMEMO
+FOR ARARM_LIGNE
+BEGIN
+  PERFORM APPEND
+END
+END
+
+
+;
+; Procédure servant à modifier la première occurrence d'un cluster 
+; en Powerhouse Client.
+;
+
+PROCEDURE DESIGNER PH01
+BEGIN
+  ACCEPT ARLTXT    OF ARARM_LIGNE
+  ACCEPT ARLCLELIG OF ARARM_LIGNE
+END
+
+
+;
+; Procédure servant à détruire la première occurrence d'un cluster 
+; en Powerhouse Client.
+;
+
+PROCEDURE DESIGNER PH02
+BEGIN
+  DELETE ARARM_LIGNE 
+END
+
+;-------------------------------------------------------------------------------
+;
+; Recherche par référence ou recherche globale.
+;
+PROCEDURE PATH
+BEGIN
+  IF T_NUMREFFND <> ""
+  THEN LET PATH = 99
+  ELSE BEGIN
+    REQUEST ARMTYP OF ARMEMO
+    IF PROMPTOK
+    THEN BEGIN
+      REQUEST ARMNUMREF OF ARMEMO
+      IF PROMPTOK
+      THEN BEGIN
+        REQUEST ARMDAT OF ARMEMO
+        IF PROMPTOK
+        THEN LET PATH = 1 ; Compagnie,Type,Référence,Date
+        ELSE LET PATH = 2 ; Compagnie,Type,Référence
+      END
+      ELSE BEGIN
+        REQUEST ARMDAT OF ARMEMO
+        IF PROMPTOK
+        THEN LET PATH = 3 ; Compagnie,Type,Date
+        ELSE BEGIN
+          REQUEST FOUCLE OF ARMEMO
+          IF PROMPTOK
+          THEN LET PATH = 4 ; Compagnie,Type,Compagnie(f),Fournisseur
+          ELSE LET PATH = 5 ; Compagnie,Type
+        END
+      END
+    END
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST FOUCLE OF ARMEMO
+      IF PROMPTOK
+      THEN BEGIN
+        REQUEST ARMDAT OF ARMEMO
+        IF PROMPTOK
+        THEN LET PATH = 6 ; Compagnie(f),Fournisseur,Compagnie,Date
+        ELSE LET PATH = 7 ; Compagnie(f),Fournisseur,Compagnie
+      END
+    END
+  END
+END
+
+PROCEDURE FIND
+BEGIN
+  ;
+  ; Recherche sur les paramètres reçus
+  ;
+  IF PATH = 99
+  THEN GET ARMEMO VIA   CIECLE   , &
+                        ARMTYP   , &
+                        ARMNUMREF, &
+                        FOUCIECLE, &
+                        FOUCLE     &
+                  USING T_CIECLEMNU, &
+                        T_ARMTYPFND, &
+                        T_NUMREFFND, &
+                        T_FOUCIECLE, &
+                        T_FOUCLEFND
+  ;
+  ; Recherche par Compagnie, Type, Référence, Date
+  ;
+  IF PATH = 1
+  THEN GET ARMEMO VIA   CIECLE   , &
+                        ARMTYP   , &
+                        ARMNUMREF, &
+                        ARMDAT     &
+                  USING T_CIECLEMNU          , &
+                        ARMTYP      OF ARMEMO, &
+                        ARMNUMREF   OF ARMEMO, &
+                        ARMDAT      OF ARMEMO  &
+                ORDERBY FOUCLE
+  ;
+  ; Recherche par Compagnie, Type, Référence
+  ;
+  IF PATH = 2
+  THEN GET ARMEMO VIA   CIECLE   , &
+                        ARMTYP   , &
+                        ARMNUMREF  &
+                  USING T_CIECLEMNU          , &
+                        ARMTYP      OF ARMEMO, &
+                        ARMNUMREF   OF ARMEMO  &
+                ORDERBY FOUCLE, &
+                        ARMDAT
+  ;
+  ; Recherche par Compagnie, Type, Date
+  ;
+  IF PATH = 3
+  THEN GET ARMEMO VIA   CIECLE   , &
+                        ARMTYP   , &
+                        ARMDAT     &
+                  USING T_CIECLEMNU          , &
+                        ARMTYP      OF ARMEMO, &
+                        ARMDAT      OF ARMEMO  &
+                ORDERBY ARMNUMREF, &
+                        FOUCLE
+  ;
+  ; Recherche par Compagnie, Type, Fournisseur
+  ;
+  IF PATH = 4
+  THEN GET ARMEMO VIA   CIECLE   , &
+                        ARMTYP   , &
+                        FOUCIECLE, &
+                        FOUCLE     &
+                  USING T_CIECLEMNU          , &
+                        ARMTYP      OF ARMEMO, &
+                        T_FOUCIECLE          , &
+                        FOUCLE      OF ARMEMO  &
+                ORDERBY ARMDAT, &
+                        ARMNUMREF
+  ;
+  ; Recherche par Compagnie, Type
+  ;
+  IF PATH = 5
+  THEN GET ARMEMO VIA   CIECLE   , &
+                        ARMTYP     &
+                  USING T_CIECLEMNU          , &
+                        ARMTYP      OF ARMEMO  &
+                ORDERBY ARMDAT   , &
+                        ARMNUMREF, &
+                        FOUCLE
+  ;
+  ; Recherche par Fournisseur, Date
+  ;
+  IF PATH = 6
+  THEN GET ARMEMO VIA   CIECLE   , &
+                        FOUCIECLE, &
+                        FOUCLE   , &
+                        ARMDAT     &
+                  USING T_CIECLEMNU          , &
+                        T_FOUCIECLE          , &
+                        FOUCLE      OF ARMEMO, &
+                        ARMDAT      OF ARMEMO  &
+                ORDERBY ARMTYP   , &
+                        ARMNUMREF
+  ;
+  ; Recherche par Fournisseur
+  ;
+  IF PATH = 7
+  THEN GET ARMEMO VIA   CIECLE   , &
+                        FOUCIECLE, &
+                        FOUCLE     &
+                  USING T_CIECLEMNU          , &
+                        T_FOUCIECLE          , &
+                        FOUCLE      OF ARMEMO  &
+                ORDERBY ARMTYP   , &
+                        ARMDAT   , &
+                        ARMNUMREF
+  ;
+  ; Recherche par compagnie du menu.
+  ;
+  IF PATH = 0
+  THEN GET ARMEMO VIA     CIECLE &
+                  USING   T_CIECLEMNU &
+                  ORDERBY ARMDAT
+END
+
+
+PROCEDURE DETAIL FIND
+BEGIN
+  FOR ARARM_LIGNE
+  BEGIN
+    GET ARARM_LIGNE VIA     CIECLE   , &
+                            ARMTIMSTP  &
+                    USING   CIECLE    OF ARMEMO, &
+                            ARMTIMSTP OF ARMEMO  &
+                    ORDERBY CIECLE, &
+                            ARMTIMSTP, &
+                            ARLCLELIG
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; VALIDATION DE LA MISE À JOUR
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF ARMEMO &
+     AND TZ_SECDEL = "0" 
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF ARMEMO &
+     AND NOT NEWRECORD     OF ARMEMO &
+     AND NOT DELETEDRECORD OF ARMEMO &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+  ;
+  ; Le timbre de modification du mémo est mis à jour si l'usager modifie
+  ; le détail.
+  ;
+  IF NOT NEWRECORD OF ARMEMO
+  THEN BEGIN
+    FOR ARARM_LIGNE
+    BEGIN
+      IF   NEWRECORD     OF ARARM_LIGNE &
+        OR ALTEREDRECORD OF ARARM_LIGNE &
+        OR DELETEDRECORD OF ARARM_LIGNE
+      THEN BEGIN
+        LET ARMDATMOD OF ARMEMO = SYSDATE
+        LET ARMHREMOD OF ARMEMO = SYSTIME / 10000
+        LET ARMUSRMOD OF ARMEMO = TZ_LOGONID
+      END
+    END
+  END
+END
+
+BUILD
+@IF FORMAT
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+****************************** Gestion des mémos *******************************
+* Type..........: x      xxxxxxxxxxxxxxxxxxxxxxxxx                             *
+* Référence.....: xxxxxxxxxxxx                                                 *
+* Fournisseur...: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              *
+*                                                                              *
+* Date..........: xxxxxxxx                                                     *
+********************************************************************************
+* Texte                                                         Ligne          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxx          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxx          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxx          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxx          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxx          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxx          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxx          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxx          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxx          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxx          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxx          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxx          *
+********************************************************************************
+@ENDIF

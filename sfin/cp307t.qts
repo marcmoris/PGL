@@ -1,0 +1,973 @@
+;/T/ Validation sommaire des factures / Notes de crédit / Crédits / Ajustements
+;
+;/P/ Programmeur...: Nancy Marceau
+;    Date Création.: 4 février 1994
+;
+;    Description...: Permet de faire une liste de validation des factures,
+;                    des notes de crédit et des ajustements.
+;
+;    Paramètres....: Compagnie
+;                    Période comptable
+;                    No lot (Un, Plusieurs ou tous)
+;-------------------------------------------------------------------------------
+
+ USE ussetqts NOLIST   ; permet de faire les SET REPORT NOLIMIT....
+
+RUN cp307t
+
+REQUEST VERIFICATION_FACTURES_NC_AJUST
+
+ACCESS CPLOT &
+  LINK CIECLE    OF CPLOT         , &
+       PECCLE    OF CPLOT         , &
+       LCPCLE    OF CPLOT           &
+    TO CAPCIECLE                  , &
+       PECCLE                     , &
+       LCPCLE                     OF CPCPT_A_PAYER &
+
+  LINK FOUCIECLE OF CPCPT_A_PAYER , &
+       FOUCLE    OF CPCPT_A_PAYER , &
+       CAPCLE    OF CPCPT_A_PAYER   &
+    TO FOUCIECLE                  , &
+       FOUCLE                     , &
+       CAPCLE                     OF CPCAP_IMPUTATION OPTIONAL &
+
+  LINK FOUCIECLE OF CPCPT_A_PAYER , &
+       FOUCLE    OF CPCPT_A_PAYER , &
+       CAPCLE    OF CPCPT_A_PAYER , &
+       CAPTYPECR OF CPCPT_A_PAYER , &
+       CAPTYPECR OF CPCPT_A_PAYER   &
+    TO CPHCLE1                    , &
+       CPHCLE2                    , &
+       CPHCLE3                    , &
+       CPHTYPECR                  , &
+       CPHTYPTRA                  OF CPCAP_HISTO OPTIONAL
+
+
+
+CHOOSE CIECLE    PARM, &                ; No Compagnie
+       PECCLE    PARM, &                ; Période
+       LCPCLE    PARM, &                ; No lot
+       LCPTYPECR "FA"                   ; Type de lot facture
+
+TEMPORARY T_CAPCLEREF CHARACTER SIZE 15 ; No facture en référence pour Note de
+                                        ; crédit ou ajustement.
+
+TEMPORARY T_CCIMNT    FLOAT SIZE 8
+
+SORT   ON LCPCLE    OF CPLOT  &         ; No lot
+       ON FOUCIECLE OF CPCPT_A_PAYER &
+       ON FOUCLE    OF CPCPT_A_PAYER &
+       ON CAPCLE    OF CPCPT_A_PAYER
+                                        ; No facture référer si note crédit ou ajustement
+
+ITEM T_CAPCLEREF = CAPCLE OF CPCAP_HISTO  IF CAPTYPECR OF CPCPT_A_PAYER = "AJ" OR &
+                                             CAPTYPECR OF CPCPT_A_PAYER = "NC" ELSE " "
+
+ITEM T_CCIMNT = CCIMNT OF CPCAP_IMPUTATION
+
+
+SUBFILE WCP307 KEEP INCLUDE &
+ CIECLE       OF CPLOT, &
+ PECCLE       OF CPLOT, &
+ LCPCLE       OF CPLOT, &
+ LCPDSC       OF CPLOT, &
+ LCPDATJOU    OF CPLOT, &
+ LCPNBRTRS    OF CPLOT, &
+ LCPNBRTRSVER OF CPLOT, &
+ LCPCUMMNT    OF CPLOT, &
+ LCPCUMMNTVER OF CPLOT, &
+ LCPNBRTRSERR OF CPLOT, &
+ CAPCLE       OF CPCPT_A_PAYER, &
+ CAPMNT       OF CPCPT_A_PAYER, &
+ CAPCUMMNT    OF CPCPT_A_PAYER, &
+ REFCIECLE    OF CPCPT_A_PAYER, &
+ REFCLENUM    OF CPCPT_A_PAYER, &
+ REFCLETYP    OF CPCPT_A_PAYER, &
+ RADCLE       OF CPCPT_A_PAYER, &
+ CAPTYPECR    OF CPCPT_A_PAYER, &
+ CAPDAT       OF CPCPT_A_PAYER, &
+ CAPRTU       OF CPCPT_A_PAYER, &
+ CAPTERNET    OF CPCPT_A_PAYER, &
+ CAPDATNET    OF CPCPT_A_PAYER, &
+ CAPTERESC1   OF CPCPT_A_PAYER, &
+ CAPDATESC1   OF CPCPT_A_PAYER, &
+ CAPMNTTPS    OF CPCPT_A_PAYER, &
+ CAPMNTTVQ    OF CPCPT_A_PAYER, &
+ CAPMNTRTI    OF CPCPT_A_PAYER, &
+ CAPMNTCTI    OF CPCPT_A_PAYER, &
+ CAPMNTNET    OF CPCPT_A_PAYER, &
+ CAPDSC1      OF CPCPT_A_PAYER, &
+ CAPDSC2      OF CPCPT_A_PAYER, &
+ PRJCLE       OF CPCAP_IMPUTATION, &
+ PRACLE       OF CPCAP_IMPUTATION, &
+ IMMCLE       OF CPCAP_IMPUTATION, &
+ CPTCLE       OF CPCAP_IMPUTATION, &
+ UNACLE       OF CPCAP_IMPUTATION, &
+ T_CCIMNT     ALIAS CCIMNT       , &
+ CCITAXCODTPS OF CPCAP_IMPUTATION, &
+ CCITAXCODTVQ OF CPCAP_IMPUTATION, &
+ CCIMNTTPS    OF CPCAP_IMPUTATION, &
+ CCIMNTTVQ    OF CPCAP_IMPUTATION, &
+ CLICIECLE    OF CPCAP_IMPUTATION, &
+ CLICLE       OF CPCAP_IMPUTATION, &
+ CCITIMSTP    OF CPCAP_IMPUTATION, &
+ T_CAPCLEREF
+
+;---------------------------------------------------------------------------
+; Mise à jour de la date de vérification du lot
+; des factures.
+
+OUTPUT CPLOT AT LCPCLE UPDATE &
+  IF LCPDATJOU OF CPLOT = 0
+
+  ITEM LCPDATVAL OF CPLOT FINAL SYSDATE
+  ITEM LCPUSRVAL OF CPLOT FINAL LOGONID
+
+SUBFILE WCP307A AT CAPCLE INCLUDE &
+ CIECLE       OF CPLOT, &
+ PECCLE       OF CPLOT, &
+ LCPCLE       OF CPLOT, &
+ LCPDSC       OF CPLOT, &
+ LCPDATJOU    OF CPLOT, &
+ LCPNBRTRS    OF CPLOT, &
+ LCPNBRTRSVER OF CPLOT, &
+ LCPCUMMNT    OF CPLOT, &
+ LCPCUMMNTVER OF CPLOT, &
+ LCPNBRTRSERR OF CPLOT, &
+ CAPCLE       OF CPCPT_A_PAYER, &
+ CAPMNT       OF CPCPT_A_PAYER, &
+ CAPCUMMNT    OF CPCPT_A_PAYER, &
+ REFCIECLE    OF CPCPT_A_PAYER, &
+ REFCLENUM    OF CPCPT_A_PAYER, &
+ REFCLETYP    OF CPCPT_A_PAYER, &
+ RADCLE       OF CPCPT_A_PAYER, &
+ CAPTYPECR    OF CPCPT_A_PAYER, &
+ CAPDAT       OF CPCPT_A_PAYER, &
+ CAPRTU       OF CPCPT_A_PAYER, &
+ CAPTERNET    OF CPCPT_A_PAYER, &
+ CAPDATNET    OF CPCPT_A_PAYER, &
+ CAPTERESC1   OF CPCPT_A_PAYER, &
+ CAPDATESC1   OF CPCPT_A_PAYER, &
+ CAPMNTTPS    OF CPCPT_A_PAYER, &
+ CAPMNTTVQ    OF CPCPT_A_PAYER, &
+ CAPMNTRTI    OF CPCPT_A_PAYER, &
+ CAPMNTCTI    OF CPCPT_A_PAYER, &
+ CAPMNTNET    OF CPCPT_A_PAYER, &
+ CAPDSC1      OF CPCPT_A_PAYER, &
+ CAPDSC2      OF CPCPT_A_PAYER, &
+ CLICIECLE    OF CPCAP_IMPUTATION, &
+ CLICLE       OF CPCAP_IMPUTATION, &
+ CCIFLGFAC    OF CPCAP_IMPUTATION, &
+ CCITIMSTP    OF CPCAP_IMPUTATION, &
+ T_CAPCLEREF
+
+;-------------------------------------------------------------------------------
+;
+; On renverse le couru lorsqu'il s'agit d'une facture provenant de la consolidation
+; de facture.  Ces lignes seront reliées a la facture de consolidation plutot
+; qu'a la facture des payables pour que l'on puisse voir la dépense sur la facture.
+;
+;
+REQUEST RENVERSE_COURU
+
+ACCESS *WCP307A &
+  LINK REFCIECLE OF WCP307A, &
+       REFCLENUM OF WCP307A, &
+       CAPCLE    OF WCP307A  &
+    TO FOUCIECLE, &
+       FOUCLE   , &
+       FACCLE                OF ARFACTURE_REC &
+
+  LINK REFCIECLE OF WCP307A, &
+       REFCLENUM OF WCP307A, &
+       FACCIECLE OF ARFACTURE_REC &
+   TO  FOUCIECLE, &
+       FOUCLE,    &
+       FOCCIECLE OF VFOC_FOU  &
+
+  LINK  FACCIECLE OF ARFACTURE_REC &
+    TO  CIECLE OF MCCOMPAGNIE &
+
+  LINK  FOUCIECLE OF ARFACTURE_REC, &
+        FOUCLE    OF ARFACTURE_REC, &
+        FACCLE    OF ARFACTURE_REC, &
+        FACCIECLE OF ARFACTURE_REC  &
+    TO  FOUCIECLE, &
+        FOUCLE,    &
+        FACCLE,    &
+        FACCIECLE  OF ARDER_ITEM &
+
+  LINK  FACCIECLE OF ARFACTURE_REC, &
+        RECCLE    OF ARDER_ITEM &
+    TO  CIECLE, &
+        RECCLE OF ARRECEPTION  OPTIONAL &
+
+  LINK  CIECLE OF ARRECEPTION, &
+        ENTCLE OF ARRECEPTION  &
+    TO  CIECLE, &
+        ENTCLE OF ARENTREPOT OPTIONAL &
+
+  LINK  FACCIECLE OF ARDER_ITEM, &
+        RECCLE    OF ARDER_ITEM, &
+        DEICLE    OF ARDER_ITEM  &
+    TO  CIECLE, &
+        RECCLE, &
+        REDCLE OF ARREC_DETAIL OPTIONAL &
+
+  LINK  REDTAXTYPTPS OF ARREC_DETAIL, &
+        REDTAXCODTPS OF ARREC_DETAIL  &
+    TO  TAXCLETYP, &
+        TAXCLECOD OF MCTAXE ALIAS A_TAX_TPS OPTIONAL &
+
+  LINK  REDTAXTYPTVQ OF ARREC_DETAIL, &
+        REDTAXCODTVQ OF ARREC_DETAIL  &
+    TO  TAXCLETYP, &
+        TAXCLECOD OF MCTAXE ALIAS A_TAX_TVQ OPTIONAL &
+
+  LINK FOUCIEINT OF VFOC_FOU &
+    TO CIECLE OF MCCOMPAGNIE  ALIAS A_MCCIE_FOU OPTIONAL
+
+SORT   ON FOUCIECLE OF ARFACTURE_REC &
+       ON FOUCLE    OF ARFACTURE_REC &
+       ON FACCLE    OF ARFACTURE_REC &
+       ON FACCIECLE OF ARDER_ITEM &
+       ON RECCLE    OF ARDER_ITEM
+
+TEMPORARY T_ENTCPTCOU  CHARACTER SIZE 6
+TEMPORARY T_ENTUNACOU  CHARACTER SIZE 8
+
+TEMPORARY TZ_MNTTXB FLOAT SIZE 08
+TEMPORARY TZ_MNTTPS FLOAT SIZE 08
+TEMPORARY TZ_MNTTVQ FLOAT SIZE 08
+
+TEMPORARY T_MNTIMP  FLOAT SIZE 08
+TEMPORARY T_MNTTOT  FLOAT SIZE 08
+TEMPORARY T_MNTTPS  FLOAT SIZE 08
+TEMPORARY T_MNTTVQ  FLOAT SIZE 08
+TEMPORARY T_MNTCTI  FLOAT SIZE 08
+TEMPORARY T_MNTRTI  FLOAT SIZE 08
+
+TEMPORARY T_CODDC   CHARACTER SIZE 01
+
+TEMPORARY T_ESCUNI  FLOAT SIZE 8
+
+ITEM T_CODDC RESET AT INITIAL TO "D"
+
+ITEM TZ_MNTTPS = 0
+ITEM TZ_MNTTVQ = 0
+
+ITEM T_ESCUNI  = ROUND( DEIMNTESC OF ARDER_ITEM / &
+                       (DEIQTEFAC OF ARDER_ITEM / 1000) * 100)
+
+ITEM TZ_MNTTXB = ROUND( (DEIQTEFAC    OF ARDER_ITEM + &
+                         REDQTERECREJ OF ARREC_DETAIL) * &
+                        (REDPRIUNI    OF ARREC_DETAIL - T_ESCUNI) / 100000) &
+     IF     DEIFLGCOM OF ARDER_ITEM = "1" &
+        AND FACTYPECR OF ARFACTURE_REC <> "CR" &
+     ELSE ROUND(DEIQTEFAC OF ARDER_ITEM * &
+                (REDPRIUNI OF ARREC_DETAIL - T_ESCUNI) / 100000) &
+     IF     FACTYPECR OF ARFACTURE_REC <> "CR" &
+     ELSE DEIMNTTOT OF ARDER_ITEM
+
+ITEM T_MNTTOT  = TZ_MNTTXB
+
+;------------------------------------------------------------------------------
+ITEM TZ_MNTTPS = TZ_MNTTXB - &
+                 ROUND( TZ_MNTTXB / (1 + TAXPCT OF A_TAX_TPS) ) &
+     IF  TAXMOD    OF A_TAX_TPS = "I" AND &
+        (TAXFLGNET OF A_TAX_TPS = "1" OR TAXFLGNET OF A_TAX_TPS = "3") AND &
+         TAXMOD    OF A_TAX_TVQ = "S" &
+     ELSE TZ_MNTTPS
+
+;------------------------------------------------------------------------------
+ITEM TZ_MNTTXB = TZ_MNTTXB - TZ_MNTTPS &
+     IF TAXMOD OF A_TAX_TPS = "I" AND TAXMOD OF A_TAX_TVQ = "S" &
+     ELSE TZ_MNTTXB
+
+;------------------------------------------------------------------------------
+ITEM TZ_MNTTPS = ROUND( TZ_MNTTXB * TAXPCT OF A_TAX_TPS ) &
+     IF TAXMOD OF A_TAX_TPS = "S" AND TAXMOD OF A_TAX_TVQ = "S" &
+     ELSE TZ_MNTTPS
+
+;------------------------------------------------------------------------------
+ITEM TZ_MNTTXB = TZ_MNTTXB + TZ_MNTTPS &
+     IF (TAXMOD    OF A_TAX_TPS = "I" OR TAXMOD OF A_TAX_TPS = "S") AND &
+         TAXFLGNET OF A_TAX_TVQ = "2" AND &
+         TAXMOD    OF A_TAX_TVQ = "S" &
+     ELSE TZ_MNTTXB
+
+;------------------------------------------------------------------------------
+ITEM TZ_MNTTVQ = ROUND(TZ_MNTTXB * TAXPCT OF A_TAX_TVQ) &
+     IF (TAXMOD    OF A_TAX_TPS = "I" OR TAXMOD OF A_TAX_TPS = "S") AND &
+         TAXMOD    OF A_TAX_TVQ = "S" &
+     ELSE TZ_MNTTVQ
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTVQ = ROUND( TZ_MNTTXB * TAXPCT OF A_TAX_TVQ ) &
+     IF (TAXMOD    OF A_TAX_TPS <> "I" AND TAXMOD OF A_TAX_TPS <> "S") AND &
+         TAXMOD    OF A_TAX_TVQ = "S" &
+     ELSE TZ_MNTTVQ
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTVQ = ROUND( ROUND ( TZ_MNTTXB / (1 + TAXPCT OF A_TAX_TVQ + &
+                                                 TAXPCT OF A_TAX_TPS) ) &
+                 * TAXPCT OF A_TAX_TVQ) &
+     IF TAXMOD    OF A_TAX_TVQ = "I" AND TAXMOD OF A_TAX_TPS = "I" AND &
+        TAXFLGNET OF A_TAX_TVQ = "1" &
+     ELSE TZ_MNTTVQ
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTVQ = TZ_MNTTXB - &
+                 ROUND( TZ_MNTTXB / (1 + TAXPCT OF A_TAX_TVQ) ) &
+     IF  TAXMOD OF A_TAX_TVQ = "I" AND &
+        (TAXMOD OF A_TAX_TPS <> "I" OR TAXFLGNET OF A_TAX_TVQ <> "1") &
+     ELSE TZ_MNTTVQ
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTXB = TZ_MNTTXB - TZ_MNTTVQ &
+     IF TAXMOD OF A_TAX_TPS = "S" AND TAXMOD OF A_TAX_TVQ = "I" &
+     ELSE TZ_MNTTXB
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTPS = ROUND( TZ_MNTTXB * TAXPCT OF A_TAX_TPS ) &
+     IF TAXMOD OF A_TAX_TPS = "S" AND TAXMOD OF A_TAX_TVQ <> "S" &
+     ELSE TZ_MNTTPS
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTXB = TZ_MNTTXB - TZ_MNTTVQ &
+     IF TAXMOD OF A_TAX_TVQ = "I" AND TAXFLGNET OF A_TAX_TPS = "1" AND &
+        TAXMOD OF A_TAX_TPS = "I" &
+     ELSE TZ_MNTTXB
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTPS = TZ_MNTTXB - &
+                 ROUND( TZ_MNTTXB / (1 + TAXPCT OF A_TAX_TPS) ) &
+     IF TAXMOD OF A_TAX_TPS  = "I" AND TAXFLGNET OF A_TAX_TPS = "1" AND &
+        TAXMOD OF A_TAX_TVQ <> "S" &
+     ELSE TZ_MNTTPS
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTPS = TZ_MNTTXB - &
+                 ROUND( TZ_MNTTXB / (1 + TAXPCT OF A_TAX_TPS) ) &
+     IF TAXMOD OF A_TAX_TPS  = "I" AND TAXFLGNET OF A_TAX_TPS <> "1" AND &
+        TAXMOD OF A_TAX_TVQ <> "S" &
+     ELSE TZ_MNTTPS
+
+;-------------------------------------------------------------------------------
+ITEM T_MNTIMP = 0 - (T_MNTTOT + TZ_MNTTPS + TZ_MNTTVQ) &
+     IF TAXMOD OF A_TAX_TPS = "S" AND TAXMOD OF A_TAX_TVQ = "S" &
+     ELSE 0 - (T_MNTTOT + TZ_MNTTPS) &
+          IF TAXMOD OF A_TAX_TPS = "S" &
+          ELSE 0 - (T_MNTTOT + TZ_MNTTVQ) &
+               IF TAXMOD OF A_TAX_TVQ = "S" &
+               ELSE 0 - T_MNTTOT
+
+
+ITEM T_MNTTPS = 0 - TZ_MNTTPS
+ITEM T_MNTTVQ = 0 - TZ_MNTTVQ
+ITEM T_MNTCTI = ROUND( T_MNTTPS * TAXPCTCTI OF A_TAX_TPS )
+ITEM T_MNTRTI = ROUND( T_MNTTVQ * TAXPCTCTI OF A_TAX_TVQ )
+
+ITEM T_MNTIMP = T_MNTIMP - T_MNTCTI - T_MNTRTI
+
+ITEM T_ENTCPTCOU = ENTCPTCOU    OF ARENTREPOT &
+                 IF FACTYPECR OF ARFACTURE_REC <> "CR" &
+                 ELSE FOCCPTCAP OF VFOC_FOU
+ITEM T_ENTUNACOU = ENTUNACOU    OF ARENTREPOT &
+                 IF FACTYPECR OF ARFACTURE_REC <> "CR" &
+                 ELSE CIEUNABIL OF MCCOMPAGNIE
+
+;
+; On doit garder les renversements pour s'assurer qu'on ne "découre" pas trop
+;
+SUBFILE WCP307RV &
+  INCLUDE &
+       FACCIECLE OF ARFACTURE_REC , &
+       FACCLE    OF ARFACTURE_REC , &
+       FOUCIECLE OF ARFACTURE_REC , &
+       FOUCLE    OF ARFACTURE_REC , &
+       FACTYPECR OF ARFACTURE_REC , &
+       RECCLE    OF ARDER_ITEM  , &
+       REDCLE    OF ARREC_DETAIL  , &
+       CPTCLE    OF ARREC_DETAIL  , &
+       UNACLE    OF ARREC_DETAIL  , &
+       PRJCLE    OF ARREC_DETAIL  , &
+       PRACLE    OF ARREC_DETAIL  , &
+       IMMCLE    OF ARREC_DETAIL  , &
+       REDMNTTOT OF ARREC_DETAIL  , &
+       REDMNTCTI OF ARREC_DETAIL  , &
+       REDMNTRTI OF ARREC_DETAIL  , &
+       REDMNTTVQ OF ARREC_DETAIL  , &
+       REDMNTTPS OF ARREC_DETAIL  , &
+       REDPRIUNI OF ARREC_DETAIL  , &
+       REDQTERECREJ OF ARREC_DETAIL  , &
+       TAXCPTCOUCAR OF A_TAX_TPS ALIAS TAXCPTCOUTPS , &
+       TAXCPTCOUCAR OF A_TAX_TVQ ALIAS TAXCPTCOUTVQ , &
+       TAXPCT       OF A_TAX_TPS ALIAS TAXPCTTPS , &
+       TAXPCT       OF A_TAX_TVQ ALIAS TAXPCTTVQ , &
+       TAXMOD       OF A_TAX_TPS ALIAS TAXMODTPS , &
+       TAXMOD       OF A_TAX_TVQ ALIAS TAXMODTVQ , &
+       TAXFLGNET    OF A_TAX_TPS ALIAS TAXFLGNETTPS , &
+       TAXFLGNET    OF A_TAX_TVQ ALIAS TAXFLGNETTVQ , &
+       TAXPCTCTI    OF A_TAX_TPS ALIAS TAXPCTCTITPS , &
+       TAXPCTCTI    OF A_TAX_TVQ ALIAS TAXPCTCTITVQ , &
+       ENTCPTCOU OF ARENTREPOT    , &
+       ENTUNACOU OF ARENTREPOT    , &
+       CIEUNABIL OF MCCOMPAGNIE   , &
+       T_MNTIMP ALIAS T_MNTIMPORI , &
+       T_MNTCTI ALIAS T_MNTCTIORI , &
+       T_MNTRTI ALIAS T_MNTRTIORI , &
+       DEIFLGCOM OF ARDER_ITEM , &
+       CIECLE       OF WCP307A , &
+       PECCLE       OF WCP307A , &
+       LCPCLE       OF WCP307A , &
+       LCPDSC       OF WCP307A , &
+       LCPDATJOU    OF WCP307A , &
+       LCPNBRTRS    OF WCP307A , &
+       LCPNBRTRSVER OF WCP307A , &
+       LCPCUMMNT    OF WCP307A , &
+       LCPCUMMNTVER OF WCP307A , &
+       LCPNBRTRSERR OF WCP307A , &
+       CAPCLE       OF WCP307A , &
+       CAPMNT       OF WCP307A , &
+       CAPCUMMNT    OF WCP307A , &
+       REFCIECLE    OF WCP307A , &
+       REFCLENUM    OF WCP307A , &
+       REFCLETYP    OF WCP307A , &
+       RADCLE       OF WCP307A , &
+       CAPTYPECR    OF WCP307A , &
+       CAPDAT       OF WCP307A , &
+       CAPRTU       OF WCP307A , &
+       CAPTERNET    OF WCP307A , &
+       CAPDATNET    OF WCP307A , &
+       CAPTERESC1   OF WCP307A , &
+       CAPDATESC1   OF WCP307A , &
+       CAPMNTTPS    OF WCP307A , &
+       CAPMNTTVQ    OF WCP307A , &
+       CAPMNTRTI    OF WCP307A , &
+       CAPMNTCTI    OF WCP307A , &
+       CAPMNTNET    OF WCP307A , &
+       CAPDSC1      OF WCP307A , &
+       CAPDSC2      OF WCP307A , &
+       CLICIECLE    OF WCP307A , &
+       CLICLE       OF WCP307A , &
+       CCIFLGFAC    OF WCP307A , &
+       CCITIMSTP    OF WCP307A , &
+       T_CAPCLEREF  OF WCP307A
+
+
+;------------------------------------------------------------------------------
+;
+; On retrouve toutes les factures qui ont touché cette réception et on cumule
+; les montants que l'on a généré pour s'assurer que l'on n'a pas renversé
+; plus que l'on a couru.  si c'est le cas, on garde les montants en erreur pour
+; regenerer une ligne d'ajustement.
+;
+REQUEST VERIFIE_DEPASS
+
+ACCESS *WCP307RV &
+  LINK FOUCIECLE OF WCP307RV , &
+       FOUCLE    OF WCP307RV , &
+       FACCIECLE OF WCP307RV , &
+       RECCLE    OF WCP307RV , &
+       REDCLE    OF WCP307RV   &
+    TO FOUCIECLE , &
+       FOUCLE    , &
+       FACCIECLE , &
+       RECCLE    , &
+       DEICLE                  OF ARDER_ITEM OPTIONAL
+
+;
+; On fait le traitement seulement pour les lignes que l'on complete,
+; les autres gardent les montants d'origine, c'est tout.
+;
+SELECT ARDER_ITEM IF    DEIFLGCOM OF WCP307RV = "1" &
+                    AND FACTYPECR OF WCP307RV <> "CR"
+
+
+SORT ON FOUCIECLE OF WCP307RV &
+     ON FOUCLE    OF WCP307RV &
+     ON FACCLE    OF WCP307RV &
+     ON FACCIECLE OF WCP307RV &
+     ON RECCLE    OF WCP307RV &
+     ON REDCLE    OF WCP307RV
+
+TEMPORARY TZ_MNTTXB FLOAT SIZE 08
+TEMPORARY TZ_MNTTPS FLOAT SIZE 08
+TEMPORARY TZ_MNTTVQ FLOAT SIZE 08
+TEMPORARY T_MNTIMP  FLOAT SIZE 08
+TEMPORARY T_MNTTOT  FLOAT SIZE 08
+TEMPORARY T_MNTTPS  FLOAT SIZE 08
+TEMPORARY T_MNTTVQ  FLOAT SIZE 08
+TEMPORARY T_MNTCTI  FLOAT SIZE 08
+TEMPORARY T_MNTRTI  FLOAT SIZE 08
+TEMPORARY T_ESCUNI  FLOAT SIZE 8
+
+ITEM TZ_MNTTPS = 0
+ITEM TZ_MNTTVQ = 0
+
+ITEM T_ESCUNI  = ROUND( DEIMNTESC OF ARDER_ITEM / &
+                       (DEIQTEFAC OF ARDER_ITEM / 1000) * 100)
+
+ITEM TZ_MNTTXB = ROUND( (DEIQTEFAC    OF ARDER_ITEM + &
+                         REDQTERECREJ OF WCP307RV) * &
+                        (REDPRIUNI    OF WCP307RV - T_ESCUNI) / 100000) &
+     IF     DEIFLGCOM OF ARDER_ITEM = "1" &
+        AND FACTYPECR OF WCP307RV <> "CR" &
+     ELSE ROUND(DEIQTEFAC OF ARDER_ITEM * &
+                (REDPRIUNI OF WCP307RV - T_ESCUNI) / 100000) &
+     IF     FACTYPECR OF WCP307RV <> "CR" &
+     ELSE DEIMNTTOT OF ARDER_ITEM
+
+ITEM T_MNTTOT  = TZ_MNTTXB
+
+;------------------------------------------------------------------------------
+ITEM TZ_MNTTPS = TZ_MNTTXB - &
+                 ROUND( TZ_MNTTXB / (1 + TAXPCTTPS OF WCP307RV) ) &
+     IF  TAXMODTPS    OF WCP307RV = "I" AND &
+        (TAXFLGNETTPS OF WCP307RV = "1" OR TAXFLGNETTPS OF WCP307RV = "3") AND &
+         TAXMODTVQ    OF WCP307RV = "S" &
+     ELSE TZ_MNTTPS
+
+;------------------------------------------------------------------------------
+ITEM TZ_MNTTXB = TZ_MNTTXB - TZ_MNTTPS &
+     IF TAXMODTPS OF WCP307RV = "I" AND TAXMODTVQ OF WCP307RV = "S" &
+     ELSE TZ_MNTTXB
+
+;------------------------------------------------------------------------------
+ITEM TZ_MNTTPS = ROUND( TZ_MNTTXB * TAXPCTTPS OF WCP307RV ) &
+     IF TAXMODTPS OF WCP307RV = "S" AND TAXMODTVQ OF WCP307RV = "S" &
+     ELSE TZ_MNTTPS
+
+;------------------------------------------------------------------------------
+ITEM TZ_MNTTXB = TZ_MNTTXB + TZ_MNTTPS &
+     IF (TAXMODTPS    OF WCP307RV = "I" OR TAXMODTPS OF WCP307RV = "S") AND &
+         TAXFLGNETTVQ OF WCP307RV = "2" AND &
+         TAXMODTVQ    OF WCP307RV = "S" &
+     ELSE TZ_MNTTXB
+
+;------------------------------------------------------------------------------
+ITEM TZ_MNTTVQ = ROUND(TZ_MNTTXB * TAXPCTTVQ OF WCP307RV) &
+     IF (TAXMODTPS OF WCP307RV = "I" OR TAXMODTPS OF WCP307RV = "S") AND &
+         TAXMODTVQ OF WCP307RV = "S" &
+     ELSE TZ_MNTTVQ
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTVQ = ROUND( TZ_MNTTXB * TAXPCTTVQ OF WCP307RV ) &
+     IF (TAXMODTPS OF WCP307RV <> "I" AND TAXMODTPS OF WCP307RV <> "S") AND &
+         TAXMODTVQ OF WCP307RV = "S" &
+     ELSE TZ_MNTTVQ
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTVQ = ROUND( ROUND ( TZ_MNTTXB / (1 + TAXPCTTVQ OF WCP307RV + &
+                                                 TAXPCTTPS OF WCP307RV) ) &
+                 * TAXPCTTVQ OF WCP307RV) &
+     IF TAXMODTVQ    OF WCP307RV = "I" AND TAXMODTPS OF WCP307RV = "I" AND &
+        TAXFLGNETTVQ OF WCP307RV = "1" &
+     ELSE TZ_MNTTVQ
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTVQ = TZ_MNTTXB - &
+                 ROUND( TZ_MNTTXB / (1 + TAXPCTTVQ OF WCP307RV) ) &
+     IF  TAXMODTVQ OF WCP307RV = "I" AND &
+        (TAXMODTPS OF WCP307RV <> "I" OR TAXFLGNETTVQ OF WCP307RV <> "1") &
+     ELSE TZ_MNTTVQ
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTXB = TZ_MNTTXB - TZ_MNTTVQ &
+     IF TAXMODTPS OF WCP307RV = "S" AND TAXMODTVQ OF WCP307RV = "I" &
+     ELSE TZ_MNTTXB
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTPS = ROUND( TZ_MNTTXB * TAXPCTTPS OF WCP307RV ) &
+     IF TAXMODTPS OF WCP307RV = "S" AND TAXMODTVQ OF WCP307RV <> "S" &
+     ELSE TZ_MNTTPS
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTXB = TZ_MNTTXB - TZ_MNTTVQ &
+     IF TAXMODTVQ OF WCP307RV = "I" AND TAXFLGNETTPS OF WCP307RV = "1" AND &
+        TAXMODTPS OF WCP307RV = "I" &
+     ELSE TZ_MNTTXB
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTPS = TZ_MNTTXB - &
+                 ROUND( TZ_MNTTXB / (1 + TAXPCTTPS OF WCP307RV) ) &
+     IF TAXMODTPS OF WCP307RV  = "I" AND TAXFLGNETTPS OF WCP307RV = "1" AND &
+        TAXMODTVQ OF WCP307RV <> "S" &
+     ELSE TZ_MNTTPS
+
+;-------------------------------------------------------------------------------
+ITEM TZ_MNTTPS = TZ_MNTTXB - &
+                 ROUND( TZ_MNTTXB / (1 + TAXPCTTPS OF WCP307RV) ) &
+     IF TAXMODTPS OF WCP307RV  = "I" AND TAXFLGNETTPS OF WCP307RV <> "1" AND &
+        TAXMODTVQ OF WCP307RV <> "S" &
+     ELSE TZ_MNTTPS
+
+;-------------------------------------------------------------------------------
+ITEM T_MNTIMP = 0 - (T_MNTTOT + TZ_MNTTPS + TZ_MNTTVQ) &
+     IF TAXMODTPS OF WCP307RV = "S" AND TAXMODTVQ OF WCP307RV = "S" &
+     ELSE 0 - (T_MNTTOT + TZ_MNTTPS) &
+          IF TAXMODTPS OF WCP307RV = "S" &
+          ELSE 0 - (T_MNTTOT + TZ_MNTTVQ) &
+               IF TAXMODTVQ OF WCP307RV = "S" &
+               ELSE 0 - T_MNTTOT
+
+ITEM T_MNTTPS = 0 - TZ_MNTTPS
+ITEM T_MNTTVQ = 0 - TZ_MNTTVQ
+ITEM T_MNTCTI = ROUND( T_MNTTPS * TAXPCTCTITPS OF WCP307RV )
+ITEM T_MNTRTI = ROUND( T_MNTTVQ * TAXPCTCTITVQ OF WCP307RV )
+
+ITEM T_MNTIMP = T_MNTIMP - T_MNTCTI - T_MNTRTI
+
+TEMPORARY T_TOTDEP  FLOAT SIZE 8
+TEMPORARY T_TOTCTI  FLOAT SIZE 8
+TEMPORARY T_TOTRTI  FLOAT SIZE 8
+
+  ITEM T_TOTDEP SUBTOTAL T_MNTIMP RESET AT REDCLE
+  ITEM T_TOTCTI SUBTOTAL T_MNTCTI RESET AT REDCLE
+  ITEM T_TOTRTI SUBTOTAL T_MNTRTI RESET AT REDCLE
+
+;
+; Calcul des montants de la réception pour les comparer avec les factures
+;
+TEMPORARY T_MNTDEP  FLOAT SIZE 8
+
+  ITEM T_MNTDEP = REDMNTTOT OF WCP307RV
+  ITEM T_MNTDEP = T_MNTDEP - REDMNTTPS OF WCP307RV &
+                IF TAXMODTPS OF WCP307RV <> "S"
+  ITEM T_MNTDEP = T_MNTDEP - REDMNTTVQ OF WCP307RV &
+                IF TAXMODTVQ OF WCP307RV <> "S"
+
+TEMPORARY T_DIFDEP  FLOAT SIZE 8
+TEMPORARY T_DIFRTI  FLOAT SIZE 8
+TEMPORARY T_DIFCTI  FLOAT SIZE 8
+
+  ITEM T_DIFDEP = T_MNTDEP              + T_TOTDEP &
+                    IF    0 > (T_MNTDEP + T_TOTDEP) &
+                      AND DEIFLGCOM OF WCP307RV = "1" &
+                      AND FACTYPECR OF WCP307RV <> "CR" &
+               ELSE 0
+  ITEM T_DIFRTI = REDMNTRTI OF WCP307RV + T_TOTRTI &
+                    IF    0 > (REDMNTRTI OF WCP307RV + T_TOTRTI) &
+                      AND DEIFLGCOM OF WCP307RV = "1" &
+                      AND FACTYPECR OF WCP307RV <> "CR" &
+               ELSE 0
+  ITEM T_DIFCTI = REDMNTCTI OF WCP307RV + T_TOTCTI &
+                    IF    0 > (REDMNTCTI OF WCP307RV + T_TOTCTI) &
+                      AND DEIFLGCOM OF WCP307RV = "1" &
+                      AND FACTYPECR OF WCP307RV <> "CR" &
+               ELSE 0
+
+SUBFILE WCP307TF AT REDCLE &
+  INCLUDE &
+       CIECLE       OF WCP307RV , &
+       PECCLE       OF WCP307RV , &
+       LCPCLE       OF WCP307RV , &
+       LCPDSC       OF WCP307RV , &
+       LCPDATJOU    OF WCP307RV , &
+       LCPNBRTRS    OF WCP307RV , &
+       LCPNBRTRSVER OF WCP307RV , &
+       LCPCUMMNT    OF WCP307RV , &
+       LCPCUMMNTVER OF WCP307RV , &
+       LCPNBRTRSERR OF WCP307RV , &
+       CAPCLE       OF WCP307RV , &
+       CAPMNT       OF WCP307RV , &
+       CAPCUMMNT    OF WCP307RV , &
+       REFCIECLE    OF WCP307RV , &
+       REFCLENUM    OF WCP307RV , &
+       REFCLETYP    OF WCP307RV , &
+       RADCLE       OF WCP307RV , &
+       CAPTYPECR    OF WCP307RV , &
+       CAPDAT       OF WCP307RV , &
+       CAPRTU       OF WCP307RV , &
+       CAPTERNET    OF WCP307RV , &
+       CAPDATNET    OF WCP307RV , &
+       CAPTERESC1   OF WCP307RV , &
+       CAPDATESC1   OF WCP307RV , &
+       CAPMNTTPS    OF WCP307RV , &
+       CAPMNTTVQ    OF WCP307RV , &
+       CAPMNTRTI    OF WCP307RV , &
+       CAPMNTCTI    OF WCP307RV , &
+       CAPMNTNET    OF WCP307RV , &
+       CAPDSC1      OF WCP307RV , &
+       CAPDSC2      OF WCP307RV , &
+       FACCIECLE OF WCP307RV , &
+       FACCLE    OF WCP307RV , &
+       FOUCIECLE OF WCP307RV , &
+       FOUCLE    OF WCP307RV , &
+       FACTYPECR OF WCP307RV , &
+       RECCLE    OF WCP307RV , &
+       REDCLE    OF WCP307RV , &
+       CPTCLE    OF WCP307RV , &
+       UNACLE    OF WCP307RV , &
+       PRJCLE    OF WCP307RV , &
+       PRACLE    OF WCP307RV , &
+       IMMCLE    OF WCP307RV , &
+       TAXCPTCOUTPS OF WCP307RV , &
+       TAXCPTCOUTVQ OF WCP307RV , &
+       ENTCPTCOU    OF WCP307RV , &
+       ENTUNACOU    OF WCP307RV , &
+       CIEUNABIL    OF WCP307RV , &
+       T_MNTIMPORI , &
+       T_MNTCTIORI , &
+       T_MNTRTIORI , &
+       T_DIFDEP , &
+       T_DIFRTI , &
+       T_DIFCTI , &
+       CLICIECLE    OF WCP307RV , &
+       CLICLE       OF WCP307RV , &
+       CCIFLGFAC    OF WCP307RV , &
+       CCITIMSTP    OF WCP307RV , &
+       T_CAPCLEREF  OF WCP307RV
+
+
+;------------------------------------------------------------------------------
+;
+; On génere les lignes d'ajustement si on a eu des renversements trop élevés
+;
+;
+REQUEST AJUSTE_COURU
+
+ACCESS *WCP307TF
+
+SORT   ON FACCIECLE OF WCP307TF &
+       ON RECCLE    OF WCP307TF &
+       ON FOUCIECLE OF WCP307TF &
+       ON FOUCLE    OF WCP307TF &
+       ON FACCLE    OF WCP307TF
+
+
+TEMPORARY T_TAXCOD    CHARACTER SIZE 2
+TEMPORARY T_MNTNUL    INTEGER   SIZE 4
+TEMPORARY T_PRJCLE    CHARACTER SIZE 8
+TEMPORARY T_PRACLE    CHARACTER SIZE 3
+TEMPORARY T_IMMCLE    CHARACTER SIZE 12
+
+TEMPORARY T_MNTDEP    FLOAT SIZE 8
+TEMPORARY T_MNTCTI    FLOAT SIZE 8
+TEMPORARY T_MNTRTI    FLOAT SIZE 8
+TEMPORARY T_MNTCOU    FLOAT SIZE 8
+TEMPORARY T_TOTCOU    FLOAT SIZE 8
+TEMPORARY T_MNTCOUREC FLOAT SIZE 08 ; Montant total du courus par réc.
+
+
+
+  ITEM T_MNTDEP = T_MNTIMPORI OF WCP307TF &
+                - T_DIFDEP    OF WCP307TF
+  ITEM T_MNTCTI = T_MNTCTIORI OF WCP307TF &
+                - T_DIFCTI    OF WCP307TF
+  ITEM T_MNTRTI = T_MNTRTIORI OF WCP307TF &
+                - T_DIFRTI    OF WCP307TF
+
+  ITEM T_MNTCOU = 0 - (  T_MNTDEP &
+                       + T_MNTCTI &
+                       + T_MNTRTI )
+
+  ITEM T_TOTCOU    SUBTOTAL T_MNTCOU RESET AT FACCLE
+  ITEM T_MNTCOUREC SUBTOTAL T_MNTCOU RESET AT RECCLE
+
+;
+; Création du subfile pour l'imputation inversée de la dépense ou de l'inventaire.
+;
+SUBFILE WCP307 KEEP APPEND IF FACTYPECR OF WCP307TF <> "CR" INCLUDE &
+       CIECLE       OF WCP307TF , &
+       PECCLE       OF WCP307TF , &
+       LCPCLE       OF WCP307TF , &
+       LCPDSC       OF WCP307TF , &
+       LCPDATJOU    OF WCP307TF , &
+       LCPNBRTRS    OF WCP307TF , &
+       LCPNBRTRSVER OF WCP307TF , &
+       LCPCUMMNT    OF WCP307TF , &
+       LCPCUMMNTVER OF WCP307TF , &
+       LCPNBRTRSERR OF WCP307TF , &
+       CAPCLE       OF WCP307TF , &
+       CAPMNT       OF WCP307TF , &
+       CAPCUMMNT    OF WCP307TF , &
+       REFCIECLE    OF WCP307TF , &
+       REFCLENUM    OF WCP307TF , &
+       REFCLETYP    OF WCP307TF , &
+       RADCLE       OF WCP307TF , &
+       CAPTYPECR    OF WCP307TF , &
+       CAPDAT       OF WCP307TF , &
+       CAPRTU       OF WCP307TF , &
+       CAPTERNET    OF WCP307TF , &
+       CAPDATNET    OF WCP307TF , &
+       CAPTERESC1   OF WCP307TF , &
+       CAPDATESC1   OF WCP307TF , &
+       CAPMNTTPS    OF WCP307TF , &
+       CAPMNTTVQ    OF WCP307TF , &
+       CAPMNTRTI    OF WCP307TF , &
+       CAPMNTCTI    OF WCP307TF , &
+       CAPMNTNET    OF WCP307TF , &
+       CAPDSC1      OF WCP307TF , &
+       CAPDSC2      OF WCP307TF , &
+       PRJCLE       OF WCP307TF , &
+       PRACLE       OF WCP307TF , &
+       IMMCLE       OF WCP307TF , &
+       CPTCLE       OF WCP307TF , &
+       UNACLE       OF WCP307TF , &
+       T_MNTDEP ALIAS CCIMNT , &
+       T_TAXCOD ALIAS  CCITAXCODTPS , &
+       T_TAXCOD ALIAS  CCITAXCODTVQ , &
+       T_MNTNUL ALIAS  CCIMNTTPS    , &
+       T_MNTNUL ALIAS  CCIMNTTVQ    , &
+       CLICIECLE    OF WCP307TF , &
+       CLICLE       OF WCP307TF , &
+       CCITIMSTP    OF WCP307TF , &
+       T_CAPCLEREF  OF WCP307TF
+
+
+;
+; Ajout au subfile pour l'imputation inversée le couru de TPS
+;
+SUBFILE WCP307 ALIAS A_TPS KEEP APPEND IF FACTYPECR OF WCP307TF <> "CR" INCLUDE &
+       CIECLE       OF WCP307TF , &
+       PECCLE       OF WCP307TF , &
+       LCPCLE       OF WCP307TF , &
+       LCPDSC       OF WCP307TF , &
+       LCPDATJOU    OF WCP307TF , &
+       LCPNBRTRS    OF WCP307TF , &
+       LCPNBRTRSVER OF WCP307TF , &
+       LCPCUMMNT    OF WCP307TF , &
+       LCPCUMMNTVER OF WCP307TF , &
+       LCPNBRTRSERR OF WCP307TF , &
+       CAPCLE       OF WCP307TF , &
+       CAPMNT       OF WCP307TF , &
+       CAPCUMMNT    OF WCP307TF , &
+       REFCIECLE    OF WCP307TF , &
+       REFCLENUM    OF WCP307TF , &
+       REFCLETYP    OF WCP307TF , &
+       RADCLE       OF WCP307TF , &
+       CAPTYPECR    OF WCP307TF , &
+       CAPDAT       OF WCP307TF , &
+       CAPRTU       OF WCP307TF , &
+       CAPTERNET    OF WCP307TF , &
+       CAPDATNET    OF WCP307TF , &
+       CAPTERESC1   OF WCP307TF , &
+       CAPDATESC1   OF WCP307TF , &
+       CAPMNTTPS    OF WCP307TF , &
+       CAPMNTTVQ    OF WCP307TF , &
+       CAPMNTRTI    OF WCP307TF , &
+       CAPMNTCTI    OF WCP307TF , &
+       CAPMNTNET    OF WCP307TF , &
+       CAPDSC1      OF WCP307TF , &
+       CAPDSC2      OF WCP307TF , &
+       T_PRJCLE     ALIAS PRJCLE , &
+       T_PRACLE     ALIAS PRACLE , &
+       T_IMMCLE     ALIAS IMMCLE , &
+       TAXCPTCOUTPS OF WCP307TF ALIAS CPTCLE , &
+       CIEUNABIL    OF WCP307TF ALIAS UNACLE , &
+       T_MNTCTI     ALIAS CCIMNT , &
+       T_TAXCOD     ALIAS  CCITAXCODTPS , &
+       T_TAXCOD     ALIAS  CCITAXCODTVQ , &
+       T_MNTNUL     ALIAS  CCIMNTTPS    , &
+       T_MNTNUL     ALIAS  CCIMNTTVQ    , &
+       CLICIECLE    OF WCP307TF , &
+       CLICLE       OF WCP307TF , &
+       CCITIMSTP    OF WCP307TF , &
+       T_CAPCLEREF  OF WCP307TF
+
+;
+; Ajout au subfile pour l'imputation inversée le couru de TVQ
+;
+SUBFILE WCP307 ALIAS A_TVQ KEEP APPEND IF FACTYPECR OF WCP307TF <> "CR" INCLUDE &
+       CIECLE       OF WCP307TF , &
+       PECCLE       OF WCP307TF , &
+       LCPCLE       OF WCP307TF , &
+       LCPDSC       OF WCP307TF , &
+       LCPDATJOU    OF WCP307TF , &
+       LCPNBRTRS    OF WCP307TF , &
+       LCPNBRTRSVER OF WCP307TF , &
+       LCPCUMMNT    OF WCP307TF , &
+       LCPCUMMNTVER OF WCP307TF , &
+       LCPNBRTRSERR OF WCP307TF , &
+       CAPCLE       OF WCP307TF , &
+       CAPMNT       OF WCP307TF , &
+       CAPCUMMNT    OF WCP307TF , &
+       REFCIECLE    OF WCP307TF , &
+       REFCLENUM    OF WCP307TF , &
+       REFCLETYP    OF WCP307TF , &
+       RADCLE       OF WCP307TF , &
+       CAPTYPECR    OF WCP307TF , &
+       CAPDAT       OF WCP307TF , &
+       CAPRTU       OF WCP307TF , &
+       CAPTERNET    OF WCP307TF , &
+       CAPDATNET    OF WCP307TF , &
+       CAPTERESC1   OF WCP307TF , &
+       CAPDATESC1   OF WCP307TF , &
+       CAPMNTTPS    OF WCP307TF , &
+       CAPMNTTVQ    OF WCP307TF , &
+       CAPMNTRTI    OF WCP307TF , &
+       CAPMNTCTI    OF WCP307TF , &
+       CAPMNTNET    OF WCP307TF , &
+       CAPDSC1      OF WCP307TF , &
+       CAPDSC2      OF WCP307TF , &
+       T_PRJCLE     ALIAS PRJCLE , &
+       T_PRACLE     ALIAS PRACLE , &
+       T_IMMCLE     ALIAS IMMCLE , &
+       TAXCPTCOUTVQ OF WCP307TF ALIAS CPTCLE , &
+       CIEUNABIL    OF WCP307TF ALIAS UNACLE , &
+       T_MNTRTI     ALIAS CCIMNT , &
+       T_TAXCOD     ALIAS  CCITAXCODTPS , &
+       T_TAXCOD     ALIAS  CCITAXCODTVQ , &
+       T_MNTNUL     ALIAS  CCIMNTTPS    , &
+       T_MNTNUL     ALIAS  CCIMNTTVQ    , &
+       CLICIECLE    OF WCP307TF , &
+       CLICLE       OF WCP307TF , &
+       CCITIMSTP    OF WCP307TF , &
+       T_CAPCLEREF  OF WCP307TF
+
+;
+; Inversement du compte de couru.
+;
+SUBFILE WCP307 ALIAS A_COU KEEP APPEND AT FACCLE INCLUDE &
+       CIECLE       OF WCP307TF , &
+       PECCLE       OF WCP307TF , &
+       LCPCLE       OF WCP307TF , &
+       LCPDSC       OF WCP307TF , &
+       LCPDATJOU    OF WCP307TF , &
+       LCPNBRTRS    OF WCP307TF , &
+       LCPNBRTRSVER OF WCP307TF , &
+       LCPCUMMNT    OF WCP307TF , &
+       LCPCUMMNTVER OF WCP307TF , &
+       LCPNBRTRSERR OF WCP307TF , &
+       CAPCLE       OF WCP307TF , &
+       CAPMNT       OF WCP307TF , &
+       CAPCUMMNT    OF WCP307TF , &
+       REFCIECLE    OF WCP307TF , &
+       REFCLENUM    OF WCP307TF , &
+       REFCLETYP    OF WCP307TF , &
+       RADCLE       OF WCP307TF , &
+       CAPTYPECR    OF WCP307TF , &
+       CAPDAT       OF WCP307TF , &
+       CAPRTU       OF WCP307TF , &
+       CAPTERNET    OF WCP307TF , &
+       CAPDATNET    OF WCP307TF , &
+       CAPTERESC1   OF WCP307TF , &
+       CAPDATESC1   OF WCP307TF , &
+       CAPMNTTPS    OF WCP307TF , &
+       CAPMNTTVQ    OF WCP307TF , &
+       CAPMNTRTI    OF WCP307TF , &
+       CAPMNTCTI    OF WCP307TF , &
+       CAPMNTNET    OF WCP307TF , &
+       CAPDSC1      OF WCP307TF , &
+       CAPDSC2      OF WCP307TF , &
+       T_PRJCLE     ALIAS PRJCLE , &
+       T_PRACLE     ALIAS PRACLE , &
+       T_IMMCLE     ALIAS IMMCLE , &
+       ENTCPTCOU    OF WCP307TF ALIAS CPTCLE , &
+       ENTUNACOU    OF WCP307TF ALIAS UNACLE , &
+       T_TOTCOU     ALIAS CCIMNT , &
+       T_TAXCOD     ALIAS  CCITAXCODTPS , &
+       T_TAXCOD     ALIAS  CCITAXCODTVQ , &
+       T_MNTNUL     ALIAS  CCIMNTTPS    , &
+       T_MNTNUL     ALIAS  CCIMNTTVQ    , &
+       CLICIECLE    OF WCP307TF , &
+       CLICLE       OF WCP307TF , &
+       CCITIMSTP    OF WCP307TF , &
+       T_CAPCLEREF  OF WCP307TF
+
+
+BUILD cp307t
+

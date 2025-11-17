@@ -1,0 +1,192 @@
+;/T/ Liste des chèques en circulation
+;
+;/P/ Programmeur...: Chantal Martineau / Adapté pour PGL par Thomas BRENNEUR
+;    Date Création.: 11 Aout 1993
+;
+;    Description...: Consultation de la liste des chèques en circulation pour
+;                    une date donnée et pour un compte de banque.
+;
+;    Paramètres....: Compagnie
+;                    Compte de banque (Un, Plusieurs, tous)
+;                    Date
+;                    Ordre : No chèque externe ou pré-imprimée
+;
+;    Particularités: Si un chèque est déja concilié mais que sa date de
+;                    conciliation est posterieure à la date demandée, alors
+;                    ce chèque est affiché.
+;                    On ne sélectionne pas un chèque s'il est annulé ou si
+;                    si c'est un chèque d'annulation (CA).
+;                    On ne sélectionne que les paiement imprimés même s'ils
+;                    ne sont pas journalisés.
+;
+;/M/ Modification.: Denis Pouliot
+;    Date.........: 22 août 1996
+;    But..........: Ajouter un ordre de tri sur le montant. (SOS #308)
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST   ; permet de faire les SET REPORT DEV....
+
+;
+; Recherche des paiements
+;
+
+ACCESS CPPAIEMENT &
+
+  ;
+  ; Lecture de la description et de la devise du compte de banque
+  ;
+  LINK  LBQCPTENC OF CPPAIEMENT &
+    TO  CPTCLE                  OF VCPT_DSC &
+
+  ;
+  ; Lecture de la référence du paiement
+  ;
+
+  LINK  REFCIECLE OF CPPAIEMENT, &
+        REFCLETYP OF CPPAIEMENT, &
+        REFCLENUM OF CPPAIEMENT, &
+        RADCLE    OF CPPAIEMENT  &
+    TO  REFCIECLE, &
+        REFCLETYP, &
+        REFCLENUM, &
+        RADCLE                  OF VRAD_01
+
+
+CHOOSE CIECLE     PARM , &  ; Compagnie
+       LBQCPTENC  PARM , &  ; Compte d'encaisse
+       PAMTYPECR  "CH"      ; Les chèques uniquements
+;       PAMCODANN  "0"       ; On choisit même si le chèque est annulé
+
+;-------------------------------------------------------------------------------
+
+DEFINE D_DATE_PARM  DATE = PARM         ; Date de sélection
+
+;
+; Ordre de tri :
+;     1 - No chèque interne
+;     2 - No cheque Pré-imprimée
+;     3 - Par montant
+;
+DEFINE  D_TRI_PARM   CHAR SIZE 1  = PARM
+
+DEFINE  D_CHEQUE CHAR SIZE 10 &
+        =      PAMCLE    OF CPPAIEMENT IF D_TRI_PARM = "1" &
+          ELSE PAMNUMPIM OF CPPAIEMENT IF D_TRI_PARM = "2" &
+          ELSE ASCII(PAMMNT    OF CPPAIEMENT,10)
+
+
+DEFINE  D_DATE CHAR SIZE 6 &
+        = ASCII(D_DATE_PARM,8)[3:6] ;Pour le titre de Rapport
+
+
+SORT ON LBQCPTENC OF CPPAIEMENT, &  ; Compte d'encaisse
+        D_CHEQUE                    ; No chèque ou montant
+
+SELECT  CPPAIEMENT &
+        IF    PAMDAT    OF CPPAIEMENT <= D_DATE_PARM &
+          AND PAMFLGIMP OF CPPAIEMENT  = "1"         &
+          AND (     PAMCCLDAT OF CPPAIEMENT = 0      &
+                OR  PAMCCLDAT > D_DATE_PARM     )    &
+          AND (     PAMDATANN OF CPPAIEMENT  > D_DATE_PARM &
+                OR  PAMDATANN OF CPPAIEMENT = 0 )
+
+;-------------------------------------------------------------------------------
+
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &  ;titre1
+@IF FRANCAIS
+        "Liste des chèque en circulation"
+@ELSE
+        "List of Checks in Circulation"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = &  ; titre2  du rapport
+@IF FRANCAIS
+        "AU " + D_DATE[1:2] + "/" + D_DATE[3:2] + "/" + D_DATE[5:2]
+@ELSE
+        "TO " + D_DATE[1:2] + "/" + D_DATE[3:2] + "/" + D_DATE[5:2]
+@ENDIF
+
+;
+; numéro du rapport
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "CP304Z"
+
+;
+; Nom de la compagnie
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM
+
+
+;-------------------------------------------------------------------------------
+
+USE ustitstd NOLIST  ; Titre standard pour l'application
+  SKIP 2 &
+@IF FRANCAIS
+    TAB 001 "Compte encaisse:" &
+@ELSE
+    TAB 001 "%%%pte encaisse:" &
+@ENDIF
+    TAB 018 LBQCPTENC OF CPPAIEMENT &
+    TAB 025 CPTDSC    OF VCPT_DSC   &
+@IF FRANCAIS
+    TAB 066 "Devise :" &
+@ELSE
+    TAB 066 "Devise :" &
+@ENDIF
+    TAB 075 DEVCLE OF VCPT_DSC &
+  SKIP 2 &
+@IF FRANCAIS
+    TAB 001 "  No           No            Daté    Journalisé" &
+@ELSE
+    TAB 001 "%%%o           No            Daté    Journalisé" &
+@ENDIF
+  SKIP &
+@IF FRANCAIS
+    TAB 001 "chèque   chèque pré-impr.     du        le                     Employé / Fournisseur                Montant" &
+@ELSE
+    TAB 001 "%%%que   chèque pré-impr.     du        le                     Employé / Fournisseur                Montant" &
+@ENDIF
+  SKIP &
+    TAB 001 "-------  ----------------  --------  ----------  -----------------------------------------------  -------------"
+
+REPORT &
+    TAB 001 PAMCLE    OF CPPAIEMENT &
+    TAB 014 PAMNUMPIM OF CPPAIEMENT &
+    TAB 028 PAMDAT    OF CPPAIEMENT &
+    TAB 039 PAMDATJOU OF CPPAIEMENT &
+    TAB 050 REFCLENUM OF CPPAIEMENT &
+    TAB 057 RADNOM    OF VRAD_01    &
+    TAB 099 PAMMNT    OF CPPAIEMENT
+
+FOOTING AT LBQCPTENC &
+    TAB 098 "--------------" &
+  SKIP &
+    TAB 098 PAMMNT OF CPPAIEMENT SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+  SKIP &
+    TAB 098 "==============" &
+  SKIP PAGE
+
+BUILD cp304z
+@IF FORMAT
+
+CP304                                        xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                    Page: 9999
+99/99/99 HH:MM xxxxxxxxxxxx                      Liste des chèques en circulation
+                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+Compte encaisse: 123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx Devise : xxx
+
+  No           No            Daté    Journalisé
+chèque   chèque pré-impr.     du        le                     Employé / Fournisseur                Montant
+-------  ----------------  --------  ----------  -----------------------------------------------  -------------
+1234567      12345678      99/99/99   99/99/99   123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  99,999,999.99
+1234567      12345678      99/99/99   99/99/99   123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  99,999,999.99
+1234567      12345678      99/99/99   99/99/99   123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  99,999,999.99
+1234567      12345678      99/99/99   99/99/99   123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  99,999,999.99
+1234567      12345678      99/99/99   99/99/99   123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  99,999,999.99
+1234567      12345678      99/99/99   99/99/99   123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  99,999,999.99
+                                                                                                 --------------
+                                                                                                 999,999,999.99
+                                                                                                 ==============
+
+@ENDIF

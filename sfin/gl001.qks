@@ -1,0 +1,1294 @@
+;/T/ Journal général
+;
+;//M/GRA01/Francois Richard/1999-06-18
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur..: Alain Coté
+;    Date Création: 3 mars 1992
+;
+;    Description..: Saisie des écritures de journal et consultation des
+;                   écritures de journal journalisées. On ne peut pas détruire
+;                   une écriture, il faut l'annuler pour ne pas perdre la
+;                   séquence des numéros d'écriture.
+;
+;/M/ François Déry, 30 avril 1999
+;       Modifier l'accèss au fichier de séquence car il a
+;       été converti en format interbase au lieu d'indexé.
+;
+;-------------------------------------------------------------------------------
+;/V/ 3.00.02    Guy Chabot 20 mai 1994 (228)
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN gl001 ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             ACTIVITIES ENTRY, FIND, CHANGE &
+             RECEIVING T_CIECLEMNU, &
+                       T_CIENOM   , &
+                       T_PECCLEMNU, &
+                       T_PECCLECOU, &
+                       T_FLGMNU   , &
+                       T_ECJCLENUMFND, &
+                       T_ECJCLESEQFND
+
+TEMPORARY T_PECCLE_SIE3 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_FIELDTEXT_SIE3 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_PECCLECOU_SIE2 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_FIELDTEXT_SIE2 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_PECCLECOU_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_FIELDTEXT_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+
+TEMPORARY T_CIECLEMNU    CHARACTER SIZE 4 ; Compagnie de transaction
+TEMPORARY T_CIENOM       CHARACTER SIZE 40; Compagnie de transaction
+TEMPORARY T_PECCLEMNU    CHARACTER SIZE 4 ; Période du menu
+TEMPORARY T_PECCLECOU    CHARACTER SIZE 4 ; Période courante
+TEMPORARY T_FLGMNU       CHARACTER SIZE 1 ; Identifie le menu d'origine.
+TEMPORARY T_ECJCLENUMFND CHARACTER SIZE 8 ; Numéro d'écriture de recherche
+TEMPORARY T_ECJCLESEQFND CHARACTER SIZE 2 ; Numéro de séquence de recherche
+
+;
+; Variables temporaires pour répèter la valeur de la période et du lot en
+; mode saisie.
+;
+TEMPORARY T_PECCLESAI  CHARACTER SIZE  4 RESET AT STARTUP
+TEMPORARY T_LGLCLESAI  CHARACTER SIZE  4 RESET AT STARTUP
+
+
+USE ussectmp NOLIST
+    "GL001"
+
+USE gl001.hlp NOLIST
+
+USE ustraecr NOLIST
+TRANSACTION QUERY  READ ONLY  READ COMMITTED   COMMIT ON MODE
+;
+; Action bar pour ecran pleine page
+;
+USE usactecr NOLIST
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Imputation             " ACTION DESIGNER GL01
+  MENUITEM LABEL "Ecritures comptables   " ACTION DESIGNER GL02
+  MENUITEM LABEL "Ecritures liées        " ACTION DESIGNER GL03
+  MENUITEM LABEL "Gestion des lots       " ACTION DESIGNER GL04
+@ELSE
+ACTIONMENU LABEL "Subscreens"
+  MENUITEM LABEL "Charge                 " ACTION DESIGNER GL01
+  MENUITEM LABEL "Accounting entries     " ACTION DESIGNER GL02
+  MENUITEM LABEL "Linked entries         " ACTION DESIGNER GL03
+  MENUITEM LABEL "Batch management       " ACTION DESIGNER GL04
+@ENDIF
+
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE GLECJ_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+
+;-------------------------------------------------------------------------------
+;
+; Paramètres pour la compagnie consolidé(holding)
+;
+FILE MCHOLDING        REFERENCE
+  ACCESS VIA CIENMC USING "1"
+
+;
+; Ecriture de journal general par cie
+;
+FILE GLECRITURE_JG    PRIMARY
+  ;
+  ; La procédure PATH et FIND on été écrite pour que l'écran soit appelé
+  ; directement par l'analyse de compte.
+  ;
+  ITEM ECJCIECLE    OF GLECRITURE_JG INITIAL T_CIECLEMNU
+  ITEM ECJDATSTP    OF GLECRITURE_JG INITIAL SYSDATE
+  ITEM ECJUSRCRE    OF GLECRITURE_JG INITIAL LOGONID
+  ITEM ECJFLGINTCIE OF GLECRITURE_JG INITIAL "0" IF T_FLGMNU = "C" &
+                                        ELSE "1"
+  ITEM PECCLE       OF GLECRITURE_JG INITIAL T_PECCLESAI
+  ITEM LGLCLE       OF GLECRITURE_JG INITIAL T_LGLCLESAI
+
+;
+; Vérification du lot d'ecriture
+;
+FILE GLLOT            REFERENCE
+  ACCESS VIA LGLCIECLE, &
+             PECCLE   , &
+             LGLCLE     &
+         USING ECJCIECLE OF GLECRITURE_JG, &
+               PECCLE    OF GLECRITURE_JG, &
+               LGLCLE    OF GLECRITURE_JG
+
+;
+; Destruction de l'imputation
+;
+FILE GLIMPUTATION     DELETE &
+                      NOITEM
+  ACCESS VIA ECJCIECLE, &
+             ECJCLENUM, &
+             ECJCLESEQ  &
+         USING ECJCIECLE OF GLECRITURE_JG, &
+               ECJCLENUM OF GLECRITURE_JG, &
+               ECJCLESEQ OF GLECRITURE_JG
+
+;
+; Valide la période comptable, il y a deux accès PECCLE et ECJPECDES.
+;
+FILE MCPERIODE_CTB    DESIGNER
+
+;
+; Validation du type d'écriture.
+;
+DEFINE    D_ECJTYPECR  CHARACTER SIZE 16 = "ECJTYPECR"
+TEMPORARY T_ECJTYPECR  CHARACTER SIZE 4
+;
+FILE VCBI_DSC         REFERENCE
+  ACCESS VIA XELNOM, &
+             CBICLE  &
+         USING D_ECJTYPECR, &
+               ECJTYPECR OF GLECRITURE_JG
+
+
+;
+; Numérotation du numéro d'écriture, le numéro est attribué par année.
+;
+FILE GLECJ_SEQ        DESIGNER &
+                      TRANSACTION GEN_NUM_SEQ
+  ACCESS VIA ECSCIECLE, &
+             ECSANN &
+         USING ECJCIECLE OF GLECRITURE_JG, &
+               PECCLE    OF GLECRITURE_JG[1:2]
+
+;
+; Validation de la compagnie d'inter-cie.
+;
+FILE MCCOMPAGNIE      REFERENCE
+  ACCESS VIA CIECLE &
+         USING ECJCIEINT OF GLECRITURE_JG
+
+;-------------------------------------------------------------------------------
+;
+; Pour écran de popup
+;
+TEMPORARY T_LGLCLE    CHARACTER SIZE 4 ; Popup sur les lots
+TEMPORARY T_PECCLE    CHARACTER SIZE 4 ; Popup sur les périodes et les lots
+TEMPORARY T_MODCLE    CHARACTER SIZE 2 initial "GL" ; Popup sur les périodes
+TEMPORARY T_CIECLE    CHARACTER SIZE 4 ; Popup sur les compagnies
+TEMPORARY T_SILECJDAT CHARACTER SIZE 1 ; Pour la validation de la date
+                                       ; d'écriture
+
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU      IF T_FLGMNU = "C"
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER(T_CIENOM)
+;
+; Cette variable sert au sous-écran GL001A.
+;
+DEFINE D_LGLATRJOU CHARACTER SIZE 1 = LGLATRJOU OF GLLOT
+
+;
+; On affiche que c'est une écriture d'inter-compagnie si cet écran est
+; appellé par le menu consolidé.
+;
+DEFINE D_INTCIE CHARACTER SIZE 15 = "Inter-compagnie" IF T_FLGMNU = "H"
+
+;----------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Journal général " &
+@ELSE
+      " General Journal " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP
+ALIGN(2,3,19) (,31,47) (,53,69)
+FIELD PECCLE    OF GLECRITURE_JG ID 02 HIDDEN &
+label "Période ......:"&
+        DEFAULT T_PECCLEMNU &
+        DUPLICATE &
+        NOCHANGE &
+        LOOKUP ON MCPERIODE_CTB &
+          VIA PECCLE &
+          USING PECCLE OF GLECRITURE_JG &
+          MESSAGE 222 ; Cette période n'existe pas.
+
+FIELD LGLCLE    OF GLECRITURE_JG &
+label "Lot...........:"&
+        NUMERIC SIGNIFICANCE 4 &
+        REQUIRED &
+        NOCHANGE &
+        DUPLICATE &
+        LOOKUP ON GLLOT &
+          MESSAGE 242 ; Ce numéro de lot n'existe pas
+
+FIELD ECJDATSTP OF GLECRITURE_JG  FORMAT YYYYMMDD PATTERN "####/##/##"&
+label "Date d'entrée.:"&
+        DISPLAY
+
+SKIP TO GROUP 3
+
+FIELD ECJDATJOU OF GLECRITURE_JG  FORMAT YYYYMMDD PATTERN "####/##/##"&
+label "Date journal..:"&
+        DISPLAY
+
+ALIGN(2,3,19) (,,28) (,33,49)
+FIELD ECJCLENUM    OF GLECRITURE_JG HIDDEN ID 04 &
+label "No écriture...:"&
+        REQUIRED &
+        NOCHANGE &
+        REFRESH  &
+        LOOKUP NOTON GLECRITURE_JG &
+          VIA ECJCIECLE, &
+              ECJCLENUM, &
+              ECJCLESEQ  &
+          USING ECJCIECLE, &
+                ECJCLENUM, &
+                ECJCLESEQ  &
+          MESSAGE 265 ; Ce numéro d'écriture existe déjá.
+
+FIELD ECJCLESEQ OF GLECRITURE_JG &
+        DISPLAY
+
+FIELD ECJFLGANN OF GLECRITURE_JG &
+label "Annulée.......:"&
+        SIZE 3
+
+SKIP 1
+
+ALIGN(2,3,19) (,,33)
+FIELD ECJDAT    OF GLECRITURE_JG  FORMAT YYYYMMDD PATTERN "####/##/##" ID 06 HIDDEN &
+label "Date écriture.:"&
+        DEFAULT SYSDATE
+
+FIELD T_SILECJDAT &
+ SILENT
+
+FIELD D_INTCIE &
+        FIXED
+
+SKIP 1
+
+ALIGN(2,3,19) (,,24)
+
+FIELD ECJCIEINT OF GLECRITURE_JG ID 08 HIDDEN &
+label "Cie d'inter...:"&
+        REQUIRED &
+        LOOKUP ON MCCOMPAGNIE &
+          MESSAGE 207 ; Cette compagnie n'existe pas
+
+FIELD CIENOMABR OF MCCOMPAGNIE &
+        DISPLAY
+
+SKIP 1
+
+
+FIELD ECJTYPECR OF GLECRITURE_JG ID 12 HIDDEN &
+label "Type écriture.:"&
+        LOOKUP ON VCBI_DSC &
+          MESSAGE 228 ; Ce type d'écriture n'existe pas.
+
+FIELD CBIDSC OF VCBI_DSC &
+        DISPLAY
+
+SKIP 1
+
+FIELD ECJTRFUNA OF GLECRITURE_JG ID 14 HIDDEN &
+label "Inter-unité...:"&
+        NOCHANGE &
+        SIZE 3
+
+SKIP 1
+
+ALIGN(2,3,19)
+FIELD ECJDSC1 OF GLECRITURE_JG ID 16 HIDDEN &
+label "Description...:"
+
+FIELD ECJDSC2 OF GLECRITURE_JG ID SAME HIDDEN NOLABEL
+FIELD ECJDSC3 OF GLECRITURE_JG ID SAME HIDDEN NOLABEL
+
+
+SKIP TO LINE 19
+
+DRAW ,1 TO ,80
+
+TITLE &
+@IF FRANCAIS
+      "Ecriture récurrente" &
+@ELSE
+      "Recurring Entry" &
+@ENDIF
+      AT ,1 CENTER
+SKIP
+
+ALIGN(2,3,19)(,33,49)
+FIELD ECJNBRPERINI OF GLECRITURE_JG ID 20 HIDDEN &
+label "Nbr pér init..:"&
+        REQUIRED
+
+FIELD ECJNBRPERRES OF GLECRITURE_JG &
+label "Nbr pér rest..:"&
+        DISPLAY
+SKIP
+
+DRAW ,1 TO ,80
+
+TITLE &
+@IF FRANCAIS
+      "Ecriture renversée" &
+@ELSE
+      "Reversed Entry" &
+@ENDIF
+      AT ,1 CENTER
+SKIP
+
+FIELD ECJPECDES OF GLECRITURE_JG ID 22 HIDDEN &
+label "Période dest..:"&
+        LOOKUP ON MCPERIODE_CTB &
+          MESSAGE 222 ; Cette période n'existe pas.
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès pour l'écran par son code.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+  ;
+  ; Si l'écran n'est pas appellé par le menu, alors on interdit la saisie,
+  ; la destruction et la modification à l'usager
+  ;
+  IF T_ECJCLENUMFND <> ""
+  THEN BEGIN
+    LET TZ_SECENT = "0"
+    LET TZ_SECDEL = "0"
+    LET TZ_SECMOD = "0"
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT PECCLE
+BEGIN
+  ;
+  ; Popup sur les périodes.
+  ;
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PECCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    ;
+    ; Si on est dans le menu du holding il faut pointer sur le popup
+    ; des périodes du holding, sinon on pointe sur le popup des périodes
+    ; par compagnie.
+    ;
+    IF T_FLGMNU = "H"
+    THEN RUN SCREEN mc105 PASSING T_PECCLE MODE F
+    ELSE RUN SCREEN mc109 PASSING T_CIECLEMNU, T_PECCLE, T_MODCLE MODE F
+    LET FIELDTEXT = TRUNC(T_PECCLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la période de l'écriture selon la période courante.
+;
+;
+PROCEDURE EDIT PECCLE
+BEGIN
+
+  ; Ajustement pour le changement de siècle
+  IF FIELDTEXT[1:1] < "8"
+  THEN LET T_FIELDTEXT_SIE = "1" + FIELDTEXT
+  ELSE LET T_FIELDTEXT_SIE = "0" + FIELDTEXT
+
+  ; Ajustement pour le changement de siècle
+  IF T_PECCLECOU[1:1] < "8"
+  THEN LET T_PECCLECOU_SIE = "1" + T_PECCLECOU
+  ELSE LET T_PECCLECOU_SIE = "0" + T_PECCLECOU
+
+  IF T_FIELDTEXT_SIE < T_PECCLECOU_SIE
+  THEN ERROR 223 ; On ne peut inscrire une période inférieure à celle courante..
+
+  IF FIELDTEXT <> T_PECCLECOU
+  THEN WARN 230 ; La période indiquée est différente de la période courante...
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Accés au sous-écran de consultation des lots.
+;
+;
+PROCEDURE INPUT LGLCLE
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PECCLE = PECCLE OF GLECRITURE_JG
+    LET T_LGLCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gl101 MODE F PASSING T_CIECLEMNU, T_PECCLE, T_LGLCLE
+    LET FIELDTEXT = TRUNC(T_LGLCLE)
+  END
+  ;
+  ; Force l'éxécution du LOOKUP sur le lot et de la procédure EDIT.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(LGLCLE OF GLECRITURE_JG))
+  THEN LET FIELDTEXT = LGLCLE OF GLECRITURE_JG
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du lot.
+;
+;
+PROCEDURE EDIT LGLCLE
+BEGIN
+
+  IF LGLNBRTRSVER OF GLLOT = 0
+  THEN ERROR 317 ; Saisie interdite, entrez d'abord vos montants vérifiés
+                 ; dans le lot.
+
+  IF LGLDATJOU OF GLLOT <> 0
+  THEN ERROR 243 ; Le lot est déjà journalisé.
+
+  IF LGLATRJOU OF GLLOT = "1"
+  THEN ERROR 313 ; Le lot est déjà autorisé.
+
+  IF LGLUSR OF GLLOT <> LOGONID
+  THEN ERROR 244 ; Ce lot ne vous est pas destiné.
+
+  IF LGLDATVAL OF GLLOT <> 0
+  THEN WARN 245 ; Une liste de vérification a déjà été demandé pour ce lot.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Assigne le type de lot à l'écriture.
+;
+;
+PROCEDURE PROCESS LGLCLE
+BEGIN
+  LET ECJTYPECR OF GLECRITURE_JG = LGLTYPECR OF GLLOT
+  DISPLAY ECJTYPECR OF GLECRITURE_JG
+  DISPLAY CBIDSC OF VCBI_DSC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Si dans les parametres du HOLDING, il a été défini que le numéro d'écriture
+; doit etre saisie par l'usager; alors on vérifie que le numéro saisie
+; n'entre pas en conflit avec les numéros générés automatiquement.
+; C'est a dire :
+;              - Que le numéro d'écriture saisie par l'usager n'existe pas
+;                déja dans le fichier des écritures.
+;              - Que le numéro saisie par l'usager ne commence pas par
+;                l'identifiant des écritures automatiques ou extérieur.
+;              - Que l'usager a bien saisie un numéro (il est obligatoire).
+;
+PROCEDURE EDIT ECJCLENUM
+BEGIN
+  IF     HLDECRAUT OF MCHOLDING = "S" &
+     AND ECJCLENUM OF GLECRITURE_JG[1:1] = HLDECRCOD OF MCHOLDING
+  THEN ERROR 320 ; Ce numéro d'écriture est invalide.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Traitement pour les indicateurs dont la valeur est Oui ou Non.
+; Le procédure suivante transpose les valeurs sous un code universel
+; soit 1 et 0.
+;
+;
+PROCEDURE INPUT ECJFLGANN
+BEGIN
+  USE usflginp NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; On affiche l'indicateur sous la langue de l'usager.
+;
+;              Français  Anglais  Condition
+; Valeurs: 1 =   Oui       Yes      Vrai
+;          0 =   Non       No       Faux
+;
+PROCEDURE OUTPUT ECJFLGANN
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation de la date selon la période de l'écriture.
+;
+;
+PROCEDURE EDIT T_SILECJDAT
+BEGIN
+  GET MCPERIODE_CTB VIA PECCLE &
+                    USING PECCLE OF GLECRITURE_JG &
+                    OPTIONAL
+
+  IF ECJDAT OF GLECRITURE_JG < PECDATDEB OF MCPERIODE_CTB
+  THEN WARNING 231 ; La date est inférieure à la date de début de la période.
+
+  IF ECJDAT OF GLECRITURE_JG > PECDATFIN OF MCPERIODE_CTB
+  THEN WARNING 232 ; La date est supérieure à la date de fin de la période.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les compagnies.
+;
+;
+PROCEDURE INPUT ECJCIEINT
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc106 PASSING T_CIECLE MODE F
+    LET FIELDTEXT = TRUNC(T_CIECLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les types d'écritures(code bilingue).
+;
+;
+PROCEDURE INPUT ECJTYPECR
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_ECJTYPECR = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_ECJTYPECR, T_ECJTYPECR
+    LET FIELDTEXT = TRUNC(T_ECJTYPECR)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sert à valider les codes réservés.
+;
+;
+PROCEDURE EDIT ECJTYPECR
+BEGIN
+  IF FIELDTEXT = "AU" OR &
+     FIELDTEXT = "RF"
+  THEN ERROR 246 ; Type d'écriture reservé
+END
+
+;-------------------------------------------------------------------------------
+;
+; Si l'usager recul en mode ENTRY ou modifi le type d'écriture, il faut
+; re-initiliser les champs qui depende du type d'écriture.
+;
+PROCEDURE PROCESS ECJTYPECR
+BEGIN
+
+  IF ECJTYPECR OF GLECRITURE_JG <> "RC"
+  THEN BEGIN
+    LET ECJNBRPERINI OF GLECRITURE_JG = 0
+    LET ECJNBRPERRES OF GLECRITURE_JG = 0
+    DISPLAY ECJNBRPERINI OF GLECRITURE_JG
+    DISPLAY ECJNBRPERRES OF GLECRITURE_JG
+  END
+
+  IF ECJTYPECR OF GLECRITURE_JG <> "RV" AND &
+     ECJTYPECR OF GLECRITURE_JG <> "RS"
+  THEN BEGIN
+    LET ECJPECDES    OF GLECRITURE_JG = " "
+    DISPLAY ECJPECDES OF GLECRITURE_JG
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Traitement pour les indicateurs dont la valeur est Oui ou Non.
+; Le procédure suivante transpose les valeurs sous un code universel
+; soit 1 et 0.
+;
+;
+PROCEDURE INPUT ECJTRFUNA
+BEGIN
+  USE usflginp NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; On affiche l'indicateur sous la langue de l'usager.
+;
+;              Français  Anglais  Condition
+; Valeurs: 1 =   Oui       Yes      Vrai
+;          0 =   Non       No       Faux
+;
+PROCEDURE OUTPUT ECJTRFUNA
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Force la validation du nombre de période, car l'usager peut reculer ou
+; modifier le type d'écriture.
+;
+;
+PROCEDURE INPUT ECJNBRPERINI
+BEGIN
+  IF NOT FINDMODE AND &
+     0 = SIZE(TRUNCATE(FIELDTEXT))
+  THEN LET FIELDTEXT = ASCII(ECJNBRPERINI OF GLECRITURE_JG)
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide le nombre de période initial.
+;
+;
+PROCEDURE EDIT ECJNBRPERINI
+BEGIN
+  IF FIELDVALUE <= 1
+  THEN ERROR 259; Le nombre de période doit être supérieure à une fois.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Le nombre de périodes initiales est accessible que pour la première écriture
+; d'une écriture récurrente.
+;
+;
+PROCEDURE PROCESS ECJNBRPERINI
+BEGIN
+  LET ECJNBRPERRES OF GLECRITURE_JG = ECJNBRPERINI OF GLECRITURE_JG
+  DISPLAY ECJNBRPERRES OF GLECRITURE_JG
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Force la validation du nombre de période, car l'usager peut reculer ou
+; modifier le type d'écriture.
+;
+;
+PROCEDURE INPUT ECJNBRPERRES
+BEGIN
+  IF NOT FINDMODE AND &
+     0 = SIZE(TRUNC(FIELDTEXT))
+  THEN LET FIELDTEXT = ASCII(ECJNBRPERRES OF GLECRITURE_JG)
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide le nombre de période initiales.
+;
+;
+PROCEDURE EDIT ECJNBRPERRES
+BEGIN
+  IF FIELDVALUE = 0
+  THEN ERROR 260; Le nombre de période doit être supérieure à zéro.
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT ECJPECDES
+BEGIN
+  ;
+  ; Popup sur les périodes.
+  ;
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PECCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    ;
+    ; Si on est dans le menu du holding il faut pointer sur le popup
+    ; des périodes du holding, sinon on pointe sur le popup des périodes
+    ; par compagnie.
+    ;
+    IF T_FLGMNU = "H"
+    THEN RUN SCREEN mc105 PASSING T_PECCLE MODE F
+    ELSE RUN SCREEN mc109 PASSING T_CIECLEMNU, T_PECCLE, T_MODCLE MODE F
+    LET FIELDTEXT = TRUNC(T_PECCLE)
+  END
+  ;
+  ; Force le LOOKUP, ce champ est demandé que pour les écritures renversées.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(TRUNC(FIELDTEXT))
+  THEN LET FIELDTEXT = ECJPECDES OF GLECRITURE_JG
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la période à renversée selon la période courante.
+;
+;
+PROCEDURE EDIT ECJPECDES
+BEGIN
+
+  ; Ajustement pour le changement de siècle
+  IF FIELDTEXT[1:1] < "8"
+  THEN LET T_FIELDTEXT_SIE2 = "1" + FIELDTEXT
+  ELSE LET T_FIELDTEXT_SIE2 = "0" + FIELDTEXT
+
+  ; Ajustement pour le changement de siècle
+  IF T_PECCLECOU[1:1] < "8"
+  THEN LET T_PECCLECOU_SIE2 = "1" + T_PECCLECOU
+  ELSE LET T_PECCLECOU_SIE2 = "0" + T_PECCLECOU
+
+  IF T_FIELDTEXT_SIE2 < T_PECCLECOU_SIE2
+  THEN ERROR 223 ; On ne peut inscrire une période inférieure à celle courante..
+
+  ; Ajustement pour le changement de siècle
+  IF FIELDTEXT[1:1] < "8"
+  THEN LET T_FIELDTEXT_SIE3 = "1" + FIELDTEXT
+  ELSE LET T_FIELDTEXT_SIE3 = "0" + FIELDTEXT
+
+  ; Ajustement pour le changement de siècle
+  IF PECCLE OF GLECRITURE_JG[1:1] < "8"
+  THEN LET T_PECCLE_SIE3 = "1" + PECCLE OF GLECRITURE_JG
+  ELSE LET T_PECCLE_SIE3 = "0" + PECCLE OF GLECRITURE_JG
+
+  IF T_FIELDTEXT_SIE3 < T_PECCLE_SIE3
+  THEN ERROR 234 ; Période inférieure à celle de l'écriture.
+
+  IF PECRGL OF MCPERIODE_CTB = "1"
+  THEN ERROR 338 ; On ne peut pas spécifier une période de régularisation.
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; La procédure entry est générée car il y a des différence de saisie selon
+; le type d'écriture.
+;
+;
+PROCEDURE ENTRY
+BEGIN
+
+  ;
+  ; La période et le lot reste les mêmes pour la durée d'une saisie.
+  ;
+  IF T_PECCLESAI = "" &
+    OR T_LGLCLESAI = ""
+  THEN BEGIN
+    ACCEPT PECCLE OF GLECRITURE_JG
+    ACCEPT LGLCLE OF GLECRITURE_JG
+    LET T_PECCLESAI  = PECCLE OF GLECRITURE_JG
+    LET T_LGLCLESAI  = LGLCLE OF GLECRITURE_JG
+  END
+  ELSE BEGIN
+    EDIT    PECCLE OF GLECRITURE_JG
+    EDIT    LGLCLE OF GLECRITURE_JG
+    DISPLAY PECCLE OF GLECRITURE_JG
+    DISPLAY LGLCLE OF GLECRITURE_JG
+
+  END
+
+
+  DISPLAY ECJDATSTP OF GLECRITURE_JG
+  ;
+  ; si le numéro d'écriture est saisie manuellement ('S' selon holding)
+  ; alors on demande le numéro d'écriture,
+  ; sinon, il sera généré au UPDATE.
+  ;
+  IF HLDECRAUT OF MCHOLDING = "S"
+  THEN ACCEPT ECJCLENUM OF GLECRITURE_JG
+
+  DISPLAY ECJFLGANN OF GLECRITURE_JG
+
+  ACCEPT ECJDAT    OF GLECRITURE_JG
+  EDIT   T_SILECJDAT
+
+  IF T_FLGMNU = "H"
+  THEN ACCEPT ECJCIEINT OF GLECRITURE_JG
+  ELSE BEGIN
+    LET ECJCIEINT OF GLECRITURE_JG = T_CIECLEMNU
+    DISPLAY ECJCIEINT OF GLECRITURE_JG
+  END
+  DISPLAY CIENOMABR OF MCCOMPAGNIE
+
+  ACCEPT ECJTYPECR OF GLECRITURE_JG
+  DISPLAY CBIDSC OF VCBI_DSC
+
+  IF T_FLGMNU = "C"
+  THEN ACCEPT ECJTRFUNA OF GLECRITURE_JG
+  ELSE DISPLAY ECJTRFUNA OF GLECRITURE_JG
+
+  ACCEPT ECJDSC1 OF GLECRITURE_JG
+  ACCEPT ECJDSC2 OF GLECRITURE_JG
+  ACCEPT ECJDSC3 OF GLECRITURE_JG
+
+  IF ECJTYPECR OF GLECRITURE_JG = "RC" OR &
+     ECJTYPECR OF GLECRITURE_JG = "DP"
+  THEN ACCEPT ECJNBRPERINI OF GLECRITURE_JG
+
+  IF ECJTYPECR OF GLECRITURE_JG = "RV" OR &
+     ECJTYPECR OF GLECRITURE_JG = "RS"
+  THEN ACCEPT ECJPECDES    OF GLECRITURE_JG
+
+  RUN SCREEN gl001a PASSING T_CIECLEMNU, &
+                            T_CIENOM   , &
+                            T_FLGMNU   , &
+                            D_LGLATRJOU, &
+                            GLECRITURE_JG &
+                    MODE E
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; La compagnie d'inter-cie est modifiable seulement pour les écritures de
+; journal du menu du consolidé.
+;
+;
+PROCEDURE DESIGNER 08
+BEGIN
+  IF T_FLGMNU = "H"
+  THEN BEGIN
+    ACCEPT ECJCIEINT OF GLECRITURE_JG
+    DISPLAY CIENOMABR OF MCCOMPAGNIE
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Si l'usager modifi le type d'écriture il faut demander les champs qui
+; dépende de celui-ci.
+;
+;
+PROCEDURE DESIGNER 12
+BEGIN
+  ;
+  ; Pour les écritures récurrente et dépenses payées d'avance seul l'écriture
+  ; d'origine est modifiable,le numéro de séquence est à blanc.
+  ;
+  IF ECJTYPECR OF GLECRITURE_JG = "RG" OR &
+     ECJTYPECR OF GLECRITURE_JG = "RV" OR &
+     ECJTYPECR OF GLECRITURE_JG = "SA" OR &
+     ( ( ECJTYPECR OF GLECRITURE_JG = "RC" OR &
+         ECJTYPECR OF GLECRITURE_JG = "DP" ) AND &
+       0 = SIZE(TRUNC(ECJCLESEQ OF GLECRITURE_JG)))
+  THEN BEGIN
+    ACCEPT ECJTYPECR OF GLECRITURE_JG
+    DISPLAY CBIDSC OF VCBI_DSC
+    ;
+    ; Ecriture recurrente
+    ;
+    IF ECJTYPECR OF GLECRITURE_JG = "RC" OR &
+       ECJTYPECR OF GLECRITURE_JG = "DP"
+    THEN BEGIN
+      ;
+      ; Si c'est la première écriture on demande la nombre de période initial
+      ;
+      IF 0 = SIZE(TRUNC(ECJCLESEQ OF GLECRITURE_JG))
+      THEN ACCEPT ECJNBRPERINI OF GLECRITURE_JG
+      ELSE ACCEPT ECJNBRPERRES OF GLECRITURE_JG
+    END
+    ;
+    ; Ecriture renversée
+    ;
+    IF ECJTYPECR OF GLECRITURE_JG = "RV" OR &
+       ECJTYPECR OF GLECRITURE_JG = "RS"
+    THEN ACCEPT ECJPECDES OF GLECRITURE_JG
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Ecriture recurrente
+;
+;
+PROCEDURE DESIGNER 20
+BEGIN
+  IF ECJTYPECR OF GLECRITURE_JG = "RC" OR &
+     ECJTYPECR OF GLECRITURE_JG = "DP"
+  THEN BEGIN
+    ;
+    ; Si c'est la première écriture on demande la nombre de période initial
+    ;
+    IF 0 = SIZE(TRUNC(ECJCLESEQ OF GLECRITURE_JG))
+    THEN ACCEPT ECJNBRPERINI OF GLECRITURE_JG
+    ELSE ACCEPT ECJNBRPERRES OF GLECRITURE_JG
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Ecriture renversée
+;
+;
+PROCEDURE DESIGNER 22
+BEGIN
+  IF ECJTYPECR OF GLECRITURE_JG = "RV" OR &
+     ECJTYPECR OF GLECRITURE_JG = "RS"
+  THEN ACCEPT ECJPECDES OF GLECRITURE_JG
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Cette procedure empeche l'acces au sous-ecran si l'eciture est annulee
+;
+;
+PROCEDURE DESIGNER GL01
+BEGIN
+  IF ECJFLGANN OF GLECRITURE_JG = "1"
+  THEN ERROR 235 ; Cette écriture est annulée, on ne peut accéder au ss-écran.
+  RUN SCREEN gl001a PASSING T_CIECLEMNU, &
+                            T_CIENOM   , &
+                            T_FLGMNU   , &
+                            D_LGLATRJOU, &
+                            GLECRITURE_JG &
+                    MODE F
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Cette procedure empeche l'acces au sous-ecran si l'eciture n'est pas
+; journalisée.
+;
+;
+PROCEDURE DESIGNER GL02
+BEGIN
+  IF ECJDATJOU OF GLECRITURE_JG = 0
+  THEN ERROR 261 ; L'écriture doit être journalisée pour accèder le sous-écran.
+
+  RUN SCREEN gl001b PASSING T_CIECLEMNU, &
+                            T_CIENOM   , &
+                            T_FLGMNU   , &
+                            GLECRITURE_JG &
+                    MODE F
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Cette procedure permet de consulter l'ensemble des écritures
+; qui sont liées à  une écriture donnée.
+;
+;
+PROCEDURE DESIGNER GL03
+BEGIN
+  IF ECJDATJOU OF GLECRITURE_JG <> 0
+  THEN RUN SCREEN gl001c PASSING GLECRITURE_JG MODE F
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Appel de l'ecran de vérification du lot.
+;
+;
+PROCEDURE DESIGNER GL04
+BEGIN
+  LET T_PECCLE = PECCLE OF GLECRITURE_JG
+  LET T_LGLCLE = LGLCLE OF GLECRITURE_JG
+  RUN SCREEN gl020 MODE F &
+                   PASSING T_CIECLEMNU, &
+                           T_CIENOM   , &
+                           T_PECCLEMNU, &
+                           T_PECCLECOU, &
+                           T_FLGMNU   , &
+                           T_PECCLE   , &
+                           T_LGLCLE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; La procédure PATH suivante est nécessaire dans le cas où l'écran est
+; appelé autre que par le menu.
+;
+;
+PROCEDURE PATH
+BEGIN
+  IF T_ECJCLENUMFND <> ""
+  THEN LET PATH = 99
+  ELSE BEGIN
+    REQUEST ECJCLENUM OF GLECRITURE_JG
+    IF PROMPTOK
+    THEN REQUEST ECJCLESEQ OF GLECRITURE_JG
+    IF PROMPTOK
+    THEN LET PATH = 1
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST ECJCLENUM OF GLECRITURE_JG
+      IF PROMPTOK
+      THEN LET PATH = 2
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST PECCLE OF GLECRITURE_JG
+      IF PROMPTOK
+      THEN REQUEST LGLCLE OF GLECRITURE_JG
+      IF PROMPTOK
+      THEN LET PATH = 3
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST PECCLE OF GLECRITURE_JG
+      IF PROMPTOK
+      THEN LET PATH = 4
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      LET PATH = 5
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; La procédure FIND est pour gérer l'appel en sous-écran (PATH=99)
+;
+;
+PROCEDURE FIND
+BEGIN
+  IF PATH = 1
+  THEN GET GLECRITURE_JG VIA ECJCIECLE , &
+                             ECJCLENUM , &
+                             ECJCLESEQ &
+                         USING T_CIECLEMNU , &
+                               ECJCLENUM OF GLECRITURE_JG , &
+                               ECJCLESEQ OF GLECRITURE_JG   &
+                         ORDERBY ECJCIECLE , &
+                                 ECJCLENUM , &
+                                 ECJCLESEQ
+
+  IF PATH = 2
+  THEN GET GLECRITURE_JG VIA ECJCIECLE , &
+                             ECJCLENUM   &
+                         USING T_CIECLEMNU , &
+                               ECJCLENUM OF GLECRITURE_JG &
+                         ORDERBY ECJCIECLE , &
+                                 ECJCLENUM , &
+                                 ECJCLESEQ
+
+  IF PATH = 3
+  THEN GET GLECRITURE_JG VIA ECJCIECLE , &
+                             PECCLE    , &
+                             LGLCLE      &
+                         USING T_CIECLEMNU             , &
+                               PECCLE OF GLECRITURE_JG , &
+                               LGLCLE OF GLECRITURE_JG   &
+                         ORDERBY ECJCIECLE , &
+                                 ECJCLENUM , &
+                                 ECJCLESEQ
+  IF PATH = 4
+  THEN GET GLECRITURE_JG VIA ECJCIECLE , &
+                             PECCLE      &
+                         USING T_CIECLEMNU , &
+                               PECCLE OF GLECRITURE_JG &
+                         ORDERBY ECJCIECLE , &
+                                 ECJCLENUM , &
+                                 ECJCLESEQ
+  IF PATH = 5
+  THEN GET GLECRITURE_JG VIA ECJCIECLE &
+                         USING T_CIECLEMNU &
+                         ORDERBY ECJCIECLE , &
+                                 ECJCLENUM , &
+                                 ECJCLESEQ
+
+  IF PATH = 99
+  THEN GET GLECRITURE_JG VIA ECJCIECLE , &
+                             ECJCLENUM , &
+                             ECJCLESEQ   &
+                         USING T_CIECLEMNU    , &
+                               T_ECJCLENUMFND , &
+                               T_ECJCLESEQFND
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF GLECRITURE_JG &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF GLECRITURE_JG &
+     AND NOT NEWRECORD     OF GLECRITURE_JG &
+     AND NOT DELETEDRECORD OF GLECRITURE_JG &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  IF ECJDATJOU OF GLECRITURE_JG <> 0
+  THEN ERROR 236 ; Impossible de mettre à jour, l'écriture est journalisé...
+
+  IF LGLATRJOU OF GLLOT = "1" AND &
+     ECJDATJOU OF GLECRITURE_JG = 0
+  THEN ERROR 314 ; Impossible de mettre à jour, lot déjà autorisé...
+
+  IF ECJFLGANN OF GLECRITURE_JG = "1"
+  THEN BEGIN
+    DELETE GLIMPUTATION
+    LET ECJMNTDBT OF GLECRITURE_JG = 0
+    LET ECJMNTCRT OF GLECRITURE_JG = 0
+    LET ECJNUMLIG OF GLECRITURE_JG = 0
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; L'assignation du numero d'ecriture est fait lors du UPDATE pour eviter
+; de perdre des numeros d'ecriture du journal general, le sous-ecran
+; GL001A fait la meme chose dans sa PROCEDURE UPDATE
+;
+;
+PROCEDURE UPDATE
+BEGIN
+  ;
+  ; si l'écriture est générée automatiquement ('A' selon holding)
+  ; alors on génére le numéro d'écriture;
+  ; sinon, il est obligatoire lors de la saisie.
+  ;
+  IF 0 = SIZE(TRUNCATE(ECJCLENUM OF GLECRITURE_JG)) AND &
+     HLDECRAUT OF MCHOLDING = "A"
+  THEN BEGIN
+    START TRANSACTION GEN_NUM_SEQ
+    GET GLECJ_SEQ OPTIONAL
+    LET ECSCIECLE OF GLECJ_SEQ = ECJCIECLE OF GLECRITURE_JG
+    LET ECSANN    OF GLECJ_SEQ = PECCLE    OF GLECRITURE_JG
+    ;
+    ; Il faut ajouter l'année au début du numéro pour un nouveau record.
+    ; ex: ECSNUMSEQ = 920000
+    ;
+
+    ; Ajustement pour le changement de siècle
+    IF NEWRECORD OF GLECJ_SEQ
+    THEN LET ECSNUMSEQ OF GLECJ_SEQ = 0
+    LET ECSNUMSEQ OF GLECJ_SEQ     = ECSNUMSEQ OF GLECJ_SEQ + 1
+    LET ECJCLENUM OF GLECRITURE_JG = ECSANN OF GLECJ_SEQ + &
+                 ASCII(ECSNUMSEQ OF GLECJ_SEQ, ECSLONNUM OF GLECJ_SEQ -2)
+    PUT GLECJ_SEQ
+    COMMIT TRANSACTION GEN_NUM_SEQ
+  END
+  PUT GLECRITURE_JG
+  PUT GLIMPUTATION
+END
+
+BUILD
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+******************************* Journal général ********************************
+* Période ......: xxxxx         Lot...........: xxxx  Date d'entrée.: xxxxxxxx *
+*                                                     Date journal..: xxxxxxxx *
+* No écriture...: xxxxxxxx xx   Annulée.......: xxx                            *
+*                                                                              *
+* Date écriture.: xxxxxxxx      xxxxxxxxxxxxxxx                                *
+*                                                                              *
+* Cie d'inter...: xxxx xxxxxxxxxxxxxxxxxxxx                                    *
+*                                                                              *
+* Type écriture.: xx   xxxxxxxxxxxxxxxxxxxxxxxxx                               *
+*                                                                              *
+* Inter-unité...: xxx                                                          *
+*                                                                              *
+* Description...: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+******************************Ecriture récurrente*******************************
+* Nbr pér init..: xx            Nbr pér rest..: xx                             *
+*******************************Ecriture renversée*******************************
+* Période dest..: xxxxx                                                        *
+********************************************************************************
+@ENDIF

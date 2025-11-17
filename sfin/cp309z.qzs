@@ -1,0 +1,336 @@
+;/T/ Validation sommaire des paiements
+;
+;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur...: Nancy Marceau
+;    Date Création.: 9 février 1994
+;
+;    Modifié par...: Guy Chabot le 24-Mars-1994
+;    Impact........: Modification du tri pour le nom du fournisseur divers.
+;
+;
+;    Description...: Liste de validation des lots des paiements
+;
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST   ; permet de faire les SET REPORT DEV....
+SET NOBLANK           ; Empêche l'impression de ligne blanche
+
+;
+; Subfile contenant les paiements à imprimer
+;
+
+ACCESS *WCP309A &
+
+  ;
+  ; Récupération de la référence à qui est destiné le paiement
+  ;
+
+  LINK REFCIECLE OF WCP309A , &
+       REFCLETYP OF WCP309A , &
+       REFCLENUM OF WCP309A , &
+       RADCLE    OF WCP309A   &
+    TO REFCIECLE            , &
+       REFCLETYP            , &
+       REFCLENUM            , &
+       RADCLE               OF MCREF_ADRESSE &
+  OPTIONAL &
+
+  LINK REFCIECLE OF WCP309A , &
+       REFCLETYP OF WCP309A , &
+       REFCLENUM OF WCP309A   &
+    TO REFCIECLE            , &
+       REFCLETYP            , &
+       REFCLENUM  OF MCREFERENCE OPTIONAL &
+
+  LINK CIECLE OF WCP309A  , &
+       CLICLE OF WCP309A  &
+    TO CLICIECLE ,&
+       CLICLE OF CRCLIENT OPTIONAL
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_WCP309A CHARACTER SIZE 5 = "1" + PECCLE OF WCP309A &
+         IF PECCLE OF WCP309A[1:1] < "8" &
+         ELSE "0" + PECCLE OF WCP309A
+
+SORT ON CIECLE    OF WCP309A, &
+        D_PECCLE_WCP309A    , &
+        LCPCLE    OF WCP309A, &
+        REFCLETYP OF WCP309A, &
+        REFCLENUM OF WCP309A, &
+        RADNOMABR OF MCREF_ADRESSE, &
+        LBQCPTENC OF WCP309A, &
+        PAMCLE    OF WCP309A, &
+        PAMDEPDIR OF WCP309A, &
+        T_TYPDET  OF WCP309A, &
+        CAPCLE    OF WCP309A, &
+        CPCCLELIG OF WCP309A, &
+        CPITIMSTP OF WCP309A
+
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 & ; Premier titre du rapport
+@IF FRANCAIS
+        = "Validation sommaire des paiements"
+@ELSE
+        = "%%%Validation sommaire des paiements"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 & ; Deuxiemme titre du rapport
+        = " "
+
+DEFINE DZ_NUMRAP  CHARACTER SIZE 12 & ; numéro du rapport
+        = "CP309"
+
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 & ; Nom de la compagnie
+       = PARM
+
+USE usflgdet NOLIST ;Flag Bilingue (O/N)
+
+;
+;Indique si le lot est hors balance
+;
+DEFINE D_HRSBLC   CHARACTER SIZE 3 &
+        = DZ_FLGAFFO IF LCPNBRTRSERR OF WCP309A <> 0 ELSE &
+          DZ_FLGAFFN
+
+
+;
+;Indique si le chèque est de type dépense direct ou fournisseur
+;
+DEFINE  D_PAMDEPDIR CHARACTER SIZE 4 &
+        = "Dir." IF PAMDEPDIR OF WCP309A <> "0" ELSE &
+          "Fou."
+
+DEFINE D_MNTNET INTEGER SIZE 4 &
+       = CPHMNTPYE OF WCP309A &
+           IF PAMDEPDIR OF WCP309A = "0" ELSE &
+             PAMMNT - PAMMNTCTI - PAMMNTRTI
+;
+; Indique si le lot est journalisé
+;
+DEFINE  D_JOURNALISE CHAR SIZE 12 &
+@IF FRANCAIS
+        = "Journalisé" &
+@ELSE
+        = "Posted" &
+@ENDIF
+        IF LCPDATJOU OF WCP309A <> 0 ELSE ""
+
+
+;
+; Affichage d'une "*" en face de chaque transactions dont l'imputation comptable
+; ne balance pas avec le montant total.
+;
+DEFINE  D_BALANCE  CHARACTER SIZE 1 &
+        = "*" IF PAMMNT OF WCP309A <> PAMCUMMNT OF WCP309A ELSE ""
+
+; On prend les descriptions si c'est un paiement direct
+;
+DEFINE D_PAMDSC1 CHARACTER SIZE 40 = &
+  PAMDSC1 OF WCP309A IF PAMDEPDIR OF WCP309A = "1" ELSE ""
+
+DEFINE D_PAMDSC2 CHARACTER SIZE 40 = &
+  PAMDSC2 OF WCP309A IF PAMDEPDIR OF WCP309A = "1" ELSE ""
+
+
+USE ustit220 NOLIST  ; Titre standard pour l'application a 220
+SKIP 2 &
+@IF FRANCAIS
+    TAB 001 "Lot....: "   &
+@ELSE
+    TAB 001 "Batch..: "   &
+@ENDIF
+    TAB 011 LCPCLE OF WCP309A &
+    TAB 016 LCPDSC OF WCP309A &
+    TAB 061 "Hors balance = " &
+    TAB 076 D_HRSBLC          &
+  SKIP &
+@IF FRANCAIS
+    TAB 001 "Période: " &
+@ELSE
+    TAB 001 "Period.: " &
+@ENDIF
+    TAB 010 PECCLE OF WCP309A &
+    TAB 061 D_JOURNALISE      &
+  SKIP 2 &
+TAB 001 "  Numéro Numéro  Date     Compte   Type                      Numéro" &
+TAB 146 "         SS-            Unité                           Co Co  Refact" &
+  SKIP 1 &
+TAB 001 "* fourn. chèque  chèque   encaisse paie.  Montant chèque Dev facture" &
+TAB 075 "Montant facture    Escompte         CTI         RTI     Montant payé" &
+TAB 146 "Projet   prj Immobilis.   adm.     Compte         Montant TF TP  client" &
+  SKIP 1 &
+TAB 001 "- ------ ------- -------- -------- ----- --------------- --- ------------" &
+TAB 075 " --------------- ----------- ----------- ----------- ---------------" &
+TAB 146 "-------- --- ------------ -------- ------ --------------- -- --  ------"
+
+
+HEADING AT LCPCLE &
+  SKIP PAGE
+
+REPORT &
+    TAB 001  D_BALANCE                    PRINT AT PAMCLE &
+    TAB 003  REFCLENUM   OF WCP309A       PRINT AT REFCLENUM &
+    TAB 010  RADNOMABR   OF MCREF_ADRESSE PRINT AT RADNOMABR &
+    TAB 051  D_PAMDSC1                    PRINT AT CAPCLE    &
+    TAB 092  D_PAMDSC2                    PRINT AT CAPCLE    &
+  SKIP 1 &
+    TAB 010  PAMCLE      OF WCP309A PRINT AT PAMCLE &
+    TAB 018  PAMDAT      OF WCP309A PRINT AT PAMCLE &
+    TAB 028  LBQCPTENC   OF WCP309A PRINT AT PAMCLE &
+    TAB 036  D_PAMDEPDIR            PRINT AT PAMCLE &
+    TAB 042  PAMMNT      OF WCP309A SUBTOTAL &
+       PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 5 PRINT AT PAMCLE &
+    TAB 058  DEVCLE      OF MCREFERENCE PRINT AT PAMCLE &
+
+    TAB 062  CAPCLE      OF WCP309A PRINT AT CAPCLE &
+    TAB 075  CAPMNT      OF WCP309A SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " &
+                                             SIGNIFICANCE 5 BWZ PRINT AT CAPCLE &
+    TAB 091  CPHMNTESC OF WCP309A SUBTOTAL PICTURE "^^^,^^^.^^ "     &
+                                             SIGNIFICANCE 5 BWZ PRINT AT CAPCLE &
+    TAB 103  PAMMNTCTI   OF WCP309A SUBTOTAL PICTURE "^^^,^^^.^^ "     &
+                                             SIGNIFICANCE 5 BWZ PRINT AT CAPCLE &
+    TAB 115  PAMMNTRTI   OF WCP309A SUBTOTAL PICTURE "^^^,^^^.^^ "     &
+                                             SIGNIFICANCE 5 BWZ PRINT AT CAPCLE &
+    TAB 127  D_MNTNET               SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " &
+                                             SIGNIFICANCE 5 BWZ PRINT AT CAPCLE &
+
+    TAB 146  PRJCLE      OF WCP309A &
+    TAB 155  PRACLE      OF WCP309A &
+    TAB 159  IMMCLE      OF WCP309A &
+    TAB 172  UNACLE      OF WCP309A &
+    TAB 181  CPTCLE      OF WCP309A &
+    TAB 188  CPIMNT      OF WCP309A  PICTURE "^^^,^^^,^^^.^^ " &
+                                     SIGNIFICANCE 5 BWZ &
+    TAB 204  CPITAXCODTPS OF WCP309A &
+    TAB 207  CPITAXCODTVQ OF WCP309A &
+    TAB 211  CLICLE       OF CRCLIENT &
+ SKIP
+
+
+FOOTING AT LCPCLE &
+  SKIP 2 &
+TAB 001 "                          Montant cumulé    Montant brut" &
+TAB 075 "Montant facture    Escompte         CTI         RTI     Montant net" &
+TAB 186 " Montant imputé " &
+ SKIP &
+TAB 001 "                         --------------- ---------------" &
+TAB 075 "--------------- ----------- ----------- ----------- ---------------" &
+TAB 186 "---------------" &
+  SKIP &
+TAB 001 "Total du lot " &
+TAB 014 LCPCLE    OF WCP309A &
+TAB 025 LCPCUMMNT OF WCP309A  SUBTOTAL AT LCPCLE PICTURE "^^^,^^^,^^^.^^ " &
+                                                 SIGNIFICANCE 5 &
+TAB 042 PAMMNT    OF WCP309A  SUBTOTAL AT PAMCLE PICTURE "^^^,^^^,^^^.^^ " &
+                                                 SIGNIFICANCE 5 &
+TAB 075 CAPMNT    OF WCP309A  SUBTOTAL AT CAPCLE PICTURE "^^^,^^^,^^^.^^ " &
+                                                 SIGNIFICANCE 5 BWZ &
+TAB 091 CPHMNTESC    OF WCP309A SUBTOTAL AT CAPCLE PICTURE "^^^,^^^.^^ "    &
+                                                 SIGNIFICANCE 5 BWZ &
+TAB 103 PAMMNTCTI OF WCP309A  SUBTOTAL AT PAMCLE PICTURE "^^^,^^^.^^ "     &
+                                                 SIGNIFICANCE 5 BWZ &
+TAB 115 PAMMNTRTI OF WCP309A  SUBTOTAL AT PAMCLE PICTURE "^^^,^^^.^^ "     &
+                                                 SIGNIFICANCE 5 BWZ &
+TAB 127 D_MNTNET              SUBTOTAL AT CAPCLE PICTURE "^^^,^^^,^^^.^^ " &
+                                                 SIGNIFICANCE 5 &
+TAB 188 CPIMNT    OF WCP309A  SUBTOTAL PICTURE "^^^,^^^,^^^.^^ "           &
+                                       SIGNIFICANCE 5 BWZ &
+  SKIP &
+TAB 001 "                         --------------- ---------------" &
+TAB 075 "--------------- ----------- ----------- ----------- ---------------" &
+TAB 188 "---------------"
+
+
+FINAL FOOTING &
+  SKIP 2 &
+TAB 001 "                          Montant cumulé    Montant brut" &
+TAB 075 "Montant facture    Escompte         CTI         RTI     Montant net" &
+TAB 188 " Montant imputé " &
+ SKIP &
+TAB 001 "                         --------------- ---------------" &
+TAB 075 "--------------- ----------- ----------- ----------- ---------------" &
+TAB 188 "---------------" &
+  SKIP &
+TAB 001 "Total pour tous les lots" &
+TAB 025 LCPCUMMNT OF WCP309A  SUBTOTAL AT LCPCLE PICTURE "^^^,^^^,^^^.^^ " &
+                                                 SIGNIFICANCE 5 &
+TAB 042 PAMMNT    OF WCP309A  SUBTOTAL AT PAMCLE PICTURE "^^^,^^^,^^^.^^ " &
+                                                 SIGNIFICANCE 5 &
+TAB 075 CAPMNT    OF WCP309A  SUBTOTAL AT CAPCLE PICTURE "^^^,^^^,^^^.^^ " &
+                                                 SIGNIFICANCE 5 BWZ &
+TAB 091 CPHMNTESC  OF WCP309A SUBTOTAL AT CAPCLE PICTURE "^^^,^^^.^^ "    &
+                                                  SIGNIFICANCE 5 BWZ &
+TAB 103 PAMMNTCTI OF WCP309A  SUBTOTAL AT PAMCLE PICTURE "^^^,^^^.^^ "     &
+                                                 SIGNIFICANCE 5 BWZ &
+TAB 115 PAMMNTRTI OF WCP309A  SUBTOTAL AT PAMCLE PICTURE "^^^,^^^.^^ "     &
+                                                 SIGNIFICANCE 5 BWZ &
+TAB 127 D_MNTNET              SUBTOTAL AT CAPCLE PICTURE "^^^,^^^,^^^.^^ " &
+                                                 SIGNIFICANCE 5 BWZ &
+TAB 188 CPIMNT    OF WCP309A  SUBTOTAL PICTURE "^^^,^^^,^^^.^^ "           &
+                                                 SIGNIFICANCE 5 BWZ &
+  SKIP &
+TAB 001 "                         --------------- ---------------" &
+TAB 075 "--------------- ----------- ----------- ----------- ---------------" &
+TAB 188 "---------------"
+
+
+BUILD cp309z
+
+@IF FORMAT
+
+                                                                                                   1         1         1         1         1         1         1         1         1         1         2          2        2
+         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8         9         0          1        2
+123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890012345678901234567890
+CP309                                                                     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                                         Page: 9999
+99/99/99 HH:MM xxxxxxxxxxxx                                                  Validation sommaire des paiements
+                                                                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+Lot....:  xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     Hors balance = xxx  Journalisé
+Période: 99-99
+
+  Numéro Numéro  Date     Compte   Type                      Numéro                                                                                       SS-            Unité                           Co Co  Refact
+* fourn. chèque  chèque   encaisse paie.  Montant chèque Dev facture      Montant facture    Escompte         CTI         RTI    Montant payé    Projet   prj Équipement adm.     Compte         Montant TF TP  client
+- ------ ------- -------- -------- ----- --------------- --- ------------ --------------- ----------- ----------- ----------- ---------------    -------- --- ---------- -------- ------ --------------- -- --  ------
+x xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+         xxxxxxx 99/99/99  xxxxxx  xxxx  999,999,999.99- xxx xxxxxxxxxxxx 999,999,999.99- 999,999.99- 999,999.99- 999,999.99- 999,999,999.99-    xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx 999,999,999.99- xx xx  xxxxxx
+                                                                                                                                                 xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx 999,999,999.99- xx xx  xxxxxx
+                                                                                                                                                 xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx 999,999,999.99- xx xx  xxxxxx
+
+                                                             xxxxxxxxxxxx 999,999,999.99- 999,999.99- 999,999.99- 999,999.99- 999,999,999.99-    xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx 999,999,999.99- xx xx  xxxxxx
+                                                                                                                                                 xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx 999,999,999.99- xx xx  xxxxxx
+                                                                                                                                                 xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx 999,999,999.99- xx xx  xxxxxx
+
+x xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+         xxxxxxx 99/99/99  xxxxxx  xxxx  999,999,999.99- xxx xxxxxxxxxxxx 999,999,999.99- 999,999.99- 999,999.99- 999,999.99- 999,999,999.99-    xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx 999,999,999.99- xx xx  xxxxxx
+                                                                                                                                                 xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx 999,999,999.99- xx xx  xxxxxx
+                                                                                                                                                 xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx 999,999,999.99- xx xx  xxxxxx
+
+                                                             xxxxxxxxxxxx 999,999,999.99- 999,999.99- 999,999.99- 999,999.99- 999,999,999.99-    xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx 999,999,999.99- xx xx  xxxxxx
+                                                                                                                                                 xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx 999,999,999.99- xx xx  xxxxxx
+                                                                                                                                                 xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx 999,999,999.99- xx xx  xxxxxx
+
+
+
+                          Montant cumulé    Montant brut                  Montant facture    Escompte         CTI         RTI     Montant net                                             Montant imputé
+                         --------------- ---------------                  --------------- ----------- ----------- ----------- ---------------                                            ---------------
+Total du lot xxxx        999,999,999.99- 999,999,999.99-                  999,999,999.99- 999,999.99- 999,999.99- 999,999.99- 999,999,999.99-                                            999,999,999.99-
+                         --------------- ---------------                  --------------- ----------- ----------- ----------- ---------------                                            ---------------
+
+
+                          Montant cumulé   Montant brut                   Montant facture    Escompte         CTI         RTI     Montant net                                             Montant imputé
+                         --------------- --------------                   --------------- ----------- ----------- ----------- ---------------                                            ---------------
+Total pour tous les lots 999,999,999.99- 999,999,999.99-                  999,999,999.99- 999,999.99- 999,999.99- 999,999.99- 999,999,999.99-                                            999,999,999.99-
+                         --------------- ---------------                  --------------- ----------- ----------- ----------- ---------------                                            ---------------
+
+
+
+@ENDIF

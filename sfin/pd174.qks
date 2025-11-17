@@ -1,0 +1,257 @@
+;/T/ Charges diverses (Pilotage)
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date création: 1994-08-17
+;
+;    Description..: Ce panorama permet de gérer les charges diverses.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd174 ACTIONBAR                    &
+             MODE LABEL "" AT 2,80        &
+             NOACTION                     &
+             FIELDMARK RETAIN STARTUP     &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU ,      &
+                       T_CIENOM
+
+;-------------------------------------------------------------------------------
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD174"
+
+;-------------------------------------------------------------------------------
+; Documentation de l'écran.
+;
+USE pd174.hlp NOLIST
+
+;-------------------------------------------------------------------------------
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+;-------------------------------------------------------------------------------
+;
+; Variable temporaire du programme pour les pop-up
+;
+;
+TEMPORARY T_CPTCLE    CHARACTER SIZE 06 RESET AT STARTUP
+TEMPORARY T_UNACLE    CHARACTER SIZE 08 RESET AT STARTUP
+
+TEMPORARY T_CPTTYPPAT CHARACTER SIZE 01 ; Pattern type de compte
+TEMPORARY T_CPTCATPAT CHARACTER SIZE 08 ; Pattern catégorie du compte
+TEMPORARY T_PECCLE    CHARACTER SIZE 04 ; Période
+
+
+
+
+;-------------------------------------------------------------------------------
+; Déclaration du fichier primaire
+;
+
+FILE PDCHARGES_DIVERS PRIMARY NOITEM
+  ACCESS VIA     CIECLE,   &
+                 CDICODCHR &
+         USING   T_CIECLEMNU,                  &
+                 CDICODCHR OF PDCHARGES_DIVERS &
+         REQUEST CDICODCHR OF PDCHARGES_DIVERS &
+         ORDERBY CIECLE,   &
+                 CDICODCHR
+
+  ACCESS VIA     CIECLE      &
+         USING   T_CIECLEMNU &
+         ORDERBY CIECLE,     &
+                 CDICODCHR
+
+         ITEM CIECLE OF PDCHARGES_DIVERS INITIAL T_CIECLEMNU
+
+;-------------------------------------------------------------------------------
+;
+; Déclaration des fichiers référence
+;
+FILE MCCOMPTE REFERENCE
+  ACCESS VIA     CPTCLE &
+         USING   CPTCLE OF PDCHARGES_DIVERS &
+         ORDERBY CPTCLE
+
+FILE MCUNITE_ADM REFERENCE
+  ACCESS VIA     CIECLE, &
+                 UNACLE &
+         USING   T_CIECLEMNU, &
+                 UNACLE OF PDCHARGES_DIVERS &
+         ORDERBY UNACLE
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+;
+;
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Charges diverses " &
+@ELSE
+      " %%%Charges diverses " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST ; Pour placer le TITLE OFF
+
+SKIP TO LINE 4
+
+ALIGN (2,3,19)
+
+FIELD CDICODCHR    OF PDCHARGES_DIVERS   &
+        HIDDEN ID 05                     &
+        REQUIRED NOCHANGE                &
+        LOOKUP NOTON PDCHARGES_DIVERS    &
+          VIA   CIECLE,                  &
+                CDICODCHR                &
+          USING T_CIECLEMNU,             &
+                CDICODCHR OF PDCHARGES_DIVERS &
+          MESSAGE 2926 ; Ce code de charge diverse existe déjà
+
+FIELD CDIDSCFRA    OF PDCHARGES_DIVERS   &
+        HIDDEN ID 10
+
+FIELD CDIDSCANG    OF PDCHARGES_DIVERS   &
+        HIDDEN ID 15
+
+FIELD CDITYPCHR    OF PDCHARGES_DIVERS   &
+        HIDDEN ID 20
+
+FIELD CPTCLE       OF PDCHARGES_DIVERS   &
+        HIDDEN ID 25                     &
+        REQUIRED NOCHANGE                &
+        LOOKUP ON MCCOMPTE               &
+          MESSAGE 2924 ; Ce compte n'existe pas
+
+FIELD UNACLE       OF PDCHARGES_DIVERS   &
+        HIDDEN ID 30                     &
+        REQUIRED NOCHANGE                &
+        LOOKUP ON MCUNITE_ADM            &
+          MESSAGE 2925 ; Cette unité n'existe pas
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Appel du popup pour le champs CPTCLE (compte)
+;
+;
+PROCEDURE INPUT CPTCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE    = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    LET T_CPTTYPPAT = "@"
+    LET T_CPTCATPAT = "@"
+    LET T_PECCLE    = ""
+    RUN SCREEN mc103 MODE F &
+                      PASSING T_CPTCLE, &
+                              T_CPTTYPPAT, &
+                              T_CPTCATPAT, &
+                              T_PECCLE
+    LET FIELDTEXT = TRUNCATE( T_CPTCLE )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Appel du popup pour le champs UNACLE (Unité administrative)
+;
+;
+PROCEDURE INPUT UNACLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE = CPTCLE OF PDCHARGES_DIVERS
+    LET T_PECCLE = ""
+    LET T_UNACLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+
+    RUN SCREEN mc115 MODE F &
+                     PASSING T_CIECLEMNU, &
+                             T_CPTCLE, &
+                             T_UNACLE, &
+                             T_PECCLE
+    LET FIELDTEXT = TRUNCATE( T_UNACLE )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDCHARGES_DIVERS   &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDCHARGES_DIVERS   &
+     AND NOT NEWRECORD     OF PDCHARGES_DIVERS   &
+     AND NOT DELETEDRECORD OF PDCHARGES_DIVERS   &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+END
+
+BUILD
+@IF FORMAT
+@ENDIF

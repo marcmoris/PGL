@@ -1,0 +1,265 @@
+;/T/ Liste des réquisitions d'achat / Détaillée
+;
+;/P/ Programmeur...: Nancy Marceau
+;    Date Création.: 2 mai 1994
+;
+;    Description...: Ce rapport présente les réquisitions d'achat pour
+;                    les entrepôts désirés.
+;
+;    Paramètres....: Compagnie 
+;                    Entrepôt           (Un, plusieurs ou tous)
+;                    Numéro réquisition (Borne de début, <retour>=tous)
+;                    Numéro réquisition (Borne de fin)
+;                    Statut             (P=préliminaire, A=approuvée, 
+;                                        C=complète,X=annulée,<retour>=tous)    
+;                     
+;
+;/M/                 Caroline kaine, 12 nov 96, Format passe de 180 a 175 
+;
+;/M/ Programmeur.......: Francois Richard
+;    Date modification.: 15 Juin 1999
+;    Description.......: Migration Achat/Réception/Inventaire de l'environnement
+;                        BOC
+;-------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST
+SET NOBLANK
+
+ACCESS *WAR319A  &
+  LINK CIECLE OF WAR319A, &
+       ENTCLE OF WAR319A &
+    TO CIECLE, &
+       ENTCLE OF ARENTREPOT   &
+  
+  LINK T_FOUCIECLE , &
+       T_REFCLETYP , &
+       T_FOUCLE    , &
+       T_RADCLE      &
+    TO REFCIECLE, &
+       REFCLETYP, &
+       REFCLENUM, &
+       RADCLE OF MCREF_ADRESSE   OPTIONAL &
+  
+  LINK T_FOUCIECLE OF WAR319A, &
+       T_FOUCLE    OF WAR319A, &
+       CIECLE    OF WAR319A &
+    TO FOUCIECLE, &
+       FOUCLE,    &
+       FOCCIECLE OF VFOC_FOU   OPTIONAL & 
+
+   ;
+   ; Statut de la réquisition
+   ;
+  LINK ("REQSTUAPP",                 &
+         REQSTUAPP OF WAR319A)       &
+    TO XELNOM,                       &
+       CBICLE OF VCBI_DSC     OPTIONAL & 
+
+  LINK (CIECLE OF WAR319A, &
+        REQCLE OF WAR319A, &
+        REQCLENUM OF WAR319A, &
+        "1")               &
+     TO CIECLE           , &
+        REQCLE           , &
+        REQCLENUM           , &
+        RQNIMP OF ARREQ_NOTE   OPTIONAL &
+   ;
+   ; Devise du consolidé
+   ;
+  LINK ("1") &
+    TO CIENMC OF MCHOLDING    
+
+
+
+; Variables obligatoires pour les en-têtes standards.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+       "Liste des réquisitions d'achat / Détaillée"
+@ELSE
+       "%%%Liste des réquisitions d'achat / Détaillée"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+       ""
+@ELSE
+       "%%%"
+@ENDIF
+
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE  7 = "AR319Z"
+;
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM 
+
+
+USE usflgdet NOLIST ;Flag Bilingue (O/N)
+
+;
+;Indique si la réquisition est une soumission
+;
+DEFINE D_REQFLGSOU CHARACTER SIZE 3 &
+        = DZ_FLGAFFO IF REQFLGSOU OF WAR319A <> "0" ELSE &
+          DZ_FLGAFFN 
+
+ ; Statuts de réquisition demandés
+ ;
+DEFINE D_CBIDSC1 CHARACTER SIZE 15 = "Approuvée " &
+  IF 0 <> INDEX (D_REQSTUAPP OF WAR319A,"A") OR  D_REQSTUAPP OF WAR319A = "" &
+    ELSE ""
+
+DEFINE D_CBIDSC2 CHARACTER SIZE 15 = "Complète "&
+  IF 0 <> INDEX (D_REQSTUAPP OF WAR319A,"C") OR  D_REQSTUAPP OF WAR319A = "" &
+    ELSE ""
+
+DEFINE D_CBIDSC3 CHARACTER SIZE 15 = "Préliminaire " &
+  IF 0 <> INDEX (D_REQSTUAPP OF WAR319A,"P") OR  D_REQSTUAPP OF WAR319A = "" &
+    ELSE ""
+
+DEFINE D_CBIDSC4 CHARACTER SIZE 15 = "Annulée " &
+  IF 0 <> INDEX (D_REQSTUAPP OF WAR319A,"X") OR  D_REQSTUAPP OF WAR319A = "" &
+    ELSE ""
+
+DEFINE D_CBIDSCDEM CHARACTER SIZE 70 = &
+  PACK (TRUNCATE(D_CBIDSC1) + " " + &
+        TRUNCATE(D_CBIDSC2) + " " + &
+        TRUNCATE(D_CBIDSC3) + " " + &
+        TRUNCATE(D_CBIDSC4))
+
+
+DEFINE D_CBIDSC CHARACTER SIZE 15 = CBIDSC OF VCBI_DSC
+
+
+DEFINE    D_DEVCLE    CHARACTER SIZE 04 = " " &
+          IF DEVCLE OF VFOC_FOU = DEVCLE OF MCHOLDING OR &
+             0 = SIZE(TRUNCATE(FOUCLE OF WAR319A)) &
+          ELSE "/" + DEVCLE OF VFOC_FOU
+
+DEFINE D_RADNOM CHARACTER SIZE 40 = RADNOM OF MCREF_ADRESSE[1:40]
+
+SORT ON CIECLE    OF WAR319A &  ; Compagnie
+     ON ENTCLE    OF WAR319A &  ; Entrepôt
+     ON REQCLE    OF WAR319A &  ; Numéro réquisition
+     ON REQCLENUM    OF WAR319A &  ; Numéro d'item du produit
+     ON RQNSEQ    OF ARREQ_NOTE
+
+
+USE ustit175 NOLIST
+  SKIP 2 &
+@IF FRANCAIS
+TAB 001 "Entrepôt..........:" &
+@ELSE 
+TAB 001 "%%%Entrepôt..........:" &
+@ENDIF
+
+TAB 021 ENTCLE OF WAR319A    &
+TAB 027 ENTNOM OF ARENTREPOT &
+  SKIP  &
+@IF FRANCAIS
+TAB 001 "Statuts demandés..:" &
+@ELSE
+TAB 001 "%%%Statuts demandés..:" &
+@ENDIF
+
+TAB 021 D_CBIDSCDEM &
+  SKIP 2 &
+@IF FRANCAIS
+  TAB 001 "No                  Sta. ------ Date ------" &
+@ELSE
+  TAB 001 "%%%                 Sta. ------ Date ------" &
+@ENDIF
+
+SKIP &
+@IF FRANCAIS
+  TAB 001 "réquisition Item    App. Approuvée  Requise Sou. Produit                                           Qté commandée Prix unitaire       TPS        TVQ  Escompte         Total   " &
+@ELSE
+  TAB 001 "%%%" &
+@ENDIF
+SKIP &
+  TAB 001 "                          aa/mm/jj aa/mm/jj" &
+SKIP &
+  TAB 001 "----------- ------- ---- --------- -------- ---- ------------------------------------------------- ------------- ------------- ---------- ---------- ---------- --------------" &
+SKIP 2
+
+HEADING AT REQCLENUM &
+  TAB 002 REQCLE    OF WAR319A PRINT AT REQCLE &
+  TAB 013 REQCLENUM    OF WAR319A &
+  TAB 022 REQSTUAPP OF WAR319A &
+  TAB 027 REQDATAPP OF WAR319A &
+  TAB 036 REQDATREQ OF WAR319A &
+  TAB 045 D_REQFLGSOU          &
+  TAB 050 PRDCLE    OF WAR319A &
+  TAB 063 REQDSC    OF WAR319A &
+  TAB 102 REQQTEREQ OF WAR319A &
+    PICTURE "^^,^^^.^^^ "      &
+    TRAILING SIGN "-"          &
+    SIGNIFICANCE 6             &
+    BWZ                        &     
+  TAB 116 REQPRIUNI OF WAR319A &
+  TAB 128 REQMNTTPS OF WAR319A &  
+    PICTURE "^^,^^^.^^ "      &
+    TRAILING SIGN "-"          &
+    SIGNIFICANCE 5             &
+    BWZ                        &
+  TAB 138 REQMNTTVQ OF WAR319A &   
+    PICTURE "^^,^^^.^^ "      &
+    TRAILING SIGN "-"          &
+    SIGNIFICANCE 5             &
+    BWZ                        &
+  TAB 149 REQMNTESC OF WAR319A &
+    PICTURE "^^,^^^.^^ "      &
+    TRAILING SIGN "-"          &
+    SIGNIFICANCE 5             &
+    BWZ                        &
+  TAB 160 REQMNTTOT OF WAR319A &
+      RESERVE 5 LINES
+
+REPORT TAB 063 RQNDSC OF ARREQ_NOTE
+
+FOOTING AT REQCLENUM &
+  TAB 025 "Compte :"           &
+  TAB 034 CPTCLE OF WAR319A    &
+  TAB 045 "Unité :"            &
+  TAB 053 UNACLE OF WAR319A    &
+  TAB 070 "Projet-activité:"   &
+  TAB 088 PRJCLE OF WAR319A    &
+  TAB 096 "-"                  &
+  TAB 097 PRACLE OF WAR319A    &
+  TAB 110 "Immobilis..:"       &
+  TAB 123 IMMCLE OF WAR319A    &
+  TAB 155 "Fournisseur :"      &
+  TAB 170 FOUCLE    OF WAR319A &
+  TAB 177 RADNOM    OF MCREF_ADRESSE &
+      SKIP &
+  TAB 025 "__________________________________________________" &
+  TAB 075 "__________________________________________________" &
+  TAB 125 "__________________________________________________" &
+  TAB 175 "____________________________________________"
+ 
+BUILD ar319z
+@IF FORMAT
+         1         2         3         4         5         6         7         8         9        10        11        12        13        14        15        16        17        18        19        20
+1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678
+
+Entrepôt..........: xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+Statuts demandés..: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+No                  Sta. ------ Date ------
+réquisition Item    App. Approuvée  Requise Sou. Produit                                           Qté commandée Prix unitaire       TPS        TVQ  Escompte         Total   
+----------- ------- ---- --------- -------- ---- ------------------------------------------------- ------------- ------------- ---------- ---------- ---------- -------------
+ xxxxxxxxx  xxx.xxx  x    99/99/99 99/99/99 xxx  xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   99,999.999-   999,999.99- 99,999.99- 99,999.99- 99,999.99- 9,999,999.99-
+
+                                                              xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+                                                              xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+                                                              xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+                                                              xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+                                                              xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+                        Compte : xxxxxx     Unité : xxxxxxxx         Projet-activité:  xxxxx-xxxxxx Fournisseur : xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+                        ___________________________________________________________________________________________________________________________________________________________
+
+@ENDIF

@@ -1,0 +1,215 @@
+;/T/ Liste des sorties/retours par pièce et employé
+;
+;/P/ Programmeur...: Marc Poulin
+;    Date Création.: 5 Aôut 1999
+;
+;    Description...: Impression des sorties/retours par pièce et employé
+;
+;    Paramètres....: Code de compagnie   (passée en paramètre par le système)
+;                    Type de mouvement   (Sorties ou retours)
+;                    Code de produit     (avec bornes de début et de fin)
+;                    Code d'usager       (Un code usager par employé)
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST
+
+
+ACCESS ARPRODUIT   LINK CIECLE    OF ARPRODUIT   , &
+                        PRDCLE    OF ARPRODUIT     &
+                     TO CIECLE                   , &
+                        PRDCLE    OF ARMOU_DETAIL  &
+
+                   LINK CIECLE    OF ARMOU_DETAIL, &
+                        MOUCLE    OF ARMOU_DETAIL  &
+                     TO CIECLE                   , &
+                        MOUCLE    OF ARMOUVEMENT   &
+
+                   LINK UTLCLE    OF ARMOUVEMENT   &
+                     TO UTLCLE    OF ARUTILISATEUR OPTIONAL &
+
+                   LINK ("MOUSTU"                , &
+                        MOUSTU    OF ARMOUVEMENT)  &
+                     TO XELNOM                   , &
+                        CBICLE    OF VCBI_DSC    ALIAS A_CBI_MOUSTU OPTIONAL &
+
+                   LINK ("MOUTYP"                , &
+                        MOUTYP    OF ARMOUVEMENT)  &
+                     TO XELNOM                   , &
+                        CBICLE    OF VCBI_DSC    ALIAS A_CBI_MOUTYP OPTIONAL
+;
+; Sélection selon les paramètres associés au code de compagnie et au code de produit
+;
+CHOOSE CIECLE    PARM      , & ; Code de compagnie
+       PRDCLE    PARM RANGE    ; Code de produit
+;
+; Reception du code d'usager (associé à l'employé)
+;
+DEFINE D_UTLCLE CHARACTER SIZE 10 = PARM
+;
+; Reception du type de mouvement voulu (Sortie ou Retour)
+;
+DEFINE D_MOUTYP    CHARACTER SIZE 01 = PARM
+;
+; Date de début 
+;
+DEFINE D_DATDEB DATE = PARM
+;
+; Date de fin
+;
+DEFINE D_DATFIN DATE = PARM
+
+;
+; Sélection selon les paramètres associés au code usager et au type de mouvement
+;
+SELECT ARMOUVEMENT IF (UTLCLE OF ARMOUVEMENT = D_UTLCLE OR D_UTLCLE = ' ') AND &
+                      (MOUTYP OF ARMOUVEMENT = D_MOUTYP OR D_MOUTYP = ' ') AND &
+                      (MOUDAT OF ARMOUVEMENT >= D_DATDEB                   AND & 
+                      (MOUDAT OF ARMOUVEMENT <= D_DATFIN OR D_DATFIN = 0))
+;
+; Sorties et retours seulements
+;
+SELECT IF MOUTYP OF ARMOUVEMENT = "S"  OR & ; Sorties
+          MOUTYP OF ARMOUVEMENT = "E"       ; Retours (Entrées)
+
+;-------------------------------------------------------------------------------
+;
+; Variables obligatoires pour les en-têtes standards.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = "Liste des sorties/retours par pièce et employé"
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = ""
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE  7 = "AR353Z"
+;
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM
+;
+; Statut du mouvement (15 caractères)
+;
+DEFINE D_CBIDSC_MOUSTU CHARACTER SIZE 15 = CBIDSC OF A_CBI_MOUSTU
+;
+; Type du mouvement (15 caractères)
+;
+DEFINE D_CBIDSC_MOUTYP CHARACTER SIZE 15 = CBIDSC OF A_CBI_MOUTYP
+;
+; Nom + prénom de l'utilisateur
+;
+DEFINE D_NOMPNM CHARACTER SIZE 27 = TRUNC(UTLNOM OF ARUTILISATEUR) + ", " + &
+                                    TRUNC(UTLPNM OF ARUTILISATEUR)
+;
+; Tri
+;
+SORT ON CIECLE    OF ARMOUVEMENT  &
+     ON PRDCLE    OF ARMOU_DETAIL &
+     ON MOUTYP    OF ARMOUVEMENT  &
+     ON MOUSTU    OF ARMOUVEMENT  &
+     ON MOUCLE    OF ARMOUVEMENT
+
+USE ustit180 NOLIST
+  SKIP 3 &
+ TAB 001 "                                                                         Statut            Numéro de  " &
+ TAB 103 "Date du                                           Quantité     Prix unitaire" &
+  SKIP 1 &
+ TAB 001 "Produit                                     Entrepôt  Type de mouvement  du mouvement      mouvement  " &
+ TAB 103 "mouvement  Utilisateur                            mouvement    du produit   " &
+  SKIP 1 &
+ TAB 001 "------------------------------------------- --------  ------------------ ----------------- ---------  " &
+ TAB 103 "---------- -------------------------------------- -----------  -------------" &
+  SKIP
+
+REPORT                                &
+  TAB 001  PRDCLE    OF ARMOU_DETAIL  &
+           PRINT AT PRDCLE            &
+  TAB 014  PRDDSC1   OF ARPRODUIT     &
+           PIC "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^" &
+           PRINT AT PRDCLE            &
+  TAB 045  ENTCLE    OF ARMOUVEMENT   &
+           PRINT AT PRDCLE            &
+  TAB 055  MOUTYP    OF ARMOUVEMENT   &
+           PRINT AT MOUTYP            &
+  TAB 057  D_CBIDSC_MOUTYP            &
+           PRINT AT MOUTYP            &
+  TAB 074  MOUSTU    OF ARMOUVEMENT   &
+           PRINT AT MOUSTU            &
+  TAB 076  D_CBIDSC_MOUSTU            &
+           PRINT AT MOUSTU            &
+  TAB 092  MOUCLE    OF ARMOUVEMENT   &
+           PRINT AT MOUCLE            &
+  TAB 103  MOUDAT    OF ARMOUVEMENT   &
+           FORMAT YYYYMMDD            &
+           PRINT AT MOUCLE            &
+  TAB 114  UTLCLE    OF ARMOUVEMENT   &
+           PRINT AT MOUCLE            &
+  TAB 125  D_NOMPNM                   &
+           PRINT AT MOUCLE            &
+  TAB 153  MODQTE    OF ARMOU_DETAIL  &
+           PICTURE "^^^,^^^.^^^ "     &
+           TRAILING SIGN "-"          &
+           SIGNIFICANCE 6             &
+  TAB 166  MODPRIUNI OF ARMOU_DETAIL  &
+           PICTURE "^^^,^^^.^^^^ "    &
+           TRAILING SIGN "-"          &
+           SIGNIFICANCE 7
+
+BUILD ar353z
+
+
+@IF FORMAT
+                                                                                                   1         1         1         1         1         1         1         1         1
+         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8
+123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+
+AR353Z                                                                                                  GRANICOR INC. - DEVELOPPEMENT                                                                                                                PAGE: 99
+99/99/99 99:99 prosig                                                                           Liste des sorties/retours par pièce et employé
+
+
+                                                                         Statut            Numéro de  Date du                                           Quantité     Prix unitaire
+Produit                                     Entrepôt  Type de mouvement  du mouvement      mouvement  mouvement  Usager                                 mouvement    du produit
+------------------------------------------- --------  ------------------ ----------------- ---------  ---------- -------------------------------------- -----------  -------------
+xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxx      x xxxxxxxxxxxxxxxx x xxxxxxxxxxxxxxx xxxxxxxxx  9999/99/99 xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxx 999,999.999  999,999.9999-
+                                                      x xxxxxxxxxxxxxxxx x xxxxxxxxxxxxxxx xxxxxxxxx  9999/99/99 xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxx 999,999.999  999,999.9999-
+                                                      x xxxxxxxxxxxxxxxx x xxxxxxxxxxxxxxx xxxxxxxxx  9999/99/99 xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxx 999,999.999  999,999.9999-
+                                                      x xxxxxxxxxxxxxxxx x xxxxxxxxxxxxxxx xxxxxxxxx  9999/99/99 xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxx 999,999.999  999,999.9999-
+xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxx      x xxxxxxxxxxxxxxxx x xxxxxxxxxxxxxxx xxxxxxxxx  9999/99/99 xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxx 999,999.999  999,999.9999-
+xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxx      x xxxxxxxxxxxxxxxx x xxxxxxxxxxxxxxx xxxxxxxxx  9999/99/99 xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxx 999,999.999  999,999.9999-
+
+
+
+************************************************************************************************************************************************************************************
+
+                            Maintenance de programme
++------------------------------------------------------------------------------+
+|Module........: ARL4 Listes des inventaires                                   |
+|Rang ds menu..: 0041                                                          |
+|Nom Programme.: AR353     Genre.........: R                                   |
+|Descrip. Fra..: Liste des sorties/retours par pièce et employé                |
+|Descrip. Ang..:                                                               |
+|                                                                              |
+|Intéractif....: L  Lot                                                        |
+|Liste paramèt.: N  on                                                         |
+|File d'attente: SYSB Batch régulière                                          |
+|Forme........:  F02  Compressé 68 lignes                                      |
+|Code d'imprim.: SYS  Imprimante système                                       |
+|Nbre Copies..:  01                                                            |
+|Paramèt. PRINT:                                                               |
+|PRINT standard: O  ui                           Créé par.....:  prosig        |
+|Prio. d'impres:                                 Modifié par...: prosig        |
+|                                                Dat. modifica.: 1999/08/06    |
+|                                                Dat. fin......:               |
++------------------------------------------------------------------------------+
++--------------------------- Paramètres d'Exécution ---------------------------+
+| Lg    Paramètre                                                              |
+| 02    $quiz                                                                  |
+| 04    execute ar353z                                                         |
+| 06    %CUF_CIECLEMNU                                                         |
+| 08    %CRPRDCLE REPEATING                                                    |
+| 10    %D MOUUSRCRE                                                           |
+| 12    %D MOUTYP                                                              |
+| 14    %DUF_CIENOM                                                            |
+| 16    exit                                                                   |
++------------------------------------------------------------------------------+
+
+@ENDIF

@@ -1,0 +1,609 @@
+;/T/ Soumission
+;
+;/P/ Programmeur..: Guy Chabot
+;    Date Création: 30 septembre 1994
+;
+;    Description..: Permet la saisie des fournisseurs qui sont en soumission pour le
+;                   produit de la réquisition.
+;
+;/M/ Programmeur.......: Francois Richard
+;    Date modification : 29 juillet 1999
+;    Description.......: Modification de l'\351cran pour la passé de
+;                        de 80 a 132 colonne
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN ar006h ACTIONBAR &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              MODE LABEL "" AT 2,132 &
+              FROM 1,1 TO 23,132 &              
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU  , &
+                        T_CIENOM     , &
+                        T_PECCLEMNU  , &
+                        T_SELFOU     , &
+                        ARREQUISITION
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-écrans
+
+USE ar006h.hlp NOLIST
+
+USE ussectmp NOLIST     ; Variable pour la sécurité
+      "AR006H"          ; Nom de l'écran
+
+USE ustrasse NOLIST
+
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_RAD_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE MCRAD_SEQ IN DICT
+                        
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 04 ; Numéro de la compagnie
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie
+TEMPORARY T_PECCLEMNU CHARACTER SIZE 04 ; Période courante ou subséquente.
+TEMPORARY T_SELFOU    CHARACTER SIZE 01 RESET AT STARTUP
+
+DEFINE    DZ_CIECLE   CHARACTER SIZE 04 = T_CIECLEMNU
+DEFINE    DZ_CIENOM   CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+;
+; Table maitre passer en parametre.
+;
+FILE ARREQUISITION        MASTER
+
+;-------------------------------------------------------------------------------
+;
+; Table primaire.
+;
+FILE ARREQ_SOUMISSION    PRIMARY &
+                        OCCURS 15 &
+                        NOITEM
+  ACCESS VIA    CIECLE   , &
+                REQCLE   , &
+                REQCLENUM     &
+         USING  CIECLE    OF ARREQUISITION, &
+                REQCLE    OF ARREQUISITION, &
+                REQCLENUM OF ARREQUISITION  &
+        ORDERBY CIECLE   , &
+                REQCLE   , &
+                REQCLENUM   , &
+                FOUCLE
+
+  ITEM CIECLE    OF ARREQ_SOUMISSION INITIAL CIECLE    OF ARREQUISITION
+  ITEM REQCLE    OF ARREQ_SOUMISSION INITIAL REQCLE    OF ARREQUISITION
+  ITEM REQCLENUM OF ARREQ_SOUMISSION INITIAL REQCLENUM OF ARREQUISITION
+  ITEM FOUCIECLE OF ARREQ_SOUMISSION INITIAL FOUCIECLE OF ARREQUISITION
+
+;-------------------------------------------------------------------------------
+;
+; Validation du numéro d'adresse et ajout de la nouvelle adresse pour les
+; fournisseurs divers.
+;
+FILE MCREF_ADRESSE     SECONDARY &
+                      NOITEM &
+                      NODELETE &
+                      OCCURS WITH ARREQ_SOUMISSION
+
+  ACCESS  VIA   REFCIECLE, &
+                REFCLETYP, &
+                REFCLENUM, &
+                RADCLE &
+          USING FOUCIECLE OF ARREQ_SOUMISSION, &
+                REFCLETYP OF ARREQUISITION    , &
+                FOUCLE    OF ARREQ_SOUMISSION, &
+                RADCLE    OF ARREQ_SOUMISSION
+
+  ITEM REFCIECLE OF MCREF_ADRESSE FINAL FOUCIECLE OF ARREQ_SOUMISSION
+  ITEM REFCLETYP OF MCREF_ADRESSE FINAL REFCLETYP OF ARREQUISITION
+  ITEM REFCLENUM OF MCREF_ADRESSE FINAL FOUCLE    OF ARREQ_SOUMISSION
+  ITEM RADCLE    OF MCREF_ADRESSE FINAL RADCLE    OF ARREQ_SOUMISSION
+  ITEM RADACHCP  OF MCREF_ADRESSE INITIAL "1"
+
+;-------------------------------------------------------------------------------
+;
+; Numéro de séquence des adresses pour les clients divers.
+;
+FILE MCRAD_SEQ         DESIGNER TRANSACTION GEN_RAD_SEQ
+
+;-------------------------------------------------------------------------------
+;
+;
+FILE VFOC_FOU            REFERENCE &
+                        OCCURS WITH ARREQ_SOUMISSION
+
+  ACCESS VIA   FOUCIECLE, &
+               FOUCLE,    &
+               FOCCIECLE  &
+         USING FOUCIECLE OF ARREQ_SOUMISSION, &
+               FOUCLE    OF ARREQ_SOUMISSION, &
+               CIECLE    OF ARREQ_SOUMISSION
+
+;-------------------------------------------------------------------------------
+;
+; Validation du code de taxe fédéral.
+;
+FILE MCTAXE            REFERENCE &
+                      ALIAS A_TAX_TPS &
+                      OCCURS WITH ARREQ_SOUMISSION
+
+  ACCESS VIA   TAXCLETYP, &
+               TAXCLECOD &
+         USING RSOTAXTYPTPS OF ARREQ_SOUMISSION, &
+               RSOTAXCODTPS OF ARREQ_SOUMISSION
+
+;-------------------------------------------------------------------------------
+;
+; Validation du code de taxe provincial.
+;
+FILE MCTAXE            REFERENCE &
+                      ALIAS A_TAX_TVP &
+                      OCCURS WITH ARREQ_SOUMISSION
+
+  ACCESS VIA   TAXCLETYP, &
+               TAXCLECOD &
+         USING RSOTAXTYPTVQ OF ARREQ_SOUMISSION, &
+               RSOTAXCODTVQ OF ARREQ_SOUMISSION
+
+
+;-------------------------------------------------------------------------------
+;
+; Permet de conserver le taux de la devise à chacune des modifications.
+;
+FILE MCDEVISE    DESIGNER OPEN READ
+
+
+;-------------------------------------------------------------------------------
+;
+; Paramètres pour la compagnie consolidé(holding)
+;
+FILE MCHOLDING  REFERENCE
+  ACCESS VIA CIENMC USING "1"
+
+
+TEMPORARY T_CIECLE    CHARACTER SIZE 4 ; Popup
+TEMPORARY T_FOUCLE    CHARACTER SIZE 6 ; Popup sur les fournisseurs.
+TEMPORARY T_FOCCIECLE CHARACTER SIZE 4 ; Popup sur les fournisseurs.
+TEMPORARY T_REFCLETYP CHARACTER SIZE 1 ; Popup sur adresses achat.
+TEMPORARY T_TYPADR    CHARACTER SIZE 3 ; Popup sur adresses achat.
+TEMPORARY T_TAXCLETYP CHARACTER SIZE 1 ; Popup sur les codes de taxes
+TEMPORARY T_TAXCLECOD CHARACTER SIZE 2 ; Popup sur les codes de taxes
+TEMPORARY T_TAXMODPAT CHARACTER SIZE 5 ; Popup sur les codes de taxes
+TEMPORARY T_TAXMODTPSOLD CHARACTER SIZE 1  ; Pour diminuer le bon cumul de taxe.
+TEMPORARY T_TAXMODTVQOLD CHARACTER SIZE 1  ; Pour diminuer le bon cumul de taxe.
+TEMPORARY T_RSOPRIUNI CHARACTER SIZE 14 ; Popup sur dernier coûtant
+TEMPORARY T_PRDCLE    CHARACTER SIZE 12 ; Produit pour écran dépisteur.
+TEMPORARY T_FLGMOD       CHARACTER SIZE 1  ; Flag pour déceler s'il y eu modif.
+
+;
+; Temporaires nécessaires au calcul des taxes
+;
+USE ustaxtmp NOLIST
+
+DEFINE D_DEVCLE    CHARACTER SIZE 04 = " " &
+          IF DEVCLE OF VFOC_FOU = DEVCLE OF MCHOLDING OR &
+             0 = SIZE(TRUNCATE(FOUCLE OF ARREQ_SOUMISSION)) &
+          ELSE "/" + DEVCLE OF VFOC_FOU
+
+
+TEMPORARY T_RADCLE    INTEGER UNSIGNED SIZE  2 ; Popup sur adresses achat.
+
+;-------------------------------------------------------------------------------
+;
+USE usdrw132    NOLIST     ; Draw pour les écrans
+USE ustitstd132 NOLIST     ; En-tête pour les écrans
+USE ushilite    NOLIST     ; Hilite pour tous les écrans
+
+DRAW THIN 5,1 TO 5,132
+SKIP 
+
+TITLE &
+@IF FRANCAIS
+      " Soumission " &
+@ELSE
+      " %%% " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP
+
+ALIGN(,3,17) (,35,49)(,65,80)(,,88)
+
+FIELD PRDCLE OF ARREQUISITION &
+        DISPLAY PREDISPLAY   &
+@IF FRANCAIS
+        LABEL "Produit.....:"
+@ELSE
+        LABEL "%%%duit.....:"
+@ENDIF
+
+FIELD REQQTEREQ OF ARREQUISITION &
+        DISPLAY PREDISPLAY   &
+@IF FRANCAIS
+        LABEL "Quantité....:"
+@ELSE
+        LABEL "%%%"
+@ENDIF
+
+FIELD REQCLENUM OF ARREQUISITION &
+        DISPLAY PREDISPLAY   &
+@IF FRANCAIS
+        LABEL "Item........:"
+@ELSE
+        LABEL "%%%m........:"
+@ENDIF
+
+FIELD REQDSC OF ARREQUISITION &
+        DISPLAY PREDISPLAY
+
+
+SKIP 1 
+TITLE &
+"  No.    Fournisseur                         Adr.  Prix unitaire" &
+  AT ,02
+TITLE &
+"Commentaire                              Total          Devise" &
+  AT ,69
+
+ALIGN(2,2,3) (,,10) (,,47) (,,53) (,,69) (,,110)(,,126)
+
+CLUSTER OCCURS WITH ARREQ_SOUMISSION ID BASE 10
+
+FIELD FOUCLE OF ARREQ_SOUMISSION &
+        HIDDEN       &
+        LABEL " "    &
+        REQUIRED     &
+        LOOKUP ON VFOC_FOU &
+          MESSAGE 1355 ; Ce fournisseur n'existe pas.
+
+FIELD RADNOM OF MCREF_ADRESSE &
+        SIZE 35 &
+        DISPLAY 
+
+FIELD RADCLE OF ARREQ_SOUMISSION &
+        NOENTRY       &
+        REQUIRED      &
+        BWZ           &
+        LOOKUP ON MCREF_ADRESSE &
+          VIA   REFCIECLE, &
+                REFCLETYP, &
+                REFCLENUM, &
+                RADCLE     &
+          USING FOUCIECLE OF ARREQ_SOUMISSION, &
+                REFCLETYP OF ARREQUISITION    , &
+                FOUCLE    OF ARREQ_SOUMISSION, &
+                RADCLE    OF ARREQ_SOUMISSION  &
+          MESSAGE 1363  ; Cette adresse n'existe pas pour ce fournisseur.
+
+FIELD RSOPRIUNI    OF ARREQ_SOUMISSION 
+
+FIELD RSODSC OF ARREQ_SOUMISSION 
+
+FIELD RSOMNTTOT    OF ARREQ_SOUMISSION &
+        DISPLAY &
+        PICTURE "^^^,^^^,^^^.^^ " TRAIL "-" SIGNIF 5
+
+FIELD D_DEVCLE &
+        DISPLAY
+
+CLUSTER
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul des montants.
+;
+PROCEDURE INTERNAL CALCUL_MONTANT
+BEGIN
+  ;
+  ; Calcul du montant brut du produit
+  ;
+  LET RSOMNTTOT OF ARREQ_SOUMISSION = &
+    ROUND ( REQQTEREQ OF ARREQUISITION * &
+            RSOPRIUNI OF ARREQ_SOUMISSION /100000 )
+
+  DISPLAY RSOMNTTOT OF ARREQ_SOUMISSION
+  DISPLAY D_DEVCLE
+  LET DEVTAU OF ARREQ_SOUMISSION = DEVTAU OF MCDEVISE
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+PROCEDURE INPUT RSOPRIUNI
+BEGIN
+  ;
+  ; Popup sur le dernier coûtant du produit.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE   = T_CIECLEMNU
+    LET T_PRDCLE    = PRDCLE OF ARREQUISITION
+    LET T_RSOPRIUNI = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN ar104 MODE F PASSING T_CIECLEMNU, T_PRDCLE, T_RSOPRIUNI &
+                       WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_RSOPRIUNI)
+  END
+  ;
+  ; Force l'éxécution de la procédure EDIT si non présent sur le produit
+  ; entrepôt car ce champ est obligatoire.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT)
+  THEN LET FIELDTEXT = ASCII(RSOPRIUNI OF ARREQ_SOUMISSION,11)[1:7] + "." + &
+                       ASCII(RSOPRIUNI OF ARREQ_SOUMISSION,11)[8:4]
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Cette procédure permet de faire l'appel de la procédure de calcul des taxes.
+;
+PROCEDURE PROCESS RSOPRIUNI
+BEGIN
+  DO INTERNAL CALCUL_MONTANT
+END
+
+;-------------------------------------------------------------------------------
+;
+; Ecran de consultation (dépisteur) des fournisseurs
+;
+PROCEDURE INPUT FOUCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE    = FOUCIECLE OF ARREQUISITION
+    LET T_FOUCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_FOCCIECLE = T_CIECLEMNU
+    RUN SCREEN cp104 MODE F PASSING T_CIECLE, T_FOUCLE, T_FOCCIECLE &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_FOUCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Le fournisseur doit être Actif.
+;
+PROCEDURE EDIT FOUCLE
+BEGIN
+  IF FOUSTU OF VFOC_FOU = "I"
+  THEN ERROR 1391 ; Le fournisseur est inactif.
+
+  IF FOURTU OF VFOC_FOU = "1"
+  THEN WARNING 1392 ; Le fournisseur est présentement retenu.
+END
+;-------------------------------------------------------------------------------
+; Procédure permettant d'initialiser les informations du fournisseur sur la
+; commande.  Permet aussi de vérifier si un numéro de commande est réservé.
+;
+PROCEDURE PROCESS FOUCLE
+BEGIN
+  IF FOUTYP OF VFOC_FOU <> "D"
+  THEN BEGIN
+    LET     RADCLE     OF ARREQ_SOUMISSION = FOCADRACH OF VFOC_FOU
+    EDIT    RADCLE     OF ARREQ_SOUMISSION
+    DISPLAY RADCLE     OF ARREQ_SOUMISSION
+  END
+  ELSE LET RADCLE OF ARREQ_SOUMISSION = 0
+END
+
+;-------------------------------------------------------------------------------
+;
+; Si l'usager modifie le nom du fournisseur divers, il faut mettre à jour
+; le nom abrégé si celui-ci correspond à l'ancienne valeur.
+;
+PROCEDURE EDIT RADNOM
+BEGIN
+  IF RADNOMABR OF MCREF_ADRESSE = OLDVALUE( RADNOM OF MCREF_ADRESSE )[1:20]
+  THEN LET RADNOMABR OF MCREF_ADRESSE = RADNOM OF MCREF_ADRESSE
+END
+
+;-------------------------------------------------------------------------------
+; Ecran dépisteur dur l'adresse d'achat du fournisseur
+;
+PROCEDURE INPUT RADCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE    = FOUCIECLE OF ARREQ_SOUMISSION
+    LET T_REFCLETYP = REFCLETYP OF ARREQUISITION
+    LET T_FOUCLE    = FOUCLE    OF ARREQ_SOUMISSION
+    LET T_TYPADR    = "ACH"
+    LET T_RADCLE = 0
+    RUN SCREEN mc108 MODE F PASSING   T_CIECLE, &
+                                      T_REFCLETYP, &
+                                      T_FOUCLE, &
+                                      T_TYPADR, &
+                                      T_RADCLE  &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    IF T_RADCLE <> 0
+    THEN LET FIELDTEXT = ASCII(T_RADCLE)
+    ELSE LET FIELDTEXT = ""
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Validation que l'adresse est une adresse d'achat.
+;
+PROCEDURE EDIT RADCLE
+BEGIN
+  IF RADACHCP OF MCREF_ADRESSE <> "1"
+  THEN ERROR 1366 ; Ce n'est pas une adresse d'achat.
+END
+
+;-------------------------------------------------------------------------------
+;
+; Affiche le nom du fournisseur provenant de l'adresse (permet d'avoir le
+; nom du fournisseur divers)
+;
+PROCEDURE PROCESS RADCLE
+BEGIN
+  DISPLAY RADNOM  OF MCREF_ADRESSE
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE DESIGNER 10
+BEGIN
+  IF T_SELFOU = "0"
+  THEN BEGIN
+    ACCEPT FOUCLE OF ARREQ_SOUMISSION
+    IF FOUTYP    OF VFOC_FOU      = "D"
+    THEN BEGIN
+      ACCEPT RADNOM OF MCREF_ADRESSE
+      ;
+      ; Sous-écran pour la saisie de l'adresse.
+      ;
+      RUN SCREEN ar006e &
+                   PASSING MCREF_ADRESSE &
+                   MODE F
+    END
+    ELSE BEGIN
+      DISPLAY RADNOM    OF MCREF_ADRESSE
+      DISPLAY RADCLE    OF ARREQ_SOUMISSION
+    END
+    ACCEPT  RSOPRIUNI    OF ARREQ_SOUMISSION
+    DISPLAY RSOMNTTOT    OF ARREQ_SOUMISSION
+    DISPLAY D_DEVCLE
+    ACCEPT  RSODSC OF ARREQ_SOUMISSION
+  END
+  ELSE BEGIN
+    LET FOUCLE    OF ARREQUISITION = FOUCLE OF ARREQ_SOUMISSION
+    LET REQFLGSOU OF ARREQUISITION = "0"
+    LET REQPRIUNI OF ARREQUISITION = RSOPRIUNI OF ARREQ_SOUMISSION
+    LET RADCLE    OF ARREQUISITION = RADCLE OF ARREQ_SOUMISSION
+    RETURN
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE APPEND
+BEGIN
+  ACCEPT FOUCLE OF ARREQ_SOUMISSION
+  IF FOUTYP    OF VFOC_FOU      = "D"
+  THEN BEGIN
+    ACCEPT RADNOM OF MCREF_ADRESSE
+    ;
+    ; Sous-écran pour la saisie de l'adresse.
+    ;
+    RUN SCREEN ar006e &
+          PASSING MCREF_ADRESSE &
+          MODE E
+  END
+  ELSE BEGIN
+    DISPLAY RADNOM    OF MCREF_ADRESSE
+    DISPLAY RADCLE    OF ARREQ_SOUMISSION
+  END
+  ACCEPT  RSOPRIUNI    OF ARREQ_SOUMISSION
+  DISPLAY RSOMNTTOT    OF ARREQ_SOUMISSION
+  DISPLAY D_DEVCLE
+  ACCEPT  RSODSC OF ARREQ_SOUMISSION
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  DISPLAY PRDCLE    OF ARREQUISITION
+  DISPLAY REQCLENUM    OF ARREQUISITION
+  DISPLAY REQDSC    OF ARREQUISITION
+  DISPLAY REQQTEREQ OF ARREQUISITION
+  FOR ARREQ_SOUMISSION
+  BEGIN
+    PERFORM APPEND
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR ARREQ_SOUMISSION
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF ARREQ_SOUMISSION &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF ARREQ_SOUMISSION &
+       AND NOT NEWRECORD     OF ARREQ_SOUMISSION &
+       AND NOT DELETEDRECORD OF ARREQ_SOUMISSION &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+    ;
+    ; Mise à jour du timbre de modification si l'usager change la réquisition.
+    ;
+    IF    NOT NEWRECORD OF ARREQUISITION  &
+      AND ALTEREDRECORD OF ARREQ_SOUMISSION
+    THEN BEGIN
+      LET REQDATMOD OF ARREQUISITION  = SYSDATE
+      LET REQHREMOD OF ARREQUISITION  = SYSTIME / 10000
+      LET REQUSRMOD OF ARREQUISITION  = TZ_LOGONID
+    END
+    ;
+    ; On incrémente le numéro d'adresse pour les clients divers.
+    ;
+    IF     FOUTYP OF VFOC_FOU = "D" &
+       AND RADCLE OF ARREQ_SOUMISSION = 0
+    THEN BEGIN  
+      START TRANSACTION GEN_RAD_SEQ
+      GET MCRAD_SEQ VIA REFCIECLE, &
+                        REFCLETYP, &
+                        REFCLENUM  &
+                  USING FOUCIECLE OF ARREQUISITION, &
+                        REFCLETYP OF ARREQUISITION, &
+                        FOUCLE    OF ARREQ_SOUMISSION &
+                  OPTIONAL
+      LET REFCIECLE OF MCRAD_SEQ = FOUCIECLE OF ARREQUISITION
+      LET REFCLETYP OF MCRAD_SEQ = REFCLETYP OF ARREQUISITION
+      LET REFCLENUM OF MCRAD_SEQ = FOUCLE    OF ARREQ_SOUMISSION
+      LET RASNUMSEQ OF MCRAD_SEQ = RASNUMSEQ OF MCRAD_SEQ + 1
+      LET RADCLE    OF ARREQ_SOUMISSION = RASNUMSEQ OF MCRAD_SEQ
+      PUT MCRAD_SEQ
+      COMMIT TRANSACTION GEN_RAD_SEQ
+    END
+  END
+END
+
+BUILD
+@IF FORMAT
+********************************** Soumission **********************************
+* Produit.....: xxxxxxxxxxxx              Quantité....: xxxxxxxxx              *
+* Item........: xxxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              *
+*                                                                              *
+*  No.    Fournisseur                               Adr.    Prix unitaire      *
+*                                                                              *
+* xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxx  xxxxxxxxxxxxxxx      *
+*  Comm.:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         xxxxxxxxxxxxxxx xxxx *
+*                                                                              *
+* xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxx  xxxxxxxxxxxxxxx      *
+*  Comm.:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         xxxxxxxxxxxxxxx xxxx *
+*                                                                              *
+* xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxx  xxxxxxxxxxxxxxx      *
+*  Comm.:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         xxxxxxxxxxxxxxx xxxx *
+*                                                                              *
+* xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxx  xxxxxxxxxxxxxxx      *
+*  Comm.:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         xxxxxxxxxxxxxxx xxxx *
+********************************************************************************
+@ENDIF

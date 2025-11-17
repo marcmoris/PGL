@@ -1,0 +1,172 @@
+;/T/ Liste de vérification des mouvements d'inventaire
+;
+;/M/TRSMAG/Sylvie Chouinard/1999-09-08
+; État......... : Terminé
+; Description.. : GRA01
+;                 Le détail du rapport doit être le détail du mouvement
+;                 d'inventaire au lieu de l'imputation.
+;                 Donc, on va chercher l'info dans la table ARMOU_DETAIL
+;                 au lieu de ARMOU_IMPUTATION.
+;
+;/P/ Programmeur...: Nancy Marceau
+;    Date Création.: 24 mai 1994
+;
+;    Description...: Pour faire la vérification des lots des mouvements
+;                    d'inventaire. Cette liste peut être lancée pour les
+;                    lots journlaisés ou non.
+;
+;    Paramètres....: Compagnie          (Compagnie du menu)
+;                    Période comptable  (Obligatoire)
+;                    No lot             (Un, Plusieurs ou tous)
+;                    Mouv.non journ     (Obligatoire)
+;
+;
+;    Particularités: Pour faire la vérification des lots non journalisés, il
+;                    faut répondre "oui" pour inclure les mouvements
+;                    non journalisés.  Ainsi, tous les mouvements approuvés
+;                    apparaîtront dans la liste de vérification.
+;
+;/M/ Programmeur ...: Claudie Doyon ;
+;    Date ..........: 1999/11/03
+;    Description....: Modification de MOUDAT OF ARMOUVEMENT >= D_DATE_CRE
+;                     pour le remplcacer par
+;                     MOUDAT OF ARMOUVEMENT = D_DATE_CRE
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST   ; permet de faire les SET REPORT NOLIMIT....
+SET LOCK RECORD UPDATE
+
+RUN ar344t
+
+GLOBAL TEMPORARY G_MOUINC CHARACTER SIZE 1 PARM   ; Flag pour inclure mouvements
+                                                  ; non journalisés.
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de prendre tous les mouvements des lots demandés en
+; paramètre.
+;
+REQUEST VERIFICATION_MOUVEMENTS
+
+ACCESS ARMOUVEMENT   &
+  LINK CIECLE    OF ARMOUVEMENT   , &
+       PECCLE    OF ARMOUVEMENT   , &
+       LARCLE    OF ARMOUVEMENT     &
+    TO CIECLE                     , &
+       PECCLE                     , &
+       LARCLE                     OF ARLOT            OPTIONAL &
+
+  LINK CIECLE    OF ARMOUVEMENT   , &
+       MOUCLE    OF ARMOUVEMENT     &
+    TO CIECLE                     , &
+       MOUCLE                     OF ARMOU_DETAIL     OPTIONAL
+
+CHOOSE CIECLE    PARM, &                ; No Compagnie
+       ENTCLE    PARM, &                ; Entrepôt
+       PECCLE    PARM, &                ; Période
+       LARCLE    PARM, &                ; No lot
+       MOUSTU    PARM                   ; Statut
+
+DEFINE D_DATE_CRE INTEGER SIZE 4 = PARM
+
+; On ne prend que les mouvements journalisés et que les
+; mouvements créés après la date reçue en paramètre.
+
+SELECT ARMOUVEMENT IF LARCLE OF ARMOUVEMENT <> ""     AND &
+                      MOUDAT OF ARMOUVEMENT >= D_DATE_CRE
+
+SORT   ON LARCLE    OF ARMOUVEMENT ; No lot
+
+
+SUBFILE WAR344 KEEP INCLUDE &
+ LARDSC        OF ARLOT,        &
+ LARDATJOU     OF ARLOT,        &
+ LARNBRTRS     OF ARLOT,        &
+ LARNBRTRSVER  OF ARLOT,        &
+ LARCUMMNT     OF ARLOT,        &
+ LARCUMMNTVER  OF ARLOT,        &
+ LARNBRTRSERR  OF ARLOT,        &
+ CIECLE        OF ARMOUVEMENT,  &
+ PECCLE        OF ARMOUVEMENT,  &
+ LARCLE        OF ARMOUVEMENT,  &
+ MOUCLE        OF ARMOUVEMENT,  &
+ MOUTYP        OF ARMOUVEMENT,  &
+ MOUSTU        OF ARMOUVEMENT,  &
+ MOUDAT        OF ARMOUVEMENT,  &
+ ENTCLE        OF ARMOUVEMENT,  &
+ MOUDSC1       OF ARMOUVEMENT,  &
+ MOUDSC2       OF ARMOUVEMENT,  &
+ MOUMNTNET     OF ARMOUVEMENT,  &
+ MOUMNTDBT     OF ARMOUVEMENT,  &
+ MOUMNTCRT     OF ARMOUVEMENT,  &
+ MOUNBRITE     OF ARMOUVEMENT,  &
+ UTLCLE        OF ARMOUVEMENT,  &
+ PRDCLE        OF ARMOU_DETAIL, &
+ ENTCLE        OF ARMOU_DETAIL ALIAS PRD_ENTCLE, &
+ MODQTE        OF ARMOU_DETAIL, &
+ MODPRIUNI     OF ARMOU_DETAIL, &
+ CPTCLE        OF ARMOU_DETAIL, &
+ UNACLE        OF ARMOU_DETAIL, &
+ MODMNTNET     OF ARMOU_DETAIL, &
+ PRJCLE        OF ARMOU_DETAIL, &
+ PRACLE        OF ARMOU_DETAIL, &
+ MODCOUMYN     OF ARMOU_DETAIL
+
+;-------------------------------------------------------------------------------
+; Cette étape permet de prendre les mouvements non journalisés si l'utilisateur
+; le désire.
+;
+REQUEST MOUVEMENTS_NON_JOURNALISES
+
+ACCESS ARMOUVEMENT   &
+
+  LINK CIECLE    OF ARMOUVEMENT , &
+       MOUCLE    OF ARMOUVEMENT   &
+    TO CIECLE                   , &
+       MOUCLE                     OF ARMOU_DETAIL       OPTIONAL
+
+CHOOSE CIECLE PARM, &      ; Compagnie
+       ENTCLE PARM, &      ; Entrepôt
+       PECCLE PARM, &      ; Période
+       LARCLE ""  , &      ; Numéro de lot
+       MOUSTU PARM         ; Statut
+
+DEFINE D_DATE_CRE INTEGER SIZE 4 = PARM
+
+; On sélectionne les mouvements non journalisés et les
+; mouvements créés après la date reçue en paramètre.
+
+SELECT ARMOUVEMENT IF G_MOUINC <> "0" AND &
+                      MOUDAT OF ARMOUVEMENT >= D_DATE_CRE
+
+SORT   ON LARCLE    OF ARMOUVEMENT ; No lot
+
+OUTPUT *WAR344 ADD NOITEM
+ ITEM CIECLE     OF WAR344 FINAL  CIECLE    OF ARMOUVEMENT
+ ITEM PECCLE     OF WAR344 FINAL  PECCLE    OF ARMOUVEMENT
+ ITEM LARCLE     OF WAR344 FINAL  LARCLE    OF ARMOUVEMENT
+ ITEM MOUCLE     OF WAR344 FINAL  MOUCLE    OF ARMOUVEMENT
+ ITEM MOUTYP     OF WAR344 FINAL  MOUTYP    OF ARMOUVEMENT
+ ITEM MOUSTU     OF WAR344 FINAL  MOUSTU    OF ARMOUVEMENT
+ ITEM MOUDAT     OF WAR344 FINAL  MOUDAT    OF ARMOUVEMENT
+ ITEM ENTCLE     OF WAR344 FINAL  ENTCLE    OF ARMOUVEMENT
+ ITEM MOUDSC1    OF WAR344 FINAL  MOUDSC1   OF ARMOUVEMENT
+ ITEM MOUDSC2    OF WAR344 FINAL  MOUDSC2   OF ARMOUVEMENT
+ ITEM MOUMNTNET  OF WAR344 FINAL  MOUMNTNET OF ARMOUVEMENT
+ ITEM MOUMNTDBT  OF WAR344 FINAL  MOUMNTDBT OF ARMOUVEMENT
+ ITEM MOUMNTCRT  OF WAR344 FINAL  MOUMNTCRT OF ARMOUVEMENT
+ ITEM MOUNBRITE  OF WAR344 FINAL  MOUNBRITE OF ARMOUVEMENT
+ ITEM UTLCLE     OF WAR344 FINAL  UTLCLE    OF ARMOUVEMENT
+ ITEM PRDCLE     OF WAR344 FINAL  PRDCLE    OF ARMOU_DETAIL
+ ITEM PRD_ENTCLE OF WAR344 FINAL  ENTCLE    OF ARMOU_DETAIL
+ ITEM MODQTE     OF WAR344 FINAL  MODQTE    OF ARMOU_DETAIL
+ ITEM MODPRIUNI  OF WAR344 FINAL  MODPRIUNI OF ARMOU_DETAIL
+ ITEM CPTCLE     OF WAR344 FINAL  CPTCLE    OF ARMOU_DETAIL
+ ITEM UNACLE     OF WAR344 FINAL  UNACLE    OF ARMOU_DETAIL
+ ITEM MODMNTNET  OF WAR344 FINAL  MODMNTNET OF ARMOU_DETAIL
+ ITEM PRJCLE     OF WAR344 FINAL  PRJCLE    OF ARMOU_DETAIL
+ ITEM PRACLE     OF WAR344 FINAL  PRACLE    OF ARMOU_DETAIL
+ ITEM MODCOUMYN  OF WAR344 FINAL  MODCOUMYN OF ARMOU_DETAIL
+
+
+BUILD

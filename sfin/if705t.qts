@@ -1,0 +1,90 @@
+;/T/ 2.5.6, 2.5.7 Procédure de selection des factures à transferrer au C.A.R.
+;
+;/P/ Programmeur...: Martin Bruyère
+;    Date Création.: 1995-03-15
+;
+;    Description...: Cette procédure recherche toutes les factures qui n'on pas
+;                    été transférer au compte à recevoir
+;
+;    Paramètres....: A venir
+;
+;    Particularités: Aucune
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST   ; set process nolimit
+
+RUN if705t
+
+GLOBAL TEMPORARY G_NBRTRX    INTEGER UNSIGNED SIZE 04 INITIAL 0    ; Nbr transaction
+GLOBAL TEMPORARY G_MNT       FLOAT            SIZE 08 INITIAL 0.00 ; Montant total pour le lot
+
+GLOBAL TEMPORARY G_NUMLOT    INTEGER UNSIGNED SIZE 04 INITIAL 1    ; Numéro de lot
+
+;-------------------------------------------------------------------------------
+;
+; Recherche parmis toutes les factures toutes celles qui n'ont pas été
+; transférées au comptes à recevoir.
+;
+
+REQUEST RECHERCHE_FACTURE
+
+ACCESS PDFACTURE &
+  LINK CIECLE OF PDFACTURE, &
+       FTRNUMFAC OF PDFACTURE &
+    TO CIECLE, &
+       FTRNUMFAC OF PDLOT_FACTURE OPTIONAL
+
+CHOOSE FTRTYPFAC PARM ; Type de facture
+
+SELECT IF NOT RECORD PDLOT_FACTURE EXISTS
+
+ITEM G_NBRTRX    = G_NBRTRX    + 1
+ITEM G_MNT       = G_MNT       + FTRMNT     OF PDFACTURE
+
+SUBFILE W-IF705-FACTURE KEEP &
+  INCLUDE CIECLE OF PDFACTURE, &
+          FTRNUMFAC OF PDFACTURE
+
+;-------------------------------------------------------------------------------
+;
+; Création du lot de transfert
+;
+
+REQUEST CREATION_LOT_TRANSFERT EXECUTE IF G_NBRTRX > 0
+
+ACCESS MCHOLDING &
+  LINK "PD" TO SLOCODSEQ        OF PDSEQ_LOT OPTIONAL
+
+;
+; affectation du numéro de séqunce du numéro de lot
+;
+ITEM G_NUMLOT    INITIAL SLONUMSEQ        OF PDSEQ_LOT + 1
+
+OUTPUT PDSEQ_LOT ADD UPDATE AT FINAL ALIAS A_SLO_NEW
+  ITEM SLOCODSEQ        OF A_SLO_NEW INITIAL "PD"
+  ITEM SLONUMSEQ        OF A_SLO_NEW FINAL G_NUMLOT
+
+OUTPUT PDLOT_TRANSFERT ADD AT FINAL ALIAS A_LTR_NEW
+  ITEM LTRNUMLOT        OF A_LTR_NEW        FINAL G_NUMLOT
+  ITEM LTRSTU           OF A_LTR_NEW        = "C"
+  ITEM LTRNBRTRX        OF A_LTR_NEW        FINAL G_NBRTRX
+  ITEM LTRMNT           OF A_LTR_NEW        FINAL G_MNT
+  ITEM LTRDATCRE        OF A_LTR_NEW        = SYSDATE
+  ITEM LTRHRECRE        OF A_LTR_NEW        = SYSTIME / 10000
+  ITEM LTRUSRCRE        OF A_LTR_NEW        = LOGONID
+
+;-------------------------------------------------------------------------------
+;
+; Mise à jour des numéro de lot de transfert des factures.
+;
+
+REQUEST MAJ_FACTURE EXECUTE IF G_NBRTRX > 0
+
+ACCESS *W-IF705-FACTURE
+
+OUTPUT PDLOT_FACTURE ADD
+  ITEM LTRNUMLOT    OF PDLOT_FACTURE    FINAL G_NUMLOT
+  ITEM FTRNUMFAC    OF PDLOT_FACTURE    FINAL FTRNUMFAC    OF W-IF705-FACTURE
+
+BUILD if705t

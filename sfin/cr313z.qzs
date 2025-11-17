@@ -1,0 +1,270 @@
+;/T/ Journal de caisse-recettes
+;
+;;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur...: Alain Côté
+;    Date Création.: 29 juillet 1993
+;
+;    Description...: Impression du journal du caisse recette. Le journal
+;                    contient les encaissements de la période demandée.
+;                    On imprime que les transactions qui sont journalisées.
+;
+;    Paramètres....: Compagnie
+;                    Periode CTB (Une, Plusieurs )
+;
+;
+;
+;/V3.02.04/, Nancy Marceau, 94/06/09, (264)
+; 
+;/M/ Francois Richard, 1999-07-12
+;
+;    Ajustement pour le changement de siècle
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST
+
+ACCESS CRDEPOT &
+  ;
+  ; Pour avoir la description du compte d'encaisse.
+  ;
+  LINK LBQCPTENC OF CRDEPOT &
+    TO CPTCLE OF                 VCPT_DSC ALIAS A_CPT_ENC &
+  ;
+  ; Nom du client/employé.
+  ;
+  LINK REFCIECLE OF CRDEPOT , &
+       REFCLETYP OF CRDEPOT , &
+       REFCLENUM OF CRDEPOT  &
+    TO REFCIECLE          , &
+       REFCLETYP          , &
+       REFCLENUM OF              MCREFERENCE OPTIONAL &
+  ;
+  ; Ecriture de la transaction.
+  ;
+  LINK HISCLE OF CRDEPOT &
+    TO HISCLE OF                 MCHIS_ECR OPTIONAL &
+  ;
+  ; Description du compte venant de l'écriture.
+  ;
+  LINK CPTCLE OF MCHIS_ECR &
+    TO CPTCLE OF                 VCPT_DSC   OPTIONAL &
+  ;
+  ; Description de l'unité administrative venant de l'écriture.
+  ;
+  LINK CIECLE   OF MCHIS_ECR , &
+       UNACLE   OF MCHIS_ECR   &
+    TO CIECLE                , &
+       UNACLE OF                 MCUNITE_ADM OPTIONAL
+
+
+CHOOSE CIECLE PARM, & ; Compagnie du menu
+       PECCLE PARM    ; Période ctb
+
+
+SELECT CRDEPOT IF     DPODATJOU OF CRDEPOT <> 0 &
+                  AND DPOTYPECR OF CRDEPOT = "EN"
+
+
+
+;
+; Titre du rapport.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+             "Journal de caisse-recettes"
+@ELSE
+             "%%%Journal du caisse recette"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = " "
+
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE  7 = "CR313"
+
+;
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM
+
+;
+; Libellé de la description, on imprime le libellé s'il y a une description
+; pour la transaction.
+;
+DEFINE D_LIBDSC CHARACTER SIZE 12 = "Description:" &
+                                       IF    DPODSC1 OF CRDEPOT <> "" &
+                                          OR DPODSC2 OF CRDEPOT <> ""
+
+
+;
+; Détermine si on doit imprimer la description du nom du dépôt ou de la
+; référence.
+;
+DEFINE D_REFNOM CHARACTER SIZE 20 = REFNOMABR OF MCREFERENCE &
+                                      IF 0 = SIZE (TRUNCATE ( DPONOM OF CRDEPOT ) ) &
+                                    ELSE DPONOM OF CRDEPOT
+
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE CHARACTER SIZE 5 = "1" + PECCLE OF CRDEPOT &
+         IF PECCLE OF CRDEPOT[1:1] < "8" &
+         ELSE "0" + PECCLE OF CRDEPOT
+
+; Ajustement pour le changement de siècle
+DEFINE D_DPOCLE_TRI CHARACTER SIZE 13 = "1" + DPOCLE OF CRDEPOT &
+   IF DPOCLE OF CRDEPOT < "8" &
+   ELSE "0" + DPOCLE OF CRDEPOT
+
+SORT ON CIECLE    OF CRDEPOT     & ; Numéro de compagnie.
+     ON D_PECCLE_SIE     & ; Période ctb.
+     ON LBQCPTENC OF CRDEPOT     & ; Compte à recevoir.
+     ON D_DPOCLE_TRI             & ; Numéro d'encaissement.
+     ON CPTCLE    OF MCHIS_ECR   & ; Compte ctb
+     ON UNACLE    OF MCHIS_ECR
+
+
+;
+; Imression de l'en-tête.
+;
+USE ustit180 NOLIST
+SKIP 2&
+@IF FRANCAIS
+ TAB 001 "Période.......:"   &
+@ELSE
+ TAB 001 "Period........:"   &
+@ENDIF
+ TAB 017 PECCLE OF CRDEPOT &
+SKIP 1 &
+
+@IF FRANCAIS
+ TAB 001 "Cpt encaisse..:" &
+@ELSE
+ TAB 001 "%%%cpt encaiss:" &
+@ENDIF
+ TAB 017 LBQCPTENC OF CRDEPOT &
+ TAB 024 CPTDSC    OF A_CPT_ENC &
+@IF FRANCAIS
+ TAB 065 "Devise..:" &
+@ELSE
+ TAB 065 "Curency.:" &
+@ENDIF
+ TAB 075 DEVCLE OF A_CPT_ENC &
+SKIP 2 &
+
+ TAB 001 &
+@IF FRANCAIS
+"     No                                    Date    No                         Montant" &
+@ELSE
+"%%%  No                                    Date    No                         Montant" &
+@ENDIF
+SKIP &
+
+ TAB 001 &
+@IF FRANCAIS
+"encaissement        Client/Employé       encaissé lot   Montant reçu         encaissé              Compte                Unité administrative           Débit         Crédit    " &
+@ELSE
+"%%%aissement        Client/Employé       encaissé lot   Montant reçu         encaissé              Compte                Unité administrative           Débit         Crédit    " &
+@ENDIF
+SKIP &
+
+ TAB 001 &
+"------------ --------------------------- -------- ---- --------------     -------------- --------------------------- ----------------------------- -------------- --------------"
+
+
+
+REPORT &
+ TAB 001 DPOCLE    OF CRDEPOT     PRINT AT D_DPOCLE_TRI &
+ TAB 014 REFCLENUM OF CRDEPOT     PRINT AT D_DPOCLE_TRI &
+ TAB 021 D_REFNOM                 PRINT AT D_DPOCLE_TRI &
+ TAB 042 DPODAT    OF CRDEPOT     PRINT AT D_DPOCLE_TRI &
+ TAB 051 LCRCLE    OF CRDEPOT     PRINT AT D_DPOCLE_TRI &
+ TAB 056 DPOMNTPAM OF CRDEPOT     PRINT AT D_DPOCLE_TRI &
+ TAB 070 "/"                      PRINT AT D_DPOCLE_TRI &
+ TAB 071 DEVCLE    OF MCREFERENCE PRINT AT D_DPOCLE_TRI &
+ TAB 075 DPOMNTENC OF CRDEPOT     PRINT AT D_DPOCLE_TRI &
+ TAB 090 CPTCLE    OF MCHIS_ECR &
+ TAB 097 CPTDSCABR OF VCPT_DSC  &
+ TAB 118 UNACLE    OF MCHIS_ECR &
+ TAB 127 UNANOMABR OF MCUNITE_ADM &
+ TAB 148 HECMNTDBT OF MCHIS_ECR &
+           BWZ &
+ TAB 163 HECMNTCRT OF MCHIS_ECR &
+           BWZ
+
+
+
+FOOTING AT D_DPOCLE_TRI &
+  TAB 012 DPONOM OF CRDEPOT &
+  TAB 090 D_LIBDSC &
+  TAB 103 DPODSC1 OF CRDEPOT &
+  TAB 148 "--------------" &
+  TAB 163 "--------------" &
+SKIP &
+  TAB 103 DPODSC2 OF CRDEPOT &
+  TAB 148 HECMNTDBT OF MCHIS_ECR SUBTOTAL &
+  TAB 163 HECMNTCRT OF MCHIS_ECR SUBTOTAL &
+SKIP 2
+
+
+FOOTING AT LBQCPTENC &
+  TAB 074 "---------------" &
+SKIP &
+  TAB 066 "Total :" &
+  TAB 074 DPOMNTENC OF CRDEPOT SUBTOTAL AT D_DPOCLE_TRI &
+                               PICTURE "^^^,^^^,^^^.^^ " &
+SKIP &
+  TAB 074 "===============" &
+SKIP PAGE
+
+BUILD cr313z
+
+@IF FORMAT
+                                                                                                   1         1         1         1         1         1         1         1         1
+         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8
+123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+
+CR313                                                                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                             Page:9999
+99/99/99 HH:MM xxxxxxxxxxxx                                                   Journal de caisse-recettes
+                                                            xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+Période.......: 99-99
+Cpt encaisse..: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   Devise..: xxx
+
+     No                                    Date    No                         Montant
+encaissement        Client/Employé       encaissé lot   Montant reçu         encaissé              Compte                Unité administrative           Débit         Crédit
+------------ --------------------------- -------- ---- --------------     -------------- --------------------------- ----------------------------- -------------- --------------
+123456789012 123456 xxxxxxxxxxxxxxxxxxxx xx/xx/xx xxxx 99,999,999.99-/XXX 99,999,999.99- 123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 99,999,999.99- 99,999,999.99-
+                                                                                         123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 99,999,999.99- 99,999,999.99-
+                                                                                         123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 99,999,999.99- 99,999,999.99-
+           xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                      Description: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     -------------- --------------
+                                                                                                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     99,999,999.99- 99,999,999.99-
+
+123456789012 123456 xxxxxxxxxxxxxxxxxxxx xx/xx/xx xxxx 99,999,999.99-/XXX 99,999,999.99- 123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 99,999,999.99- 99,999,999.99-
+                                                                                         123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 99,999,999.99- 99,999,999.99-
+                                                                                         123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 99,999,999.99- 99,999,999.99-
+           xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                      Description: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     -------------- --------------
+                                                                                                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     99,999,999.99- 99,999,999.99-
+
+123456789012 123456 xxxxxxxxxxxxxxxxxxxx xx/xx/xx xxxx 99,999,999.99-/XXX 99,999,999.99- 123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 99,999,999.99- 99,999,999.99-
+                                                                                         123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 99,999,999.99- 99,999,999.99-
+                                                                                         123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 99,999,999.99- 99,999,999.99-
+           xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                      Description: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     -------------- --------------
+                                                                                                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     99,999,999.99- 99,999,999.99-
+
+123456789012 123456 xxxxxxxxxxxxxxxxxxxx xx/xx/xx xxxx 99,999,999.99-/XXX 99,999,999.99- 123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 99,999,999.99- 99,999,999.99-
+                                                                                         123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 99,999,999.99- 99,999,999.99-
+                                                                                         123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 99,999,999.99- 99,999,999.99-
+           xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                      Description: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     -------------- --------------
+                                                                                                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     99,999,999.99- 99,999,999.99-
+
+                                                                         ---------------
+                                                                 Total:  999,999,999.99-
+                                                                         ===============
+@ENDIF

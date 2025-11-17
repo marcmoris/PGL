@@ -1,0 +1,1633 @@
+;/T/ Gestion des fournisseurs
+;
+;/P/ Programmeur..: Thomas BRENNEUR
+;    Date Création: 18-Mai-1993
+;
+;    Description..: Création, maintenance et interrogation d'un fournisseur
+;
+;    Remarque.....:
+;
+;       La charte fournisseur peut :
+;
+;         - être universelle
+;           C'est à dire que le fournisseur est identique et est disponible
+;           pour toutes les compagnies. Dans ce cas, T_FOUCIECLE contient les
+;           caractères de substitution du holding.
+;
+;         - être par companie
+;           C'est à dire que chaque fournisseur appartient à une seule compagnie
+;           et si deux compagnies du holding utilisent le même fournisseur,
+;           celui-ci devra être déclaré 2 fois. dans ce cas T_FOUCIECLE contient
+;           le numéro de compagnie du menu.
+;
+;       Le type de charte de fournisseur est déterminé pae le flag
+;       HLDCHTFOU dans la table MCHOLDING.
+;
+;       Si la charte est universelle alors l'usager doit définir la liste des
+;       compagnies qui peuvent utiliser ce fournisseur ainsi que les
+;       informations qui peuvent êtres différentes entre ces compagnies
+;       (comptes, termes, adresses...)
+;
+;/M/ Adatation....: Marc Morissette 10 Novembre 1993
+;
+;    Description..: Ajout du numéro client
+;                   Ajout de l'ancient numéro de fournisseur
+;                   Ajout du code de région
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin.
+;    Date..............: 13 mars 2000.
+;    Description.......: Permettre la saisie de l'information relative au courriel - Adresse e-mail du fournisseur.
+;
+;    Référence.........: Stabilisation du module Achats/Réceptions Inventaire (Magasin) - point 20.
+;    
+;    Signet............: MP-00-03-10_S20.
+;
+;    ----------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin     
+;    Date..............: 18 février 2002
+;    Référence.........: Demande de changement D200215 - Demandeur (Josée Robitaille & Anik Lupien).
+;
+;    Signet............: MP-02-02-18_D200215.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cp001 ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             AUTOUPDATE &
+             RECEIVING T_CIECLEMNU, &
+                       T_CIENOM   , &
+                       T_PECCLEMNU, &
+                       T_PECCLECOU, &
+                       T_FOUCIECLE, &
+                       T_EMPCIECLE
+
+USE ussectmp  NOLIST
+    "CP001"
+
+USE cp001.hlp NOLIST
+
+USE usactecr NOLIST
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Informations par compagnies" ACTION DESIGNER D001
+  MENUITEM LABEL "Factures                   " ACTION DESIGNER D002
+  MENUITEM LABEL "Paiements                  " ACTION DESIGNER D003
+  MENUITEM LABEL "Solde par compagnies       " ACTION DESIGNER D004
+  MENUITEM LABEL "Mémos                      " ACTION DESIGNER D005
+  MENUITEM LABEL "Adresse Supplémentaires    " ACTION DESIGNER D006
+  MENUITEM LABEL "Contacts                   " ACTION DESIGNER D007
+  MENUITEM LABEL "Achats par période         " ACTION DESIGNER D008
+  MENUITEM LABEL "Achats toutes compagnies   " ACTION DESIGNER D009
+  MENUITEM LABEL "Vérification               " ACTION DESIGNER D010
+@ELSE
+ACTIONMENU LABEL "Subscreens"
+  MENUITEM LABEL "%%%Informations par compagnies" ACTION DESIGNER D001
+  MENUITEM LABEL "%%%Factures                   " ACTION DESIGNER D002
+  MENUITEM LABEL "%%%Paiements                  " ACTION DESIGNER D003
+  MENUITEM LABEL "%%%Solde par compagnies       " ACTION DESIGNER D004
+  MENUITEM LABEL "%%%Mémos                      " ACTION DESIGNER D005
+  MENUITEM LABEL "%%%Adresse Supplémentaires    " ACTION DESIGNER D006
+  MENUITEM LABEL "%%%Contacts                   " ACTION DESIGNER D007
+  MENUITEM LABEL "%%%Achats par période         " ACTION DESIGNER D008
+  MENUITEM LABEL "%%%Achats toutes compagnies   " ACTION DESIGNER D009
+  MENUITEM LABEL "%%%Vérification               " ACTION DESIGNER D010
+@ENDIF
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie du menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; Compagnie du menu
+TEMPORARY T_PECCLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Période du menu
+TEMPORARY T_PECCLECOU CHARACTER SIZE 4  RESET AT STARTUP ; Période courante
+TEMPORARY T_FOUCIECLE CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie du fournisseur
+TEMPORARY T_EMPCIECLE CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie de l'employé
+
+TEMPORARY T_FLGDEL    CHARACTER        SIZE 1 ; Flag pour le sous-écran de
+                                              ; destruction
+TEMPORARY T_FLGREF    CHARACTER        SIZE 1 ; Flag pour le sous-écran de
+                                              ; destruction
+
+DEFINE    DZ_CIECLE   CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE    DZ_CIENOM   CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+
+FILE CPFOURNISSEUR    PRIMARY
+
+  ACCESS  VIA     FOUCIECLE, &
+                  FOUCLE &
+          USING   T_FOUCIECLE, &
+                  FOUCLE OF CPFOURNISSEUR &
+          REQUEST FOUCLE &
+          ORDERBY FOUCIECLE , &
+                  FOUCLE
+
+  ACCESS  VIA     FOUCIECLE, &
+                  FOUCLEANC &
+          USING   T_FOUCIECLE, &
+                  FOUCLEANC OF CPFOURNISSEUR &
+          REQUEST FOUCLEANC &
+          ORDERBY FOUCIECLE , &
+                  FOUCLE
+
+  ACCESS  VIA     FOUCIECLE &
+          USING   T_FOUCIECLE &
+          ORDERBY FOUCIECLE , &
+                  FOUCLE
+
+  ;
+  ; Initialisation des types de taxes et du type de référence (il ne sont là
+  ; que pour faciliter le traitement).
+  ;
+  ; Par défaut :
+  ;     .Le fournisseur est de type régulier (R)
+  ;     .Son statut est actif (A).
+  ;     .Il n'est pas retenu
+  ;     .Son numéro de compagnie est en fonction de la charte (universelle
+  ;      ou par compagnie)
+  ;
+  ITEM FOUREFTYP    OF CPFOURNISSEUR INITIAL "F"
+  ITEM CLICLE       OF CPFOURNISSEUR INITIAL "      "
+  ITEM FOUTYP       OF CPFOURNISSEUR INITIAL "R"
+  ITEM FOUSTU       OF CPFOURNISSEUR INITIAL "A"
+  ITEM FOURTU       OF CPFOURNISSEUR INITIAL "0"
+  ITEM FOUCIECLE    OF CPFOURNISSEUR INITIAL T_FOUCIECLE
+  ITEM FOUDATCRE    OF CPFOURNISSEUR INITIAL SYSDATE
+  ITEM FOUHRECRE    OF CPFOURNISSEUR INITIAL SYSTIME / 10000
+  ITEM FOUUSRCRE    OF CPFOURNISSEUR INITIAL LOGONID
+
+;-------------------------------------------------------------------------------
+;
+; Table d'adresse générale
+;
+FILE MCREF_ADRESSE    SECONDARY &
+                      NOITEM &
+                      NODELETE
+
+  ACCESS  VIA   REFCIECLE, &
+                REFCLETYP, &
+                REFCLENUM, &
+                RADCLE &
+          USING FOUCIECLE OF CPFOURNISSEUR, &
+                FOUREFTYP OF CPFOURNISSEUR, &
+                FOUCLE    OF CPFOURNISSEUR, &
+                1
+
+  ;
+  ; Lors de la création d'un fournisseur on créée une nouvelle
+  ; adresse. Sauf dans le cas d'un fournisseur divers.
+  ;
+  ITEM REFCIECLE  OF MCREF_ADRESSE  INITIAL FOUCIECLE OF CPFOURNISSEUR &
+                                            IF FOUTYP OF CPFOURNISSEUR <> "D"
+  ITEM REFCLETYP  OF MCREF_ADRESSE  INITIAL FOUREFTYP OF CPFOURNISSEUR &
+                                            IF FOUTYP OF CPFOURNISSEUR <> "D"
+  ITEM REFCLENUM  OF MCREF_ADRESSE  INITIAL FOUCLE    OF CPFOURNISSEUR &
+                                            IF FOUTYP OF CPFOURNISSEUR <> "D"
+  ITEM RADCLE     OF MCREF_ADRESSE  INITIAL 1 &
+                                            IF FOUTYP OF CPFOURNISSEUR <> "D"
+
+  ITEM RADNOM     OF MCREF_ADRESSE FINAL    FOUNOM    OF CPFOURNISSEUR &
+                                            IF FOUTYP OF CPFOURNISSEUR <> "D"
+  ITEM RADNOMABR  OF MCREF_ADRESSE FINAL    FOUNOMABR OF CPFOURNISSEUR &
+                                            IF FOUTYP OF CPFOURNISSEUR <> "D"
+  ITEM RADPAMCP   OF MCREF_ADRESSE FINAL   "1" &
+                                            IF FOUTYP OF CPFOURNISSEUR <> "D"
+  ITEM RADACHCP   OF MCREF_ADRESSE FINAL   "1" &
+                                            IF FOUTYP OF CPFOURNISSEUR <> "D"
+  ITEM RADRETCP   OF MCREF_ADRESSE FINAL   "1" &
+                                            IF FOUTYP OF CPFOURNISSEUR <> "D"
+
+;-------------------------------------------------------------------------------
+;
+; Table des contacts du fournisseur
+;
+FILE CPFOU_CONTACT    SECONDARY &
+                      NOITEM &
+                      NODELETE
+
+  ACCESS  VIA   FOUCIECLE, &
+                FOUCLE   , &
+                CTFCLE     &
+          USING FOUCIECLE OF CPFOURNISSEUR, &
+                FOUCLE    OF CPFOURNISSEUR, &
+                1
+
+  ;
+  ; Lors de la création d'un fournisseur on crée un contact pour ce
+  ; fournisseur.
+  ;
+  ITEM FOUCIECLE  OF CPFOU_CONTACT  INITIAL FOUCIECLE OF CPFOURNISSEUR &
+                                            IF FOUTYP OF CPFOURNISSEUR <> "D"
+  ITEM FOUCLE     OF CPFOU_CONTACT  INITIAL FOUCLE    OF CPFOURNISSEUR &
+                                            IF FOUTYP OF CPFOURNISSEUR <> "D"
+  ITEM CTFCLE     OF CPFOU_CONTACT  INITIAL 1 &
+                                            IF FOUTYP OF CPFOURNISSEUR <> "D"
+
+;-------------------------------------------------------------------------------
+;
+;
+; l'adresse ou le contact.
+;
+  ITEM FOUDATMOD OF CPFOURNISSEUR FINAL   SYSDATE        &
+                                        IF NOT NEWRECORD OF CPFOURNISSEUR AND &
+                                           ( ALTEREDRECORD OF CPFOURNISSEUR OR &
+                                             ALTEREDRECORD OF CPFOU_CONTACT OR &
+                                             ALTEREDRECORD OF MCREF_ADRESSE )
+  ITEM FOUHREMOD OF CPFOURNISSEUR FINAL   SYSTIME / 10000 &
+                                        IF NOT NEWRECORD OF CPFOURNISSEUR AND &
+                                           ( ALTEREDRECORD OF CPFOURNISSEUR      OR &
+                                             ALTEREDRECORD OF CPFOU_CONTACT OR &
+                                             ALTEREDRECORD OF MCREF_ADRESSE )
+  ITEM FOUUSRMOD OF CPFOURNISSEUR FINAL   LOGONID         &
+                                        IF NOT NEWRECORD OF CPFOURNISSEUR AND &
+                                           ( ALTEREDRECORD OF CPFOURNISSEUR      OR &
+                                             ALTEREDRECORD OF CPFOU_CONTACT OR &
+                                             ALTEREDRECORD OF MCREF_ADRESSE )
+
+;
+; Maintenance de la table MCREFERENCE pour le fournisseur.
+;
+FILE MCREFERENCE      SECONDARY &
+                      NOITEM    &
+                      NEED 1    &
+                      NODELETE
+ ACCESS VIA   REFCIECLE, &
+              REFCLETYP, &
+              REFCLENUM  &
+        USING FOUCIECLE OF CPFOURNISSEUR , &
+              FOUREFTYP OF CPFOURNISSEUR , &
+              FOUCLE    OF CPFOURNISSEUR
+
+  ITEM REFCIECLE OF MCREFERENCE FINAL FOUCIECLE OF CPFOURNISSEUR
+  ITEM REFCLETYP OF MCREFERENCE FINAL FOUREFTYP OF CPFOURNISSEUR
+  ITEM REFCLENUM OF MCREFERENCE FINAL FOUCLE    OF CPFOURNISSEUR
+  ITEM REFNOM    OF MCREFERENCE FINAL FOUNOM    OF CPFOURNISSEUR
+  ITEM REFNOMABR OF MCREFERENCE FINAL FOUNOMABR OF CPFOURNISSEUR
+  ITEM REFADRPAM OF MCREFERENCE FINAL 0
+  ITEM DEVCLE    OF MCREFERENCE FINAL DEVCLE    OF CPFOURNISSEUR
+  ITEM REFSTU    OF MCREFERENCE FINAL FOUSTU    OF CPFOURNISSEUR
+  ITEM REFCAT    OF MCREFERENCE FINAL FOUCAT    OF CPFOURNISSEUR
+  ITEM REFFOURTU OF MCREFERENCE FINAL FOURTU    OF CPFOURNISSEUR
+
+;
+; Destruction des contacts.
+;
+FILE CPFOU_CONTACT    DELETE &
+                      ALIAS A_CTF_DELETE &
+                      NOITEM
+  ACCESS VIA FOUCIECLE, &
+             FOUCLE     &
+         USING FOUCIECLE OF CPFOURNISSEUR , &
+               FOUCLE    OF CPFOURNISSEUR
+
+;
+; Destruction des adresses du fournisseur.
+;
+FILE MCREF_ADRESSE    DELETE &
+                      ALIAS A_RAD_DELETE &
+                      NOITEM
+  ACCESS  VIA   REFCIECLE , &
+                REFCLETYP , &
+                REFCLENUM   &
+          USING FOUCIECLE OF CPFOURNISSEUR , &
+                FOUREFTYP OF CPFOURNISSEUR , &
+                FOUCLE    OF CPFOURNISSEUR
+
+
+FILE CPREGION REFERENCE
+  ACCESS VIA REGCLE &
+         USING RADREG OF MCREF_ADRESSE
+
+TEMPORARY T_RADREG CHARACTER SIZE 3  ; Pop-up sur les régions
+
+;-------------------------------------------------------------------------------
+;
+; Recherche de la description de la devise du fournisseur
+;
+FILE VDEV_DSC         REFERENCE
+
+  ACCESS  VIA   DEVCLE &
+          USING DEVCLE OF CPFOURNISSEUR
+
+;-------------------------------------------------------------------------------
+;
+; Recherche si le client est déjà référencé pour un autre fournisseur
+;
+FILE MCREF_SOLDE DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+; Mettre à jour la table client avec le nouveau fournisseur.
+;
+FILE CRCLIENT DESIGNER
+
+TEMPORARY T_CLINO CHARACTER SIZE 6
+
+;-------------------------------------------------------------------------------
+;
+; Validation du statut du fournisseur et lecture de sa description
+;
+DEFINE    D_FOUSTU CHARACTER SIZE 16 = "FOUSTU"
+TEMPORARY T_FOUSTU CHARACTER SIZE 4
+
+FILE VCBI_DSC         REFERENCE &
+                      ALIAS VCBI_DSC_FOUSTU
+
+  ACCESS  VIA   XELNOM, &
+                CBICLE &
+          USING D_FOUSTU, &
+                FOUSTU OF CPFOURNISSEUR
+
+;-------------------------------------------------------------------------------
+;
+; Validation de la langue du fournisseur et lecture de sa description
+;
+DEFINE    D_FOULNG CHARACTER SIZE 16 = "FOULNG"
+TEMPORARY T_FOULNG CHARACTER SIZE 4
+
+FILE VCBI_DSC         REFERENCE &
+                      ALIAS VCBI_DSC_FOULNG
+
+  ACCESS  VIA   XELNOM, &
+                CBICLE &
+          USING D_FOULNG, &
+                FOULNG OF CPFOURNISSEUR
+
+;-------------------------------------------------------------------------------
+;
+; Validation du type du fournisseur et lecture de sa description
+;
+DEFINE    D_FOUTYP CHARACTER SIZE 16 = "FOUTYP"
+TEMPORARY T_FOUTYP CHARACTER SIZE 4
+
+FILE VCBI_DSC         REFERENCE &
+                      ALIAS VCBI_DSC_FOUTYP
+
+  ACCESS  VIA   XELNOM, &
+                CBICLE &
+          USING D_FOUTYP, &
+                FOUTYP OF CPFOURNISSEUR
+
+;-------------------------------------------------------------------------------
+;
+; Validation de la catégorie du fournisseur et lecture de sa description
+;
+DEFINE    D_FOUCAT CHARACTER SIZE 16 = "FOUCAT"
+TEMPORARY T_FOUCAT CHARACTER SIZE 4
+
+FILE VCBI_DSC         REFERENCE &
+                      ALIAS VCBI_DSC_FOUCAT
+
+  ACCESS  VIA   XELNOM, &
+                CBICLE &
+          USING D_FOUCAT, &
+                FOUCAT OF CPFOURNISSEUR
+
+;-------------------------------------------------------------------------------
+;
+; Validation de l'existance de la compagnie du fournisseur interne
+;
+FILE MCCOMPAGNIE      REFERENCE
+
+  ACCESS  VIA   CIECLE &
+          USING FOUCIEINT OF CPFOURNISSEUR
+
+;-------------------------------------------------------------------------------
+;
+; Lecture des paramètres de l'application
+;
+
+FILE MCHOLDING        REFERENCE
+  ACCESS VIA CIENMC USING "1"
+
+TEMPORARY T_HLDCHTFOU CHARACTER SIZE 1 INITIAL HLDCHTFOU
+
+TEMPORARY T_CLICIECLE CHARACTER SIZE 4 RESET AT STARTUP ; Compagnie du client.
+
+;
+; Validation du numéro de client et on a besoin de certaines informations sur
+; le client , comme les termes d'encaissements, le statut, le type...
+;
+FILE VCLC_CLI         REFERENCE
+  ACCESS VIA CLICIECLE, &
+             CLICLE   , &
+             CIECLE     &
+         USING T_CLICIECLE,&
+               CLICLE OF CPFOURNISSEUR,&
+               T_CIECLEMNU
+
+TEMPORARY T_CLICLE    CHARACTER SIZE  6 ; Popup sur les clients
+
+
+;-------------------------------------------------------------------------------
+; MP-02-02-18_D200215.
+
+FILE MCCHARTE_UNA     REFERENCE
+  ACCESS VIA CPTCLE, &
+             CIECLE, &
+             UNACLE &
+         USING CPTCLE OF CPFOURNISSEUR, &
+               T_CIECLEMNU            , &
+               UNACLE OF CPFOURNISSEUR
+
+
+FILE MCUNITE_ADM      REFERENCE &
+                      OCCURS WITH CPFOURNISSEUR
+  ACCESS VIA CIECLE, &
+             UNACLE  &
+         USING T_CIECLEMNU, &
+               UNACLE OF CPFOURNISSEUR
+
+
+FILE VCPT_DSC         REFERENCE &
+                      OCCURS WITH CPFOURNISSEUR
+  ACCESS VIA CPTCLE &
+         USING CPTCLE OF CPFOURNISSEUR
+
+;-------------------------------------------------------------------------------
+;
+; Clés de recherche pour les popup de consultations et les sous écrans
+;
+;
+TEMPORARY T_CIEINT    CHARACTER SIZE 4 ; Compagnie interne
+TEMPORARY T_DEVCLE    CHARACTER SIZE 3 ; Code de devise
+TEMPORARY T_FOUCLE    CHARACTER SIZE 6 ; Code de devise
+
+;-------------------------------------------------------------------------------
+; MP-02-02-18_D200215.
+
+TEMPORARY T_CPTCLE    CHARACTER SIZE 6 ; Popup sur les comptes
+TEMPORARY T_PECCLE    CHARACTER SIZE 4 ; Popup sur les comptes et unité adm.
+TEMPORARY T_CPTTYP    CHARACTER SIZE 1 ; Popup sur les comptes
+TEMPORARY T_CPTCAT    CHARACTER SIZE 8 ; Popup sur les comptes
+TEMPORARY T_UNACLE    CHARACTER SIZE 8 ; Popup sur les unités adm.
+
+TEMPORARY T_CPTPECDEBI_SIE  CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+TEMPORARY T_CPTPECDEBA_SIE  CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+TEMPORARY T_PECCLE_SIE2     CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+TEMPORARY T_CCUPECDEBI_SIE1 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+TEMPORARY T_CCUPECDEBA_SIE1 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+TEMPORARY T_PECCLE_SIE1     CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+;-------------------------------------------------------------------------------
+
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Gestion des fournisseurs " &
+@ELSE
+      " Suppliers management " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST
+
+;-------------------------------------------------------------------------------
+
+ALIGN (3,3,19) (,39,55) (,,57)
+
+FIELD FOUCLE OF CPFOURNISSEUR &
+label "Fournisseur...:" &
+      HIDDEN ID 05 &
+      REQUIRED NOCHANGE &
+      LOOKUP NOTON CPFOURNISSEUR &
+        VIA   FOUCIECLE, &
+              FOUCLE &
+        USING FOUCIECLE OF CPFOURNISSEUR, &
+              FOUCLE OF CPFOURNISSEUR &
+        MESSAGE 416 ; Ce fournisseur existe deja
+
+FIELD FOUSTU OF CPFOURNISSEUR &
+label "Statut........:"&
+      HIDDEN ID SAME &
+      LOOKUP ON VCBI_DSC_FOUSTU &
+        VIA   XELNOM, &
+              CBICLE &
+        USING D_FOUSTU, &
+              FOUSTU OF CPFOURNISSEUR &
+        MESSAGE 417 ; Ce statut est inexistant
+
+FIELD CBIDSC OF VCBI_DSC_FOUSTU DISPLAY SIZE 20
+
+FIELD FOUCLEANC OF CPFOURNISSEUR DISPLAY
+
+FIELD FOULNG OF CPFOURNISSEUR &
+label "Langue........:"&
+      HIDDEN ID SAME &
+      LOOKUP ON VCBI_DSC_FOULNG &
+        VIA   XELNOM, &
+              CBICLE &
+        USING D_FOULNG, &
+              FOUSTU OF CPFOURNISSEUR &
+        MESSAGE 439 ; Ce code est invalide.
+
+FIELD CBIDSC OF VCBI_DSC_FOULNG DISPLAY SIZE 20
+
+SKIP
+
+ALIGN (3,3,19) (,,21) (,39,55) (,,60)
+
+FIELD FOUTYP OF CPFOURNISSEUR &
+label "Type..........:"&
+      HIDDEN ID 10 &
+      NOCHANGE &
+      LOOKUP ON VCBI_DSC_FOUTYP &
+        VIA   XELNOM, &
+              CBICLE &
+        USING D_FOUTYP, &
+              FOUTYP OF CPFOURNISSEUR &
+        MESSAGE 567 ; Ce type de fournisseur n'existe pas
+
+FIELD CBIDSC OF VCBI_DSC_FOUTYP  DISPLAY SIZE 17
+
+FIELD FOUCIEINT OF CPFOURNISSEUR &
+label "Cie interne...:"&
+      HIDDEN ID SAME &
+      REQUIRED NOCHANGE &
+      IF FOUTYP OF CPFOURNISSEUR = "I" &
+      LOOKUP ON MCCOMPAGNIE &
+        VIA   CIECLE &
+        USING FOUCIEINT OF CPFOURNISSEUR &
+        MESSAGE 402 ; cette compagnie est inexistante
+
+FIELD CIENOMABR OF MCCOMPAGNIE DISPLAY SIZE 19 &
+label "Nom abrégé....:"
+SKIP TO GROUP 3
+
+FIELD CLICLE OF CPFOURNISSEUR &
+label "Client........:"&
+  HIDDEN ID SAME
+
+ALIGN (3,3,19)
+
+FIELD FOUNOM OF CPFOURNISSEUR &
+label "Nom...........:"&
+      HIDDEN ID 15 &
+      REQUIRED
+
+ALIGN (3,3,19) (,41,55) (,,64)
+FIELD FOUNOMABR OF CPFOURNISSEUR &
+label "Nom abrégé....:"&
+      HIDDEN ID SAME &
+      DEFAULT FOUNOM OF CPFOURNISSEUR
+
+; ------------------------------------------------------------------------------
+; MP-02-02-18_D200215.
+
+FIELD UNACLE       OF CPFOURNISSEUR &
+      HIDDEN ID 17                  &
+      LABEL "Unité/compte:"         &
+      LOOKUP ON MCUNITE_ADM MESSAGE 666 ; Ce numéro d'unité adm. n'existe pas.
+
+FIELD CPTCLE       OF CPFOURNISSEUR &
+      HIDDEN ID SAME                &
+      NOLABEL                       
+
+; ------------------------------------------------------------------------------
+
+SKIP 1
+
+ALIGN (3,3,19) (,,23) (,39,55) (,,60)
+
+FIELD DEVCLE OF CPFOURNISSEUR &
+label "Code devise...:"&
+      HIDDEN ID 20 &
+      NOCHANGE DEFAULT DEVCLE OF MCHOLDING &
+      LOOKUP ON VDEV_DSC &
+        VIA   DEVCLE &
+        USING DEVCLE OF CPFOURNISSEUR &
+        MESSAGE 418 ; Cette devise est inexistante
+
+FIELD DEVDSC OF VDEV_DSC &
+      DISPLAY
+
+FIELD FOUCAT OF CPFOURNISSEUR &
+label "Catégorie.....:"&
+      HIDDEN ID SAME &
+      LOOKUP ON VCBI_DSC_FOUCAT &
+        VIA   XELNOM, &
+              CBICLE &
+        USING D_FOUCAT, &
+              FOUCAT OF CPFOURNISSEUR &
+        MESSAGE 409 ; cette categorie est inexistante
+
+FIELD CBIDSC OF VCBI_DSC_FOUCAT &
+      DISPLAY SIZE 19
+
+SKIP
+
+ALIGN (3,3,19)
+
+FIELD RADADR1 OF MCREF_ADRESSE &
+label "Adresse.......:"&
+      HIDDEN ID 25 &
+      REQUIRED &
+      IF FOUTYP OF CPFOURNISSEUR <> "D"
+
+FIELD RADADR2 OF MCREF_ADRESSE &
+      HIDDEN ID SAME &
+      NOLABEL &
+      IF FOUTYP OF CPFOURNISSEUR <> "D"
+
+FIELD RADADR3 OF MCREF_ADRESSE &
+      HIDDEN ID SAME &
+      NOLABEL &
+      IF FOUTYP OF CPFOURNISSEUR <> "D"
+
+FIELD RADADR4 OF MCREF_ADRESSE &
+      HIDDEN ID SAME &
+      NOLABEL &
+      IF FOUTYP OF CPFOURNISSEUR <> "D"
+
+SKIP TO LINE 15
+ALIGN (,60,67)
+
+FIELD RADCP OF MCREF_ADRESSE &
+      HIDDEN ID SAME &
+      IF FOUTYP OF CPFOURNISSEUR <> "D" &
+@IF FRANCAIS
+      LABEL "C.P..:"
+@ELSE
+      LABEL "P.C..:"
+@ENDIF
+
+ALIGN (,59,67)
+FIELD RADREG OF MCREF_ADRESSE &
+      HIDDEN ID SAME &
+      IF FOUTYP OF CPFOURNISSEUR <> "D" &
+      LOOKUP ON CPREGION  &
+        VIA REGCLE    &
+        USING RADREG OF MCREF_ADRESSE &
+      MESSAGE 580     & ; Cette région n'existe pas
+
+@IF FRANCAIS
+      LABEL "Région:"
+@ELSE
+      LABEL "%%%%%% "
+@ENDIF
+
+SKIP TO LINE 13
+
+ALIGN (,60,67)
+
+FIELD RADTEL OF MCREF_ADRESSE &
+      HIDDEN ID SAME &
+      IF FOUTYP OF CPFOURNISSEUR <> "D" &
+@IF FRANCAIS
+      LABEL "Tél..:"
+@ELSE
+      LABEL "Tel..:"
+@ENDIF
+
+FIELD RADFAX OF MCREF_ADRESSE &
+      HIDDEN ID SAME &
+      IF FOUTYP OF CPFOURNISSEUR <> "D" &
+@IF FRANCAIS
+      LABEL "Fax..:"
+@ELSE
+      LABEL "Fax..:"
+@ENDIF
+
+SKIP TO LINE 17
+
+ALIGN (3,3,19) (,40,46) (,60,67)
+
+FIELD CTFNOM OF CPFOU_CONTACT &
+label "Contact.......:"&
+      HIDDEN ID 30 &
+      IF FOUTYP OF CPFOURNISSEUR <> "D"
+
+FIELD CTFTEL OF CPFOU_CONTACT &
+      HIDDEN ID SAME &
+      IF FOUTYP OF CPFOURNISSEUR <> "D" &
+@IF FRANCAIS
+      LABEL "Tél.:"
+@ELSE
+      LABEL "Tel.:"
+@ENDIF
+
+FIELD CTFTELPOS OF CPFOU_CONTACT &
+      HIDDEN ID SAME &
+      IF FOUTYP OF CPFOURNISSEUR <> "D" &
+@IF FRANCAIS
+      LABEL "Poste:"
+@ELSE
+      LABEL "Poste:"
+@ENDIF
+
+SKIP
+
+FIELD CTFTIT OF CPFOU_CONTACT &
+label "Titre contact :"&
+      HIDDEN ID SAME &
+      IF FOUTYP OF CPFOURNISSEUR <> "D"
+
+FIELD CTFFAX OF CPFOU_CONTACT &
+      HIDDEN ID SAME &
+      IF FOUTYP OF CPFOURNISSEUR <> "D" &
+@IF FRANCAIS
+      LABEL "Fax.:"
+@ELSE
+      LABEL "Fax.:"
+@ENDIF
+
+FIELD CTFTELCEL OF CPFOU_CONTACT &
+      HIDDEN ID SAME &
+      IF FOUTYP OF CPFOURNISSEUR <> "D" &
+@IF FRANCAIS
+      LABEL "Cell.:"
+@ELSE
+      LABEL "Cell.:"
+@ENDIF
+
+SKIP 
+
+; ----------------------------------
+; MP-00-03-10_S20.
+
+FIELD FOUCOURRIEL OF CPFOURNISSEUR & 
+      HIDDEN ID 33                 &
+      LABEL "Courriel(mail):"      
+SKIP 
+
+; ----------------------------------
+
+ALIGN (3,3,19)
+
+FIELD FOUDATOUV OF CPFOURNISSEUR  FORMAT YYYYMMDD PATTERN "####/##/##" &
+label "Date ouverture:"&
+      HIDDEN ID 35 &
+      DEFAULT SYSDATE
+
+FIELD FOUDATFER OF CPFOURNISSEUR  FORMAT YYYYMMDD PATTERN "####/##/##"&
+label "Date fermeture:"&
+      HIDDEN ID 40 &
+      NOENTRY
+
+FIELD FOURTU OF CPFOURNISSEUR &
+label "Retenu........:"&
+      HIDDEN ID 45 &
+      SIZE 3 &
+      IF FOUTYP OF CPFOURNISSEUR <> "D" &
+      NOENTRY
+
+SUBSCREEN cp001a &
+          HIDDEN ID 60 &
+          NOLABEL &
+          AUTO &
+          PASSING CPFOURNISSEUR, &
+                  CPFOU_CONTACT, &
+                  MCREF_ADRESSE, &
+                  T_CIECLEMNU  , &
+                  T_CIENOM     , &
+                  T_HLDCHTFOU    &
+          MODE SAME
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès pour l'écran par son code.
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+  IF HLDCHTCLI OF MCHOLDING = "1"
+  THEN LET T_CLICIECLE = T_CIECLEMNU
+  ELSE LET T_CLICIECLE = HLDCHRSUB OF MCHOLDING
+END
+
+;-------------------------------------------------------------------------------
+;
+; Popup sur le statut du fournisseur
+;
+PROCEDURE INPUT FOUSTU
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_FOUSTU = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_FOUSTU, T_FOUSTU
+    LET FIELDTEXT = TRUNCATE(T_FOUSTU)
+  END
+END
+
+PROCEDURE PROCESS FOUSTU
+BEGIN
+  IF FOUSTU OF CPFOURNISSEUR = "I"
+  THEN ACCEPT FOUDATFER OF CPFOURNISSEUR
+  ELSE BEGIN
+    LET FOUDATFER OF CPFOURNISSEUR = 0
+    DISPLAY FOUDATFER OF CPFOURNISSEUR
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Popup sur la langue du fournisseur, initialisation des valeurs par défaut,
+; et saisie de la date de fermeture si on inactive le fournisseur.
+;
+PROCEDURE INPUT FOULNG
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_FOULNG = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_FOULNG, T_FOULNG
+    LET FIELDTEXT = TRUNCATE(T_FOULNG)
+  END
+  IF      0 = SIZE (TRUNCATE(FIELDTEXT)) &
+     AND  0 = SIZE (TRUNCATE(FOULNG OF CPFOURNISSEUR))
+  THEN BEGIN
+@IF FRANCAIS
+    LET FIELDTEXT = "F"
+@ELSE
+    LET FIELDTEXT = "E"
+@ENDIF
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Popup sur le type de fournisseur et initialisation de la compagnie si
+; celui-ci n'est pas de type interne.
+;
+PROCEDURE INPUT FOUTYP
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_FOUTYP = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_FOUTYP, T_FOUTYP
+    LET FIELDTEXT = TRUNCATE(T_FOUTYP)
+  END
+END
+
+PROCEDURE PROCESS FOUTYP
+BEGIN
+  IF FOUTYP OF CPFOURNISSEUR <> "I"
+  THEN LET FOUCIEINT OF CPFOURNISSEUR = " "
+  IF FOUTYP OF CPFOURNISSEUR <> "D"
+  THEN
+    BEGIN
+      ;
+      ; Initialisation de la clée de l'adresse et des contacts des
+      ; fournisseurs qui ne sont pas de type DIVERS
+      ;
+      LET REFCIECLE OF MCREF_ADRESSE = FOUCIECLE OF CPFOURNISSEUR
+      LET REFCLETYP OF MCREF_ADRESSE = FOUREFTYP OF CPFOURNISSEUR
+      LET REFCLENUM OF MCREF_ADRESSE = FOUCLE    OF CPFOURNISSEUR
+      LET RADCLE    OF MCREF_ADRESSE = 1
+      LET FOUCIECLE OF CPFOU_CONTACT = FOUCIECLE OF CPFOURNISSEUR
+      LET FOUCLE    OF CPFOU_CONTACT = FOUCLE    OF CPFOURNISSEUR
+      LET CTFCLE    OF CPFOU_CONTACT = 1
+    END
+  ELSE
+    BEGIN
+      ;
+      ; On efface l'adresse et le contact si l'usager décide de changer le
+      ; type de fournisseur en cours de saisie.
+      ;
+      LET RADADR1 OF MCREF_ADRESSE =""
+      LET RADADR2 OF MCREF_ADRESSE =""
+      LET RADADR3 OF MCREF_ADRESSE =""
+      LET RADADR4 OF MCREF_ADRESSE =""
+      LET RADTEL  OF MCREF_ADRESSE =""
+      LET RADFAX  OF MCREF_ADRESSE =""
+      LET RADCP   OF MCREF_ADRESSE =""
+      LET CTFNOM     OF CPFOU_CONTACT =""
+      LET CTFTEL     OF CPFOU_CONTACT =""
+      LET CTFTELPOS  OF CPFOU_CONTACT =""
+      LET CTFTIT     OF CPFOU_CONTACT =""
+      LET CTFFAX     OF CPFOU_CONTACT =""
+      LET CTFTELCEL  OF CPFOU_CONTACT =""
+
+      DISPLAY RADADR1 OF MCREF_ADRESSE
+      DISPLAY RADADR2 OF MCREF_ADRESSE
+      DISPLAY RADADR3 OF MCREF_ADRESSE
+      DISPLAY RADADR4 OF MCREF_ADRESSE
+      DISPLAY RADTEL  OF MCREF_ADRESSE
+      DISPLAY RADFAX  OF MCREF_ADRESSE
+      DISPLAY RADCP   OF MCREF_ADRESSE
+      DISPLAY CTFNOM     OF CPFOU_CONTACT
+      DISPLAY CTFTEL     OF CPFOU_CONTACT
+      DISPLAY CTFTELPOS  OF CPFOU_CONTACT
+      DISPLAY CTFTIT     OF CPFOU_CONTACT
+      DISPLAY CTFFAX     OF CPFOU_CONTACT
+      DISPLAY CTFTELCEL  OF CPFOU_CONTACT
+    END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Popup sur les compagnies pour le choix de la compagnie du fournisseur interne.
+;
+PROCEDURE INPUT FOUCIEINT
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIEINT = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc106 MODE F PASSING T_CIEINT
+    LET FIELDTEXT = TRUNCATE(T_CIEINT)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les client.
+;
+;
+PROCEDURE INPUT CLICLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CLICLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cr102 MODE F PASSING T_CLICIECLE, T_CIECLEMNU, T_CLICLE &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNC(T_CLICLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du client.
+;
+;
+PROCEDURE EDIT CLICLE
+BEGIN
+  IF 0 <> SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+
+    GET VCLC_CLI OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 2304 ; Ce client n'existe pas
+
+    IF CLISTU OF VCLC_CLI = "I"
+    THEN ERROR 632 ; Le client est inactif.
+
+    WHILE RETRIEVING MCREF_SOLDE VIA REFCIECLE, CIECLE, CLICLE &
+                               USING FOUCIECLE, T_CIECLEMNU, FIELDTEXT
+    BEGIN
+      IF FOUCLE OF MCREF_SOLDE <> ""
+      THEN ERROR 599 ;Ce client est déjà référencé par un fournisseur.
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Popup sur les devises
+;
+PROCEDURE INPUT DEVCLE
+BEGIN
+ IF 0 <> INDEX(FIELDTEXT,"*")
+ THEN BEGIN
+   LET T_DEVCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+   RUN SCREEN mc101 PASSING T_DEVCLE MODE F
+   LET FIELDTEXT = TRUNCATE(T_DEVCLE)
+ END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Popup sur la catégorie du fournisseur
+;
+PROCEDURE INPUT FOUCAT
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_FOUCAT = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_FOUCAT, T_FOUCAT
+    LET FIELDTEXT = TRUNCATE(T_FOUCAT)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Popup sur les régions
+;
+PROCEDURE INPUT RADREG
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_RADREG = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc117 MODE F PASSING T_RADREG
+    LET FIELDTEXT = TRUNCATE(T_RADREG)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Validation de l'adresse :
+;
+;   l'usager doit absolument rentrer au moins une ligne d'adresse
+;
+;
+PROCEDURE INPUT RADADR1
+BEGIN
+  IF 0 = SIZE(TRUNCATE(FIELDTEXT))
+  THEN LET FIELDTEXT = RADADR1 OF MCREF_ADRESSE
+  IF 0 = SIZE(TRUNCATE(FIELDTEXT))
+  THEN ERROR 401 ; Vous devez entrer une valeur.
+END
+
+;-------------------------------------------------------------------------------
+;
+; Procedure de formatage du numero de telephone
+;
+PROCEDURE INPUT RADTEL
+BEGIN
+  USE ustelfmt NOLIST  ;Fomate le numéro de téléphone nord américain
+END
+
+;-------------------------------------------------------------------------------
+;
+; Procedure de formatage du numero de FAX
+;
+PROCEDURE INPUT RADFAX
+BEGIN
+  USE ustelfmt NOLIST  ;Fomate le numéro de téléphone nord américain
+END
+
+;-------------------------------------------------------------------------------
+;
+; Procedure de formatage du numero de code postal
+;
+PROCEDURE INPUT RADCP
+BEGIN
+  USE uscpfmt NOLIST  ;Fomate le numéro de code postal
+END
+
+;-------------------------------------------------------------------------------
+;
+; Procedure de formatage du numero de telephone du contact
+;
+PROCEDURE INPUT CTFTEL
+BEGIN
+  USE ustelfmt NOLIST  ;Fomate le numéro de téléphone nord américain
+END
+
+;-------------------------------------------------------------------------------
+;
+; Procedure de formatage du numero de FAX du contact
+;
+PROCEDURE INPUT CTFFAX
+BEGIN
+  USE ustelfmt NOLIST  ;Fomate le numéro de téléphone nord américain
+END
+
+;-------------------------------------------------------------------------------
+;
+; Procedure de formatage du numero de cellulaire du contact
+;
+PROCEDURE INPUT CTFTELCEL
+BEGIN
+  USE ustelfmt NOLIST  ;Fomate le numéro de téléphone nord américain
+END
+
+;-------------------------------------------------------------------------------
+;
+; On valide que l'usager rentre une date s'il inactive le fournisseur
+;
+PROCEDURE INPUT FOUDATFER
+BEGIN
+  IF 0 = SIZE(TRUNCATE(FIELDTEXT))
+  THEN ERROR 572 ; La date de fermeture est obligatoire pour inactiver un fournisseur
+END
+
+PROCEDURE EDIT FOUDATFER
+BEGIN
+  IF FOUDATFER OF CPFOURNISSEUR < FOUDATOUV OF CPFOURNISSEUR
+  THEN ERROR 568 ; La date de fermeture doir être supérieur ou égale à la date d'ouverture
+END
+
+;-------------------------------------------------------------------------------
+;
+; Flag OUI/NON sur la retenue du fournisseur
+;
+PROCEDURE INPUT FOURTU
+BEGIN
+  USE usflginp NOLIST
+END
+
+PROCEDURE OUTPUT FOURTU
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+;
+; Pour faire genre OLDVALUE
+;
+PROCEDURE POSTFIND
+BEGIN
+  LET T_CLINO = CLICLE OF CPFOURNISSEUR
+END
+
+;
+; Pour faire genre OLDVALUE
+;
+PROCEDURE POSTUPDATE
+BEGIN
+  LET T_CLINO = CLICLE OF CPFOURNISSEUR
+END
+
+;-------------------------------------------------------------------------------
+;
+; On valide si l'usager à le droit d'entrer de nouveaux fournisseurs
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF      DELETEDRECORD OF CPFOURNISSEUR &
+      AND TZ_SECDEL = "0"
+  THEN ERROR 1
+
+  ;
+  ; Validation de la modification
+  ;
+  IF     ALTEREDRECORD     OF CPFOURNISSEUR &
+     AND NOT NEWRECORD     OF CPFOURNISSEUR &
+     AND NOT DELETEDRECORD OF CPFOURNISSEUR &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  ;
+  ; Un fournisseur de type divers ne doit pas avoir d'adresse ou de contact.
+  ;
+  IF FOUTYP OF CPFOURNISSEUR = "D"
+  THEN BEGIN
+
+    IF NOT DELETEDRECORD OF MCREF_ADRESSE
+    THEN DELETE MCREF_ADRESSE
+
+    IF NOT DELETEDRECORD OF CPFOU_CONTACT
+    THEN DELETE CPFOU_CONTACT
+  END
+  ;
+  ; Destruction d'un fournisseur.
+  ;
+  IF DELETEDRECORD OF CPFOURNISSEUR
+  THEN BEGIN
+    ;
+    ; On initialise le flag de retour pour savoir si le sous-écran a
+    ; bien fonctionné.
+    ;
+    LET T_FLGDEL = ""
+    ;
+    ; Flag pour savoir si la table MCREFERENCE du fournisseur est référée.
+    ;
+    LET T_FLGREF =  ""
+    ;
+    ; Appel du sous-écran qui valide si le fournisseur est référé.
+    ;
+    RUN SCREEN cp001x MODE SAME &
+                      PASSING CPFOURNISSEUR , &
+                              T_FLGDEL      , &
+                              T_FLGREF
+    ;
+    ; Si la valeur de retour égale 1, cela indique que le sous-écran
+    ; n'a trouvé aucune référence pour l'identifiant demandé.
+    ;
+    IF T_FLGDEL = ""
+    THEN ERROR " "
+    ;
+    ; Si la valeur de retour égale 1, cela indique que la table MCREFERENCE
+    ; n'est pas référées pour ce client.
+    ;
+    IF T_FLGREF = "1"
+    THEN DELETE MCREFERENCE
+    END
+
+    IF T_CLINO <> CLICLE OF CPFOURNISSEUR
+    THEN BEGIN
+      GET CRCLIENT VIA CLICIECLE, CLICLE &
+                 USING FOUCIECLE, CLICLE OF CPFOURNISSEUR
+      LET FOUCLE OF CRCLIENT = FOUCLE OF CPFOURNISSEUR
+      PUT CRCLIENT RESET
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; MODIFICATION DU TYPE DE FOURNISSEUR :
+;
+;   Si le type de fournisseur est "I" interne, alors il faut saisir le numéro
+;   de compagnie de provenance
+;
+PROCEDURE DESIGNER 10
+BEGIN
+  IF FOUTYP OF CPFOURNISSEUR = "I"
+  THEN ACCEPT FOUCIEINT OF CPFOURNISSEUR
+  DISPLAY CIENOMABR OF MCCOMPAGNIE
+  ACCEPT CLICLE OF CPFOURNISSEUR
+END
+
+;-------------------------------------------------------------------------------
+;
+; MODIFICATION DE L'ADRESSE :
+;
+;   L'adresse n'est pas accessible si le fournisseur est de type divers "D".
+;
+PROCEDURE DESIGNER 25
+BEGIN
+  IF FOUTYP OF CPFOURNISSEUR <> "D"
+  THEN BEGIN
+    ACCEPT RADADR1 OF MCREF_ADRESSE
+    ACCEPT RADADR2 OF MCREF_ADRESSE
+    ACCEPT RADADR3 OF MCREF_ADRESSE
+    ACCEPT RADADR4 OF MCREF_ADRESSE
+    ACCEPT RADTEL  OF MCREF_ADRESSE
+    ACCEPT RADFAX  OF MCREF_ADRESSE
+    ACCEPT RADCP   OF MCREF_ADRESSE
+    ACCEPT RADREG  OF MCREF_ADRESSE
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; MODIFICATION DU CONTACT :
+;
+;   Le contact n'est pas accessible si le fournisseur est de type divers "D".
+;
+PROCEDURE DESIGNER 30
+BEGIN
+  IF FOUTYP OF CPFOURNISSEUR <> "D"
+  THEN BEGIN
+    ACCEPT CTFNOM     OF CPFOU_CONTACT
+    ACCEPT CTFTEL     OF CPFOU_CONTACT
+    ACCEPT CTFTELPOS  OF CPFOU_CONTACT
+    ACCEPT CTFTIT     OF CPFOU_CONTACT
+    ACCEPT CTFFAX     OF CPFOU_CONTACT
+    ACCEPT CTFTELCEL  OF CPFOU_CONTACT
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; MODIFICATION DE LA DATE DE FERMETURE :
+;
+;   La date de fermeture n'est pas accessible si le fournisseur est actif
+;
+PROCEDURE DESIGNER 40
+BEGIN
+  IF FOUSTU OF CPFOURNISSEUR = "I"
+  THEN ACCEPT FOUDATFER OF CPFOURNISSEUR
+END
+
+;-------------------------------------------------------------------------------
+;
+; RETENUE D'UN FOURNISSEUR :
+;
+;   On ne peut pas retenir un fournisseur divers. Dans son cas, seul la
+;   facture (ou autre pièce) peut être retenue.
+;
+PROCEDURE DESIGNER 45
+BEGIN
+  IF FOUTYP OF CPFOURNISSEUR <> "D"
+  THEN ACCEPT FOURTU OF CPFOURNISSEUR
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel des sous-écrans
+;
+;
+
+;
+; Informations complémentaire
+;
+PROCEDURE DESIGNER D001
+BEGIN
+  RUN SCREEN  cp001a &
+              PASSING CPFOURNISSEUR, &
+                      CPFOU_CONTACT, &
+                      MCREF_ADRESSE, &
+                      T_CIECLEMNU  , &
+                      T_CIENOM     , &
+                      T_HLDCHTFOU    &
+              MODE SAME
+END
+
+;
+; Factures
+;
+PROCEDURE DESIGNER D002
+BEGIN
+  RUN SCREEN  cp001g &
+              PASSING   CPFOURNISSEUR, &
+                        T_CIECLEMNU  , &
+                        T_CIENOM     , &
+                        T_FOUCIECLE  , &
+                        T_PECCLEMNU  , &
+                        T_PECCLECOU    &
+              MODE SAME
+END
+
+;
+; Paiements
+;
+PROCEDURE DESIGNER D003
+BEGIN
+  RUN SCREEN  cp001h &
+              PASSING   CPFOURNISSEUR, &
+                        T_CIECLEMNU  , &
+                        T_CIENOM       &
+              MODE SAME
+END
+
+;
+; Solde par compagnies
+;
+PROCEDURE DESIGNER D004
+BEGIN
+  RUN SCREEN  cp001c &
+              PASSING CPFOURNISSEUR &
+              MODE SAME
+END
+
+;
+; Mémos
+;
+PROCEDURE DESIGNER D005
+BEGIN
+  LET T_FOUCLE = FOUCLE OF CPFOURNISSEUR
+  RUN SCREEN  cp014 &
+              PASSING T_FOUCIECLE, &
+                      T_FOUCLE   , &
+                      T_CIECLEMNU, &
+                      T_CIENOM     &
+              MODE SAME
+END
+
+;
+; Adresses Supplémentaires
+;
+PROCEDURE DESIGNER D006
+BEGIN
+  IF FOUTYP OF CPFOURNISSEUR <> "D"
+  THEN RUN SCREEN cp001d &
+                  PASSING CPFOURNISSEUR &
+                  MODE SAME
+END
+
+;
+; Contacts
+;
+PROCEDURE DESIGNER D007
+BEGIN
+  IF FOUTYP OF CPFOURNISSEUR <> "D"
+  THEN RUN SCREEN cp001i &
+                  PASSING CPFOURNISSEUR &
+                  MODE SAME
+END
+
+;
+; Achats par période
+;
+PROCEDURE DESIGNER D008
+BEGIN
+  RUN SCREEN  cp001e &
+              PASSING T_CIECLEMNU  , &
+                      T_CIENOM     , &
+                      CPFOURNISSEUR  &
+              MODE SAME
+END
+
+;
+; Achats toutes compagnies
+;
+PROCEDURE DESIGNER D009
+BEGIN
+  RUN SCREEN  cp001f &
+              PASSING T_CIECLEMNU  , &
+                      T_CIENOM     , &
+                      CPFOURNISSEUR  &
+              MODE SAME
+END
+
+;
+; Vérification
+;
+PROCEDURE DESIGNER D010
+BEGIN
+  RUN SCREEN  cp001j &
+              PASSING CPFOURNISSEUR &
+              MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+; MP-02-02-18_D200215.
+;
+; Popup sur les unités administratives.
+;
+;
+PROCEDURE INPUT UNACLE
+BEGIN
+  ;
+  ; Popup sur les unités administrative.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE = CPTCLE OF CPFOURNISSEUR
+    LET T_PECCLE = T_PECCLECOU
+    LET T_UNACLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc104 MODE F PASSING T_CIECLEMNU, T_UNACLE &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNCATE(T_UNACLE)
+  END
+  ;
+  ; Force l'éxécution du LOOKUP.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(UNACLE OF CPFOURNISSEUR))
+  THEN LET FIELDTEXT = UNACLE OF CPFOURNISSEUR
+END
+
+
+;-----------------------------------
+;
+; Popup sur les comptes.
+;
+
+PROCEDURE INPUT CPTCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_CPTTYP = "R"
+    LET T_CPTCAT = "@"
+    LET T_PECCLE = T_PECCLECOU
+    RUN SCREEN mc103 MODE F PASSING T_CPTCLE, &
+                                    T_CPTTYP, &
+                                    T_CPTCAT, &
+                                    T_PECCLE  &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNCATE(T_CPTCLE)
+  END
+  ;
+  ; Force l'éxécution du LOOKUP.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(CPTCLE OF CPFOURNISSEUR))
+  THEN LET FIELDTEXT = CPTCLE OF CPFOURNISSEUR
+END
+
+
+;-----------------------------------
+;
+;
+; Validation si le compte est actif.
+;
+;
+PROCEDURE EDIT CPTCLE
+BEGIN
+  ;
+  ; Note: La période de fin, est la première période d'inactivité.
+  ;
+
+  ; Ajustement pour le changement de siècle
+  IF T_PECCLECOU[1:1] < "8"
+  THEN LET T_PECCLE_SIE2 = "1" + T_PECCLECOU
+  ELSE LET T_PECCLE_SIE2 = "0" + T_PECCLECOU
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBA OF VCPT_DSC[1:1] < "8"
+  THEN LET T_CPTPECDEBA_SIE = "1" + CPTPECDEBA OF VCPT_DSC
+  ELSE LET T_CPTPECDEBA_SIE = "0" + CPTPECDEBA OF VCPT_DSC
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBI OF VCPT_DSC[1:1] < "8"
+  THEN LET T_CPTPECDEBI_SIE = "1" + CPTPECDEBI OF VCPT_DSC
+  ELSE LET T_CPTPECDEBI_SIE = "0" + CPTPECDEBI OF VCPT_DSC
+
+  IF T_PECCLE_SIE2 >= T_CPTPECDEBA_SIE AND &
+     ( &
+       T_PECCLE_SIE2 < T_CPTPECDEBI_SIE OR &
+       CPTPECDEBI OF VCPT_DSC = "" &
+     )
+  THEN NULL
+  ELSE ERROR 667 ; Ce compte est inactif.
+
+  IF CPTTYP OF VCPT_DSC <> "R"
+  THEN ERROR 668 ; On ne peut pas utliser ce compte dans une imputation.
+
+  IF     DEVCLE OF VCPT_DSC <> DEVCLE OF VCLC_CLI  &
+     AND DEVCLE OF VCPT_DSC <> DEVCLE OF MCHOLDING
+  THEN ERROR 726 ; Compte interdit due à la devise du compte.
+
+  IF HLDCHTCPT OF MCHOLDING = "1"
+  THEN BEGIN
+    GET MCCHARTE_UNA OPTIONAL
+    ;
+    ; Si la charte est incluse, le lien est obligatoire.
+    ;
+    IF NOT ACCESSOK
+    THEN BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN ERROR 669 ; La combinaison compte/unité adm n'existe pas.
+    END
+    ELSE BEGIN
+      ;
+      ; Si la charte est Exclusive et que la période fait partie de
+      ; l'intervalle de période de la charte alors c'est une erreur.
+      ;
+      ; Si la charte est inclusive et que la période ne fait pas partie de
+      ; l'intervalle de période de la charte alors c'est une erreur.
+      ;
+
+      ; Ajustement pour le changement de siècle
+      IF T_PECCLECOU[1:1] < "8"
+      THEN LET T_PECCLE_SIE1 = "1" + T_PECCLECOU
+      ELSE LET T_PECCLE_SIE1 = "0" + T_PECCLECOU
+
+      ; Ajustement pour le changement de siècle
+      IF CCUPECDEBA OF MCCHARTE_UNA[1:1] < "8"
+      THEN LET T_CCUPECDEBA_SIE1 = "1" + CCUPECDEBA OF MCCHARTE_UNA
+      ELSE LET T_CCUPECDEBA_SIE1 = "0" + CCUPECDEBA OF MCCHARTE_UNA
+
+     ; Ajustement pour le changement de siècle
+     IF CCUPECDEBI OF MCCHARTE_UNA[1:1] < "8"
+     THEN LET T_CCUPECDEBI_SIE1 = "1" + CCUPECDEBI OF MCCHARTE_UNA
+     ELSE LET T_CCUPECDEBI_SIE1 = "0" + CCUPECDEBI OF MCCHARTE_UNA
+
+      IF ( &
+           T_PECCLE_SIE1 >= T_CCUPECDEBA_SIE1 AND &
+           ( &
+             T_PECCLE_SIE1 < T_CCUPECDEBI_SIE1 OR &
+             CCUPECDEBI OF MCCHARTE_UNA = " " &
+           ) &
+         )
+      THEN BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "E"
+        THEN ERROR 670 ; La combinaison compte/unité adm. est inactif.
+      END
+      ELSE BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "I"
+        THEN ERROR 670 ; La combinaison compte/unité adm. est inactif.
+      END
+    END
+  END
+END
+
+;-------------------------------------------------------------------------------
+
+
+BUILD
+
+@IF FORMAT
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+*************************** Gestion des fournisseurs ***************************
+* Fournisseur...: xxxxxx              Statut........: x xxxxxxxxxxxxxxxxxxxx   *
+* Ancien Fourn..: xxxxxxxx            Langue........: x xxxxxxxxxxxxxxxxxxxx   *
+* Type..........: x xxxxxxxxxxxxxxxxx Cie interne...: xxxx xxxxxxxxxxxxxxxxxxx *
+*                                     Client........: xxxxxx                   *
+* Nom...........: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+* Nom abrégé....: xxxxxxxxxxxxxxxxxxxx  Unité/compte: xxxxxxxx xxxxxx          *
+*                                                                              *
+* Code devise...: xxx xxxxxxxxxxxxxxx Catégorie.....: xxxx xxxxxxxxxxxxxxxxxxx *
+* Adresse.......: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx Tél..: xxxxxxxxxxxxx*
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx Fax..: xxxxxxxxxxxxx*
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx C.P..: xxxxxxx      *
+*                                                         Région: xxx          *
+* Contact.......: xxxxxxxxxxxxxxxxxxxx Tél.: xxxxxxxxxxxxx Poste: xxxx         *
+* Titre contact : xxxxxxxxxxxxxxxxxxxx Fax.: xxxxxxxxxxxxx Cell.: xxxxxxxxxxxxx*
+* Courriel(mail): xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx *
+* Date ouverture: xxxxxxxxxx                                                   *
+* Date fermeture: xxxxxxxxxx                                                   *
+* Retenu........: xxx                                                          *
+********************************************************************************
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+@ENDIF

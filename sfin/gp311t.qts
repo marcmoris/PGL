@@ -1,0 +1,175 @@
+;/T/ RAPPORT SUR LES COMPTES AU PRIX REVIENT (COURT)
+;
+;
+;/M/ Marie-Josée Hamel, 96.03.14, faire un lien entre les réceptions et les
+;                                 facture pour que les mnts et les commentaires
+;                                 soient ensemble.
+;-------------------------------------------------------------------------------
+USE ussetqts NOLIST
+
+SET LOCK FILE UPDATE
+
+RUN gp311t
+
+GLOBAL TEMPORARY G-CPTCLE1 CHAR SIZE 6 PARM
+GLOBAL TEMPORARY G-CPTCLE2 CHAR SIZE 6 PARM
+GLOBAL TEMPORARY G-CPTCLE3 CHAR SIZE 6 PARM
+GLOBAL TEMPORARY G-CPTCLE4 CHAR SIZE 6 PARM
+
+
+;
+; Va chercher dans le detail des transactions toutes ce qui touche les comptes
+; selectionnes
+;
+REQUEST SELECT-PROJET
+
+ACCESS MCHIS_PROJET &
+  LINK HISCLE TO HISCLE OF MCHISTO OPTIONAL
+
+
+CHOOSE CIECLE PARM, PRJCLE PARM, PRACLE PARM
+
+SELECT IF CPTCLE OF MCHIS_PROJET = G-CPTCLE1 OR &
+          CPTCLE OF MCHIS_PROJET = G-CPTCLE2 OR &
+          CPTCLE OF MCHIS_PROJET = G-CPTCLE3 OR &
+          CPTCLE OF MCHIS_PROJET = G-CPTCLE4
+
+SORT ON CIECLE &
+     ON PRJCLE &
+     ON HISNUMDOC &
+     ON CPTCLE
+
+;;;MJH
+TEMPORARY T_RECCLE  CHARACTER SIZE 12
+TEMPORARY T_RECDAT  DATE
+TEMPORARY T_DSC1    CHARACTER SIZE 50
+TEMPORARY T_DSC2    CHARACTER SIZE 50
+TEMPORARY T_DSC3    CHARACTER SIZE 50
+TEMPORARY T_MNTDBT  FLOAT SIZE 8
+TEMPORARY T_MNTCRT  FLOAT SIZE 8
+
+  ITEM T_MNTDBT SUBTOTAL HIPMNTDBT  OF MCHIS_PROJET RESET AT CPTCLE
+  ITEM T_MNTCRT SUBTOTAL HIPMNTCRT  OF MCHIS_PROJET RESET AT CPTCLE
+
+SUBFILE WGP311A KEEP AT CPTCLE &
+INCLUDE CIECLE     OF MCHIS_PROJET, &
+        PRJCLE     OF MCHIS_PROJET, &
+        CPTCLE     OF MCHIS_PROJET, &
+        T_MNTDBT ALIAS HIPMNTDBT  , &
+        T_MNTCRT ALIAS HIPMNTCRT  , &
+        HISNUMDOC  OF MCHISTO, &
+        HISCODMOD  OF MCHISTO, &
+        HISTYPECR  OF MCHISTO, &
+        REFCIECLE  OF MCHISTO, &
+        REFCLETYP  OF MCHISTO, &
+        REFCLENUM  OF MCHISTO, &
+        HISDAT     OF MCHISTO, &
+        HISDSCGEN  OF MCHISTO, &
+        HISDSCSAI  OF MCHISTO, &
+        HISDSCSAI2 OF MCHISTO, &
+        G-CPTCLE1, &
+        G-CPTCLE2, &
+        G-CPTCLE3, &
+        G-CPTCLE4, &
+        T_RECCLE , &
+        T_RECDAT , &
+        T_DSC1   , &
+        T_DSC2   , &
+        T_DSC3
+
+;
+;  On va chercher les factures liées aux réceptions pour afficher les
+;  description des factures en dessous plutot que la description de la
+;  réception (qui ne veut pas dire grand chose, c'est le numéro de B/L)
+;
+REQUEST TROUVE_FACTURE
+
+ACCESS *WGP311A &
+LINK REFCIECLE , &
+     REFCLENUM , &
+     CIECLE    , &
+     HISNUMDOC   &
+  TO FOUCIECLE , &
+     FOUCLE    , &
+     FACCIECLE , &
+     RECCLE                      OF ARFAC_DETAIL &
+LINK FOUCIECLE OF ARFAC_DETAIL , &
+     FOUCLE    OF ARFAC_DETAIL , &
+     FACCLE    OF ARFAC_DETAIL   &
+  TO FOUCIECLE , &
+     FOUCLE    , &
+     FACCLE                      OF ARFACTURE_REC
+
+SELECT WGP311A IF HISCODMOD OF WGP311A = "AR"
+
+SORT ON CIECLE    OF WGP311A &
+     ON PRJCLE    OF WGP311A &
+     ON HISNUMDOC OF WGP311A &
+     ON CPTCLE    OF WGP311A
+
+TEMPORARY T_DSCFAC1 CHARACTER SIZE 50
+TEMPORARY T_DSCFAC2 CHARACTER SIZE 50
+TEMPORARY T_DSCFAC3 CHARACTER SIZE 50
+
+  ITEM T_DSCFAC1 = FACCOM1 OF ARFACTURE_REC &
+                        IF 0 = SIZE( TRUNCATE( T_DSCFAC1 ) ) &
+                   RESET AT HISNUMDOC
+  ITEM T_DSCFAC2 = FACCOM1 OF ARFACTURE_REC &
+                        IF    0 = SIZE( TRUNCATE( T_DSCFAC2 ) ) &
+                          AND T_DSCFAC1 <> FACCOM1 OF ARFACTURE_REC &
+              ELSE FACCOM2 OF ARFACTURE_REC &
+                        IF    0 = SIZE( TRUNCATE( T_DSCFAC2 ) )  &
+                   RESET AT HISNUMDOC
+  ITEM T_DSCFAC3 = FACCOM1 OF ARFACTURE_REC &
+                        IF    0 = SIZE( TRUNCATE( T_DSCFAC3 ) ) &
+                          AND T_DSCFAC1 <> FACCOM1 OF ARFACTURE_REC &
+                          AND T_DSCFAC2 <> FACCOM1 OF ARFACTURE_REC &
+              ELSE FACCOM2 OF ARFACTURE_REC &
+                        IF    0 = SIZE( TRUNCATE( T_DSCFAC3 ) ) &
+                          AND T_DSCFAC2 <> FACCOM2 OF ARFACTURE_REC  &
+                   RESET AT HISNUMDOC
+
+OUTPUT WGP311A UPDATE AT CPTCLE NOITEM
+  ITEM T_DSC1 OF WGP311A FINAL T_DSCFAC1
+  ITEM T_DSC2 OF WGP311A FINAL T_DSCFAC2
+  ITEM T_DSC3 OF WGP311A FINAL T_DSCFAC3
+
+;
+; On va chercher les numéros de réception liées pour trier les factures
+; par ordre de réception (pour que l'on voie la facture toute suite apres
+; la réception)
+;
+REQUEST TROUVE_RECEPT
+
+ACCESS *WGP311A &
+LINK CIECLE    , &
+     REFCLENUM , &
+     HISNUMDOC   &
+  TO FACCIECLE , &
+     FOUCLE    , &
+     FACCLE                      OF ARFAC_DETAIL &
+LINK FACCIECLE OF ARFAC_DETAIL , &
+     RECCLE    OF ARFAC_DETAIL   &
+  TO CIECLE , &
+     RECCLE                      OF ARRECEPTION
+
+SELECT WGP311A IF HISCODMOD OF WGP311A = "CP"
+
+SORT ON CIECLE    OF WGP311A &
+     ON PRJCLE    OF WGP311A &
+     ON HISNUMDOC OF WGP311A &
+     ON CPTCLE    OF WGP311A &
+     ON RECCLE    OF ARFAC_DETAIL
+
+TEMPORARY T_REC  CHARACTER SIZE 12
+TEMPORARY T_DAT  DATE
+
+  ITEM T_REC = RECCLE OF ARFAC_DETAIL
+  ITEM T_DAT = RECDAT OF ARRECEPTION
+
+OUTPUT WGP311A UPDATE AT CPTCLE NOITEM
+  ITEM T_RECCLE OF WGP311A FINAL T_REC
+  ITEM T_RECDAT OF WGP311A FINAL T_DAT
+
+
+BUILD

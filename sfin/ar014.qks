@@ -1,0 +1,1155 @@
+;/T/ Mouvement de marchandises
+;
+;/P/ Programmeur..: Nancy Marceau
+;    Date Création: 16 mai 1994
+;
+;    Description..: Cet écran permet de saisir les mouvements d'invnetaire des
+;                   produits. Chaque mouvement d'inventaire appartient à un et
+;                   un seul entrepôt mais il peut en affecter plus d'un. Une
+;                   fois approuvé, le mouvement sera journalisé.
+;
+;/M/ Pascal Tremblay, 98-01-21
+;    Ajustement pour le changement de siècle
+;
+;/M/ Programmeur..: Patrick Langlois, 24 août 1999
+;                   Ajout de l'utilisateur (UTLCLE)
+;
+;
+;***********************************************************************************************************************************
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date..............: 10 mars 2000
+;    Description.......: Ajout d'une validation de présence unitaire sur le détail du mouvement lorsque l'usager modifie le
+;                        statut à "A" (Approuvé).
+;
+;    Référence.........: Demande directe 999999.
+;
+;    Signet............: MP-00-03-10_DD999999.
+;
+;    ----------------------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date..............: 14 mars 2000
+;    Description.......: Correction de la destruction en cascade du détail du mouvement d'inventaire.
+;
+;    Référence.........: Demande de changement 000028.
+;
+;    Signet............: MP-00-03-10_D000028.
+;
+;    ----------------------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date..............: 07 juillet 2000
+;    Description.......: Ajout d'une validation au niveau de la gestion et du contrôle des quantités en inventaire.
+;
+;    Référence.........: Demande de changement 000074.
+;
+;    Signet............: MP-00-07-07_D74.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN ar014 ACTIONBAR  &
+             MODE LABEL "" AT 2,80 &
+             AUTOUPDATE &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU, &
+                       T_CIENOM,    &
+                       T_PECCLEMNU, &
+                       T_FOUCIECLE, &
+                       T_MOUCLEFND
+
+
+USE ussectmp NOLIST     ; Variable pour la securite
+    "AR014"             ; Nom de l'écran
+
+USE ar014.hlp NOLIST    ; Use servant à la documentation de l'écran
+
+USE ustraecr NOLIST
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-ecran
+
+
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE ARMOU_SEQ IN DICT
+
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Détail du mouvement " ACTION DESIGNER D001
+  MENUITEM LABEL "Imputation          " ACTION DESIGNER D002
+  MENUITEM LABEL "Ecriture comptable  " ACTION DESIGNER D003
+  MENUITEM LABEL "Vérification        " ACTION DESIGNER D004
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%Détail du mouvement " ACTION DESIGNER D001
+  MENUITEM LABEL "%%%Imputation          " ACTION DESIGNER D002
+  MENUITEM LABEL "%%%Ecriture comptable  " ACTION DESIGNER D003
+  MENUITEM LABEL "%%%Vérification        " ACTION DESIGNER D004
+@ENDIF
+
+;-------------------------------------------------------------------------------
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de la compagnie
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie
+TEMPORARY T_PECCLEMNU CHARACTER SIZE 4  ; Période du menu
+TEMPORARY T_FOUCIECLE CHARACTER SIZE 4  ; Compagnie fournisseur
+TEMPORARY T_MOUCLEFND CHARACTER SIZE 9  ; Numéro de mouvement à chercher
+;-------------------------------------------------------------------------------
+
+
+FILE ARMOUVEMENT  PRIMARY NOITEM
+  ACCESS VIA   CIECLE,               &
+               MOUCLE                &
+         USING T_CIECLEMNU,          &
+               MOUCLE OF ARMOUVEMENT &
+         REQUEST MOUCLE    &
+         ORDERBY CIECLE,   &
+                 MOUCLE
+
+  ACCESS VIA   CIECLE,               &
+               ENTCLE                &
+         USING T_CIECLEMNU,          &
+               ENTCLE OF ARMOUVEMENT &
+         REQUEST ENTCLE  &
+         ORDERBY CIECLE, &
+                 ENTCLE, &
+                 PECCLE, &
+                 MOUCLE
+
+  ACCESS VIA   CIECLE,               &
+               PECCLE,               &
+               LARCLE                &
+         USING T_CIECLEMNU,          &
+               PECCLE OF ARMOUVEMENT,&
+               LARCLE OF ARMOUVEMENT &
+         REQUEST PECCLE, &
+                 LARCLE  &
+         ORDERBY CIECLE, &
+                 ENTCLE, &
+                 PECCLE, &
+                 LARCLE, &
+                 MOUCLE
+
+  ACCESS VIA   CIECLE,               &
+               PECCLE                &
+         USING T_CIECLEMNU,          &
+               PECCLE OF ARMOUVEMENT &
+         REQUEST PECCLE  &
+         ORDERBY CIECLE, &
+                 ENTCLE, &
+                 PECCLE, &
+                 LARCLE, &
+                 MOUCLE
+
+
+  ACCESS VIA   CIECLE               &
+         USING T_CIECLEMNU          &
+         ORDERBY CIECLE,   &
+                 MOUCLE
+
+  ITEM CIECLE    OF ARMOUVEMENT INITIAL T_CIECLEMNU
+  ITEM MOUSTU    OF ARMOUVEMENT INITIAL "P"     ; Initialisation à préliminaire
+  ITEM MOUDATCRE OF ARMOUVEMENT INITIAL SYSDATE
+  ITEM MOUHRECRE OF ARMOUVEMENT INITIAL SYSTIME / 10000
+  ITEM MOUUSRCRE OF ARMOUVEMENT INITIAL TZ_LOGONID
+  ITEM MOUDATMOD OF ARMOUVEMENT FINAL   SYSDATE        &
+                                        IF NOT NEWRECORD OF ARMOUVEMENT AND &
+                                           ALTEREDRECORD OF ARMOUVEMENT
+  ITEM MOUHREMOD OF ARMOUVEMENT FINAL   SYSTIME / 10000 &
+                                        IF NOT NEWRECORD OF ARMOUVEMENT AND &
+                                           ALTEREDRECORD OF ARMOUVEMENT
+  ITEM MOUUSRMOD OF ARMOUVEMENT FINAL   TZ_LOGONID         &
+                                        IF NOT NEWRECORD OF ARMOUVEMENT AND &
+                                           ALTEREDRECORD OF ARMOUVEMENT
+
+;-------------------------------------------------------------------------------
+; Pour valider que l'entrepôt existe
+;
+FILE ARENTREPOT  REFERENCE
+  ACCESS VIA   CIECLE, &
+               ENTCLE  &
+         USING T_CIECLEMNU, &
+               ENTCLE OF ARMOUVEMENT
+
+
+;-------------------------------------------------------------------------------
+; Fichier d'historique des transactions
+;
+FILE ARPRD_HISTO  DESIGNER
+
+
+;-------------------------------------------------------------------------------
+; Fichier permettant de valider que le lot existe
+;
+FILE ARLOT  REFERENCE
+  ACCESS  VIA   CIECLE, &
+                PECCLE, &
+                LARCLE &
+          USING CIECLE OF ARMOUVEMENT, &
+                PECCLE OF ARMOUVEMENT, &
+                LARCLE OF ARMOUVEMENT
+
+
+;------------------------------------------------------------------------------
+; Fichier détail du mouvement pour générer l'historique.
+;
+FILE ARMOU_DETAIL  DESIGNER
+  ACCESS VIA   CIECLE, &
+               MOUCLE  &
+         USING CIECLE OF ARMOUVEMENT, &
+               MOUCLE OF ARMOUVEMENT
+
+
+;-------------------------------------------------------------------------------
+; Fichier du détail pour la destruction
+;
+FILE ARMOU_DETAIL  DELETE ALIAS A_MOD_DETRUIRE NOITEM
+
+  ACCESS VIA   CIECLE               , & ; MP-00-03-14_D000028.
+               MOUCLE                 & ; MP-00-03-14_D000028.
+         USING CIECLE OF ARMOUVEMENT, & ; MP-00-03-14_D000028.
+               MOUCLE OF ARMOUVEMENT    ; MP-00-03-14_D000028.
+
+
+;-------------------------------------------------------------------------------
+; Fichier des produits pour calculer la valeur d'inventaire pour le transfert.
+;
+FILE VPRE_PRD  REFERENCE
+  ACCESS VIA   CIECLE, &
+               PRDCLE, &
+               ENTCLE  &
+         USING CIECLE OF ARMOU_DETAIL, &
+               PRDCLE OF ARMOU_DETAIL, &
+               ENTCLE OF ARMOUVEMENT
+
+
+;-------------------------------------------------------------------------------
+; Statut du mouvement
+;
+DEFINE    D_MOUSTU CHARACTER SIZE 16 = "MOUSTU"
+TEMPORARY T_MOUSTU CHARACTER SIZE 4
+
+FILE VCBI_DSC  REFERENCE ALIAS A_CBI_MOUSTU
+  ACCESS  VIA   XELNOM, &
+                CBICLE  &
+          USING D_MOUSTU, &
+                MOUSTU OF ARMOUVEMENT
+
+;-------------------------------------------------------------------------------
+; Type du mouvement
+;
+DEFINE    D_MOUTYP CHARACTER SIZE 16 = "MOUTYP"
+TEMPORARY T_MOUTYP CHARACTER SIZE 4
+
+FILE VCBI_DSC  REFERENCE ALIAS A_CBI_MOUTYP
+  ACCESS  VIA   XELNOM, &
+                CBICLE  &
+          USING D_MOUTYP, &
+                MOUTYP OF ARMOUVEMENT
+
+;-------------------------------------------------------------------------------
+; Fichier pour les numéros séquentiels des mouvements
+;
+FILE ARMOU_SEQ  DESIGNER TRANSACTION GEN_NUM_SEQ
+
+
+;
+; Paramètres pour la compagnie consolidée(holding)
+;
+FILE MCHOLDING  REFERENCE
+  ACCESS VIA CIENMC USING "1"
+
+
+;-------------------------------------------------------------------------------
+; Fichier pour valider la période
+;
+FILE MCPERIODE_CIE  DESIGNER &
+                   OPEN READ SHARE
+  ACCESS VIA   CIECLE, &
+               PECCLE &
+         USING T_CIECLEMNU, &
+               PECCLE OF ARMOUVEMENT
+
+;-------------------------------------------------------------------------------
+;
+;
+FILE GSUSAGER DESIGNER &
+                   OPEN READ SHARE
+
+;-------------------------------------------------------------------------------
+;
+; Utilisateur
+;
+FILE ARUTILISATEUR REFERENCE
+  ACCESS VIA   UTLCLE &
+         USING UTLCLE OF ARMOUVEMENT
+
+
+;-------------------------------------------------------------------------------
+  
+file armou_imputation alias a1_imputation designer
+  access via ciecle               , &
+             moucle                 &
+       using ciecle of armouvement, &
+             moucle of armouvement
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_PECCLE    CHARACTER SIZE 4 ; Popup sur les périodes.
+TEMPORARY T_MOD       CHARACTER SIZE 2 ; Code de module.
+TEMPORARY T_ENTCLE    CHARACTER SIZE 4 ; Popup sur entrepôts
+TEMPORARY T_LARCLE    CHARACTER SIZE  4 ;Popup sur les lots
+TEMPORARY T_TYPECR    CHARACTER SIZE  2 ; Popup sur les lots
+TEMPORARY T_MOUSTUOLD CHARACTER SIZE 1  INITIAL "P" ; Ancienne valeur du statut de la réception
+TEMPORARY T_MODQTE    FLOAT SIZE 8      ; Quantité pour historique.
+TEMPORARY T_MODMNTNET FLOAT SIZE 8      ; Valeur d'inventaire pour historique.
+TEMPORARY T_UTLCLE    CHARACTER SIZE 10 ; Popup utilisateur
+
+;-------------------------------------------------------------------------------
+
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+;-------------------------------------------------------------------------------
+
+;
+; Si le lot est autorisé, sert au sous-écran AR014B
+;
+DEFINE D_LARATRJOU    CHARACTER SIZE 1 = LARATRJOU OF ARLOT
+
+
+;
+; Clef d'accès pour la consultation des écritures.
+;
+DEFINE D_HISCLE    INTEGER UNSIGNED SIZE 4 = HISCLE OF ARMOUVEMENT
+
+
+USE usdrwecr NOLIST     ; Draw pour les écrans pleine page
+USE ustitstd NOLIST     ; En-tête pour les écrans pleine page
+USE ushilite NOLIST     ; Hilite pour tous les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Mouvement de marchandises " &
+@ELSE
+      " %%%Mouvement de marchandises " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+;-------------------------------------------------------------------------------
+
+
+ALIGN (3,3,19) (,,24)
+
+FIELD ENTCLE OF ARMOUVEMENT &
+        HIDDEN ID 05 &
+        REQUIRED NOCHANGE &
+        LOOKUP ON ARENTREPOT &
+          MESSAGE 1337        ; Ce code d'entrepôt n'existe pas.
+
+FIELD ENTNOM OF ARENTREPOT &
+        DISPLAY
+
+SKIP 1
+ALIGN (3,3,19) (,40,56) (,,58)
+
+FIELD PECCLE OF ARMOUVEMENT &
+        HIDDEN ID 10 &
+        NOCHANGE        &
+        DEFAULT T_PECCLEMNU &
+        PICTURE "^^-^^" &
+        LOOKUP ON MCPERIODE_CIE &
+          MESSAGE 1307 ; Cette période n'existe pas
+
+
+FIELD MOUSTU OF ARMOUVEMENT &
+        NOENTRY  &
+        LOOKUP ON A_CBI_MOUSTU &
+          MESSAGE 1408 ; Ce statut de mouvement est invalide.
+
+
+FIELD CBIDSC OF A_CBI_MOUSTU &
+        DISPLAY &
+        SIZE 15
+
+SKIP
+ALIGN (3,3,19)
+
+FIELD LARCLE OF ARMOUVEMENT &
+        HIDDEN ID 15 &
+        NUMERIC &
+        SIGNIFICANCE 4 &
+        DISPLAY
+
+
+SKIP 1
+ALIGN (3,3,19) (,40,56) (,,58)
+
+FIELD MOUCLE OF ARMOUVEMENT &
+        HIDDEN ID 20 &
+        REQUIRED IF     HLDMOVINV OF MCHOLDING <> "1" &
+        NOCHANGE  &
+        NUMERIC         &
+        SIGNIFICANCE 9  &
+        LOOKUP NOTON ARMOUVEMENT &
+          VIA   CIECLE, &
+                MOUCLE  &
+          USING T_CIECLEMNU, &
+                MOUCLE OF ARMOUVEMENT &
+          MESSAGE 1409 ; Ce numéro de mouvement existe déjà.
+
+
+FIELD MOUTYP OF ARMOUVEMENT &
+        REQUIRED NOCHANGE &
+        LOOKUP ON A_CBI_MOUTYP &
+          MESSAGE 1410 ; Ce type de mouvement n'existe pas.
+
+
+FIELD CBIDSC OF A_CBI_MOUTYP &
+        DISPLAY &
+        SIZE 15
+
+
+SKIP 1
+ALIGN (3,3,19) (,40,56)
+
+FIELD MOUDAT OF ARMOUVEMENT  FORMAT YYYYMMDD &
+        DEFAULT SYSDATE
+
+FIELD MOUDATAPP OF ARMOUVEMENT  FORMAT YYYYMMDD &
+        DISPLAY
+
+SKIP 1
+ALIGN (,40,56) (,,68)
+
+FIELD MOUDATJOU OF ARMOUVEMENT  FORMAT YYYYMMDD &
+        DISPLAY
+
+FIELD MOUHREJOU OF ARMOUVEMENT &
+        DISPLAY
+
+SKIP 1
+ALIGN (3,3,19)(,,30)(,,51)
+
+FIELD UTLCLE OF ARMOUVEMENT &
+        HIDDEN ID 25 &
+        REQUIRED     &
+        LOOKUP ON ARUTILISATEUR &
+          MESSAGE 18 ; Ce code n'existe pas
+
+FIELD UTLNOM OF ARUTILISATEUR DISPLAY
+
+FIELD UTLPNM OF ARUTILISATEUR DISPLAY
+
+
+SKIP 1
+
+FIELD MOUDSC1 OF ARMOUVEMENT &
+        HIDDEN ID 30
+
+ALIGN (,,19)
+
+FIELD MOUDSC2 OF ARMOUVEMENT
+FIELD MOUDSC3 OF ARMOUVEMENT
+
+SKIP 1
+ALIGN (3,3,19) (,40,56)
+
+FIELD MOUNBRITE OF ARMOUVEMENT &
+        HIDDEN ID 35 &
+        DISPLAY PREDISPLAY &
+        PIC "^^^^" &
+        REFRESH
+
+FIELD MOUMNTNET OF ARMOUVEMENT &
+        DISPLAY PREDISPLAY &
+        REFRESH
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+  ;
+  ; Si l'écran n'est pas appelé par le menu, alors on interdit la saisie,
+  ; la destruction et la modification des données.
+  ;
+  IF T_MOUCLEFND <> ""
+  THEN BEGIN
+    LET TZ_SECENT = "0"
+    LET TZ_SECMOD = "0"
+    LET TZ_SECDEL = "0"
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de faire un écran dépisteur pour l'entrepôt
+;
+PROCEDURE INPUT ENTCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_ENTCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN ar100 MODE F PASSING T_CIECLEMNU, T_ENTCLE
+    LET FIELDTEXT = TRUNCATE(T_ENTCLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de faire l'affichage des champs initialisés
+; au départ.
+;
+PROCEDURE PROCESS ENTCLE
+BEGIN
+  DISPLAY MOUSTU    OF ARMOUVEMENT
+  DISPLAY CBIDSC    OF A_CBI_MOUSTU
+END
+
+
+;-------------------------------------------------------------------------------
+; Ecran dépisteur pour la période comptable.
+;
+PROCEDURE INPUT PECCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_MOD = "IN"
+    LET T_PECCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN  mc109 PASSING T_CIECLEMNU, T_PECCLE, T_MOD  MODE F
+    LET FIELDTEXT = TRUNC(T_PECCLE)
+  END
+  ;
+  ; On force la validation de la période.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(PECCLE OF ARMOUVEMENT))
+  THEN LET FIELDTEXT = PECCLE OF ARMOUVEMENT
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du statut de la période.
+;
+;
+PROCEDURE EDIT PECCLE
+BEGIN
+  ;
+  IF PCCSTUAR OF MCPERIODE_CIE = "F"
+  THEN ERROR 1309 ; Cette période est fermée.
+  ;
+  IF PCCSTUAR OF MCPERIODE_CIE <> "C"
+  THEN WARNING 1310 ; La période saisie n'est pas la courante.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour les codes bilingues.
+;
+;
+PROCEDURE INPUT MOUSTU
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_MOUSTU = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_MOUSTU, T_MOUSTU
+    LET FIELDTEXT = TRUNCATE(T_MOUSTU)
+  END
+
+; --------------------------------------------
+; MP-00-03-10_DD999999.
+;
+; Vérifier qu'iy a au moins du détail associé au mouvement avant de l'approuver.
+;
+
+  IF FIELDTEXT = "A"
+  THEN BEGIN
+    GET ARMOU_DETAIL OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 1510 ; AR210 *E* Statut refusé pusqu'aucun détail n'a encore été créé.
+  END
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de valider que le seul statut modifiable est "P" et
+; que la seul valeur permise en saisie est "A"
+;
+PROCEDURE EDIT MOUSTU
+BEGIN
+  IF   OLDVALUE (MOUSTU OF ARMOUVEMENT) <> "P" &
+    OR MOUCLE OF ARMOUVEMENT = ""
+  THEN ERROR 1441 ; On ne peut pas changer le statut du mouvement.
+
+  IF FIELDTEXT <> "A" AND FIELDTEXT <> "P"
+  THEN ERROR 1370 ; Cette valeur n'est pas permise.
+END
+
+
+;------------------------------------------------------------------------------
+; Cette procédure permet de mettre à jour la date d'approbation du mouvement.
+;
+PROCEDURE PROCESS MOUSTU
+BEGIN
+ IF MOUSTU OF ARMOUVEMENT = "A"
+  THEN BEGIN
+    LET MOUDATAPP OF ARMOUVEMENT = SYSDATE
+    DISPLAY MOUDATAPP OF ARMOUVEMENT
+  END
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION & VALIDATION DU LOT
+;
+;
+PROCEDURE INPUT LARCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PECCLE = PECCLE OF ARMOUVEMENT
+    LET T_TYPECR = "MV"
+    LET T_LARCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN ar105 MODE F PASSING T_TYPECR, T_CIECLEMNU, T_PECCLE, T_LARCLE
+    LET FIELDTEXT = TRUNCATE(T_LARCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour les codes bilingues.
+;
+;
+PROCEDURE INPUT MOUTYP
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_MOUTYP  = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_MOUTYP, T_MOUTYP
+    LET FIELDTEXT = TRUNCATE(T_MOUTYP)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de valider que le type du mouvement ne peut pas être
+; 'I' pour inventaire physique car il est généré par les décomptes physiques.
+;
+PROCEDURE EDIT MOUTYP
+BEGIN
+  IF FIELDTEXT = "I"
+  THEN ERROR 1445  ; Ce type de mouvement n'est pas disponible en saisie.
+END
+
+;-------------------------------------------------------------------------------
+;
+PROCEDURE INPUT UTLCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_UTLCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN ar157 MODE F PASSING T_UTLCLE
+    LET FIELDTEXT = TRUNC(T_UTLCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de mettre à jour l'historique lorsque le mouvement
+; est approuvé.  A noter, qu'un trigger met à jour l'information des quantités
+; dans le catalogue fournisseur ainsi que dans le produit entrepôt.
+;
+PROCEDURE INTERNAL MAJ_HISTORIQUE
+BEGIN
+  LET CIECLE    OF ARPRD_HISTO = CIECLE OF ARMOU_DETAIL
+  LET PRDCLE    OF ARPRD_HISTO = PRDCLE OF ARMOU_DETAIL
+  LET PRDTYP    OF ARPRD_HISTO = PRDTYP OF VPRE_PRD
+  LET PRHTIMSTP OF ARPRD_HISTO = SYSDATE * 1000000 + ROUND(SYSTIME / 100)
+  LET ENTCLE    OF ARPRD_HISTO = T_ENTCLE
+  LET PECCLE    OF ARPRD_HISTO = PECCLE OF ARMOUVEMENT
+  LET PRHNUMREF OF ARPRD_HISTO = MOUCLE OF ARMOUVEMENT
+  LET PRHDATREF OF ARPRD_HISTO = MOUDAT OF ARMOUVEMENT
+
+  IF MOUTYP OF ARMOUVEMENT = "E"
+  THEN LET PRHTYP    OF ARPRD_HISTO = "05"    ; Entrée.
+  ELSE IF MOUTYP OF ARMOUVEMENT = "S"
+  THEN LET PRHTYP    OF ARPRD_HISTO = "06"    ; Sortie.
+  ELSE IF MOUTYP OF ARMOUVEMENT = "A"
+  THEN LET PRHTYP    OF ARPRD_HISTO = "07"    ; Ajustement.
+  ELSE IF MOUTYP OF ARMOUVEMENT = "T"
+  THEN LET PRHTYP    OF ARPRD_HISTO = "08"    ; Transfert.
+  ELSE IF MOUTYP OF ARMOUVEMENT = "I"
+  THEN LET PRHTYP    OF ARPRD_HISTO = "09"    ; Inventaire physique.
+
+
+  LET PRHQTETRS OF ARPRD_HISTO = T_MODQTE
+  LET PRHUSRCRE OF ARPRD_HISTO = TZ_LOGONID
+  LET PRHDATCRE OF ARPRD_HISTO = SYSDATE
+  LET PRHHRECRE OF ARPRD_HISTO = SYSTIME / 10000
+
+  LET PRHVAL     OF ARPRD_HISTO  = T_MODMNTNET
+  LET PRHDSC     OF ARPRD_HISTO  = MOUDSC1 OF ARMOUVEMENT
+
+  PUT ARPRD_HISTO RESET
+
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de mettre à jour les informations du produit,
+; de l'historique etc... suite à l'approbation du mouvement.
+;
+PROCEDURE INTERNAL MAJ_INFORMATIONS_MOUVEMENT
+BEGIN
+
+  WHILE RETRIEVING ARMOU_DETAIL
+  BEGIN
+    LET T_ENTCLE  = ENTCLE OF ARMOUVEMENT
+
+      ;
+      ; Si c'est un transfert, on doit dans un premier temps, enlever la
+      ; quantité de l'entrepôt source ainsi que la valeur d'inventaire.
+      ;
+    IF MOUTYP OF ARMOUVEMENT = "T"
+    THEN BEGIN
+      LET T_MODQTE    = MODQTE OF ARMOU_DETAIL * -1
+      LET T_MODMNTNET = MODMNTNET OF ARMOU_DETAIL * -1
+    END
+    ELSE BEGIN
+      LET T_MODQTE    = MODQTE    OF ARMOU_DETAIL
+      LET T_MODMNTNET = MODMNTNET OF ARMOU_DETAIL
+    END
+
+    DO INTERNAL MAJ_HISTORIQUE
+      ;
+      ; Pour le transfert, on doit ajouter la quantité dans l'entrepôt de
+      ; destination et la valeur d'inventaire.
+      ;
+    IF MOUTYP OF ARMOUVEMENT = "T"
+    THEN BEGIN
+      LET T_MODQTE    = MODQTE OF ARMOU_DETAIL
+      LET T_MODMNTNET = MODMNTNET OF ARMOU_DETAIL
+      LET T_ENTCLE    = ENTCLE OF ARMOU_DETAIL
+      DO INTERNAL MAJ_HISTORIQUE
+    END
+
+  END
+
+
+  ; Cet écran permet de générer l'imputation du mouvement automatiquement à
+  ; partir du mouvement. (GHOST SCREEN)
+  ;
+  RUN SCREEN ar014d &
+        PASSING T_CIECLEMNU, &
+                T_CIENOM   , &
+                ARMOUVEMENT &
+        MODE E
+
+END
+
+
+;-------------------------------------------------------------------------------
+; La procédure PATH est codée afin de permettre l'appel de cet écran à partir
+; de l'historique des produits.
+;
+PROCEDURE PATH
+BEGIN
+  IF T_MOUCLEFND <> "" ; L'appel provient de l'historique des produits
+  THEN BEGIN
+    LET PATH = 99
+  END
+
+  ELSE BEGIN
+    REQUEST MOUCLE OF ARMOUVEMENT
+    IF PROMPTOK
+    THEN LET PATH = 1
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST ENTCLE OF ARMOUVEMENT
+      IF PROMPTOK
+      THEN LET PATH = 2
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST PECCLE OF ARMOUVEMENT
+      IF PROMPTOK
+      THEN BEGIN
+        LET PATH = 3
+        REQUEST LARCLE OF ARMOUVEMENT
+        IF PROMPTOK
+        THEN LET PATH = 4
+      END
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      LET PATH = 5
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+; La procédure FIND est codée pour les mêmes raisons que la procédure PATH
+;
+PROCEDURE FIND
+BEGIN
+  IF PATH = 1
+  THEN GET ARMOUVEMENT &
+         VIA   CIECLE , &
+               MOUCLE   &
+         USING T_CIECLEMNU , &
+               MOUCLE OF ARMOUVEMENT &
+         ORDERBY CIECLE , &
+                 MOUCLE
+
+  IF PATH = 2
+  THEN GET ARMOUVEMENT &
+         VIA   CIECLE , &
+               ENTCLE   &
+         USING T_CIECLEMNU , &
+               ENTCLE OF ARMOUVEMENT &
+         ORDERBY CIECLE , &
+                 ENTCLE , &
+                 PECCLE , &
+                 MOUCLE
+
+  IF PATH = 3
+  THEN GET ARMOUVEMENT &
+         VIA   CIECLE , &
+               PECCLE   &
+         USING T_CIECLEMNU , &
+                PECCLE OF ARMOUVEMENT &
+         ORDERBY CIECLE , &
+                 ENTCLE , &
+                 PECCLE , &
+                 MOUCLE
+
+  IF PATH = 4
+  THEN GET ARMOUVEMENT &
+         VIA   CIECLE , &
+               PECCLE , &
+               LARCLE   &
+         USING T_CIECLEMNU , &
+                PECCLE OF ARMOUVEMENT,&
+                LARCLE OF ARMOUVEMENT &
+         ORDERBY CIECLE , &
+                 ENTCLE , &
+                 PECCLE , &
+                 LARCLE , &
+                 MOUCLE
+
+  IF PATH = 5
+  THEN GET ARMOUVEMENT &
+         VIA   CIECLE &
+         USING T_CIECLEMNU &
+         ORDERBY CIECLE , &
+         MOUCLE
+
+
+   ; L'appel provient de l'historique des produits.
+   ;
+   IF PATH = 99
+   THEN BEGIN
+     GET ARMOUVEMENT &
+        VIA   CIECLE, &
+              MOUCLE  &
+        USING T_CIECLEMNU, &
+              T_MOUCLEFND
+     LET T_MOUCLEFND = ""
+   END
+
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de conserver l'ancien statut du mouvement pour
+; vérifier lors du PREUPDATE si la modification est permise.
+;
+PROCEDURE POSTFIND
+BEGIN
+  LET T_MOUSTUOLD = MOUSTU OF ARMOUVEMENT
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure est codée pour gérer la génération du numéro de mouvement.
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  ACCEPT  ENTCLE OF ARMOUVEMENT
+  DISPLAY ENTNOM OF ARENTREPOT
+  ACCEPT  PECCLE OF ARMOUVEMENT
+  DISPLAY CBIDSC OF A_CBI_MOUSTU
+  DISPLAY LARCLE OF ARMOUVEMENT
+
+  IF HLDMOVINV OF MCHOLDING <> "1"
+  THEN ACCEPT  MOUCLE OF ARMOUVEMENT
+  ELSE DISPLAY MOUCLE OF ARMOUVEMENT
+
+  ACCEPT  MOUTYP OF ARMOUVEMENT
+  DISPLAY CBIDSC OF A_CBI_MOUTYP
+  ACCEPT  MOUDAT OF ARMOUVEMENT
+
+  DISPLAY MOUDATAPP OF ARMOUVEMENT
+  DISPLAY MOUDATJOU OF ARMOUVEMENT
+  DISPLAY MOUHREJOU OF ARMOUVEMENT
+  ACCEPT  UTLCLE  OF ARMOUVEMENT
+  DISPLAY UTLNOM  OF ARUTILISATEUR
+  DISPLAY UTLPNM  OF ARUTILISATEUR
+
+  ACCEPT  MOUDSC1 OF ARMOUVEMENT
+  ACCEPT  MOUDSC2 OF ARMOUVEMENT
+  ACCEPT  MOUDSC3 OF ARMOUVEMENT
+
+  DISPLAY MOUNBRITE OF ARMOUVEMENT
+  DISPLAY MOUMNTNET OF ARMOUVEMENT
+
+  ;
+  ; On vérifie si on utilise la numérotation automatique pour
+  ; assigner un numéro de mouvement.
+  ;
+  IF HLDMOVINV OF MCHOLDING = "1"
+  THEN BEGIN
+    IF 0 = SIZE( TRUNCATE( MOUCLE OF ARMOUVEMENT ) )
+    THEN BEGIN
+      ;
+      ; Attribution du numéro de mouvement selon la compagnie et l'année
+      ; dans la table ARMOU_SEQ où se trouve le dernier numéro de mouvement
+      ; utilisé.
+      ;
+      START TRANSACTION GEN_NUM_SEQ
+      GET ARMOU_SEQ VIA   CIECLE, &
+                          MOSANNCLE  &
+                    USING T_CIECLEMNU,&
+                          T_PECCLEMNU[1:2] &
+                    OPTIONAL
+      LET CIECLE    OF ARMOU_SEQ = T_CIECLEMNU
+      LET MOSANNCLE OF ARMOU_SEQ = T_PECCLEMNU[1:2]
+      LET MOSNUMSEQ OF ARMOU_SEQ = MOSNUMSEQ OF ARMOU_SEQ + 1
+
+      LET MOUCLE OF ARMOUVEMENT = MOSANNCLE + &
+        ASCII(MOSNUMSEQ OF ARMOU_SEQ,MOSLONNUM OF ARMOU_SEQ)
+      PUT ARMOU_SEQ
+      COMMIT TRANSACTION GEN_NUM_SEQ
+    END
+  END
+
+  RUN SCREEN ar014a &
+            PASSING T_CIECLEMNU, &
+                    T_CIENOM,    &
+                    T_MOUSTUOLD, &
+                    ARMOUVEMENT, &
+                    A_CBI_MOUTYP &
+            MODE E
+
+END
+
+;-------------------------------------------------------------------------------
+; Procédure d'appel du sous-écran du détail du mouvement.
+;
+PROCEDURE DESIGNER D001
+BEGIN
+  IF     ALTEREDRECORD OF ARMOUVEMENT &
+     AND MOUSTU OF ARMOUVEMENT <> "P"
+  THEN ERROR 1390 ; Vous devez faire une mise à jour avant d'accéder le sous-écran.
+  ELSE RUN SCREEN ar014a &
+               PASSING T_CIECLEMNU, &
+                       T_CIENOM,    &
+                       T_MOUSTUOLD, &
+                       ARMOUVEMENT, &
+                       A_CBI_MOUTYP &
+               MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+; Procédure d'appel du sous-écran de l'imputation.
+;
+PROCEDURE DESIGNER D002
+BEGIN
+  IF     ALTEREDRECORD OF ARMOUVEMENT &
+     AND MOUSTU OF ARMOUVEMENT <> "P"
+  THEN ERROR 1390 ; Vous devez faire une mise à jour avant d'accéder le sous-écran.
+  IF MOUSTU OF ARMOUVEMENT <> "P"
+  THEN RUN SCREEN ar014b &
+            PASSING T_CIECLEMNU, &
+                    T_CIENOM,    &
+                    T_MOUSTUOLD, &
+                    D_LARATRJOU, &
+                    ARMOUVEMENT  &
+            MODE F
+END
+
+
+;-------------------------------------------------------------------------------
+; Procédure d'appel du sous-écran de l'écriture comptable.
+;
+PROCEDURE DESIGNER D003
+BEGIN
+  IF MOUDATJOU OF ARMOUVEMENT = 0
+  THEN ERROR 1402 ; L'écriture doit être journalisée pour accèder le sous-écran.
+
+  RUN SCREEN mc090 &
+             PASSING D_HISCLE  &
+             MODE F
+END
+
+
+;-------------------------------------------------------------------------------
+; Procédure d'appel du sous-écran de la piste de vérification.
+;
+PROCEDURE DESIGNER D004
+BEGIN
+  RUN SCREEN ar014c &
+             PASSING ARMOUVEMENT &
+             MODE F
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF ARMOUVEMENT &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF ARMOUVEMENT &
+     AND NOT NEWRECORD     OF ARMOUVEMENT &
+     AND NOT DELETEDRECORD OF ARMOUVEMENT &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  ;
+  ; L'imputation est non modifiable Si le lot est autorisé.
+  ;
+  IF     D_LARATRJOU = "1" &
+     AND MOUDATJOU OF ARMOUVEMENT = 0
+  THEN ERROR 1424 ;Mise à jour non autorisée. Ce lot est autorisé.
+
+  ; Enlever le droit de modification si le mouvement n'est plus préliminaire.
+  ; Cependant, on permet la mise à jour si le statut vient juste d'être changer
+  ; pour "A".
+  ;
+  IF ((    ALTEREDRECORD OF ARMOUVEMENT &
+       AND NOT NEWRECORD OF ARMOUVEMENT)  &
+       OR DELETEDRECORD OF ARMOUVEMENT)   &
+    AND T_MOUSTUOLD  <> "P"
+  THEN ERROR 1443 ; Seule la modification d'un mouvement préliminaire est
+                  ; permise.
+
+  ; Appel de la procédure de mise à jour des produits entrepôt, du catalogue
+  ; du fournisseur et de l'historique des transactions lors de
+  ; l'approbation du mouvement.
+  ;
+
+  IF ALTEREDRECORD OF ARMOUVEMENT AND MOUSTU OF ARMOUVEMENT = "A"
+  THEN BEGIN
+
+  ; --------------------------------------------------------------------------------------------------
+  ; MP-00-07-07_D74.
+
+  IF MOUTYP OF ARMOUVEMENT = "S" OR MOUTYP OF ARMOUVEMENT = "T"
+  THEN BEGIN
+    WHILE RETRIEVING ARMOU_DETAIL
+    BEGIN
+      IF 0 > PREQTEPHY OF VPRE_PRD - MODQTE OF ARMOU_DETAIL AND PREFLGAUTNEG OF VPRE_PRD = "0"
+      THEN ERROR = SUBSTITUTE(1511,"(" + PRDCLE OF ARMOU_DETAIL + ")") ; Quantité physique négative non autorisée pour le produit (999999999999).
+    END
+  END
+
+  ; --------------------------------------------------------------------------------------------------
+
+
+    DO INTERNAL MAJ_INFORMATIONS_MOUVEMENT
+  END
+
+END
+
+
+
+PROCEDURE POSTUPDATE
+BEGIN
+  LET T_MOUSTUOLD = MOUSTU OF ARMOUVEMENT
+  IF    CORRECTMODE
+  THEN BEGIN
+    DISPLAY MOUCLE OF ARMOUVEMENT
+    WARNING = " "
+  END
+
+  if moustu of armouvement = "A"
+  then begin 
+    get a1_imputation opt
+    if not accessok
+    then warning "AR9999 *A* Attention ! L'imputation n'a pas été générée automatiquement"
+  end
+END
+
+
+BUILD
+
+@IF FORMAT
+************************** Mouvement de marchandises ***************************
+* Entrepôt......: xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                *
+*                                                                              *
+* Période ......: xxxxx                Statut........: x xxxxxxxxxxxxxxx       *
+* Lot...........: xxxx                                                         *
+*                                                                              *
+* # Mouvement...: xxxxxxxxx            Type..........: x xxxxxxxxxxxxxxx       *
+*                                                                              *
+* Date mouvement: xxxxxxxxxx           Date approb...: xxxxxxxxxx              *
+*                                                                              *
+*                                      Journalisé le.: xxxxxxxxxx  xxxxx       *
+*                                                                              *
+* Utilisateur...: xxxxxxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxx         *
+*                                                                              *
+* Raison........: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                                                                              *
+* Nombre d'item.: xxxx                    Montant net...: xxxxxxxxxxxxxxx      *
+*                                                                              *
+********************************************************************************
+@ENDIF

@@ -1,0 +1,737 @@
+;/T/ 2.5.8 Retour marchamdises (Bloc).
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1996-06-19
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   les retours de marchandises de diagrammes.
+;
+;/M/ François Déry, 12 mai 1999
+;       Ajout du in dict sur la transaction des séquences.
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd222a ACTIONBAR                     &
+              MODE LABEL "" AT 2,80         &
+              NOACTION                      &
+              FIELDMARK RETAIN STARTUP      &
+              HELP POPUP FROM 4,9 TO 20,72  &
+              RECEIVING T_CIECLEMNU,        &
+                        T_CIENOM,           &
+                        PDRETOUR
+
+
+;-------------------------------------------------------------------------------
+;
+; Déclaration de la transaction pour donner un numéro séquentiel
+;
+
+TRANSACTION NO_SEQ READ WRITE &
+                   RESERVING FOR PROTECTED WRITE PDSEQ_RETOUR IN DICT
+
+
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD222A"
+
+
+;-------------------------------------------------------------------------------
+; Documentation de l'écran.
+;
+USE pd222a.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire au traitement
+;
+TEMPORARY T_BLOVOLMC3 FLOAT SIZE 8
+TEMPORARY T_TYPE_PROD CHARACTER SIZE 02 INITIAL "BL" RESET AT STARTUP ; Type de produit traiter par l'écran
+TEMPORARY T_SILENT    CHARACTER SIZE 01
+TEMPORARY T_SPRNUMSOR INTEGER SIZE 4
+
+;-------------------------------------------------------------------------------
+;
+; Variable temporaire du programme pour les pop-up
+;
+
+TEMPORARY T_BLONUMGRA001APR  CHARACTER SIZE 04        ; Popup numéro bloc
+TEMPORARY T_BLONUMGRA002APR  CHARACTER SIZE 05        ; Popup numéro bloc
+TEMPORARY T_BLORECAPR        CHARACTER SIZE 01        ; Popup numéro bloc
+TEMPORARY T_CHAMP            INTEGER UNSIGNED SIZE 01 ; Popup numéro bloc
+TEMPORARY T_COD              INTEGER UNSIGNED SIZE 02 ; Popup numéro bloc
+TEMPORARY T_STU              CHARACTER        SIZE 01 ; Popup numéro bloc
+TEMPORARY T_FTRNUMFAC        INTEGER SIGNED   SIZE 04 ; Popup numéro bloc
+TEMPORARY T_RARCODRET        CHARACTER        SIZE 03 ; Popup raison retour
+TEMPORARY T_BLOLONBRU INTEGER SIZE 4
+TEMPORARY T_BLOHAUBRU INTEGER SIZE 4
+TEMPORARY T_BLOLARBRU INTEGER SIZE 4
+TEMPORARY T_TGRCODGRA CHAR SIZE 3
+TEMPORARY T_BLOSTU    CHAR SIZE 1
+
+;-------------------------------------------------------------------------------
+;
+; Sert à valider les codes bilingue et pour les sous-écrans de consultation
+;
+DEFINE    D_FTRTYPFAC CHARACTER SIZE 16 = "FTRTYPFAC"
+TEMPORARY T_FTRTYPFAC CHARACTER SIZE 04
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du volume d'une pièce de granit
+;
+
+USE usvarvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du prix d'une ligne de détail bon de commande
+;
+USE usvarprigra NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Retour de marchandises
+;
+
+FILE PDRETOUR MASTER
+
+;-------------------------------------------------------------------------------
+;
+; Lien retour - bloc
+;
+
+FILE PDBLOC_RETOUR PRIMARY &
+             NOITEM &
+             OCCURS 10 TIMES
+
+ACCESS   VIA     CIECLE,          &
+                 RTONUMSEQ        &
+         USING   T_CIECLEMNU,     &
+                 RTONUMSEQ        OF PDRETOUR &
+         ORDERBY CIECLE,          &
+                 BLONUMBLOAPR
+
+  ITEM CIECLE    OF PDBLOC_RETOUR INITIAL T_CIECLEMNU
+  ITEM RTONUMSEQ OF PDBLOC_RETOUR INITIAL RTONUMSEQ OF PDRETOUR FIXED
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro séquentiel pour les factures
+;
+
+FILE PDSEQ_RETOUR DESIGNER &
+                  TRANSACTION NO_SEQ
+
+;-------------------------------------------------------------------------------
+; Bloc
+;
+
+FILE PDBLOC REFERENCE &
+            OCCURS WITH PDBLOC_RETOUR
+
+  ACCESS VIA     CIECLE,         &
+                 BLONUMBLOAPR    &
+         USING   T_CIECLEMNU,    &
+                 BLONUMBLOAPR OF PDBLOC_RETOUR
+
+
+;-------------------------------------------------------------------------------
+;
+; Raison retour
+;
+
+FILE PDRAISON_RETOUR REFERENCE OCCURS WITH PDBLOC_RETOUR
+
+  ACCESS VIA   CIECLE,          &
+               RARCODRET        &
+         USING T_CIECLEMNU,     &
+               RARCODRET        OF PDBLOC_RETOUR
+
+
+;-------------------------------------------------------------------------------
+;
+; Bloc
+;
+
+FILE PDBLOC DESIGNER ALIAS A_BLO_FIC
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Type de produit
+;
+
+FILE PDTYPE_PRODUIT DESIGNER
+
+  ACCESS VIA     CIECLE,          &
+                 TPDTYPPRD        &
+         USING   T_CIECLEMNU,     &
+                 T_TYPE_PROD
+
+
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+
+SKIP
+
+
+TITLE &
+@IF FRANCAIS
+      " Retour de marchandises " &
+@ELSE
+      " %%%Retour de marchandises " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+
+ALIGN ( ,3,19) (41,41,57)
+
+
+FIELD RTONUMSEQ        OF PDRETOUR         &
+label "Num. séquence.:"&
+        FIXED
+
+FIELD EXPNUMEXP OF PDRETOUR &
+label "Num. expédi..:"&
+       FIXED
+
+FIELD SPRNUMSOR OF PDRETOUR &
+label "Num sortie...:"&
+       FIXED
+
+FIELD BLINUMBLI OF PDRETOUR &
+label "Bon livraison:"&
+       FIXED
+
+FIELD RTODATRET        OF PDRETOUR          FORMAT YYYYMMDD &
+PATTERN "####/##/##"&
+label "Date retour...:"&
+        FIXED
+
+
+
+
+DRAW 08,2 TO 08,79
+
+
+SKIP TO LINE 08
+
+
+TITLE &
+@IF FRANCAIS
+       " Bloc " &
+@ELSE
+      " %%%Bloc " &
+@ENDIF
+  CENTERED AT ,1
+
+
+SKIP TO LINE 10
+
+
+TITLE &
+@IF FRANCAIS
+      "Num. bloc    Gra Lon  Hau  Lar Sta   Inv  Rai              Description" &
+@ELSE
+      "Num. bloc    Gra Lon  Hau  Lar Sta   Inv  Rai              Description" &
+@ENDIF
+      AT ,3
+
+
+SKIP TO LINE 12
+
+
+ALIGN (02,02,03) (,07,08) (,13,14) (,,16) (,,20) (,,25) (,,30) (,,35) (,,40) (,,45) (,,62)
+
+
+CLUSTER OCCURS WITH PDBLOC_RETOUR ID BASE 90
+
+
+FIELD BLONUMGRA001APR  OF PDBLOC_RETOUR    &
+        HIDDEN                             &
+        AUTONEXT                           &
+        LABEL " "                          &
+        REQUIRED                           &
+        NUMERIC
+
+
+FIELD BLONUMGRA002APR  OF PDBLOC_RETOUR    &
+        HIDDEN                             &
+        AUTONEXT                           &
+        LABEL "-"                          &
+        REQUIRED                           &
+        NUMERIC &
+DISPLAY
+
+FIELD BLORECAPR        OF PDBLOC_RETOUR    &
+        HIDDEN                             &
+        LABEL "-" &
+        REQUIRED
+;        DISPLAY
+
+
+FIELD T_SILENT                             &
+        SILENT
+
+
+FIELD TGRCODGRA OF PDBLOC &
+        HIDDEN
+
+FIELD BLOLONBRU OF PDBLOC &
+        HIDDEN size 4
+
+FIELD BLOHAUBRU OF PDBLOC &
+        HIDDEN       size 4
+
+FIELD BLOLARBRU OF PDBLOC &
+        HIDDEN             size 4
+
+FIELD BLOSTU OF PDBLOC &
+        HIDDEN
+
+FIELD BLFINDRETINV     OF PDBLOC_RETOUR &
+        HIDDEN                             &
+        SIZE 03                            &
+        ;DEFAULT "0"
+        DEFAULT "1"
+
+
+FIELD RARCODRET        OF PDBLOC_RETOUR   &
+        HIDDEN                             &
+        LOOKUP ON PDRAISON_RETOUR          &
+          MESSAGE 2976 ; Cette raison n'existe pas
+
+FIELD BLFDSCRAIRET     OF PDBLOC_RETOUR   &
+        HIDDEN                             &
+        DEFAULT RARDSCFRA OF PDRAISON_RETOUR &
+        FOR , 17
+
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul du volume d'une pièce de granit
+;
+
+USE uscalvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul du prix d'une ligne de détail bon commande
+;
+
+USE uscalprigra NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel dépisteur No bloc (attemtion cet appel est particulier)
+;
+
+PROCEDURE INPUT BLONUMGRA001APR
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_BLONUMGRA001APR  = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_BLONUMGRA002APR  = ""
+    LET T_BLORECAPR        = ""
+    LET T_CHAMP            = 1
+    LET T_COD              = 1
+    LET T_STU              = ""
+    LET T_FTRNUMFAC        = FTRNUMFAC OF PDRETOUR
+    LET T_SPRNUMSOR        = SPRNUMSOR OF PDRETOUR
+    LET T_BLOLONBRU        = 0
+    LET T_BLOHAUBRU        = 0
+    LET T_BLOLARBRU        = 0
+    LET T_TGRCODGRA        = ""
+    LET T_BLOSTU           = ""
+
+    RUN SCREEN pd136 MODE F &
+                     PASSING T_SPRNUMSOR,&
+                             T_BLONUMGRA001APR, &
+                             T_BLONUMGRA002APR, &
+                             T_BLORECAPR,       &
+                             T_CHAMP,           &
+                             T_COD,             &
+                             T_STU,             &
+                             T_CIECLEMNU,       &
+                             T_BLOLONBRU,       &
+                             T_BLOHAUBRU,       &
+                             T_BLOLARBRU,       &
+                             T_TGRCODGRA,       &
+                             T_BLOSTU
+
+
+    LET FIELDTEXT = TRUNCATE( T_BLONUMGRA001APR )
+    LET BLONUMGRA002APR OF PDBLOC_RETOUR = T_BLONUMGRA002APR
+    LET BLORECAPR       OF PDBLOC_RETOUR = T_BLORECAPR
+
+    LET BLOLONBRU OF PDBLOC = T_BLOLONBRU
+    LET BLOHAUBRU OF PDBLOC = T_BLOHAUBRU
+    LET BLOLARBRU OF PDBLOC = T_BLOLARBRU
+    LET TGRCODGRA OF PDBLOC = T_TGRCODGRA
+    LET BLOSTU    OF PDBLOC = T_BLOSTU
+
+
+  END
+END
+;-------------------------------------------------------------------------------
+;
+; Appel dépisteur No bloc (attemtion cet appel est particulier)
+;
+
+PROCEDURE INPUT BLORECAPR
+BEGIN
+  GET PDBLOC OPT &
+         VIA     CIECLE,         &
+                 BLONUMBLOAPR    &
+         USING   T_CIECLEMNU,    &
+                 BLONUMGRA001APR OF PDBLOC_RETOUR + &
+                                          BLONUMGRA002APR OF PDBLOC_RETOUR
+  IF ACCESSOK
+  THEN BEGIN
+    IF BLOSTU OF PDBLOC <> "T" AND BLOSTU OF PDBLOC <> "V" AND BLOSTU OF PDBLOC <> "E" AND BLOSTU OF PDBLOC <> "D"
+    THEN BEGIN
+     DISPLAY BLOLONBRU OF PDBLOC
+     DISPLAY BLOHAUBRU OF PDBLOC
+     DISPLAY BLOLARBRU OF PDBLOC
+     DISPLAY TGRCODGRA OF PDBLOC
+     DISPLAY BLOSTU    OF PDBLOC
+    END
+    ELSE ERROR = "LE STATUS DU BLOC NE PERMET PAS CETTE OPERATION"
+  END
+  ELSE ERROR = "BLOC INCONNU"
+END
+;-------------------------------------------------------------------------------
+;
+; Initialise le champ blonumbloapr
+;
+
+PROCEDURE EDIT T_SILENT
+BEGIN
+  LET BLONUMBLOAPR OF PDBLOC_RETOUR = BLONUMGRA001APR OF PDBLOC_RETOUR + &
+                                      BLONUMGRA002APR OF PDBLOC_RETOUR + &
+                                      BLORECAPR       OF PDBLOC_RETOUR
+
+IF NEWRECORD OF PDBLOC_RETOUR
+  THEN  LET RTOVOLMC3BLO OF PDRETOUR = RTOVOLMC3BLO OF PDRETOUR + &
+                                 BLOVOLMC3 OF PDBLOC
+END
+;-------------------------------------------------------------------------------
+;
+; Traitement pour les indicateurs dont la valeur est Oui ou Non.
+;
+
+PROCEDURE INPUT BLFINDRETINV
+BEGIN
+  USE usflginp NOLIST
+END
+;-------------------------------------------------------------------------------
+;
+; Validation pour le champ
+;
+
+PROCEDURE EDIT BLFINDRETINV
+BEGIN
+  IF 0 = SIZE(TRUNCATE(FIELDTEXT)) &
+     AND &
+     0 = SIZE(TRUNCATE(BLFINDRETINV OF PDBLOC_RETOUR))
+  THEN BEGIN
+    ERROR 3044 ; Ce champ est requis
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Traitement pour les indicateurs dont la valeur est Oui ou Non.
+;
+
+PROCEDURE OUTPUT BLFINDRETINV
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur pour le champ
+;
+
+PROCEDURE INPUT RARCODRET
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_RARCODRET = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd137 MODE F &
+                     PASSING T_RARCODRET,&
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_RARCODRET )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Initialisation du champ par défaut
+;
+
+PROCEDURE INPUT BLFDSCRAIRET
+BEGIN
+  IF     0 = SIZE( TRUNCATE( FIELDTEXT)) &
+     AND 0 = SIZE( TRUNCATE( BLFDSCRAIRET OF PDBLOC_RETOUR))
+  THEN BEGIN
+    LET FIELDTEXT = RARDSCFRA OF PDRAISON_RETOUR
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Procedure de mise à jour
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  FOR PDBLOC_RETOUR
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF PDBLOC_RETOUR &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF PDBLOC_RETOUR &
+       AND NOT NEWRECORD     OF PDBLOC_RETOUR &
+       AND NOT DELETEDRECORD OF PDBLOC_RETOUR &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+
+
+    IF NOT DELETEDRECORD OF PDBLOC_RETOUR
+    THEN BEGIN
+
+      ;
+      ; Mise à jour du statut du bloc
+      ;
+      IF BLFINDRETINV OF PDBLOC_RETOUR = "1"
+      THEN BEGIN
+        GET A_BLO_FIC                      &
+          VIA   CIECLE,                    &
+                BLONUMGRA001APR,           &
+                BLONUMGRA002APR,           &
+                BLORECAPR                  &
+          USING T_CIECLEMNU,                         &
+                BLONUMGRA001APR  OF PDBLOC_RETOUR ,  &
+                BLONUMGRA002APR  OF PDBLOC_RETOUR ,  &
+                BLORECAPR        OF PDBLOC_RETOUR
+
+        IF ACCESSOK
+        THEN BEGIN
+          IF BLOSTU OF A_BLO_FIC <> "I"
+          THEN BEGIN
+            LET BLOSTU OF A_BLO_FIC = "I"
+            PUT A_BLO_FIC RESET
+          END
+        END
+      END
+    END
+  END
+  ;
+  ; Incrémentation du numéro de séquence
+  ;
+  IF 0 = RTONUMSEQ OF PDRETOUR
+  THEN BEGIN
+    START TRANSACTION NO_SEQ
+    GET PDSEQ_RETOUR OPTIONAL           &
+      VIA   CIECLE                      &
+      USING T_CIECLEMNU
+    IF NOT ACCESSOK
+    THEN BEGIN
+      LET CIECLE OF PDSEQ_RETOUR = T_CIECLEMNU
+    END
+    LET SETNUMRAP        OF PDSEQ_RETOUR     = SETNUMRAP        OF PDSEQ_RETOUR + 1
+    LET RTONUMSEQ        OF PDRETOUR         = SETNUMRAP        OF PDSEQ_RETOUR
+    PUT PDSEQ_RETOUR
+
+    DISPLAY RTONUMSEQ OF PDRETOUR
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procedure de destruction
+;
+
+PROCEDURE DELETE
+BEGIN
+;  FOR PDBLOC_RETOUR
+;  BEGIN
+    IF NOT DELETEDRECORD OF PDBLOC_RETOUR
+    THEN BEGIN
+      ;
+      ; Mise à jour du statut du bloc
+      ;
+      GET A_BLO_FIC                      &
+        VIA   CIECLE,                    &
+              BLONUMGRA001APR,           &
+              BLONUMGRA002APR,           &
+              BLORECAPR                  &
+        USING T_CIECLEMNU,                         &
+              BLONUMGRA001APR  OF PDBLOC_RETOUR ,  &
+              BLONUMGRA002APR  OF PDBLOC_RETOUR ,  &
+              BLORECAPR        OF PDBLOC_RETOUR
+
+      IF ACCESSOK
+      THEN BEGIN
+        IF BLOSTU OF A_BLO_FIC <> "T"
+        THEN BEGIN
+          LET BLOSTU OF A_BLO_FIC = "T"
+          PUT A_BLO_FIC RESET
+        END
+      END
+
+      LET RTOVOLMC3BLO OF PDRETOUR = RTOVOLMC3BLO OF PDRETOUR - &
+                                     BLOVOLMC3 OF PDBLOC
+      LET RARCODRET    OF PDBLOC_RETOUR = " "
+      LET BLFDSCRAIRET OF PDBLOC_RETOUR = " "
+
+      DELETE PDBLOC_RETOUR
+;    END
+  END
+
+END
+;------------------------------------------------------------------
+PROCEDURE APPEND
+BEGIN
+  ACCEPT BLONUMGRA001APR OF PDBLOC_RETOUR
+  ACCEPT BLONUMGRA002APR OF PDBLOC_RETOUR
+  ACCEPT BLORECAPR OF PDBLOC_RETOUR
+  EDIT T_SILENT
+  DISPLAY TGRCODGRA OF PDBLOC
+  DISPLAY BLOLONBRU OF PDBLOC
+  DISPLAY BLOHAUBRU OF PDBLOC
+  DISPLAY BLOLARBRU OF PDBLOC
+  DISPLAY BLOSTU OF PDBLOC
+  ACCEPT BLFINDRETINV OF PDBLOC_RETOUR
+  ACCEPT RARCODRET OF PDBLOC_RETOUR
+  ACCEPT BLFDSCRAIRET OF PDBLOC_RETOUR
+END
+
+PROCEDURE ENTRY
+BEGIN
+  FOR PDBLOC_RETOUR
+    BEGIN
+      PERFORM APPEND
+    END
+END
+
+
+PROCEDURE UPDATE
+BEGIN
+  PUT PDRETOUR
+  FOR PDBLOC_RETOUR
+    BEGIN
+     PUT PDBLOC_RETOUR
+    END
+END
+
+
+BUILD detail list
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+**************************** Retour de marchandises ****************************
+*                                                                              *
+* Num. séquence.: xxxxxxxxx             No. facture...: xxxxxxx                *
+* Date retour...: xxxxxxxx              Type facture..: x xxxxxxxxxxxxxxxxx    *
+*                                                                              *
+************************************* Bloc *************************************
+*                                                                              *
+* Num. bloc         Prix vente U/M Inv          Montant  Rai Description       *
+*                                                                              *
+* xxxx-xxxxx-x xxxxxxxxxxxxxxx xx  xxx  xxxxxxxxxxxxxxx  xxx xxxxxxxxxxxxxxxxx *
+* xxxx-xxxxx-x xxxxxxxxxxxxxxx xx  xxx  xxxxxxxxxxxxxxx  xxx xxxxxxxxxxxxxxxxx *
+* xxxx-xxxxx-x xxxxxxxxxxxxxxx xx  xxx  xxxxxxxxxxxxxxx  xxx xxxxxxxxxxxxxxxxx *
+* xxxx-xxxxx-x xxxxxxxxxxxxxxx xx  xxx  xxxxxxxxxxxxxxx  xxx xxxxxxxxxxxxxxxxx *
+* xxxx-xxxxx-x xxxxxxxxxxxxxxx xx  xxx  xxxxxxxxxxxxxxx  xxx xxxxxxxxxxxxxxxxx *
+* xxxx-xxxxx-x xxxxxxxxxxxxxxx xx  xxx  xxxxxxxxxxxxxxx  xxx xxxxxxxxxxxxxxxxx *
+* xxxx-xxxxx-x xxxxxxxxxxxxxxx xx  xxx  xxxxxxxxxxxxxxx  xxx xxxxxxxxxxxxxxxxx *
+* xxxx-xxxxx-x xxxxxxxxxxxxxxx xx  xxx  xxxxxxxxxxxxxxx  xxx xxxxxxxxxxxxxxxxx *
+* xxxx-xxxxx-x xxxxxxxxxxxxxxx xx  xxx  xxxxxxxxxxxxxxx  xxx xxxxxxxxxxxxxxxxx *
+* xxxx-xxxxx-x xxxxxxxxxxxxxxx xx  xxx  xxxxxxxxxxxxxxx  xxx xxxxxxxxxxxxxxxxx *
+*                                                                              *
+********************************************************************************
+@ENDIF

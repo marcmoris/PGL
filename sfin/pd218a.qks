@@ -1,0 +1,798 @@
+;/T/ 2.4.2 Enregistrer le sciage (Opérateur)
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1994-05-15
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   les feuilles de temps pour le sciage
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd218a ACTIONBAR                     &
+              MODE LABEL "" AT 2,80         &
+              NOACTION                      &
+              FIELDMARK RETAIN STARTUP      &
+              HELP POPUP FROM 4,9 TO 20,72  &
+              RECEIVING T_CIECLEMNU,        &
+                        T_CIENOM,           &
+                        PDRAP_SCIAGE
+
+
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD218A"
+
+
+;-------------------------------------------------------------------------------
+; Documentation de l'écran.
+;
+USE pd218a.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+TEMPORARY T-COMPTEUR INT SIZE 2
+TEMPORARY T-HREDEB   INT SIZE 2
+TEMPORARY T-HREFIN   INT SIZE 2
+TEMPORARY T-CODARR   CHAR SIZE 4
+TEMPORARY T-CODEMP   CHAR SIZE 6
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Sert à valider les codes bilingue et pour les sous-écrans de consultation
+;
+
+DEFINE    D_QRTCODQRT CHARACTER SIZE 16 = "QRTCODQRT"
+TEMPORARY T_QRTCODQRT CHARACTER SIZE 04
+
+
+;-------------------------------------------------------------------------------
+;
+; Clés de recherche pour les popup de consultations et les sous écrans
+;
+
+TEMPORARY T_RAACODARR   CHARACTER SIZE 04
+TEMPORARY T_EMPLOYE_NUM CHARACTER SIZE 06
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables nécessaire au traitement
+;
+
+TEMPORARY T_SILENT     CHARACTER SIZE 01
+TEMPORARY T_OLDHREDEB  INTEGER   SIZE 04
+TEMPORARY T_OLDHREFIN  INTEGER   SIZE 04
+TEMPORARY T_OLDDURSEC  FLOAT     SIZE 08
+TEMPORARY T_NEWDURSEC  FLOAT     SIZE 08
+TEMPORARY T_SW_TROUVE  CHARACTER SIZE 01 RESET AT STARTUP
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire pour le calcul d'un intervalle de temps
+;
+
+USE usdiftim NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire pour le calcul de l'heure à partir d'un nombre de seconde
+;
+
+USE uscaltim NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Rapport de sciage
+;
+
+FILE PDRAP_SCIAGE MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Opérateur sciage
+;
+
+FILE PDOPERATEUR_SCIE PRIMARY &
+                      NOITEM &
+                      OCCURS 11 TIMES
+
+  ACCESS VIA     CIECLE,          &
+                 RSCDATPRD,       &
+                 QRTCODQRT        &
+         USING   T_CIECLEMNU,                         &
+                 RSCDATPRD        OF PDRAP_SCIAGE,    &
+                 QRTCODQRT        OF PDRAP_SCIAGE     &
+         ORDERBY CIECLE,          &
+                 RSCDATPRD,       &
+                 QRTCODQRT,       &
+                 OPENUMEMP,       &
+                 OPSHREDEB,       &
+                 OPSHREFIN
+
+  ITEM CIECLE       OF PDOPERATEUR_SCIE INITIAL  T_CIECLEMNU
+  ITEM RSCDATPRD    OF PDOPERATEUR_SCIE INITIAL  RSCDATPRD OF PDRAP_SCIAGE FIXED
+  ITEM QRTCODQRT    OF PDOPERATEUR_SCIE INITIAL  QRTCODQRT OF PDRAP_SCIAGE FIXED
+  ITEM OPSDURSECOPE OF PDOPERATEUR_SCIE SUM INTO RSCDUROPE OF PDRAP_SCIAGE
+  ITEM OPSDURSECARR OF PDOPERATEUR_SCIE SUM INTO RSCDURARR OF PDRAP_SCIAGE
+
+
+;-------------------------------------------------------------------------------
+;
+; Opération de surface validation des plages horraire pour le rapport
+;
+
+FILE PDOPERATEUR_SCIE DESIGNER ALIAS OPS_FIC
+
+  ACCESS VIA     CIECLE,          &
+                 RSCDATPRD,       &
+                 QRTCODQRT,       &
+                 OPENUMEMP        &
+         USING   T_CIECLEMNU,                          &
+                 RSCDATPRD        OF PDOPERATEUR_SCIE, &
+                 QRTCODQRT        OF PDOPERATEUR_SCIE, &
+                 OPENUMEMP        OF PDOPERATEUR_SCIE
+
+  ;
+  ; Sélectionne si une des deux bornes du nouvel enregistrement se retrouve
+  ; parmis l'intervale déjà enregistré.
+  ;
+
+  SELECT IF (OPSHREDEB OF PDOPERATEUR_SCIE >= OPSHREDEB OF OPS_FIC  &
+             AND                                                    &
+             OPSHREDEB OF PDOPERATEUR_SCIE < OPSHREFIN OF OPS_FIC) &
+            OR                                                      &
+            (OPSHREDEB OF PDOPERATEUR_SCIE < OPSHREDEB OF OPS_FIC  &
+             AND                                                    &
+             OPSHREFIN OF PDOPERATEUR_SCIE > OPSHREDEB OF OPS_FIC) &
+            OR                                                      &
+            (OPSHREDEB OF PDOPERATEUR_SCIE < OPSHREFIN OF OPS_FIC  &
+             AND                                                    &
+             OPSHREFIN OF PDOPERATEUR_SCIE > OPSHREFIN OF OPS_FIC )
+
+
+;-------------------------------------------------------------------------------
+;
+; Operateur scie (validation des plage horaires)
+;
+
+FILE PDOPERATEUR_SCIE DESIGNER ALIAS A_OPS_FIC_2
+
+
+;-------------------------------------------------------------------------------
+;
+; Opérateur
+;
+
+FILE PDOPERATEUR REFERENCE OCCURS WITH PDOPERATEUR_SCIE
+
+  ACCESS VIA     CIECLE,          &
+                 OPENUMEMP        &
+         USING   T_CIECLEMNU,     &
+                 OPENUMEMP        OF PDOPERATEUR_SCIE
+
+
+;-------------------------------------------------------------------------------
+;
+; Raison arret
+;
+
+FILE PDRAISON_ARRET REFERENCE OCCURS WITH PDOPERATEUR_SCIE
+
+  ACCESS VIA   CIECLE,          &
+               RAACODARR        &
+         USING T_CIECLEMNU,     &
+               RAACODARR        OF PDOPERATEUR_SCIE
+
+
+;-------------------------------------------------------------------------------
+;
+; Code bilingue (quart de travail)
+;
+
+FILE VCBI_DSC  REFERENCE &
+               ALIAS A_CBI_QRTCODQRT
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_QRTCODQRT,                          &
+               QRTCODQRT        OF PDRAP_SCIAGE
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables nécessaire au traitement
+;
+
+DEFINE D_NOM CHARACTER SIZE 25 = TRUNCATE(OPEPNM OF PDOPERATEUR) + " " + &
+                                 TRUNCATE(OPENOM OF PDOPERATEUR)
+
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+
+SKIP
+
+
+TITLE &
+@IF FRANCAIS
+      " Productivité du sciage " &
+@ELSE
+      " %%%Productivité du sciage " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+ALIGN (,3,19)
+
+
+FIELD RSCDATPRD        OF PDRAP_SCIAGE      FORMAT YYYYMMDD &
+PATTERN "####/##/##"&
+label "Date..........:"&
+        DISPLAY                            &
+        FIXED
+
+
+ALIGN (,3,19) (,,21)
+
+
+FIELD QRTCODQRT        OF PDRAP_SCIAGE     &
+label "Quart travail.:"&
+        DISPLAY                            &
+        FIXED
+
+
+FIELD CBIDSC           OF A_CBI_QRTCODQRT  &
+        DISPLAY                            &
+        FIXED
+
+
+ALIGN (,3,19)
+
+
+FIELD RSCHREDEB        OF PDRAP_SCIAGE     &
+label "Hre début....:"&
+        DISPLAY                            &
+        FIXED
+
+
+FIELD RSCHREFIN        OF PDRAP_SCIAGE     &
+label "Hre fin......:"&
+        DISPLAY                            &
+        FIXED
+
+
+ALIGN (,48,64)
+
+
+SKIP TO LINE 4
+
+
+FIELD RSCMC3PRD        OF PDRAP_SCIAGE     &
+label "M3...........:"&
+        DISPLAY                            &
+        FIXED
+
+
+FIELD RSCHREPRD        OF PDRAP_SCIAGE     &
+label "Hre...........:"&
+        PIC "^^:^^ " LEAD "-"              &
+        DISPLAY                            &
+        FIXED
+
+
+FIELD RSCPRD           OF PDRAP_SCIAGE     &
+label "Productivité..:"&
+        DISPLAY                            &
+        FIXED
+
+
+DRAW 08,2 TO 08,79
+
+
+SKIP TO LINE 8
+
+
+TITLE &
+@IF FRANCAIS
+      " Opérateurs sciage " &
+@ELSE
+      " %%%Opérateurs sciage " &
+@ENDIF
+      CENTERED AT ,1
+
+
+SKIP TO LINE 10
+
+
+TITLE &
+@IF FRANCAIS
+      "Opér.  Nom                       Début Fin   Rais.Description" &
+@ELSE
+      "%%%r.  Nom                       Début Fin   Rais.Description " &
+@ENDIF
+      AT ,3
+
+
+SKIP TO LINE 11
+
+
+ALIGN (02,02,03) (,,10) (,,36) (,,42) (,,48) (,,53)
+
+
+CLUSTER OCCURS WITH PDOPERATEUR_SCIE ID BASE 40
+
+
+FIELD OPENUMEMP        OF PDOPERATEUR_SCIE &
+        HIDDEN                             &
+        LABEL " "                          &
+        NUMERIC                            &
+        REQUIRED                           &
+        LOOKUP ON PDOPERATEUR              &
+          MESSAGE 2913 ; Ce numéro d'employé n'existe pas
+
+
+FIELD D_NOM                                &
+        DISPLAY
+
+
+FIELD OPSHREDEB        OF PDOPERATEUR_SCIE &
+        HIDDEN                             &
+        REQUIRED
+
+
+FIELD OPSHREFIN        OF PDOPERATEUR_SCIE &
+        HIDDEN                             &
+        REQUIRED
+
+
+FIELD RAACODARR        OF PDOPERATEUR_SCIE &
+        HIDDEN                             &
+        LOOKUP ON PDRAISON_ARRET           &
+          MESSAGE 2976 ; Cette raison n'existe pas
+
+
+FIELD T_SILENT                             &
+        SILENT
+
+
+FIELD OPSDSCARR        OF PDOPERATEUR_SCIE &
+        HIDDEN                             &
+        FOR ,25                            &
+        ENTRY IF 0 <> SIZE(TRUNCATE(RAACODARR OF PDOPERATEUR_SCIE))
+
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur pour le champs
+;
+
+PROCEDURE INPUT OPENUMEMP
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_EMPLOYE_NUM   = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd110 MODE F &
+                     PASSING T_EMPLOYE_NUM, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_EMPLOYE_NUM  )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que l'heure de début n'est pas dans un intervalle déjà enregistré
+;
+
+PROCEDURE EDIT OPSHREDEB OF PDOPERATEUR_SCIE
+BEGIN
+  ;
+  ; Garde en memoire l'ancienne valeur
+  ;
+  LET T_OLDHREDEB = OLDVALUE(OPSHREDEB OF PDOPERATEUR_SCIE)
+  ;
+  ; Valide que l'heure de début est compris dans l'intervalle du rapport
+  ;
+  IF OPSHREDEB OF PDOPERATEUR_SCIE < RSCHREDEB OF PDRAP_SCIAGE &
+     OR &
+     OPSHREDEB OF PDOPERATEUR_SCIE > RSCHREFIN OF PDRAP_SCIAGE
+  THEN BEGIN
+    ERROR 3010 ; L'heure de début n'est pas compris dans l'intervalle du rapport
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que l'heure de début est plus petite que l'heure de fin
+;
+
+PROCEDURE EDIT OPSHREFIN OF PDOPERATEUR_SCIE
+BEGIN
+  ;
+  ; Garde en memoire l'ancienne valeur
+  ;
+  LET T_OLDHREFIN = OLDVALUE(OPSHREFIN OF PDOPERATEUR_SCIE)
+  ;
+  ; Valide que l'heure de début est compris dans l'intervalle du rapport
+  ;
+  IF OPSHREFIN OF PDOPERATEUR_SCIE < RSCHREDEB OF PDRAP_SCIAGE &
+     OR &
+     OPSHREFIN OF PDOPERATEUR_SCIE > RSCHREFIN OF PDRAP_SCIAGE
+  THEN BEGIN
+    ERROR 3011 ; L'heure de fin n'est pas compris dans l'intervalle du rapport
+  END
+  ;
+  ; Valide que l'heure de fin est plus grande que l'heure de début
+  ;
+  IF OPSHREFIN OF PDOPERATEUR_SCIE <= OPSHREDEB OF PDOPERATEUR_SCIE
+  THEN BEGIN
+    ERROR 3007 ; L'heure de début doit être plus petite que l'heure de fin
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour le champs raison d'arret
+;
+
+PROCEDURE INPUT RAACODARR
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_RAACODARR = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd114 MODE F &
+                     PASSING T_RAACODARR, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_RAACODARR )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul la durée en seconde
+;
+
+PROCEDURE EDIT T_SILENT
+BEGIN
+  ;
+  ; Valide que la plage horraire n'a pas été déjà enregistré
+  ;
+  LET T-COMPTEUR = OCCURRENCE
+  LET T-CODEMP   = OPENUMEMP OF PDOPERATEUR_SCIE
+  LET T-HREDEB   = OPSHREDEB OF PDOPERATEUR_SCIE
+  LET T-HREFIN   = OPSHREFIN OF PDOPERATEUR_SCIE
+  LET T-CODARR   = RAACODARR OF PDOPERATEUR_SCIE
+  IF 0 = SIZE(TRUNC(T-CODARR))
+  THEN BEGIN
+  FOR PDOPERATEUR_SCIE
+  BEGIN
+    IF T-COMPTEUR <> OCCURRENCE
+    THEN BEGIN
+          IF ((OPSHREDEB OF PDOPERATEUR_SCIE >= T-HREDEB &
+             AND                                       &
+             OPSHREDEB OF PDOPERATEUR_SCIE < T-HREFIN) &
+            OR                                         &
+            (OPSHREDEB OF PDOPERATEUR_SCIE < T-HREDEB  &
+             AND                                       &
+             OPSHREFIN OF PDOPERATEUR_SCIE > T-HREDEB) &
+            OR                                         &
+            (OPSHREDEB OF PDOPERATEUR_SCIE < T-HREFIN  &
+             AND                                       &
+             OPSHREFIN OF PDOPERATEUR_SCIE > T-HREFIN))&
+             AND T-CODEMP = OPENUMEMP OF PDOPERATEUR_SCIE
+        THEN ERROR 3005 ; Cette plage horaire chevauche ...
+    END
+  END
+  END
+  IF 0 <> SIZE(TRUNC(T-CODARR))
+  THEN BEGIN
+  FOR PDOPERATEUR_SCIE
+  BEGIN
+    IF T-COMPTEUR <> OCCURRENCE AND &
+       0 <> SIZE(TRUNC(RAACODARR OF PDOPERATEUR_SCIE))
+    THEN BEGIN
+          IF ((OPSHREDEB OF PDOPERATEUR_SCIE >= T-HREDEB &
+             AND                                       &
+             OPSHREDEB OF PDOPERATEUR_SCIE < T-HREFIN) &
+            OR                                         &
+            (OPSHREDEB OF PDOPERATEUR_SCIE < T-HREDEB  &
+             AND                                       &
+             OPSHREFIN OF PDOPERATEUR_SCIE > T-HREDEB) &
+            OR                                         &
+            (OPSHREDEB OF PDOPERATEUR_SCIE < T-HREFIN  &
+             AND                                       &
+             OPSHREFIN OF PDOPERATEUR_SCIE > T-HREFIN))&
+             AND T-CODEMP = OPENUMEMP OF PDOPERATEUR_SCIE
+        THEN ERROR 3005 ; Cette plage horaire chevauche ...
+    END
+  END
+  END
+  ;
+  ; Calcul de la durée de l'ancienne valeur
+  ;
+  LET TZ_DATDEB   = RSCDATPRD        OF PDRAP_SCIAGE
+  LET TZ_TMPDEB   = ASCII(T_OLDHREDEB,4) + "00"
+  IF QRTCODQRT OF PDRAP_SCIAGE = "S" AND T_OLDHREFIN > 2400
+  THEN BEGIN
+    LET TZ_DATFIN   = RSCDATPRD        OF PDRAP_SCIAGE + 1
+    LET TZ_TMPFIN   = ASCII((T_OLDHREFIN - 2400),4) + "00"
+  END
+  ELSE BEGIN
+    LET TZ_DATFIN   = RSCDATPRD        OF PDRAP_SCIAGE
+    LET TZ_TMPFIN   = ASCII(T_OLDHREFIN,4) + "00"
+  END
+
+
+  LET T_OLDDURSEC = DZ_DIFSECTOT
+  ;
+  ; Calcul de la durée de la nouvelle valeur
+  ;
+  LET TZ_DATDEB   = RSCDATPRD        OF PDRAP_SCIAGE
+  LET TZ_TMPDEB   = ASCII(OPSHREDEB  OF PDOPERATEUR_SCIE,4) + "00"
+  IF QRTCODQRT OF PDRAP_SCIAGE = "S" AND T_OLDHREFIN > 2400
+  THEN BEGIN
+    LET TZ_DATFIN   = RSCDATPRD        OF PDRAP_SCIAGE + 1
+    LET TZ_TMPFIN   = ASCII((OPSHREFIN  OF PDOPERATEUR_SCIE - 2400),4) + "00"
+  END
+  ELSE BEGIN
+    LET TZ_DATFIN   = RSCDATPRD        OF PDRAP_SCIAGE
+    LET TZ_TMPFIN   = ASCII(OPSHREFIN  OF PDOPERATEUR_SCIE,4) + "00"
+  END
+
+  LET T_NEWDURSEC = DZ_DIFSECTOT
+
+  LET OPSDURSEC OF PDOPERATEUR_SCIE = T_NEWDURSEC
+
+  ;
+  ; Calcul de la durée d'opération ou d'arrêt selon le cas
+  ;
+  IF 0 = SIZE(TRUNCATE(RAACODARR OF PDOPERATEUR_SCIE))
+  THEN BEGIN
+    LET OPSDURSECOPE OF PDOPERATEUR_SCIE = T_NEWDURSEC
+    LET RSCDUR OF PDRAP_SCIAGE = RSCDUROPE OF PDRAP_SCIAGE - RSCDURARR OF PDRAP_SCIAGE
+  END
+  ELSE BEGIN
+    LET OPSDURSECARR OF PDOPERATEUR_SCIE = T_NEWDURSEC
+    LET RSCDUR OF PDRAP_SCIAGE = RSCDUROPE OF PDRAP_SCIAGE - RSCDURARR OF PDRAP_SCIAGE
+  END
+  ;
+  ; Calcul des heures de production
+  ;
+  LET TZ_NBRSEC   = RSCDUR OF PDRAP_SCIAGE
+  LET RSCHREPRD OF PDRAP_SCIAGE = DZ_HEURE_2
+  DISPLAY RSCHREPRD OF PDRAP_SCIAGE
+  ;
+  ; Calcul de la prodictivité
+  ;
+  LET RSCPRD OF PDRAP_SCIAGE = (RSCMC3PRD OF PDRAP_SCIAGE / (RSCHREPRD OF PDRAP_SCIAGE / 100))
+  DISPLAY RSCPRD OF PDRAP_SCIAGE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Assigne une valeur par défaut
+;
+
+PROCEDURE INPUT OPSDSCARR        OF PDOPERATEUR_SCIE
+BEGIN
+  IF 0 = SIZE(FIELDTEXT) AND ENTRYMODE
+  THEN BEGIN
+    LET FIELDTEXT = RAADSCFRA        OF PDRAISON_ARRET
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  FOR PDOPERATEUR_SCIE
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF PDOPERATEUR_SCIE &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF PDOPERATEUR_SCIE &
+       AND NOT NEWRECORD     OF PDOPERATEUR_SCIE &
+       AND NOT DELETEDRECORD OF PDOPERATEUR_SCIE &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; PROCEDURE DE VALIDATION DES PLAGES HORAIRES
+;
+
+PROCEDURE INTERNAL VALIDE_PLAGE
+BEGIN
+  WHILE RETRIEVING A_OPS_FIC_2 &
+    VIA   CIECLE,         &
+          RSCDATPRD,      &
+          QRTCODQRT,      &
+          OPENUMEMP       &
+    USING T_CIECLEMNU,    &
+          RSCDATPRD       OF PDOPERATEUR_SCIE,      &
+          QRTCODQRT       OF PDOPERATEUR_SCIE,      &
+          OPENUMEMP       OF PDOPERATEUR_SCIE
+  BEGIN
+    IF     0 = SIZE(TRUNCATE(RAACODARR OF A_OPS_FIC_2 )) &
+       AND OPSHREDEB OF A_OPS_FIC_2 <= OPSHREDEB OF PDOPERATEUR_SCIE &
+       AND OPSHREFIN OF A_OPS_FIC_2 >= OPSHREFIN OF PDOPERATEUR_SCIE
+   THEN BEGIN
+      LET T_SW_TROUVE = "1"
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les plages horaires
+;
+
+PROCEDURE UPDATE
+BEGIN
+  PUT PDRAP_SCIAGE
+  FOR PDOPERATEUR_SCIE
+  BEGIN
+    PUT PDOPERATEUR_SCIE
+  END
+
+  FOR PDOPERATEUR_SCIE
+  BEGIN
+    IF NOT DELETEDRECORD
+    THEN BEGIN
+      IF    0 <> OPSDURSEC    OF PDOPERATEUR_SCIE &
+         OR 0 <> OPSDURSECOPE OF PDOPERATEUR_SCIE &
+         OR 0 <> OPSDURSECARR OF PDOPERATEUR_SCIE
+      THEN BEGIN
+        LET T_SW_TROUVE = "0"
+        DO INTERNAL VALIDE_PLAGE
+        IF T_SW_TROUVE = "0"
+        THEN BEGIN
+          ERROR 3235 ; Cette plage n'est pas comprise dans un intervalle de travail
+        END
+      END
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Mise à jour del la durée de sciage lors de la destruction d'un enregistrement
+;
+
+PROCEDURE DELETE
+BEGIN
+  DELETE PDOPERATEUR_SCIE
+  ;
+  ; Calcul de la durée réel
+  ;
+  LET RSCDUR OF PDRAP_SCIAGE = RSCDUROPE OF PDRAP_SCIAGE - RSCDURARR OF PDRAP_SCIAGE
+  ;
+  ; Calcul des heures de production
+  ;
+  LET TZ_NBRSEC   = RSCDUR OF PDRAP_SCIAGE
+  LET RSCHREPRD OF PDRAP_SCIAGE = DZ_HEURE_2
+  DISPLAY RSCHREPRD OF PDRAP_SCIAGE
+  ;
+  ; Calcul de la prodictivité
+  ;
+  LET RSCPRD OF PDRAP_SCIAGE = (RSCMC3PRD OF PDRAP_SCIAGE / (RSCHREPRD OF PDRAP_SCIAGE / 100))
+  DISPLAY RSCPRD OF PDRAP_SCIAGE
+END
+
+
+BUILD LIST DETAIL
+
+@IF FORMAT
+
+2xxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+3****************************** Gérer le sciage ********************************
+4 Date..........: xxxxxxxx                     M3............: xxxxxxxxxx      *
+5 Quart travail.: x xxxxxxxxxxxxxxxxxxxxxxxxx  Hre...........: xxxxx           *
+6                                              Productivité..: xxxxxxxxxxx     *
+7******************************* Détail sciage *********************************
+8                                                                              *
+9 Opér.  Nom                       Début Fin   Rais.Description                *
+0 xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxx xxxxx xxxxx xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  *
+1 xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxx xxxxx xxxxx xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  *
+2 xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxx xxxxx xxxxx xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  *
+3 xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxx xxxxx xxxxx xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  *
+4 xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxx xxxxx xxxxx xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  *
+5 xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxx xxxxx xxxxx xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  *
+6 xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxx xxxxx xxxxx xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  *
+7 xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxx xxxxx xxxxx xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  *
+8 xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxx xxxxx xxxxx xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  *
+9 xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxx xxxxx xxxxx xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  *
+0 xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxx xxxxx xxxxx xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  *
+1                                                                              *
+2                                                                              *
+3*******************************************************************************
+@ENDIF

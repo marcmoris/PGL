@@ -1,0 +1,1593 @@
+;/T/ 2.5.2: ENREGISTRER LES EXPEDITIONS - SOUS-ECRAN: BON DE LIVRAISON
+;
+;/P/ Programmeur..: Alain Simard, PROSIG informatique inc.
+;    Date Création: 11 mai 1995
+;
+;    Description..: Cet écran a pour but de gérer les bons de livraison
+;
+;/M/ Programmeur.:  Claudie Doyon
+;    Date .......:  ;1999/10/18
+;    Description.:  Modification du changement de statut du caisson(C) pour
+;                   qu'il ne le mettre à C seulement si c'est un
+;                   nouvel enregistrement.
+;                   + modifier la procédure internal del pour qu'il ne
+;                   soutrait les qté exp. seulement si le statut du caisson  ;                   est à "E".
+;
+;/M/François Déry, 12 mai 1999
+;       Ajout du in dict sur la transaction pour unix.
+;-------------------------------------------------------------------------------
+
+SCREEN pd217a ACTIONBAR &
+        MODE LABEL "" AT 2,80 &
+        NOACTION &
+        FIELDMARK RETAIN STARTUP &
+        HELP POPUP FROM 4,9 TO 20,72 &
+        RECEIVING       T_CIECLEMNU , &
+                        T_CIENOM, &
+                        PDEXPEDITION
+
+;-------------------------------------------------------------------------------
+;
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_COMNUMCOMINT_T CHAR SIZE 3
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+TEMPORARY T_CAISTU    CHARACTER SIZE 1
+
+;-------------------------------------------------------------------------------
+;
+; Déclaration de la transaction pour donner un numéro séquentiel
+;
+
+TRANSACTION NO_SEQ READ WRITE &
+                   RESERVING FOR PROTECTED WRITE PDSEQ_EXPED IN DICT
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+
+Description of screen &
+@IF FRANCAIS
+"                                                            " &
+"     Cet écran permet de gérer les bons de livraison        " &
+" associés à une expédition.                                 " &
+"                                                            " &
+"                                                            "
+@ELSE
+"                                                            " &
+"     This screen permits ....                               " &
+@ENDIF
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+
+; Variables temporaire pour la sécurité
+;
+; Description: Déclaration des variables temporaire pour la gestion
+;              de la sécurité-prosig.
+;
+; Utilisation: Doit être utiliser dans la partie déclaration de l'écran.
+;              C'est à dire avant la définition du premier fichier.
+;
+;------------------------------------------------------------------------------
+;
+; Accès au programme.
+;
+TEMPORARY TZ_SECACC CHARACTER SIZE 1 RESET AT STARTUP
+;
+; Saisie de données(Entry).
+;
+TEMPORARY TZ_SECENT CHARACTER SIZE 1 RESET AT STARTUP
+;
+; Destruction.(Delete)
+;
+TEMPORARY TZ_SECDEL CHARACTER SIZE 1 RESET AT STARTUP
+;
+; Modification.(Change mode)
+;
+TEMPORARY TZ_SECMOD CHARACTER SIZE 1 RESET AT STARTUP
+;
+; Variable pour l'élément de la sécurité.
+;
+TEMPORARY TZ_XELNOM CHARACTER SIZE 16 RESET AT STARTUP
+TEMPORARY TZ_FLGAUT CHARACTER SIZE  1 RESET AT STARTUP
+;
+; Nom de l'écran pour retrouver la sécurité.
+;
+TEMPORARY TZ_NOMECR CHARACTER SIZE 7 RESET AT STARTUP INIT &
+;
+;
+;**FIN USSECTMP
+    "PD217A"
+
+
+;-------------------------------------------------------------------------------
+;
+; definition de la transaction query por les sous-ecrans
+;
+
+; Transaction QUERY pour les sous-écrans
+;
+; Ajout d'une nouvelle transaction QUERY particulière au sous-écran
+; pour permettre à l'usager de voir ses modifications
+;
+@IF VAXVMS
+SET LIST TRANSACTION ; Pour voir les transactions utilisées
+
+TRANSACTION QUERY COMMIT ON MODE
+@ENDIF
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard dans les écrans pleine page et sous-ecran
+;
+
+; ACTIONBAR
+;
+; Description: Définition du menu déroulant standard situé dans le haut de
+;              l'écran.
+;
+; Utilisation: Il faut l'utiliser dans la partie déclaration de l'écran.
+;              C'est à dire avant la déclaration des fichiers.
+;
+;
+;
+@IF FRANCAIS
+ACTIONMENU LABEL "Rech"   ACTION FIND
+ACTIONMENU LABEL "MAJ"    ACTION UPDATE
+ACTIONMENU LABEL "Entrée" ACTION ENTRY
+ACTIONMENU LABEL "Ajout"  ACTION APPEND
+ACTIONMENU LABEL "Select" ACTION SELECT
+ACTIONMENU LABEL "Supp"   ACTION DELETE
+@ELSE
+ACTIONMENU LABEL "Find"   ACTION FIND
+ACTIONMENU LABEL "Update" ACTION UPDATE
+ACTIONMENU LABEL "Entry"  ACTION ENTRY
+ACTIONMENU LABEL "Append" ACTION APPEND
+ACTIONMENU LABEL "Select" ACTION SELECT
+ACTIONMENU LABEL "Del"    ACTION DELETE
+@ENDIF
+
+@IF VAXVMS AND FRANCAIS
+ACTIONMENU LABEL "Aide"
+  MENUITEM LABEL "Ecran      <PF1 PF2>" ACTION EXTENDED HELP
+  MENUITEM LABEL "Champ          <PF2>" ACTION FIELD HELP MARK
+  MENUITEM LABEL "Champ dét. <PF1 PF2>" ACTION EXTENDED FIELD HELP MARK
+  MENUITEM LABEL "Recherche     <rech>" ACTION FIND
+  MENUITEM LABEL "MAJ            <PF3>" ACTION UPDATE
+  MENUITEM LABEL "MAJ Retour <PF1 PF3>" ACTION UPDATE RETURN
+  MENUITEM LABEL "MAJ Garde      <F19>" ACTION UPDATE STAY
+  MENUITEM LABEL "Entrée         <ins>" ACTION ENTRY
+  MENUITEM LABEL "Ajout      <PF1 ins>" ACTION APPEND
+  MENUITEM LABEL "Sélection   <sélect>" ACTION SELECT
+  MENUITEM LABEL "Supp.    <eff.texte>" ACTION DELETE
+  MENUITEM LABEL "Supp.Lig  <PF1 eff.>" ACTION DELETE MARK
+  MENUITEM LABEL "Edition         <F9>" ACTION FIELDMARK
+  MENUITEM LABEL "Bar d'action    <F7>" ACTION ACTIONBAR
+  MENUITEM LABEL "Suivant  <page suiv>" ACTION NEXT DATA
+  MENUITEM LABEL " //            <F18>" ACTION ACTIONBAR
+  MENUITEM LABEL "Ecran préc.    <PF4>" ACTION RETURN
+  MENUITEM LABEL "Sortie         <F10>" ACTION ACTIONBAR
+  MENUITEM LABEL "Information    <tab>" ACTION INFORMATION
+  MENUITEM LABEL "Impression     <F20>" ACTION LIST
+  MENUITEM LABEL "Système       <exec>" ACTION SYSTEM
+@ENDIF
+
+@IF VAXVMS AND ANGLAIS
+ACTIONMENU LABEL "Help"
+  MENUITEM LABEL "Screen     <pf1 PF2>" ACTION EXTENDED HELP
+  MENUITEM LABEL "Field          <PF2>" ACTION FIELD HELP MARK
+  MENUITEM LABEL "Ext. Field <PF1 PF2>" ACTION EXTENDED FIELD HELP MARK
+  MENUITEM LABEL "Find Mode     <find>" ACTION FIND
+  MENUITEM LABEL "Update         <PF3>" ACTION UPDATE
+  MENUITEM LABEL "Update Ret.<PF1 PF3>" ACTION UPDATE RETURN
+  MENUITEM LABEL "Update Stay    <F19>" ACTION UPDATE STAY
+  MENUITEM LABEL "Entry Mode     <ins>" ACTION ENTRY
+  MENUITEM LABEL "Append     <PF1 ins>" ACTION APPEND
+  MENUITEM LABEL "Selection   <select>" ACTION SELECT
+  MENUITEM LABEL "Delete      <remove>" ACTION DELETE
+  MENUITEM LABEL "Del. Line <PF1 rem.>" ACTION DELETE MARK
+  MENUITEM LABEL "Field Mark      <F9>" ACTION FIELDMARK
+  MENUITEM LABEL "Action Bar      <F7>" ACTION ACTIONBAR
+  MENUITEM LABEL "Next     <next page>" ACTION NEXT DATA
+  MENUITEM LABEL " //            <F18>" ACTION ACTIONBAR
+  MENUITEM LABEL "Prev. Screen   <pf4>" ACTION RETURN
+  MENUITEM LABEL "Quick Exit     <F10>" ACTION ACTIONBAR
+  MENUITEM LABEL "Information    <tab>" ACTION INFORMATION
+  MENUITEM LABEL "List           <F20>" ACTION LIST
+  MENUITEM LABEL "System          <Do>" ACTION SYSTEM
+@ENDIF
+
+@IF UNIX AND FRANCAIS
+ACTIONMENU LABEL "Aide"
+  MENUITEM LABEL "Aide            F1_H" ACTION HELP
+  MENUITEM LABEL "Aide dét.       F1_?" ACTION EXTENDED HELP
+  MENUITEM LABEL "Recherche      F1_F7" ACTION FIND
+  MENUITEM LABEL "MAJ               F5" ACTION UPDATE
+  MENUITEM LABEL "MAJ Retour     F1_F5" ACTION UPDATE RETURN
+  MENUITEM LABEL "MAJ Garde           " ACTION UPDATE STAY
+  MENUITEM LABEL "Entrée            F7" ACTION ENTRY
+  MENUITEM LABEL "Ajout               " ACTION APPEND
+  MENUITEM LABEL "Sélection      F1_F6" ACTION SELECT
+  MENUITEM LABEL "Supp.             F2" ACTION DELETE
+  MENUITEM LABEL "Supp.Lig            " ACTION DELETE MARK
+  MENUITEM LABEL "Edition         F1_M" ACTION FIELDMARK
+  MENUITEM LABEL "Bar d'action    F1_B" ACTION ACTIONBAR
+  MENUITEM LABEL "Suivant       <Next>" ACTION NEXT DATA
+  MENUITEM LABEL " //             F1_A" ACTION ACTIONBAR
+  MENUITEM LABEL "Ecran préc.       F8" ACTION RETURN
+  MENUITEM LABEL "Sortie         F1_F8" ACTION ACTIONBAR
+  MENUITEM LABEL "Information     F1_I" ACTION INFORMATION
+  MENUITEM LABEL "Impression écran  F3" ACTION LIST
+@ENDIF
+
+@IF UNIX AND ANGLAIS
+ACTIONMENU LABEL "Help"
+  MENUITEM LABEL "Help            F1_H" ACTION HELP
+  MENUITEM LABEL "Ext. Help       F1_?" ACTION EXTENDED HELP
+  MENUITEM LABEL "Find mode      F1_F7" ACTION FIND
+  MENUITEM LABEL "Update            F5" ACTION UPDATE
+  MENUITEM LABEL "Update Return  F1_F5" ACTION UPDATE RETURN
+  MENUITEM LABEL "Update Stay         " ACTION UPDATE STAY
+  MENUITEM LABEL "Entry Mode        F7" ACTION ENTRY
+  MENUITEM LABEL "Append              " ACTION APPEND
+  MENUITEM LABEL "Selection      F1_F6" ACTION SELECT
+  MENUITEM LABEL "Delete            F2" ACTION DELETE
+  MENUITEM LABEL "Del line            " ACTION DELETE MARK
+  MENUITEM LABEL "Field Mark      F1_M" ACTION FIELDMARK
+  MENUITEM LABEL "Action Bar      F1_B" ACTION ACTIONBAR
+  MENUITEM LABEL "Next          <Next>" ACTION NEXT DATA
+  MENUITEM LABEL " //             F1_A" ACTION ACTIONBAR
+  MENUITEM LABEL "Prev. Screen      f8" ACTION RETURN
+  MENUITEM LABEL "Quick Exit     F1_F8" ACTION ACTIONBAR
+  MENUITEM LABEL "Information     F1_I" ACTION INFORMATION
+  MENUITEM LABEL "List              F3" ACTION LIST
+@ENDIF
+;
+;
+;**FIN USACTECR
+
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Conteneur                       " ACTION DESIGNER D001
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%Conteneur                    " ACTION DESIGNER D001
+@ENDIF
+
+ACTIONMENU LABEL "REV"    ACTION DESIGNER DREV
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+
+DEFINE DZ_CIECLE    CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE DZ_CIENOM    CHARACTER SIZE 40 = CENTER( T_CIENOM )
+DEFINE D_LETTRE    CHARACTER SIZE 27 = " ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+TEMPORARY D_INDLETTRE INTEGER   SIZE  4
+TEMPORARY D_BLIAMM    CHARACTER SIZE  1
+TEMPORARY T_FLGDREV   CHARACTER SIZE  1
+
+DEFINE D_KILO CHARACTER SIZE 2 = "Kg"
+;-------------------------------------------------------------------------------
+;
+; Expédition
+
+FILE PDEXPEDITION MASTER
+
+
+FILE CRCLIENT DESIGNER
+;-------------------------------------------------------------------------------
+;
+; Bons de livraison
+
+FILE PDBON_LIVRAISON PRIMARY &
+                     NOITEM
+
+  ACCESS  VIA     CIECLE,           &
+                  EXPNUMEXP,        &
+                  BLINUMBLI         &
+          REQUEST BLINUMBLI         &
+          USING   T_CIECLEMNU,               &
+                  EXPNUMEXP OF PDEXPEDITION, &
+                  BLINUMBLI
+
+  ACCESS  VIA     CIECLE,          &
+                  EXPNUMEXP        &
+          USING   T_CIECLEMNU,               &
+                  EXPNUMEXP OF PDEXPEDITION  &
+          ORDERBY CIECLE,          &
+                  BLINUMBLI
+
+  ITEM CIECLE    OF PDBON_LIVRAISON INITIAL T_CIECLEMNU
+  ITEM EXPNUMEXP OF PDBON_LIVRAISON INITIAL EXPNUMEXP OF PDEXPEDITION FIXED
+
+;-------------------------------------------------------------------------------
+;
+; définir un alias au fichier pdbon_livraison qui permettra d'obtenir
+; le dernier numero de bon cree pour cette expédition.
+;
+
+FILE PDBON_LIVRAISON DESIGNER &
+                     ALIAS A_PDBON_LIVRAISION_REF
+
+
+;-------------------------------------------------------------------------------
+;
+; caisson par bon de livraison
+;
+FILE PDLIVRE_CAISSON DETAIL &
+                     NOITEM &
+                     OCCURS 8 &
+                     COUNT INTO BLIQTECAI OF PDBON_LIVRAISON
+
+  ACCESS  VIA     CIECLE,          &
+                  EXPNUMEXP,       &
+                  BLINUMBLI        &
+          USING   T_CIECLEMNU,                 &
+                  EXPNUMEXP OF PDEXPEDITION,   &
+                  BLINUMBLI OF PDBON_LIVRAISON &
+          ORDERBY CIECLE,          &
+                  CAINUMCAI
+
+  ITEM CIECLE    OF PDLIVRE_CAISSON INITIAL T_CIECLEMNU
+  ITEM EXPNUMEXP OF PDLIVRE_CAISSON INITIAL EXPNUMEXP OF PDEXPEDITION FIXED
+  ITEM BLINUMBLI OF PDLIVRE_CAISSON INITIAL BLINUMBLI OF PDBON_LIVRAISON FIXED
+;------------------------------------------------------------------------------
+FILE PDEMBAL_DIAG DESIGNER
+ ACCESS VIA    CIECLE   ,&
+               CAINUMCAI &
+        USING  T_CIECLEMNU , &
+               CAINUMCAI OF PDLIVRE_CAISSON
+
+FILE PDDIAGRAMME DESIGNER
+ ACCESS VIA   CIECLE   ,&
+              DIANUM002  &
+        USING T_CIECLEMNU, &
+              DIANUM002 OF PDEMBAL_DIAG
+;-------------------------------------------------------------------------------
+;
+; Caisson vérification des caissons et mise à jour du poids réel
+;
+
+FILE PDCAISSON SECONDARY &
+               NOITEM &
+               OCCURS WITH PDLIVRE_CAISSON &
+               NOITEM &
+               NODELETE
+
+  ACCESS  VIA     CIECLE,          &
+                  CAINUMCAI        &
+          USING   T_CIECLEMNU,                &
+                  CAINUMCAI OF PDLIVRE_CAISSON OPT
+
+
+FILE MCCOMPAGNIE DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+; Projet
+;
+
+FILE PDPROJET REFERENCE
+
+  ACCESS VIA      CIECLE,          &
+                  PJTABR           &
+         USING    T_CIECLEMNU,     &
+                  PJTABR          OF PDBON_LIVRAISON
+
+
+;-------------------------------------------------------------------------------
+;
+; Commande interne
+;
+
+FILE PDCOMMAN_INTERNE REFERENCE
+
+  ACCESS  VIA     CIECLE,          &
+                  PJTABR           &
+          USING   T_CIECLEMNU,     &
+                  PJTABR OF PDBON_LIVRAISON
+
+
+;-------------------------------------------------------------------------------
+;
+; Clients
+;
+
+FILE VCLC_CLI REFERENCE
+
+  ACCESS  VIA     CLICIECLE, &
+                  CLICLE, &
+                  CIECLE &
+          USING   "----" , &
+                  CLICLE OF PDBON_LIVRAISON, &
+                  T_CIECLEMNU
+
+
+;-------------------------------------------------------------------------------
+;
+; Adresse clients
+;
+;
+; Cette table est utilisée pour valider l'adresse de livraison ou pour créer
+; l'adresse si nécessaire.
+;
+
+FILE MCREF_ADRESSE    REFERENCE
+
+  ACCESS  VIA     REFCIECLE, &
+                  REFCLETYP, &
+                  REFCLENUM, &
+                  RADCLE &
+          USING   "----", &
+                  "C", &
+                  CLICLE OF PDBON_LIVRAISON, &
+                  COMNUMADRLIV OF PDBON_LIVRAISON
+
+
+;-------------------------------------------------------------------------------
+;
+; Caisson (maj)
+;
+
+FILE PDCAISSON ALIAS PDCAISSON_MAJ DESIGNER
+
+FILE PDLIVRE_CAISSON DESIGNER ALIAS PDLIVRE_CAISSONN
+
+;-------------------------------------------------------------------------------
+;
+; Validation des codes saisie
+;
+; Sert à valider les codes bilingue et pour les sous-écrans de consultation
+;
+
+; type d'expedition
+DEFINE    D_EXPTYPEXP CHARACTER SIZE 16 = "EXPTYPEXP"
+TEMPORARY T_EXPTYPEXP CHARACTER SIZE 4
+
+FILE VCBI_DSC   REFERENCE &
+        ALIAS   VCBI_DSC_EXPTYPEXP
+        ACCESS  VIA     XELNOM, &
+                        CBICLE &
+                USING   D_EXPTYPEXP, &
+                        EXPTYPEXP OF PDEXPEDITION OPT
+
+;-------------------------------------------------------------------------------
+;
+; Numéro séquentiel pour les numéros d'expédition
+;
+
+FILE PDSEQ_EXPED DESIGNER &
+                     TRANSACTION NO_SEQ
+
+;-------------------------------------------------------------------------------
+;
+; variables de travail
+;
+
+TEMPORARY T_PJTABR       CHARACTER SIZE 02
+TEMPORARY T_PJTANN       CHARACTER SIZE 02
+TEMPORARY T_COMNUMCOMINT CHARACTER SIZE 03
+TEMPORARY T_COMNUMCOM    CHARACTER SIZE 07
+
+TEMPORARY T_CLICIECLE    CHARACTER SIZE 04 ; Popup sur les adresses du client
+TEMPORARY T_CLICLE       CHARACTER SIZE 06 ; Popup sur les adresses du client
+TEMPORARY T_REFCLETYP    CHARACTER SIZE 01 ; Popup sur les adresses du client
+TEMPORARY T_RADCLE       INTEGER UNSIGNED &
+                                   SIZE 02 ; Popup sur les adresses du client
+TEMPORARY T_TYPADR       CHARACTER SIZE 03 ; Popup sur les adresses du client
+temporary t_comnumcomint_def char size 3
+TEMPORARY T_CLICLE_DEF   CHARACTER SIZE 06 ; Pour la valeur par default du
+                                           ; numero de client
+
+; définir deux fonctions qui permettront de faire afficher un * pour
+; identifier les caissons de diagramme ou de tranche
+DEFINE D_DIAGRAMME      CHAR SIZE 1 &
+        =       "*" &
+                IF TPDTYPPRD OF PDCAISSON = "DI" &
+        ELSE    " "
+
+DEFINE D_TRANCHE        CHAR SIZE 1 &
+        =       "*" &
+                IF TPDTYPPRD OF PDCAISSON = "TR" &
+        ELSE    " "
+
+DEFINE D_PROD_DIM       CHAR SIZE 1 &
+        =       "*" &
+                IF TPDTYPPRD OF PDCAISSON = "PD" &
+        ELSE    " "
+
+
+;===============================================================================
+; DRAW des écrans pleine page.
+;
+; Description: Ce USE sert à dessiner le cadre des écrans pleine page.
+;
+; Utilisation: Doit être utlisé avant la première énoncée FIELD>
+;
+;
+DRAW 3,01 TO 23,80
+;
+;
+;**FIN USDRWECR
+; En-tête standard des écrans pleine page.
+;
+; Description: Ce USE sert à afficher l'en-tête standard des écrans pleine
+;              page.
+;
+; Utilisation: Doit être utlisé avant la première énoncée FIELD.
+;
+;
+SKIP TO LINE 2
+
+@IF VAXVMS
+HILITE DISPLAY HALFTONE
+@ENDIF
+
+ALIGN(,,1) (,,21)
+
+FIELD DZ_CIECLE FIXED
+FIELD DZ_CIENOM FIXED
+
+;
+;
+;**FIN USTITSTD
+; HILITE standard de tous les écrans
+;
+; Description: Définition du HILITE standard de tous les écrans, menu
+;              écrans pleine page, popup...
+;
+; Utilisation: Doit être utilisé avant la première énoncé FIELD.
+;
+;
+@IF VAXVMS
+HILITE ACTIONBAR     INVERSE                     , &
+       ACTIONBARMARK HALFTONE INVERSE            , &
+       FIELDMARK     INVERSE                     , &
+       MENUMARK      HALFTONE INVERSE            , &
+       MODE          HALFTONE                    , &
+       TITLE         HALFTONE                    , &
+       DISPLAY       HALFTONE UNDERLINE          , &
+       INFORMATION   INVERSE                     , &
+       WARNING       INVERSE HALFTONE AUDIBLE    , &
+       ERROR         INVERSE HALFTONE AUDIBLE    , &
+       SEVERE        INVERSE HALFTONE AUDIBLE BLINKING
+@ELSE
+HILITE ACTIONBAR     HALFTONE INVERSE            , &
+       ACTIONBARMARK INVERSE                     , &
+       FIELDMARK     INVERSE HALFTONE            , &
+       MENUMARK      INVERSE HALFTONE            , &
+       MODE          HALFTONE                    , &
+       LABEL         HALFTONE                    , &
+       LINEDRAWING   HALFTONE                    , &
+       TITLE         HALFTONE                    , &
+       DISPLAY       UNDERLINE                   , &
+       INFORMATION   INVERSE                     , &
+       WARNING       INVERSE AUDIBLE             , &
+       ERROR         INVERSE AUDIBLE             , &
+       SEVERE        INVERSE AUDIBLE BLINKING
+@ENDIF
+;
+;**FIN USHILITE
+
+;===============================================================================
+
+
+SKIP
+
+
+TITLE &
+@IF FRANCAIS
+      " Bons de livraison " &
+@ELSE
+      " %%%Bons de livraison " &
+@ENDIF
+      CENTERED AT ,1
+
+; HILITE TITLE OFF
+;
+; Description: Sert à désactiver l'option HILITE pour toutes les
+;              énoncés TITLE qui suit ce USE. Seul le titre principal
+;              a un HILITE particulier.
+;
+; Utilisation: Doit être utilisé après le titre principal de l'écran.
+;
+;
+HILITE TITLE OFF
+;
+;
+;**FIN USHILITE
+
+SKIP 1
+
+
+ALIGN (,4,20) (,34,50) (,,54)
+
+
+FIELD EXPNUMEXP OF PDEXPEDITION &
+label "Num. expédi...:"&
+        FIXED
+
+
+FIELD EXPTYPEXP OF PDEXPEDITION &
+label "Type expéd....:"&
+        FIXED
+
+
+FIELD CBIDSC OF VCBI_DSC_EXPTYPEXP &
+        FIXED
+
+
+SKIP
+
+
+ALIGN (3,4,20) (33,34,50)
+
+
+FIELD BLINUMBLI OF PDBON_LIVRAISON &
+label "Bon livraison.:"&
+        NUM &
+        DISPLAY &
+        HIDDEN
+
+
+FIELD BLICODDOU OF PDBON_LIVRAISON &
+label "Code douane...:"&
+        HIDDEN
+
+
+SKIP
+
+
+ALIGN (,4,20) (,,24)
+
+
+FIELD PJTABR OF PDBON_LIVRAISON &
+label "Projet........:"&
+        HIDDEN &
+        IF EXPTYPEXP OF PDEXPEDITION <> "X" &
+        REQUIRED &
+        NOCHANGE &
+        LOOKUP  ON      PDPROJET &
+                VIA     CIECLE,          &
+                        PJTABR           &
+                USING   T_CIECLEMNU,     &
+                        FIELDTEXT &
+                MESSAGE 3074 ; Le code de projet n'existe pas
+
+
+FIELD PJTNOM OF PDPROJET &
+        DISPLAY
+
+
+SKIP
+
+
+ALIGN (,4,20) (,,27) (43,44,60)
+
+
+FIELD CLICLE OF PDBON_LIVRAISON &
+label "Client........:"&
+        REQUIRED &
+        NOCHANGE &
+        LOOKUP ON VCLC_CLI &
+          MESSAGE 2968 ; Ce numéro de client n'existe pas
+
+FIELD COMNUMCOMINT OF PDBON_LIVRAISON &
+      REQUIRED &
+      NOCHANGE &
+      NOLABEL
+
+
+FIELD COMNUMADRLIV OF PDBON_LIVRAISON &
+        HIDDEN &
+        REQUIRED &
+        LABEL "Adresse.......:" &
+        PREDISPLAY &
+        LOOKUP ON MCREF_ADRESSE &
+          MESSAGE 2981 ; Ce numéro d'adresse n'existe pas
+
+
+SKIP
+
+
+ALIGN (3,4,20)
+
+
+FIELD BLIDAT OF PDBON_LIVRAISON FORMAT YYYYMMDD PATTERN "####/##/##"&
+label "Date charge.:"&
+        HIDDEN &
+        DEFAULT SYSDATE
+
+
+SKIP
+
+
+ALIGN (,4,20) (,44,60) (,,73)
+
+
+FIELD BLIQTECAI OF PDBON_LIVRAISON &
+label "Nombre caisson:"&
+        DISPLAY
+
+
+FIELD BLIPOIEST OF PDBON_LIVRAISON &
+        LABEL "Poids estimé..:" DISPLAY
+
+FIELD D_KILO DISPLAY
+
+SKIP
+;----MODIF
+ALIGN (,4,20) (,44,60) (,,73)
+
+field BLIAMM of pdbon_livraison &
+      label "Ammendement..:" &
+      display
+
+FIELD BLIPOIREE OF PDBON_LIVRAISON &
+        LABEL "Poids réel....:" DISPLAY
+
+FIELD D_KILO DISPLAY
+
+SKIP
+ALIGN (,4,20) (,44,60) (,,73)
+
+field BLIDATMOD of pdbon_livraison FORMAT YYYYMMDD PATTERN "####/##/##"&
+label "Date Modif..:"&
+      display
+
+FIELD BLIDATIMP OF PDBON_LIVRAISON FORMAT YYYYMMDD PATTERN "####/##/##"&
+label "Date impres...:"&
+        DISPLAY
+
+;field BLIAMM of pdbon_livraison &
+;      label "Ammendement..:" &
+;      display
+
+;field BLIDATMOD of pdbon_livraison &
+;      display
+
+;ALIGN (,44,60) (,,73)
+
+
+;FIELD BLIPOIREE OF PDBON_LIVRAISON &
+;        LABEL "Poids réel....:" DISPLAY
+
+;FIELD D_KILO DISPLAY
+
+SKIP
+
+
+;ALIGN (,44,60)
+
+
+;FIELD BLIDATIMP OF PDBON_LIVRAISON &
+;        DISPLAY
+
+
+SKIP
+
+
+DRAW FROM ,1 TO ,80
+
+
+SKIP 1
+
+
+TITLE &
+@IF FRANCAIS
+     "Caisson     Poids estimé        Poids réel  Tranche  Diagramme Prod. Dim" &
+@ELSE
+     "%%%sson     Poids estimé        Poids réel  Tranche  Diagramme Prod. Dim" &
+@ENDIF
+      AT ,7
+
+
+SKIP
+
+
+ALIGN (3,4,5) (,,19) (,,37) (,,56) (,,64) (,,72)
+
+
+CLUSTER OCCURS WITH PDLIVRE_CAISSON
+
+
+FIELD CAINUMCAI OF PDLIVRE_CAISSON &
+        LABEL " " &
+        NUM &
+        HIDDEN &
+        ID NEXT &
+        REQUIRED &
+        NOCHANGE &
+        LOOKUP  NOTON   PDLIVRE_CAISSON &
+                VIA     CIECLE,         &
+                        CAINUMCAI &
+                USING   T_CIECLEMNU,                 &
+                        CAINUMCAI OF PDLIVRE_CAISSON &
+                MESSAGE 3158       ; ce caisson est deja associe a une
+                                   ; expedition
+
+
+FIELD CAIPOIEST OF PDLIVRE_CAISSON &
+        ID SAME &
+        DISPLAY
+
+
+FIELD CAIPOIREE OF PDLIVRE_CAISSON &
+        ID SAME
+
+
+FIELD D_TRANCHE &
+        DISPLAY
+
+
+FIELD D_DIAGRAMME &
+        DISPLAY
+
+
+FIELD D_PROD_DIM &
+        DISPLAY
+
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+; Appel de l'écran de sécurité.
+;
+; Description: Appel de l'écran de sécurité du module Gestion de système.
+;              Les variables temporaires utilisées proviennent du USEFILE
+;              USSECTMP.
+;
+; Utilisation: Doit être inséré dans la procédure INITIALIZE de l'écran.
+;
+;
+RUN SCREEN gs000 PASSING TZ_NOMECR, & ; Nom de l'écran
+                         TZ_SECACC, & ; Accès
+                         TZ_SECENT, & ; Entrée
+                         TZ_SECMOD, & ; Modification
+                         TZ_SECDEL    ; Destruction
+
+IF "3" = TZ_SECACC
+THEN ERROR 6 ; L'usager n'est pas défini au système.
+
+IF "2" = TZ_SECACC
+THEN ERROR 7 ; Votre accès au système est expiré.
+
+IF "0" = TZ_SECACC
+THEN ERROR 8 ; Vous n'avez pas accès à cet option.
+;
+;
+;**FIN USSECECR
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Traitement pour les indicateurs dont la valeur est Oui ou Non.
+; Le procédure INPUT transpose les valeurs sous un code universel soit 1 et 0.
+;
+
+PROCEDURE INPUT BLICODDOU OF PDBON_LIVRAISON
+BEGIN
+; Flag Oui/Non procédure INPUT
+;
+;
+; Description: Traitement pour les indicateurs dont la valeur est Oui ou Non.
+;              La procédure INPUT transpose les valeurs sous un code universel
+;              soit 1 et 0.
+;                Valeur saisie   Correspondance
+;                      O               1
+;                      N               0
+;                      Y               1
+;                      1               1
+;                      0               0
+;
+; Utilisation: Doit être utilisé dans la procédure INPUT du champ à
+;              traiter.
+;
+IF    FIELDTEXT = "O" &
+   OR FIELDTEXT = "Y"
+THEN LET FIELDTEXT = "1"
+
+IF    FIELDTEXT = "N"
+THEN LET FIELDTEXT = "0"
+
+;**FIN USFLGINP
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; La procédure OUTPUT affiche les valeurs sous la forme O/N.
+;
+
+PROCEDURE OUTPUT BLICODDOU OF PDBON_LIVRAISON
+BEGIN
+; Flag Oui/Non procédure OUTPUT
+;
+;
+; Description: Traitement pour les indicateurs dont la valeur est Oui ou Non.
+;              On affiche l'indicateur sous la langue de l'usager.
+;
+;                           Français  Anglais  Condition
+;              Valeurs: 1 =   Oui       Yes      Vrai
+;                       0 =   Non       No       Faux
+;
+;
+; Utilisation: Doit être utilisé dans la procédure OUTPUT du champ à
+;              traiter.
+;
+@IF FRANCAIS
+  IF FIELDTEXT = "1"
+  THEN LET FIELDTEXT = "O"
+@ELSE
+  IF FIELDTEXT = "1"
+  THEN LET FIELDTEXT = "Y"
+@ENDIF
+  IF FIELDTEXT = "0"
+  THEN LET FIELDTEXT = "N"
+
+;**FIN USFLGOUT
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+; Sécurité pour le mode ENTRY.
+;
+; Description: Valide si l'usager peut faire de la saisie dans cette
+;              écran.
+;
+; Utilisation: Peut être utiliser dans la procédure INPUT du premier
+;              champ saisie à l'écran, ou dans la procédure ENTRY
+;              si celle-ci a été altérée.
+;
+;
+IF     ENTRYMODE       &
+   AND TZ_SECENT = "0"
+THEN SEVERE 16 ; Vous ne pouvez pas saisir de données.
+;
+;
+;**FIN USSECENT
+
+  ; determiner le dernier numéro de bon de livraison utilisé pour
+  ; créer le nouveau
+  GET A_PDBON_LIVRAISION_REF &
+        VIA     CIECLE,          &
+                EXPNUMEXP        &
+        USING   T_CIECLEMNU,              &
+                EXPNUMEXP OF PDEXPEDITION &
+        ORDERBY CIECLE,          &
+                BLINUMBLI DESCENDING OPT
+
+  IF ACCESSOK
+  THEN BEGIN
+    LET BLINUMBLI OF PDBON_LIVRAISON &
+        = ASCII( NCONV(BLINUMBLI OF A_PDBON_LIVRAISION_REF) + 1 ,2 )
+    DISPLAY BLINUMBLI OF PDBON_LIVRAISON
+  END
+  ELSE BEGIN
+    LET BLINUMBLI OF PDBON_LIVRAISON = ASCII(NCONVERT("1"),2)
+    DISPLAY BLINUMBLI OF PDBON_LIVRAISON
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur pour le champs.
+;
+
+PROCEDURE INPUT PJTABR OF PDBON_LIVRAISON
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+
+    LET T_PJTABR       = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_PJTANN       = " "
+    LET T_COMNUMCOMINT = " "
+    LET T_COMNUMCOM    = " "
+
+    RUN SCREEN pd130 MODE F &
+                     PASSING T_PJTABR, &
+                             T_PJTANN, &
+                             T_COMNUMCOMINT, &
+                             T_COMNUMCOM,&
+                             T_CIECLEMNU
+
+
+    LET     FIELDTEXT                      = TRUNCATE( T_PJTABR )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Determiner le numéro de client pour le projet
+;
+
+PROCEDURE EDIT PJTABR OF PDBON_LIVRAISON
+BEGIN
+
+  ; si le projet est multiple, alors l'usager devra saisir le numero de
+  ; client, sinon, le champ t_clicle_def contiendra le numero de client
+  ; associe a la commande interne et servira a assigner le champ CLICLE
+  ; de la relation PDBON_LIVRAISON
+
+  IF PJTPROMUL OF PDPROJET <> "1"
+  THEN BEGIN
+    GET PDCOMMAN_INTERNE &
+        VIA     CIECLE,          &
+                PJTABR           &
+        USING   T_CIECLEMNU,     &
+                PJTABR OF PDBON_LIVRAISON OPT
+    IF ACCESSOK
+    THEN BEGIN
+      LET T_CLICLE_DEF       = CLICLE OF PDCOMMAN_INTERNE
+      LET T_COMNUMCOMINT_DEF = COMNUMCOMINT OF PDCOMMAN_INTERNE
+    END
+    ELSE BEGIN
+      LET T_CLICLE_DEF       = " "
+      LET T_COMNUMCOMINT_DEF = " "
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Assigne l'annéé du projet par défaut
+;
+
+PROCEDURE PROCESS PJTABR OF PDBON_LIVRAISON
+BEGIN
+  LET PJTANN       OF PDBON_LIVRAISON = PJTANN       OF PDPROJET
+  LET COMNUMCOMINT OF PDBON_LIVRAISON = COMNUMCOMINT OF PDCOMMAN_INTERNE
+  LET COMNUMCOM    OF PDBON_LIVRAISON = COMNUMCOM    OF PDCOMMAN_INTERNE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur (pop-up) pour le champ
+;
+
+PROCEDURE INPUT CLICLE OF PDBON_LIVRAISON
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CLICLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd210n MODE F &
+                      PASSING T_CIECLEMNU ,      &
+                              T_CIENOM ,         &
+                              T_CLICLE
+    LET FIELDTEXT = TRUNCATE(T_CLICLE)
+  END
+
+  ; Assigner la valer par defaut du numero de client si le projet n'est pas
+  ; un projet multiple
+  IF 0 = SIZE(TRUNC(FIELDTEXT)) &
+  AND CLICLE OF PDBON_LIVRAISON = " " &
+  AND T_CLICLE_DEF <> " "
+  THEN BEGIN
+    LET FIELDTEXT = T_CLICLE_DEF
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide le client
+;
+
+PROCEDURE EDIT CLICLE OF PDBON_LIVRAISON
+BEGIN
+  ;
+  ; Valide que le client est actif
+  ;
+  IF CLICLE OF PDBON_LIVRAISON <> CLICLE OF PDCOMMAN_INTERNE &
+     AND &
+     PJTPROMUL OF PDPROJET <> "1" &
+     AND &
+     EXPTYPEXP OF PDEXPEDITION <> "X"
+  THEN BEGIN
+    ERROR 3191 ; Le code de client difère de celui de la commande
+  END
+  IF CLISTU OF VCLC_CLI = "I"
+  THEN BEGIN
+    ERROR 2966 ; Ce client est inactif
+  END
+
+END
+
+;----------------------------------------------------------------------
+PROCEDURE EDIT COMNUMCOMINT
+BEGIN
+ GET PDCOMMAN_INTERNE OPT &
+  VIA   CIECLE,&
+        PJTABR,&
+        COMNUMCOMINT &
+  USING T_CIECLEMNU ,&
+        PJTABR OF PDBON_LIVRAISON,&
+        FIELDTEXT
+  IF ACCESSOK
+  THEN BEGIN
+    LET COMNUMCOMINT OF PDBON_LIVRAISON = COMNUMCOMINT OF PDCOMMAN_INTERNE
+    LET COMNUMCOM    OF PDBON_LIVRAISON = COMNUMCOM    OF PDCOMMAN_INTERNE
+  END
+  ELSE
+   ERROR = "MAUVAISE COMBINAISON,PROJET,CLIENT,COMMANDE"
+END
+;----------------------------------------------------------------------
+; Appel du pop-up pour l'adresse de livraison
+;
+
+PROCEDURE INPUT COMNUMADRLIV OF PDBON_LIVRAISON
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+
+
+    LET T_CLICIECLE = "----"
+    LET T_REFCLETYP = CLIREFTYP OF VCLC_CLI
+    LET T_CLICLE    = CLICLE    OF PDBON_LIVRAISON
+    LET T_TYPADR    = ""
+    LET T_RADCLE    = 0
+    LET T_PJTABR    = PJTABR OF PDBON_LIVRAISON
+    LET T_COMNUMCOMINT_T = COMNUMCOMINT OF PDBON_LIVRAISON
+    RUN SCREEN mc118 MODE F PASSING T_CIECLEMNU, &
+                                    T_CLICIECLE, &
+                                    T_REFCLETYP, &
+                                    T_CLICLE   , &
+                                    T_TYPADR   , &
+                                    T_RADCLE   , &
+                                    T_PJTABR   , &
+                                    T_COMNUMCOMINT_T
+    IF T_RADCLE <> 0
+    THEN BEGIN
+      LET FIELDTEXT = ASCII(T_RADCLE)
+    END
+    ELSE BEGIN
+       LET FIELDTEXT = ""
+    END
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation de l'adresse.
+;
+
+PROCEDURE EDIT COMNUMADRLIV
+BEGIN
+  IF "1" <> RADLIVCR OF MCREF_ADRESSE
+  THEN BEGIN
+    WARNING 3091 ; Cette adresse n'est pas une adresse de livraison
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+
+PROCEDURE EDIT CAINUMCAI OF PDLIVRE_CAISSON
+BEGIN
+
+GET PDCAISSON &
+   VIA   CIECLE   ,&
+         CAINUMCAI &
+   USING CIECLE   ,&
+         CAINUMCAI OF PDLIVRE_CAISSON
+
+ GET PDCOMMAN_INTERNE &
+     VIA     CIECLE,          &
+             COMNUMCOM        &
+     USING   T_CIECLEMNU,     &
+             COMNUMCOM OF PDCAISSON OPT
+
+  IF (COMSTU OF PDCOMMAN_INTERNE = "T") OR &
+     (COMSTU OF PDCOMMAN_INTERNE = "A") OR &
+     (COMSTU OF PDCOMMAN_INTERNE = "X")
+  THEN ERROR = "Le status de la commande interne ne permet pas de modifier"
+
+  IF COMATR OF PDCOMMAN_INTERNE <> "1"
+  THEN ERROR = "CRÉDIT NON ACCEPTÉ"
+
+  IF CLICLE OF PDBON_LIVRAISON <> CLICLE OF PDCOMMAN_INTERNE &
+     OR PJTABR OF PDBON_LIVRAISON <> PJTABR OF PDCAISSON
+  THEN BEGIN
+    ERROR "Ce caisson ne fait pas partie de la commande interne"
+  END
+
+ GET PDCAISSON &
+     VIA     CIECLE,          &
+             CAINUMCAI        &
+     USING   T_CIECLEMNU,     &
+             CAINUMCAI OF PDLIVRE_CAISSON  OPT
+
+  IF NOT ACCESSOK
+  THEN BEGIN
+    ERROR 3129 ; Ce caisson n'existe pas
+  END
+
+  ; verifier l'etat du caisson
+  IF (CAIETA OF PDCAISSON = "S")
+  THEN BEGIN
+    ERROR 3156 ; ce caisson ne contient pas de produit fini
+  END
+
+  IF CAISTU OF PDCAISSON <> "I"
+  THEN BEGIN
+    ERROR 3157 ; ce caisson n'est pas en inventaire
+  END
+
+  IF     TPDTYPPRD OF PDCAISSON <> "DI" &
+     AND TPDTYPPRD OF PDCAISSON <> "TR" &
+     AND (TPDTYPPRD OF PDCAISSON <> "PD" AND EXPTYPEXP OF PDEXPEDITION = "X")
+  THEN ERROR 3183 ; Ce type de produit ne peut pas être expédié
+
+  GET MCCOMPAGNIE VIA CIECLE USING CIECLE OF PDCAISSON
+
+  IF CAISITENT OF PDCAISSON <> CIESITENT OF MCCOMPAGNIE
+  THEN ERROR &
+       "Le site d'entreposage du caisson diffère de celui de la compagnie !"
+
+    IF BLIDATIMP OF PDBON_LIVRAISON <> 0 AND T_FLGDREV <> "O"
+    THEN ERROR "Modification non permise sans REV"
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+
+PROCEDURE PROCESS CAINUMCAI OF PDLIVRE_CAISSON
+BEGIN
+  ; assigner les valeurs du caisson à la livraison
+  LET CAIPOIEST OF PDLIVRE_CAISSON = CAIPOIEST OF PDCAISSON
+  LET CAIPOIREE OF PDLIVRE_CAISSON = CAIPOIREE OF PDCAISSON
+  DISPLAY CAIPOIEST OF PDLIVRE_CAISSON
+  DISPLAY CAIPOIREE OF PDLIVRE_CAISSON
+  DISPLAY D_DIAGRAMME
+  DISPLAY D_TRANCHE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+
+PROCEDURE DESIGNER D001  &
+  HELP "Appel du sous-écran de gestion des conterneurs associés au B.L."
+BEGIN
+
+  RUN SCREEN pd217b &
+        MODE SAME &
+        PASSING T_CIECLEMNU,      &
+                T_CIENOM,         &
+                PDBON_LIVRAISON
+END
+;------------------------------------------------------------------------
+PROCEDURE DESIGNER DREV
+BEGIN
+ IF BLIDATIMP OF PDBON_LIVRAISON <>  0
+ THEN BEGIN
+  LET BLIFLG    OF PDBON_LIVRAISON = "O"
+  LET BLIAMM OF PDBON_LIVRAISON = D_LETTRE[INDEX(D_LETTRE,BLIAMM OF PDBON_LIVRAISON)+1:1]
+  LET BLIDATMOD OF PDBON_LIVRAISON = SYSDATE
+  LET T_FLGDREV = "O"
+  DISPLAY BLIDATMOD OF PDBON_LIVRAISON
+  DISPLAY BLIAMM    OF PDBON_LIVRAISON
+
+ END
+END
+;-----------------------------------------------------------------------
+
+PROCEDURE INTERNAL POIDS
+BEGIN
+  LET BLIPOIREE OF PDBON_LIVRAISON = 0
+  LET BLIPOIEST OF PDBON_LIVRAISON = 0
+  WHILE RETRIEVING PDLIVRE_CAISSONN &
+          VIA     CIECLE,          &
+                  EXPNUMEXP,       &
+                  BLINUMBLI        &
+          USING   T_CIECLEMNU,                 &
+                  EXPNUMEXP OF PDEXPEDITION,   &
+                  BLINUMBLI OF PDBON_LIVRAISON
+  BEGIN
+    LET BLIPOIEST OF PDBON_LIVRAISON = BLIPOIEST OF PDBON_LIVRAISON + &
+                                       CAIPOIEST OF PDLIVRE_CAISSONN
+    LET BLIPOIREE OF PDBON_LIVRAISON = BLIPOIREE OF PDBON_LIVRAISON + &
+                                       CAIPOIREE OF PDLIVRE_CAISSONN
+  END
+END
+
+;-----------------------------------------------------------------------------
+PROCEDURE INTERNAL DEL
+BEGIN
+ WHILE RETRIEVING PDDIAGRAMME VIA CIECLE,DIANUM002 &
+                  USING T_CIECLEMNU,DIANUM002 OF PDEMBAL_DIAG
+     BEGIN
+       LET DIAQTEEXPCLI OF PDDIAGRAMME = DIAQTEEXPCLI OF PDDIAGRAMME - &
+                                        EMDQTEPRD OF PDEMBAL_DIAG
+       PUT PDDIAGRAMME RESET
+     END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR PDBON_LIVRAISON
+  BEGIN
+    ;
+    IF BLIDATIMP OF PDBON_LIVRAISON <> 0 AND T_FLGDREV <> "O"
+    THEN ERROR "Modification non permise sans REV"
+    ;
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF PDBON_LIVRAISON &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF PDBON_LIVRAISON &
+       AND NOT NEWRECORD     OF PDBON_LIVRAISON &
+       AND NOT DELETEDRECORD OF PDBON_LIVRAISON &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+
+    ;
+    ; Mise à jour des informations du caisson
+    ;
+    IF NEWRECORD OF PDLIVRE_CAISSON
+    THEN LET CAISTU OF PDCAISSON = "C" ; Chargé
+
+    ; Déterminer si le poids du caisson est le même que le poids réel
+    ; de l'expédition, si ce n'est pas le cas mettre a jour le caisson
+    IF NOT DELETEDRECORD OF PDLIVRE_CAISSON
+    THEN BEGIN
+      IF CAIPOIREE OF PDCAISSON <> CAIPOIREE OF PDLIVRE_CAISSON
+      THEN LET CAIPOIREE OF PDCAISSON = CAIPOIREE OF PDLIVRE_CAISSON
+    END
+
+
+  END
+
+    IF DELETEDRECORD OF PDLIVRE_CAISSON
+    THEN BEGIN
+      WHILE RETRIEVING PDEMBAL_DIAG &
+        VIA    CIECLE,         &
+               CAINUMCAI       &
+        USING  T_CIECLEMNU,    &
+               CAINUMCAI       OF PDLIVRE_CAISSON
+      BEGIN
+        IF T_CAISTU = "E"
+        THEN DO INTERNAL DEL
+      END
+    END
+
+  ;
+  ; Incrémentation du numéro de séquence de l'expedition
+  ;
+  IF 0 = EXPNUMEXP OF PDBON_LIVRAISON
+  THEN BEGIN
+    START TRANSACTION NO_SEQ
+    GET PDSEQ_EXPED OPTIONAL &
+      VIA     CIECLE     &
+      USING   T_CIECLEMNU
+    IF NOT ACCESSOK
+    THEN BEGIN
+      LET CIECLE    OF PDSEQ_EXPED = T_CIECLEMNU
+    END
+    LET SEPNUMEXP OF PDSEQ_EXPED     = SEPNUMEXP OF PDSEQ_EXPED + 1
+    LET EXPNUMEXP OF PDBON_LIVRAISON = SEPNUMEXP OF PDSEQ_EXPED
+    LET EXPNUMEXP OF PDEXPEDITION    = SEPNUMEXP OF PDSEQ_EXPED
+    PUT PDSEQ_EXPED
+    DISPLAY EXPNUMEXP OF PDEXPEDITION
+  END
+END
+
+;-----------------------------------------------------------------------------
+PROCEDURE INTERNAL CHERCHE_DIAG
+BEGIN
+
+    WHILE RETRIEVING PDEMBAL_DIAG &
+      VIA    CIECLE,         &
+             CAINUMCAI       &
+      USING  T_CIECLEMNU,    &
+             CAINUMCAI    OF PDLIVRE_CAISSON
+      begin
+        IF T_CAISTU = "E"
+        THEN DO INTERNAL DEL
+      END
+END
+
+;-----------------------------------------------------------------------------
+PROCEDURE DELETE
+BEGIN
+  IF BLIDATIMP OF PDBON_LIVRAISON <> 0 AND T_FLGDREV <> "O"
+  THEN ERROR "E Modification non permise sans REV."
+  ;
+  ;permettre de supprimer le bl seulement si pas de caisson
+  ;
+  GET PDLIVRE_CAISSON OPT
+  IF NOT ACCESSOK
+  THEN DELETE PDBON_LIVRAISON
+
+   ;FOR PDLIVRE_CAISSON
+   ;BEGIN
+   ;   LET CAISTU OF PDCAISSON = "I" ; Inventaire
+   ;   PUT PDCAISSON RESET
+   ;
+   ;   DO INTERNAL CHERCHE_DIAG
+   ;   DELETE PDLIVRE_CAISSON
+   ;END
+END
+
+
+PROCEDURE DETAIL DELETE
+BEGIN
+
+  IF BLIDATIMP OF PDBON_LIVRAISON <> 0 AND T_FLGDREV <> "O"
+  THEN ERROR "Modification non permise sans REV."
+  
+  LET T_CAISTU = CAISTU OF PDCAISSON
+
+  LET CAISTU OF PDCAISSON = "I" ; Inventaire
+; PUT PDCAISSON RESET
+
+  DELETE PDLIVRE_CAISSON
+END
+
+;--------------------------------------
+
+PROCEDURE APPEND
+  BEGIN
+    ACCEPT CAINUMCAI OF PDLIVRE_CAISSON
+    DISPLAY CAIPOIEST OF PDLIVRE_CAISSON
+    ACCEPT CAIPOIREE OF PDLIVRE_CAISSON
+    DISPLAY D_TRANCHE
+    DISPLAY D_DIAGRAMME
+    DISPLAY D_PROD_DIM
+    END
+PROCEDURE ENTRY
+  BEGIN
+
+    DISPLAY BLINUMBLI OF PDBON_LIVRAISON
+    ACCEPT BLICODDOU OF PDBON_LIVRAISON
+    IF EXPTYPEXP OF PDEXPEDITION < > "X"
+      THEN ACCEPT PJTABR OF PDBON_LIVRAISON
+      ELSE DISPLAY PJTABR OF PDBON_LIVRAISON
+    DISPLAY PJTNOM OF PDPROJET
+    ACCEPT CLICLE OF PDBON_LIVRAISON
+    GET CRCLIENT OPT VIA CLICLE USING CLICLE OF PDBON_LIVRAISON
+     IF ACCESSOK
+     THEN BEGIN
+       IF COMATR OF CRCLIENT = "0"
+       THEN ERROR = "MAUVAIS CREDIT,VOIR CONTROLEUR"
+     END
+    accept comnumcomint of pdbon_livraison
+    ACCEPT COMNUMADRLIV OF PDBON_LIVRAISON
+    ACCEPT BLIDAT OF PDBON_LIVRAISON
+    DISPLAY BLIQTECAI OF PDBON_LIVRAISON
+;    DISPLAY BLIPOIEST OF PDBON_LIVRAISON
+;    DISPLAY D_KILO
+;    DISPLAY BLIPOIREE OF PDBON_LIVRAISON
+;    DISPLAY D_KILO
+    DISPLAY BLIDATIMP OF PDBON_LIVRAISON
+    FOR PDLIVRE_CAISSON
+      BEGIN
+        PERFORM APPEND
+        END
+    END
+PROCEDURE PATH
+  BEGIN
+    REQUEST BLINUMBLI OF PDBON_LIVRAISON
+    IF PROMPTOK
+      THEN LET PATH = 1
+    IF PATH = 0
+      THEN BEGIN
+        LET PATH = 2
+        END
+    END
+PROCEDURE FIND
+  BEGIN
+    IF PATH = 1
+      THEN GET PDBON_LIVRAISON VIA CIECLE , EXPNUMEXP , BLINUMBLI &
+          USING T_CIECLEMNU , EXPNUMEXP OF PDEXPEDITION , BLINUMBLI &
+          OF PDBON_LIVRAISON
+    IF PATH = 2
+      THEN GET PDBON_LIVRAISON VIA CIECLE , EXPNUMEXP ORDERBY CIECLE &
+          , BLINUMBLI USING T_CIECLEMNU , EXPNUMEXP OF PDEXPEDITION
+    END
+PROCEDURE DETAIL FIND
+  BEGIN
+    FOR MISSING PDLIVRE_CAISSON
+      BEGIN
+        GET PDLIVRE_CAISSON OPTIONAL
+        GET PDCAISSON OPTIONAL
+        END
+    END
+PROCEDURE UPDATE
+  BEGIN
+    LET T_FLGDREV = "N"
+    PUT PDEXPEDITION
+    FOR PDLIVRE_CAISSON
+      BEGIN
+        PUT PDLIVRE_CAISSON
+        PUT PDCAISSON
+        END
+    DO INTERNAL POIDS
+    PUT PDBON_LIVRAISON
+END
+
+
+BUILD
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+****************************** Bons de livraison *******************************
+*                                                                              *
+*  Num. expédi...: xxxxxxxxx     Type expéd....: x   xxxxxxxxxxxxxxxxxxxxxxxxx *
+*  Bon livraison.: xx            Code douane...: x                             *
+*  Projet........: xx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                *
+*  Client........: xxxxxx                  Adresse.......: xxxx                *
+*  Date charge...: xxxxxxxx                                                    *
+*  Nombre caisson: xxxxx                   Poid estimé...: xxxxxxxxxxxxx       *
+*  Ammendement...: x xx/xx/xx              Poid réel.....: xxxxxxxxxxxxx       *
+*                                          Date impres...: xxxxxxxx            *
+********************************************************************************
+*     Caisson     Poids estimé        Poids réel   Tranche Diagramme Prod. dim *
+*   xxxxxxxxx     xxxxxxxxxxxxx     xxxxxxxxxxxxx      x       x       x       *
+*   xxxxxxxxx     xxxxxxxxxxxxx     xxxxxxxxxxxxx      x       x       x       *
+*   xxxxxxxxx     xxxxxxxxxxxxx     xxxxxxxxxxxxx      x       x       x       *
+*   xxxxxxxxx     xxxxxxxxxxxxx     xxxxxxxxxxxxx      x       x       x       *
+*   xxxxxxxxx     xxxxxxxxxxxxx     xxxxxxxxxxxxx      x       x       x       *
+*   xxxxxxxxx     xxxxxxxxxxxxx     xxxxxxxxxxxxx      x       x       x       *
+*   xxxxxxxxx     xxxxxxxxxxxxx     xxxxxxxxxxxxx      x       x       x       *
+*   xxxxxxxxx     xxxxxxxxxxxxx     xxxxxxxxxxxxx      x       x       x       *
+********************************************************************************
+@ENDIF
+

@@ -1,0 +1,1900 @@
+;/T/ 2.5.6 Ventes directes.
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1995-03-08
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   les ventes directes.
+;
+;/M/ François Déry, 12 mai 1999
+;       Ajout du in dict sur la transaction des séquences.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date..............: 05 avril 2000
+;    Description.......: Incrémentation du numéro de facture par compagnie.
+;
+;    Référence.........: Stabilisation du module Gestion de blocs (point 2).
+;
+;    Signet............: MP-00-04-05_S02.
+;
+;    ----------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin     
+;    Date..............: 16 juin 2000
+;    Description.......: Ajuster le traitement afin de considérer les cas d'exceptions suivants: 
+;
+;                              - la numérotation des factures qui peut différer en le module de
+;                                Production et celui des Comptes à recevoir ;
+;                              - considérer le solde à ventiler lorsque la facture a été transférée
+;                                du module de Production vers celui des Comptes à recevoir.
+;
+;    Référence.........: Demande de changement 000068.
+;
+;    Signet............: MP-00-06-16_D68.
+;
+;    ----------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin     
+;    Date..............: 20 juin 2000
+;    Description.......: Ajuster le traitement afin que l'imputation de la facture issue d'une vente
+;                        directe soit, s'il y a lieu, considérée au niveau des prix globaux de la 
+;                        commande interne.
+;
+;    Référence.........: Demande de changement 000069.
+;
+;    Signet............: MP-00-06-20_D69.
+;
+;    ----------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin     
+;    Date..............: 19 octobre 2001
+;    Description.......: Ajuster le traitement afin que l'impression soit paramétrée selon que la facture
+;                        est produite à partir de la production ou de la comptabilité.
+;
+;    Référence.........: Demande directe - Demandeur: Anik Lupien
+;
+;    Signet............: MP-01-10-19_DD.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd213  ACTIONBAR                    &
+              MODE LABEL "" AT 2,80        &
+              NOACTION                     &
+              ACTIVITIES CHANGE,FIND,ENTRY,DELETE &
+              FIELDMARK RETAIN STARTUP     &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU ,      &
+                        T_CIENOM
+
+
+;-------------------------------------------------------------------------------
+;
+; Déclaration de la transaction pour donner un numéro séquentiel
+;
+
+TRANSACTION NO_SEQ READ WRITE &
+                   RESERVING FOR PROTECTED WRITE PDSEQ_FACTURE IN DICT
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD213"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+USE pd213.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Bloc                            " ACTION DESIGNER D001
+  MENUITEM LABEL "Tranche                         " ACTION DESIGNER D002
+  MENUITEM LABEL "Produit dimension               " ACTION DESIGNER D003
+  MENUITEM LABEL "Charges diverses                " ACTION DESIGNER D004
+  MENUITEM LABEL "Commentaire                     " ACTION DESIGNER D005
+  MENUITEM LABEL "Impression de la facture        " ACTION DESIGNER D006
+  MENUITEM LABEL "Générer l'Imputation            " ACTION DESIGNER D007
+  MENUITEM LABEL "Imputation                      " ACTION DESIGNER D008
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%Bloc                         " ACTION DESIGNER D001
+  MENUITEM LABEL "%%%Tranche                      " ACTION DESIGNER D002
+  MENUITEM LABEL "%%%Produit dimension            " ACTION DESIGNER D003
+  MENUITEM LABEL "%%%Charges diverses             " ACTION DESIGNER D004
+  MENUITEM LABEL "%%%Commentaire                  " ACTION DESIGNER D005
+  MENUITEM LABEL "%%%Impression de la facture     " ACTION DESIGNER D006
+  MENUITEM LABEL "%%%Générer l'Imputation         " ACTION DESIGNER D007
+  MENUITEM LABEL "%%%Imputation                   " ACTION DESIGNER D008
+@ENDIF
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_FTRNUMFAC INTEGER SIZE 4
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+TEMPORARY T_FACNUMFAC INTEGER   SIZE 4  RESET AT STARTUP ; Numéro de la facture
+TEMPORARY T_UNMTRA    CHARACTER SIZE 2  RESET AT STARTUP
+TEMPORARY T_FLGUPD    CHARACTER SIZE 1 INITIAL "N"
+TEMPORARY T_TPS       CHAR SIZE 12
+TEMPORARY T_TVQ       CHAR SIZE 12
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+DEFINE D_UNMTRA CHARACTER SIZE 2 = T_UNMTRA
+DEFINE D_TPS   CHAR SIZE 12 = T_TPS
+DEFINE D_TVQ   CHAR SIZE 12 = T_TVQ
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable temporaire du programme pour les dépisteurs
+;
+
+TEMPORARY T_CLICIECLE    CHARACTER SIZE 04 ; Popup sur les adresses du client
+TEMPORARY T_CLICLE       CHARACTER SIZE 06 ; Popup sur les adresses du client
+TEMPORARY T_REFCLETYP    CHARACTER SIZE 01 ; Popup sur les adresses du client
+TEMPORARY T_RADCLE       INTEGER UNSIGNED &
+                                   SIZE 02 ; Popup sur les adresses du client
+TEMPORARY T_TYPADR       CHARACTER SIZE 03 ; Popup sur les adresses du client
+
+TEMPORARY T_TMECATPAT    CHARACTER SIZE 11 ; Popup sur les termes d'encaissement.
+TEMPORARY T_TMECLE       CHARACTER SIZE 04 ; Popup sur les termes d'encaissement.
+
+TEMPORARY T_TAXCLETYP    CHARACTER SIZE 01 ; Popup sur les codes de taxes
+TEMPORARY T_TAXCLECOD    CHARACTER SIZE 02 ; Popup sur les codes de taxes
+TEMPORARY T_TAXMODPAT    CHARACTER SIZE 05 ; Popup sur les codes de taxes
+
+TEMPORARY T_FLGMOD       CHARACTER SIZE 01 ; Flag pour déceler s'il y eu modif.
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire au traitement
+;
+
+TEMPORARY T_FLGCHGDIV    CHARACTER SIZE 03 RESET AT STARTUP ; Flag pour charge diverse
+
+; ------------------------------------------
+; MP-00-06-16_D68.
+
+temporary t_ftrflgcar    character size 01
+
+; ------------------------------------------
+; MP-01-10-19_DD
+
+TEMPORARY T_FACTURE_IMP  CHARACTER SIZE 07 ; FAC001Z - (Production), FAC002Z (Comptabilité) 
+
+;-------------------------------------------------------------------------------
+;
+; Variables temporaire pour le calcul des dates due.
+;
+USE ustertmp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Temporaires necessaires au calcul des taxes
+;
+
+USE ustaxtmp NOLIST
+
+;-------------------------------------------------------------------------------
+;
+; Facture
+;
+
+FILE PDFACTURE   PRIMARY &
+                 NOITEM &
+                 NODELETE
+
+  ACCESS VIA     CIECLE,          &
+                 FTRNUMFAC        &
+         USING   T_CIECLEMNU,                          &
+                 FTRNUMFAC        OF PDFACTURE         &
+         REQUEST FTRNUMFAC        OF PDFACTURE         &
+         ORDERBY CIECLE,          &
+                 FTRNUMFAC
+
+  ACCESS VIA     CIECLE,          &
+                 CLICLE           &
+         USING   T_CIECLEMNU,                          &
+                 CLICLE           OF PDFACTURE         &
+         REQUEST CLICLE           OF PDFACTURE         &
+         ORDERBY CIECLE,FTRNUMFAC
+
+  ACCESS VIA     CIECLE           &
+         USING   T_CIECLEMNU      &
+         ORDERBY CIECLE,          &
+                 FTRNUMFAC
+
+  SELECT IF FTRTYPFAC   OF PDFACTURE = "D" AND FTRFLGBLC <> "BL"
+
+
+  ITEM CLICIECLE        OF PDFACTURE   INITIAL "----"
+  ITEM CIECLE           OF PDFACTURE   INITIAL T_CIECLEMNU
+
+  ITEM FTRTYPFAC        OF PDFACTURE   INITIAL "D"
+
+  ITEM FTRDATCRE        OF PDFACTURE   INITIAL SYSDATE
+  ITEM FTRHRECRE        OF PDFACTURE   INITIAL SYSTIME / 10000
+  ITEM FTRUSRCRE        OF PDFACTURE   INITIAL LOGONID
+
+  ITEM FTRDATDERMAJ     OF PDFACTURE   FINAL   SYSDATE &
+                                            IF NOT NEWRECORD OF PDFACTURE   &
+                                               AND &
+                                               ALTEREDRECORD OF PDFACTURE
+
+  ITEM FTRHREDERMAJ     OF PDFACTURE   FINAL   SYSTIME / 10000 &
+                                            IF NOT NEWRECORD OF PDFACTURE   &
+                                               AND &
+                                               ALTEREDRECORD OF PDFACTURE
+
+  ITEM FTRUSRDERMAJ     OF PDFACTURE   FINAL   LOGONID &
+                                            IF NOT NEWRECORD OF PDFACTURE   &
+                                               AND &
+                                               ALTEREDRECORD OF PDFACTURE
+
+
+;-------------------------------------------------------------------------------
+;
+; Lien facture - bon de livraison
+;
+
+FILE PDFACT_BON_LIVR SECONDARY
+
+  ACCESS  VIA   FTRNUMFAC        &
+          USING FTRNUMFAC        OF PDFACTURE
+
+  ITEM CIECLE    OF PDFACT_BON_LIVR INITIAL CIECLE    OF PDFACTURE FIXED
+  ITEM FTRNUMFAC OF PDFACT_BON_LIVR INITIAL FTRNUMFAC OF PDFACTURE FIXED
+
+
+FILE CRCLIENT DESIGNER
+;-------------------------------------------------------------------------------
+;
+; Numéro séquentiel pour les factures
+;
+
+FILE PDSEQ_FACTURE DESIGNER TRANSACTION NO_SEQ
+  ACCESS VIA CIECLE USING T_CIECLEMNU ; MP-00-04-05_S02.
+
+;-------------------------------------------------------------------------------
+
+FILE PDDETAIL_C_I DESIGNER
+
+;-------------------------------------------------------------------------------
+
+FILE PDLIVRE_CAISSON DESIGNER
+
+;-------------------------------------------------------------------------------
+
+
+FILE PDEMBAL_TRANCHE DESIGNER
+
+;-------------------------------------------------------------------------------
+
+;-------------------------------------------------------------------------------
+
+FILE PDBLOC_FACTURE DESIGNER
+
+FILE PDTRANCHE_FAC DESIGNER
+
+FILE PDPROD_FACTURE DESIGNER
+;-------------------------------------------------------------------------------
+;
+; Client
+;
+
+FILE VCLC_CLI        REFERENCE
+
+  ACCESS VIA     CLICIECLE,        &
+                 CLICLE,           &
+                 CIECLE            &
+         USING   "----",                                &
+                 CLICLE            OF PDFACTURE,        &
+                 T_CIECLEMNU
+
+
+;-------------------------------------------------------------------------------
+;
+; Adresse clients
+;
+
+FILE MCREF_ADRESSE    REFERENCE
+
+  ACCESS VIA   REFCIECLE,               &
+               REFCLETYP,               &
+               REFCLENUM,               &
+               RADCLE                   &
+         USING "----",                  &
+               "C",                                  &
+               CLICLE           OF PDFACTURE,        &
+               FTRNUMADRFAC     OF PDFACTURE
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation des codes de taxes fédéral.
+;
+
+FILE MCTAXE           REFERENCE &
+                      ALIAS A_TAX_TPS
+
+  ACCESS VIA   TAXCLETYP,       &
+               TAXCLECOD        &
+         USING FTRTAXTYPTPS     OF PDFACTURE,        &
+               FTRTAXCODTPS     OF PDFACTURE
+
+;----------------------------------------------------------------------------
+FILE MCTAXE REFERENCE ALIAS A_TPS
+
+ACCESS    VIA    TAXCLETYP,                         &
+                 TAXCLECOD                          &
+           USING "F",                                &
+                 FTRTAXCODTPS OF PDFACTURE
+
+
+;-------------------------------------------------------------------------------
+FILE MCTAXE REFERENCE ALIAS A_TVQ
+
+ACCESS    VIA    TAXCLETYP,                         &
+                 TAXCLECOD                          &
+           USING "P",                                &
+                 FTRTAXCODTVQ OF PDFACTURE
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation des codes de taxes provincial.
+;
+
+FILE MCTAXE           REFERENCE &
+                      ALIAS A_TAX_TVP
+
+  ACCESS VIA   TAXCLETYP,       &
+               TAXCLECOD        &
+         USING FTRTAXTYPTVQ     OF PDFACTURE,        &
+               FTRTAXCODTVQ     OF PDFACTURE
+
+
+;-------------------------------------------------------------------------------
+;
+; Terme
+;
+
+FILE CRTERME          DESIGNER &
+                      OPEN READ
+
+
+;-------------------------------------------------------------------------------
+;
+; Charges diverses
+;
+
+FILE PDTRANP_DOU_ECT DESIGNER
+
+
+;-------------------------------------------------------------------------------
+;
+; Expedition
+;
+
+FILE PDEXPEDITION REFERENCE
+
+  ACCESS VIA   CIECLE,          &
+               EXPNUMEXP        &
+         USING CIECLE           OF PDFACTURE,        &
+               EXPNUMEXP        OF PDFACT_BON_LIVR
+
+
+;-------------------------------------------------------------------------------
+;
+; Bon de livraison
+;
+
+FILE PDBON_LIVRAISON REFERENCE
+
+  ACCESS VIA   CIECLE,          &
+               BLINUMBLI        &
+         USING CIECLE           OF PDFACTURE,        &
+               BLINUMBLI        OF PDFACT_BON_LIVR
+
+
+;-------------------------------------------------------------------------------
+
+FILE PDLOT_TRANSFERT DESIGNER
+;-------------------------------------------------------------------------------
+
+FILE PDLOT_FACTURE DESIGNER
+
+
+;-------------------------------------------------------------------------------
+; mp
+;
+; Commande interne
+;
+
+FILE PDCOMMAN_INTERNE REFERENCE
+
+  ACCESS VIA     CIECLE,           &
+                 COMNUMCOM         &
+         USING   T_CIECLEMNU,      &
+                 COMNUMCOM         OF PDFACTURE
+
+;-------------------------------------------------------------------------------
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Vente directe " &
+@ELSE
+      " %%%Vente direct " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 4
+
+
+ALIGN ( ,3,19) (40,41,57)
+
+
+FIELD FTRNUMFAC        OF PDFACTURE        &
+label "Num. facture..:"&
+        DISPLAY                            &
+        REFRESH
+
+
+FIELD FTRDATFAC        OF PDFACTURE        FORMAT YYYYMMDD &
+PATTERN "####/##/##"&
+label "Date facture..:"&
+        HIDDEN ID 05                       &
+        DEFAULT SYSDATE
+
+
+ALIGN (,3,19) (,41,57)                       ; mp
+FIELD COMNUMCOM        OF PDFACTURE        & ; mp
+      HIDDEN ID 07                         &
+      LABEL "Commande int..:"              &
+      LOOKUP ON PDCOMMAN_INTERNE           &
+        MESSAGE 1399 ; Ce numéro de commande n'existe pas
+
+
+;FIELD EXPNUMEXP        OF PDFACT_BON_LIVR  &
+;        HIDDEN ID 10                       &
+;        REQUIRED                           &
+;        LOOKUP ON PDEXPEDITION             &
+;           MESSAGE 2016 ; Ce numéro d'expédition n'existe pas
+
+
+FIELD FTRDATPRT        OF PDFACTURE        FORMAT YYYYMMDD &
+PATTERN "####/##/##"&
+label "Date impress..:"&
+        DISPLAY
+
+
+;ALIGN (2,3,19)
+;FIELD BLINUMBLI        OF PDFACT_BON_LIVR  &
+;        HIDDEN ID 15                       &
+;        REQUIRED                           &
+;        LOOKUP ON PDBON_LIVRAISON          &
+;          MESSAGE 2124 ; Ce numéro de bon de livraison n'existe pas
+
+
+ALIGN (2,3,19) (,,27)
+
+
+FIELD CLICLE           OF PDFACTURE        &
+label "Client........:"&
+        HIDDEN ID 20                       &
+        REQUIRED                           &
+        LOOKUP ON VCLC_CLI                 &
+          MESSAGE 1868 ; Ce numéro de client n'existe pas
+
+
+FIELD CLINOM           OF VCLC_CLI         &
+        DISPLAY
+
+
+ALIGN (2,3,19) (,,24)
+
+
+FIELD FTRNUMADRFAC     OF PDFACTURE        &
+        HIDDEN ID 25                       &
+        REQUIRED                           &
+        LABEL "Adresse.......:"            &
+        LOOKUP ON MCREF_ADRESSE            &
+          MESSAGE 1881 ; Ce numéro d'adresse n'existe pas
+
+
+FIELD RADADR1          OF MCREF_ADRESSE    &
+        DISPLAY
+
+
+ALIGN (,,24)
+
+
+FIELD RADADR2          OF MCREF_ADRESSE    &
+        DISPLAY
+
+
+FIELD RADADR3          OF MCREF_ADRESSE    &
+        DISPLAY
+
+
+FIELD RADADR4          OF MCREF_ADRESSE    &
+        DISPLAY
+
+
+FIELD RADCP            OF MCREF_ADRESSE    &
+        DISPLAY
+
+
+ALIGN (,3,19) (,46,62)
+
+
+FIELD RADTEL           OF MCREF_ADRESSE    &
+label "Téléphone.....:"&
+        DISPLAY
+
+
+FIELD RADFAX           OF MCREF_ADRESSE    &
+label "Fax...........:"&
+        DISPLAY
+
+
+ALIGN (2,3,19) (,,24)
+
+
+FIELD FTRTERNET        OF PDFACTURE        &
+label "Terme net.....:"&
+        HIDDEN ID 30
+
+
+FIELD FTRDATNET        OF PDFACTURE        FORMAT YYYYMMDD &
+PATTERN "####/##/##"&
+        DISPLAY
+
+; ------------------------------------------
+; MP-00-06-16_D68.
+
+align (44,46,62)
+field ftrnumcar        of pdfacture       &
+      label "No.facture C/R:"             &
+      hidden id 33                        &
+      upshift                             &
+      noentry                             
+
+align (2,3,19) (,,24)
+
+; -----------------------------------------
+
+
+FIELD FTRTERESC1       OF PDFACTURE         &
+label "Escompte 1....:"&
+        HIDDEN ID 35
+
+
+FIELD FTRDATESC1        OF PDFACTURE       FORMAT YYYYMMDD  &
+PATTERN "####/##/##"&
+        DISPLAY
+
+; ------------------------------------------
+; MP-00-06-16_D68.
+
+align (44,46,62)
+field t_ftrflgcar                         &
+      label "Hors bal.  C/R:"             &
+      hidden id 37                        &
+      upshift                             &
+      noentry                             
+
+; -----------------------------------------
+
+ALIGN (2,3,19) (,,24) (,46,62)
+
+
+FIELD FTRTERESC2       OF PDFACTURE        &
+label "Escompte 2....:"&
+        HIDDEN ID 40
+
+
+FIELD FTRDATESC2        OF PDFACTURE        FORMAT YYYYMMDD &
+PATTERN "####/##/##"&
+        DISPLAY
+
+
+FIELD FTRMNT           OF PDFACTURE        &
+label "Mnt facture...:"&
+        DISPLAY                            &
+        REFRESH
+
+
+FIELD FTRTERFRS        OF PDFACTURE        &
+label "Frais.........:"&
+        HIDDEN ID 45
+
+
+FIELD FTRDATFRS        OF PDFACTURE        FORMAT YYYYMMDD &
+PATTERN "####/##/##"&
+        DISPLAY
+
+
+FIELD FTRMNTBRU                            &
+        DISPLAY                            &
+        LABEL "Escomptable...:"            &
+        PICTURE "^^^,^^^,^^^.^^ "          &
+        TRAILING SIGN "-"                  &
+        SIGNIFICANCE 5                     &
+        REFRESH
+
+
+ALIGN (2,3,19) (,,24) (,46,62) ;+5
+
+
+FIELD FTRTAXCODTPS     OF PDFACTURE        &
+label "Code taxe TPS.:"&
+        HIDDEN ID 50                       &
+        LOOKUP ON A_TAX_TPS                &
+          MESSAGE 1989 ; Ce code de taxe n'existe pas
+
+
+FIELD TAXDSCFRA OF A_TPS &
+        ID SAME &
+        DISPLAY
+
+
+FIELD FTRMNTTPS        OF PDFACTURE        &
+label "Montant TPS...:"&
+        DISPLAY                            &
+        REFRESH
+
+
+FIELD FTRTAXCODTVQ     OF PDFACTURE        &
+label "Code taxe TVP.:"&
+        HIDDEN ID 55                       &
+        LOOKUP ON A_TAX_TVP                &
+          MESSAGE 1989 ; Ce code de taxe n'existe pas
+
+
+FIELD TAXDSCFRA OF A_TVQ &
+        ID SAME &
+        DISPLAY
+
+FIELD FTRMNTTVQ        OF PDFACTURE        &
+label "Montant TVQ...:"&
+        DISPLAY                            &
+        REFRESH
+
+
+ALIGN (,3,19)
+
+
+FIELD T_FLGCHGDIV                          &
+        DISPLAY                            &
+        REFRESH                            &
+        LABEL "Charge div....:"
+
+
+SKIP
+
+
+ALIGN (,3,19) (,46,62)
+
+
+FIELD FTRVOLMC3BLO     OF PDFACTURE        &
+        LABEL "Bloc (m3).....:" &
+        DISPLAY                            &
+        REFRESH
+
+
+FIELD FTRSURMC2DIA     OF PDFACTURE        &
+        LABEL "Diagramme (m2):" &
+        DISPLAY                            &
+        REFRESH
+
+
+
+FIELD FTRSURMC2TRA     OF PDFACTURE        &
+        LABEL "Tranche (m2)..:" &
+        DISPLAY                            &
+        REFRESH
+
+
+FIELD FTRSURMC2PD      OF PDFACTURE        &
+        LABEL "Prod dim (m2).:" &
+        DISPLAY                            &
+        REFRESH
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul des dates due.
+;
+
+USE ustmecal NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du pop-up pour numéro de client
+;
+
+PROCEDURE INPUT CLICLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CLICLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd210n MODE F &
+                      PASSING T_CIECLEMNU ,      &
+                              T_CIENOM ,         &
+                              T_CLICLE
+    LET FIELDTEXT = TRUNCATE(T_CLICLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide le client
+;
+
+PROCEDURE EDIT CLICLE
+BEGIN
+  ;
+  ; Valide que le client est actif
+  ;
+  IF CLISTU OF VCLC_CLI = "I"
+  THEN BEGIN
+    ERROR 1866 ; Ce client est inactif
+  END
+
+  GET CRCLIENT OPT VIA CLICLE USING CLICLE OF VCLC_CLI
+  IF ACCESSOK
+    THEN BEGIN
+     IF COMATR OF CRCLIENT = "0"
+     THEN ERROR = "MAUVAIS CREDIT,VOIR LE CONTROLEUR"
+   END
+
+  ;
+  ;
+  ;
+  GET MCREF_ADRESSE OPTIONAL
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du pop-up pour l'adresse du client
+;
+
+PROCEDURE INPUT FTRNUMADRFAC
+BEGIN
+  ;
+  ; Appel du dépisteur
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CLICIECLE = CLICIECLE OF PDFACTURE
+    LET T_REFCLETYP = CLIREFTYP OF VCLC_CLI
+    LET T_CLICLE    = CLICLE    OF PDFACTURE
+    LET T_TYPADR    = ""
+    LET T_RADCLE    = 0
+
+    RUN SCREEN mc108 MODE F PASSING T_CLICIECLE, &
+                                    T_REFCLETYP, &
+                                    T_CLICLE   , &
+                                    T_TYPADR   , &
+                                    T_RADCLE
+    IF T_RADCLE <> 0
+    THEN BEGIN
+      LET FIELDTEXT = ASCII(T_RADCLE)
+    END
+    ELSE BEGIN
+       LET FIELDTEXT = ""
+    END
+  END
+  ;
+  ; Valide que l'adresse a été saisi
+  ;
+  IF 0 = SIZE(FIELDTEXT) AND 0 = SIZE(ASCII(FTRNUMADRFAC OF PDFACTURE))
+  THEN BEGIN
+    ERROR 1884 ; Le numéro d'adresse doit être saisie
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation de l'adresse.
+;
+
+PROCEDURE EDIT FTRNUMADRFAC
+BEGIN
+  GET MCREF_ADRESSE OPTIONAL
+  IF "1" <> RADFACCR OF MCREF_ADRESSE
+  THEN BEGIN
+    ERROR 1990 ; Cette adresse n'est pas une adresse de facturation
+  END
+  DISPLAY RADADR1 OF MCREF_ADRESSE
+  DISPLAY RADADR2 OF MCREF_ADRESSE
+  DISPLAY RADADR3 OF MCREF_ADRESSE
+  DISPLAY RADCP   OF MCREF_ADRESSE
+  DISPLAY RADTEL  OF MCREF_ADRESSE
+  DISPLAY RADFAX  OF MCREF_ADRESSE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que la date de facture a été saisie
+;
+
+PROCEDURE PROCESS FTRDATFAC
+BEGIN
+  IF 0 = FTRDATFAC OF PDFACTURE
+  THEN BEGIN
+    ERROR 1944 ; Ce champ est requis
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Terme net, popup sur les termes d'encaissements.
+;
+
+PROCEDURE INPUT FTRTERNET
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TMECLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_TMECATPAT = "NET"
+    RUN SCREEN cr104 MODE F PASSING T_TMECLE, &
+                                    T_TMECATPAT
+    LET FIELDTEXT = TRUNC(T_TMECLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation du code de terme-net, il est optionel.
+;
+
+PROCEDURE EDIT FTRTERNET
+BEGIN
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    GET CRTERME VIA TMECLE &
+                USING FIELDTEXT &
+                OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 2010 ; Ce terme n'existe pas.
+
+    IF TMECAT OF CRTERME <> "NET"
+    THEN ERROR 2011 ; Ce n'est pas un code terme pour le net.
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul de la date due pour le terme-net.
+;
+
+PROCEDURE PROCESS FTRTERNET
+BEGIN
+  ;
+  ; Calcul de la date due.
+  ;
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    LET TZ_DATCAL = FTRDATFAC OF PDFACTURE
+    DO INTERNAL TER_DATE_DUE
+    LET FTRDATNET OF PDFACTURE = TZ_DATRES
+  END
+
+  DISPLAY FTRDATNET OF PDFACTURE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Force l'éxécution de la procédure EDIT, car la date due pour le net est
+; obligatoire.
+;
+
+PROCEDURE INPUT FTRDATNET
+BEGIN
+  IF NOT FINDMODE AND  &
+     0 = SIZE(FIELDTEXT)
+  THEN LET FIELDTEXT = ASCII( MOD( FTRDATNET OF PDFACTURE,1000000 ),6 )
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la date due avec la date de la facture.
+;
+
+PROCEDURE EDIT FTRDATNET
+BEGIN
+  IF FIELDVALUE < FTRDATFAC OF PDFACTURE
+  THEN ERROR 2012 ; La date due ne peut être inférieure à la date de la facture.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Terme d'escompte 1, popup sur les termes d'encaissements.
+;
+
+PROCEDURE INPUT FTRTERESC1
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TMECATPAT = "ESC"
+    LET T_TMECLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cr104 MODE F PASSING T_TMECLE, &
+                                    T_TMECATPAT
+    LET FIELDTEXT = TRUNC(T_TMECLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation du code de terme-escmpte(1), il est optionel.
+;
+
+PROCEDURE EDIT FTRTERESC1
+BEGIN
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    GET CRTERME VIA TMECLE &
+                USING FIELDTEXT &
+                OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 2010 ; Ce terme n'existe pas.
+
+    IF TMECAT OF CRTERME <> "ESC"
+    THEN ERROR 2013 ; Ce n'est pas un code terme pour les escmptes.
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul de la date due pour le terme-escompte(1).
+;
+
+PROCEDURE PROCESS FTRTERESC1
+BEGIN
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    ;
+    ; Calcul de l date due.
+    ;
+    LET TZ_DATCAL = FTRDATFAC OF PDFACTURE
+    DO INTERNAL TER_DATE_DUE
+    LET FTRDATESC1 OF PDFACTURE = TZ_DATRES
+  END
+  ELSE BEGIN
+    LET FTRDATESC1 OF PDFACTURE = 0
+    LET FTRTERESC2 OF PDFACTURE = ""
+    LET FTRDATESC2 OF PDFACTURE = 0
+    DISPLAY FTRTERESC2 OF PDFACTURE
+    DISPLAY FTRDATESC2 OF PDFACTURE
+  END
+  DISPLAY FTRDATESC1 OF PDFACTURE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la date due avec la date de la facture.
+;
+
+PROCEDURE EDIT FTRDATESC1
+BEGIN
+  IF FIELDVALUE < FTRDATFAC OF PDFACTURE
+  THEN ERROR 2012 ; La date due ne peut être inférieure à la date de la facture.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Terme d'escompte 2, popup sur les termes d'encaissements.
+;
+
+PROCEDURE INPUT FTRTERESC2
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TMECATPAT = "ESC"
+    LET T_TMECLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cr104 MODE F PASSING T_TMECLE, &
+                                    T_TMECATPAT
+    LET FIELDTEXT = TRUNC(T_TMECLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation du code de terme-escmpte(2).
+;
+
+PROCEDURE EDIT FTRTERESC2
+BEGIN
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    GET CRTERME VIA TMECLE &
+                USING FIELDTEXT &
+                OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 2010 ; Ce terme n'existe pas.
+
+    IF TMECAT OF CRTERME <> "ESC"
+    THEN ERROR 2013 ; Ce n'est pas un code terme pour les escmptes.
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul de la date due pour le terme-escompte(2).
+;
+
+PROCEDURE PROCESS FTRTERESC2
+BEGIN
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    ;
+    ; Calcul de l date due.
+    ;
+    LET TZ_DATCAL = FTRDATFAC OF PDFACTURE
+    DO INTERNAL TER_DATE_DUE
+    LET FTRDATESC2 OF PDFACTURE = TZ_DATRES
+  END
+  ELSE BEGIN
+    LET FTRDATESC2 OF PDFACTURE = 0
+  END
+  DISPLAY FTRDATESC2 OF PDFACTURE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la date due avec la date de la facture.
+;
+
+PROCEDURE EDIT FTRDATESC2
+BEGIN
+  IF FIELDVALUE < FTRDATFAC OF PDFACTURE
+  THEN ERROR 2012 ; La date due ne peut être inférieure à la date de la FTRture.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Terme de frais, popup sur les termes d'encaissement.
+;
+
+PROCEDURE INPUT FTRTERFRS
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TMECATPAT = "FRS"
+    LET T_TMECLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cr104 MODE F PASSING T_TMECLE, &
+                                    T_TMECATPAT
+    LET FIELDTEXT = TRUNC(T_TMECLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation du code de terme-frais.
+;
+
+PROCEDURE EDIT FTRTERFRS
+BEGIN
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    GET CRTERME VIA TMECLE &
+                USING FIELDTEXT &
+                OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 2010 ; Ce terme n'existe pas.
+
+    IF TMECAT OF CRTERME <> "FRS"
+    THEN ERROR 2014 ; Ce n'est pas un code terme pour les frais d'administration.
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul de la date due pour le terme-FRAIS.
+;
+
+PROCEDURE PROCESS FTRTERFRS
+BEGIN
+  IF 0 <> SIZE( TRUNCATE( FIELDTEXT ) )
+  THEN BEGIN
+    ;
+    ; Calcul de l date due.
+    ;
+    LET TZ_DATCAL = FTRDATFAC OF PDFACTURE
+    DO INTERNAL TER_DATE_DUE
+    LET FTRDATFRS OF PDFACTURE = TZ_DATRES
+  END
+  ELSE BEGIN
+    LET FTRDATFRS OF PDFACTURE = 0
+  END
+  DISPLAY FTRDATFRS OF PDFACTURE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la date due avec la date de la facture.
+;
+
+PROCEDURE EDIT FTRDATFRS
+BEGIN
+  IF FIELDVALUE < FTRDATFAC OF PDFACTURE
+  THEN ERROR 2012 ; La date due ne peut être inférieure à la date de la facture.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Sous-écran de consultation des codes de taxe.
+;
+
+PROCEDURE INPUT FTRTAXCODTPS
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TAXCLETYP = FTRTAXTYPTPS OF PDFACTURE
+    LET T_TAXCLECOD = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_TAXMODPAT = "S"                                 ; Taxe exclu seulement
+    RUN SCREEN mc111 MODE F PASSING T_TAXCLETYP, &
+                                    T_TAXCLECOD, &
+                                    T_TAXMODPAT
+    LET FIELDTEXT = TRUNCATE(T_TAXCLECOD)
+  END
+  ;
+  ; Par defaut on utilise le code de taxe de TPS du client.
+  ;
+  IF     0 = SIZE( FIELDTEXT ) &
+     AND NEWRECORD OF PDFACTURE &
+     AND FTRTAXCODTVQ OF PDFACTURE = "" &
+     AND CLCTAXCODTPS OF VCLC_CLI <> ""
+  THEN LET FIELDTEXT = CLCTAXCODTPS OF VCLC_CLI
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation du code de taxe fédérale
+;
+
+PROCEDURE EDIT FTRTAXCODTPS
+BEGIN
+  IF 0 <> SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    IF "S" <> TAXMOD OF A_TAX_TPS
+    THEN BEGIN
+      ERROR 2007 ; Le type de taxe doit être exclu
+    END
+    IF TAXCPTCAR OF A_TAX_TPS = ""
+    THEN BEGIN
+      ERROR 2008 ; On ne peut pas utiliser ce code de taxe au recevable.
+    END
+  END
+  ;
+  ; Initialise le flag à Oui dans la procédure EDIT. Car si l'usager saisie
+  ; une valeur la procédure EDIT est exécuté.
+  ;
+  LET T_FLGMOD = "1"
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du montant de taxe
+;
+
+;PROCEDURE PROCESS FTRTAXCODTPS
+;BEGIN
+  ;
+  ; Calcul des taxes.
+  ;
+
+;  LET TZ_MNTTXB = FTRMNTBRU OF PDFACTURE
+
+  ;
+  ; Use standart pour le calcul des taxes
+  ;
+;  USE ustaxcal NOLIST
+
+;  LET FTRMNTTPS OF PDFACTURE = TZ_MNTTPS
+;  LET FTRMNTTVQ OF PDFACTURE = TZ_MNTTVP
+;  LET FTRMNT    OF PDFACTURE = FTRMNTBRU OF PDFACTURE + &
+;                               FTRMNTTPS OF PDFACTURE + &
+;                               FTRMNTTVQ OF PDFACTURE
+;  DISPLAY FTRMNTTPS OF PDFACTURE
+;  DISPLAY FTRMNTTVQ OF PDFACTURE
+;  DISPLAY FTRMNT    OF PDFACTURE
+;END
+
+
+;-------------------------------------------------------------------------------
+;
+; Sous-écran de consultation des codes de taxe.
+;
+
+PROCEDURE INPUT FTRTAXCODTVQ
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TAXCLETYP = FTRTAXTYPTVQ OF PDFACTURE
+    LET T_TAXCLECOD = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_TAXMODPAT = "S"                                 ; Taxe exclu seulement
+    RUN SCREEN mc111 MODE F PASSING T_TAXCLETYP, &
+                                    T_TAXCLECOD, &
+                                    T_TAXMODPAT
+    LET FIELDTEXT = TRUNCATE(T_TAXCLECOD)
+  END
+  ;
+  ; Par defaut on utilise le code de taxe de TVP du client.
+  ;
+  IF     0 = SIZE( FIELDTEXT ) &
+     AND NEWRECORD OF PDFACTURE &
+     AND FTRTAXCODTVQ OF PDFACTURE = "" &
+     AND CLCTAXCODTVP OF VCLC_CLI <> ""
+  THEN BEGIN
+    LET FIELDTEXT = CLCTAXCODTVP OF VCLC_CLI
+  END
+  ;
+  ; Force l'éxécution de la procédure edit, car il y a inter-relation entre
+  ; deux champs(taxe).
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     T_FLGMOD = "1"
+  THEN BEGIN
+    LET FIELDTEXT = FTRTAXCODTVQ OF PDFACTURE
+  END
+
+
+
+END
+
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation du code de taxe provincial
+;
+
+PROCEDURE EDIT FTRTAXCODTVQ
+BEGIN
+
+  IF 0 <> SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    IF "S" <> TAXMOD OF A_TAX_TVP
+    THEN BEGIN
+      ERROR 2007 ; Le type de taxe doit être exclus
+    END
+    IF TAXCPTCAR OF A_TAX_TVP = "" AND TAXCLECOD OF A_TAX_TVP <>"P0"
+    THEN ERROR 2008 ; On ne peut pas utiliser ce code de taxe au recevable.
+
+    IF TAXMOD    OF A_TAX_TVP = "I" AND &
+       TAXFLGNET OF A_TAX_TVP = "2" AND &
+       TAXMOD    OF A_TAX_TPS = "S"
+    THEN ERROR 2009 ; TVP incluse et TPS ensus incompatible.
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du montant de taxe
+;
+;
+;PROCEDURE PROCESS FTRTAXCODTVQ
+;BEGIN
+  ;
+  ; Calcul des taxes.
+  ;
+
+;  LET TZ_MNTTXB = FTRMNTBRU OF PDFACTURE
+
+  ;
+  ; Use standart pour le calcul des taxes
+  ;
+;  USE ustaxcal NOLIST
+
+;  LET FTRMNTTPS OF PDFACTURE = TZ_MNTTPS
+;  LET FTRMNTTVQ OF PDFACTURE = TZ_MNTTVP
+;  LET FTRMNT    OF PDFACTURE = FTRMNTBRU OF PDFACTURE + &
+;                               FTRMNTTPS OF PDFACTURE + &
+;                               FTRMNTTVQ OF PDFACTURE
+;  DISPLAY FTRMNTTPS OF PDFACTURE
+;  DISPLAY FTRMNTTVQ OF PDFACTURE
+;  DISPLAY FTRMNT    OF PDFACTURE
+;END
+
+; ---------------------------------
+; MP-00-06-16_D68.
+
+procedure input t_ftrflgcar
+begin
+  use usflginp nolist  ; Entree d'un flag oui/non
+end
+
+procedure output t_ftrflgcar
+begin
+  use usflgout3 nolist ; Afficher la valeur oui/non avec 3 caracteres.
+end
+
+;-------------------------------------------------------------------------------
+; MP-00-06-20_D69.
+;
+
+PROCEDURE PROCESS COMNUMCOM OF PDFACTURE
+BEGIN
+  LET COMNUMCOMINT OF PDFACTURE = COMNUMCOMINT OF PDCOMMAN_INTERNE
+  LET PJTABR       OF PDFACTURE = PJTABR       OF PDCOMMAN_INTERNE
+  LET PJTANN       OF PDFACTURE = PJTANN       OF PDCOMMAN_INTERNE
+  LET PJTNUMSEQ    OF PDFACTURE = PJTNUMSEQ    OF PDCOMMAN_INTERNE
+  LET PJTNUMPRO    OF PDFACTURE = PJTNUMPRO    OF PDCOMMAN_INTERNE
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Recherche si au moins une charge diverse est lier à la facture
+;
+
+PROCEDURE POSTFIND
+BEGIN
+  GET PDTRANP_DOU_ECT OPTIONAL &
+    VIA   CIECLE,              &
+          FTRNUMFAC            &
+    USING T_CIECLEMNU,         &
+          FTRNUMFAC        OF PDFACTURE
+  IF ACCESSOK
+  THEN BEGIN
+    LET T_FLGCHGDIV    = "Oui"
+  END
+  ELSE BEGIN
+    LET T_FLGCHGDIV    = "Non"
+  END
+  DISPLAY T_FLGCHGDIV
+
+; -------------------------------------------
+; MP-00-06-16_D68.
+
+  let t_ftrflgcar = ftrflgcar of pdfacture
+
+  display t_ftrflgcar
+
+; -------------------------------------------
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Bloc
+;
+
+PROCEDURE DESIGNER D001
+BEGIN
+  IF NEWRECORD     OF PDFACTURE AND T_FLGUPD <> "O"
+     THEN ERROR "Vous devez faire une mise a jour"
+  RUN SCREEN  pd213a &
+              PASSING T_CIECLEMNU,        &
+                      T_CIENOM,           &
+                      PDFACTURE           &
+              MODE SAME
+  ;
+  ; Calcul des taxes.
+  ;
+
+  LET TZ_MNTTXB = FTRMNTBRU OF PDFACTURE
+
+  ;
+  ; Use standart pour le calcul des taxes
+  ;
+  USE ustaxcal NOLIST
+
+  LET FTRMNTTPS OF PDFACTURE = TZ_MNTTPS
+  LET FTRMNTTVQ OF PDFACTURE = TZ_MNTTVP
+  LET FTRMNT    OF PDFACTURE = FTRMNTBRU OF PDFACTURE + &
+                               FTRMNTTPS OF PDFACTURE + &
+                               FTRMNTTVQ OF PDFACTURE
+  DISPLAY FTRMNTTPS OF PDFACTURE
+  DISPLAY FTRMNTTVQ OF PDFACTURE
+  DISPLAY FTRMNT    OF PDFACTURE
+LET T_FLGUPD = "N"
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Tranche
+;
+
+PROCEDURE DESIGNER D002
+BEGIN
+  IF NEWRECORD     OF PDFACTURE AND T_FLGUPD <> "O"
+     THEN ERROR "Vous devez faire une mise a jour"
+  RUN SCREEN  pd213b &
+              PASSING T_CIECLEMNU,        &
+                      T_CIENOM,           &
+                      PDFACTURE           &
+              MODE SAME
+  ;
+  ; Calcul des taxes.
+  ;
+
+  LET TZ_MNTTXB = FTRMNTBRU OF PDFACTURE
+
+  ;
+  ; Use standart pour le calcul des taxes
+  ;
+  USE ustaxcal NOLIST
+
+  LET FTRMNTTPS OF PDFACTURE = TZ_MNTTPS
+  LET FTRMNTTVQ OF PDFACTURE = TZ_MNTTVP
+  LET FTRMNT    OF PDFACTURE = FTRMNTBRU OF PDFACTURE + &
+                               FTRMNTTPS OF PDFACTURE + &
+                               FTRMNTTVQ OF PDFACTURE
+  DISPLAY FTRMNTTPS OF PDFACTURE
+  DISPLAY FTRMNTTVQ OF PDFACTURE
+  DISPLAY FTRMNT    OF PDFACTURE
+LET T_FLGUPD = "N"
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Produit de dimension
+;
+
+PROCEDURE DESIGNER D003
+BEGIN
+  IF NEWRECORD     OF PDFACTURE AND T_FLGUPD <> "O"
+     THEN ERROR "Vous devez faire une mise a jour"
+  RUN SCREEN  pd213c &
+              PASSING T_CIECLEMNU,        &
+                      T_CIENOM,           &
+                      PDFACTURE           &
+              MODE SAME
+  ;
+  ; Calcul des taxes.
+  ;
+
+  LET TZ_MNTTXB = FTRMNTBRU OF PDFACTURE
+
+  ;
+  ; Use standart pour le calcul des taxes
+  ;
+  USE ustaxcal NOLIST
+
+  LET FTRMNTTPS OF PDFACTURE = TZ_MNTTPS
+  LET FTRMNTTVQ OF PDFACTURE = TZ_MNTTVP
+  LET FTRMNT    OF PDFACTURE = FTRMNTBRU OF PDFACTURE + &
+                               FTRMNTTPS OF PDFACTURE + &
+                               FTRMNTTVQ OF PDFACTURE
+  DISPLAY FTRMNTTPS OF PDFACTURE
+  DISPLAY FTRMNTTVQ OF PDFACTURE
+  DISPLAY FTRMNT    OF PDFACTURE
+LET T_FLGUPD = "N"
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Charges diverses
+;
+
+PROCEDURE DESIGNER D004
+BEGIN
+  IF NEWRECORD     OF PDFACTURE AND T_FLGUPD <> "O"
+     THEN ERROR "Vous devez faire une mise a jour"
+  RUN SCREEN  pd213h &
+              PASSING T_CIECLEMNU,        &
+                      T_CIENOM,           &
+                      PDFACTURE           &
+              MODE SAME
+  ;
+  ; Calcul des taxes.
+  ;
+
+  LET TZ_MNTTXB = FTRMNTBRU OF PDFACTURE
+
+  ;
+  ; Use standart pour le calcul des taxes
+  ;
+  USE ustaxcal NOLIST
+
+  LET FTRMNTTPS OF PDFACTURE = TZ_MNTTPS
+  LET FTRMNTTVQ OF PDFACTURE = TZ_MNTTVP
+  LET FTRMNT    OF PDFACTURE = FTRMNTBRU OF PDFACTURE + &
+                               FTRMNTTPS OF PDFACTURE + &
+                               FTRMNTTVQ OF PDFACTURE
+  DISPLAY FTRMNTTPS OF PDFACTURE
+  DISPLAY FTRMNTTVQ OF PDFACTURE
+  DISPLAY FTRMNT    OF PDFACTURE
+  GET PDTRANP_DOU_ECT OPTIONAL &
+    VIA   FTRNUMFAC        &
+    USING FTRNUMFAC        OF PDFACTURE
+  IF ACCESSOK
+  THEN BEGIN
+    LET T_FLGCHGDIV    = "Oui"
+  END
+  ELSE BEGIN
+    LET T_FLGCHGDIV    = "Non"
+  END
+  DISPLAY T_FLGCHGDIV
+LET T_FLGUPD = "N"
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Commentaire
+;
+
+PROCEDURE DESIGNER D005
+BEGIN
+  RUN SCREEN  pd213d &
+              PASSING T_CIECLEMNU,        &
+                      T_CIENOM,           &
+                      PDFACTURE           &
+              MODE SAME
+END
+
+;-------------------------------------------------------------------------------
+;
+; Impression de la facture pour une vente directe.
+;
+
+PROCEDURE DESIGNER D006
+BEGIN
+  LET T_FACTURE_IMP = "FAC001Z" ; MP-01-10-19_DD
+  LET T_FACNUMFAC   = FTRNUMFAC OF PDFACTURE
+  RUN SCREEN  fac001 &
+              PASSING T_CIECLEMNU  , &
+                      T_FACNUMFAC  , &
+                      T_FACTURE_IMP  & ; MP-01-10-19_DD
+              MODE E
+  LET FTRDATPRT OF PDFACTURE = SYSDATE
+  PUSH UPDATE
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  LET T_FLGUPD = "O"
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDFACTURE &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDFACTURE &
+     AND NOT NEWRECORD     OF PDFACTURE &
+     AND NOT DELETEDRECORD OF PDFACTURE &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+
+  ;
+ ;--validation du status du lot
+ ;
+  GET PDLOT_FACTURE OPTIONAL &
+    VIA   CIECLE,          &
+          FTRNUMFAC        &
+    USING T_CIECLEMNU,     &
+          FTRNUMFAC        OF PDFACTURE
+  IF ACCESSOK
+  THEN BEGIN
+   GET PDLOT_TRANSFERT OPTIONAL &
+    VIA   CIECLE,          &
+          LTRNUMLOT        &
+    USING CIECLE,     &
+          LTRNUMLOT        OF PDLOT_FACTURE
+    IF ACCESSOK
+    THEN BEGIN
+     IF LTRSTU OF PDLOT_TRANSFERT = "T" and alteredrecord of pdfacture ; MP-00-06-16_D68.
+      THEN ERROR 2
+
+    END
+   END
+
+  ; -------------------------------------------
+  ; MP-00-06-16_D68.
+  ;
+
+  if t_ftrflgcar = " "
+  then let ftrflgcar of pdfacture = "0"
+  else let ftrflgcar of pdfacture = t_ftrflgcar
+
+  ; -------------------------------------------
+
+  ;
+  ; Incrémentation du numéro de séquence
+  ;
+  IF 0 = FTRNUMFAC OF PDFACTURE
+  THEN BEGIN
+    START TRANSACTION NO_SEQ
+    GET PDSEQ_FACTURE OPTIONAL                      ; MP-00-04-05_S02.
+    LET CIECLE        OF PDSEQ_FACTURE = T_CIECLEMNU; MP-00-04-05_S02.
+    LET SEFNUMRAP     OF PDSEQ_FACTURE = SEFNUMRAP OF PDSEQ_FACTURE + 1
+    LET FTRNUMFAC     OF PDFACTURE     = SEFNUMRAP OF PDSEQ_FACTURE
+    PUT PDSEQ_FACTURE
+    DISPLAY FTRNUMFAC OF PDFACTURE
+  END
+
+  LET TZ_MNTTXB = FTRMNTBRU OF PDFACTURE
+  ;
+  ; Use standart pour le calcul des taxes
+  ;
+  USE ustaxcal NOLIST
+
+  LET FTRMNTTPS OF PDFACTURE = TZ_MNTTPS
+  LET FTRMNTTVQ OF PDFACTURE = TZ_MNTTVP
+  LET FTRMNT    OF PDFACTURE = FTRMNTBRU OF PDFACTURE + &
+                               FTRMNTTPS OF PDFACTURE + &
+                               FTRMNTTVQ OF PDFACTURE
+  DISPLAY FTRMNTTPS OF PDFACTURE
+  DISPLAY FTRMNTTVQ OF PDFACTURE
+  DISPLAY FTRMNT    OF PDFACTURE
+
+  ; ---------------------------------
+  ; MP-00-06-16_D68.
+
+  if 0=size(truncate(ftrnumcar of pdfacture))
+  then let ftrnumcar of pdfacture = ascii(ftrnumfac of pdfacture)
+
+  ; ---------------------------------
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Permet de faire afficher le numéro de séquence de la facture
+;
+
+PROCEDURE POSTUPDATE
+BEGIN
+  IF CORRECTMODE
+  THEN BEGIN
+    DISPLAY FTRNUMFAC OF PDFACTURE
+    WARNING = " "
+  END
+
+; -------------------------------------------
+; MP-00-06-16_D68.
+
+  let t_ftrflgcar = ftrflgcar of pdfacture
+
+  display t_ftrflgcar            
+  display ftrnumcar of pdfacture
+
+; -------------------------------------------
+
+END
+
+;----------------------------------------------------------------------
+ PROCEDURE FIND
+   BEGIN
+     LET T_UNMTRA = " "
+     IF PATH = 1
+       THEN GET PDFACTURE VIA CIECLE , FTRNUMFAC ORDERBY CIECLE , &
+          FTRNUMFAC USING T_CIECLEMNU , FTRNUMFAC OF PDFACTURE
+     IF PATH = 2
+       THEN GET PDFACTURE VIA CIECLE , CLICLE ORDERBY CIECLE , &
+           FTRNUMFAC USING T_CIECLEMNU , CLICLE OF PDFACTURE
+     IF PATH = 3
+       THEN GET PDFACTURE VIA CIECLE ORDERBY CIECLE , FTRNUMFAC USING &
+           T_CIECLEMNU
+     GET PDFACT_BON_LIVR OPTIONAL
+     ;END
+;----
+ IF ACCESSOK
+  THEN GET PDLIVRE_CAISSON VIA CIECLE,EXPNUMEXP,BLINUMBLI &
+                           USING T_CIECLEMNU,EXPNUMEXP OF PDFACT_BON_LIVR, &
+                                 BLINUMBLI OF PDFACT_BON_LIVR OPT
+  IF ACCESSOK
+   THEN GET PDEMBAL_TRANCHE VIA CIECLE,CAINUMCAI USING T_CIECLEMNU, &
+                                CAINUMCAI OF PDLIVRE_CAISSON OPT
+    IF ACCESSOK
+       THEN BEGIN
+           GET PDDETAIL_C_I VIA CIECLE,COMNUMCOM,DCINUMLIG &
+                           USING T_CIECLEMNU,COMNUMCOM OF PDEMBAL_TRANCHE ,&
+                                 DCINUMLIG OF PDEMBAL_TRANCHE OPT
+
+        LET T_UNMTRA = DCIUNMVEN OF PDDETAIL_C_I
+       END
+   END
+
+;--------------------------------------------------------------------
+;GENERER  Imputation (ventilation)
+;
+PROCEDURE DESIGNER D007
+BEGIN
+  RUN SCREEN pd213j &
+              PASSING T_CIECLEMNU,      &
+                      T_CIENOM,         &
+                      PDFACTURE         &
+          MODE E
+END
+; Imputation (ventilation)
+;
+PROCEDURE DESIGNER D008
+BEGIN
+  RUN SCREEN pd213i &
+              PASSING T_CIECLEMNU,      &
+                      T_CIENOM,         &
+                      PDFACTURE         &
+          MODE F
+ END
+;-------------------------------------------------------------------------------
+PROCEDURE DELETE
+BEGIN
+
+ ;
+ ;--validation du status du lot
+ ;
+  GET PDLOT_FACTURE OPTIONAL &
+    VIA   CIECLE,          &
+          FTRNUMFAC        &
+    USING T_CIECLEMNU,     &
+          FTRNUMFAC        OF PDFACTURE
+  IF ACCESSOK
+  THEN BEGIN
+   GET PDLOT_TRANSFERT OPTIONAL &
+    VIA   CIECLE,          &
+          LTRNUMLOT        &
+    USING CIECLE,     &
+          LTRNUMLOT        OF PDLOT_FACTURE
+    IF ACCESSOK
+    THEN BEGIN
+     IF LTRSTU OF PDLOT_TRANSFERT = "T"
+      THEN ERROR 2
+
+    END
+   END
+
+
+GET PDBLOC_FACTURE OPT VIA CIECLE,FTRNUMFAC USING T_CIECLEMNU,FTRNUMFAC OF PDFACTURE
+  IF ACCESSOK
+  THEN ERROR "Détruire les blocs en sous-écran avant"
+GET PDTRANCHE_FAC OPT VIA CIECLE,FTRNUMFAC USING T_CIECLEMNU,FTRNUMFAC OF PDFACTURE
+  IF ACCESSOK
+  THEN ERROR "Détruire les tranches en sous-écran avant"
+GET PDPROD_FACTURE OPT VIA CIECLE,FTRNUMFAC USING T_CIECLEMNU,FTRNUMFAC OF PDFACTURE
+  IF ACCESSOK
+  THEN ERROR "Détruire les produits dimenssion en sous-écran avant"
+
+
+
+;---trop de fichier, procedure delete
+  LET T_FTRNUMFAC = FTRNUMFAC OF PDFACTURE
+  RUN SCREEN  pd215l &
+              PASSING T_CIECLEMNU,        &
+                      T_FTRNUMFAC         &
+          MODE E
+
+  DELETE PDFACTURE
+
+END
+
+BUILD DETAIL LIST
+
+
+@IF FORMAT
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+********************************* Vente direct *********************************
+* Num. facture..: xxxxxxx               Date facture..: xxxxxxxxxx             *
+* Commande int..: xxxxxxxxx             Date impress..: xxxxxxxxxx             *
+* Client........: xxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             *
+* Adresse.......: xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                *
+*                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                *
+*                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                *
+*                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                *
+*                      xxxxxxx                                                 *
+* Téléphone.....: xxxxxxxxxxxxx              Fax...........: xxxxxxxxxxxxx     *
+* Terme net.....: xxxx xxxxxxxxxx            No.facture C/R: xxxxxxxx          *
+* Escompte 1....: xxxx xxxxxxxxxx            Hors bal.  C/R: xxx               *
+* Escompte 2....: xxxx xxxxxxxxxx            Mnt facture...: xxxxxxxxxxxxxxx   *
+* Frais.........: xxxx xxxxxxxxxx            Escomptable...: xxxxxxxxxxxxxxx   *
+* Code taxe TPS.: xx   xxxxxxxxxxxxxxxxxxxx  Montant TPS...: xxxxxxxxxxxxxxx   *
+* Code taxe TVP.: xx   xxxxxxxxxxxxxxxxxxxx  Montant TVQ...: xxxxxxxxxxxxxxx   *
+* Charge div....: xxx                                                          *
+* Bloc (m3).....: xxxxxxxxx                  Diagramme (m2): xxxxxxxxx         *
+* Tranche (m2)..: xxxxxxxxx                  Prod dim (m2).: xxxxxxxxx         *
+*                                                                              *
+********************************************************************************
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+@ENDIF

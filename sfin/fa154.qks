@@ -1,0 +1,250 @@
+;/T/ Facturation
+;
+;/P/ Programmeur..: Steeve Duguay
+;    Date Création: 2 mai 1995
+;
+;    Description..: Permet la saisie des codes de paiements
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+;
+SCREEN fa154 ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU, &
+                       T_CIENOM
+
+
+USE fa154.hlp NOLIST
+
+USE ussectmp NOLIST     ; Variable pour la sécurité
+"FA154"                 ; Nom de l'écran
+
+USE usactecr  NOLIST
+
+USE ustrasse NOLIST
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 04 ; Numéro de la compagnie
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie
+
+DEFINE    DZ_CIECLE   CHARACTER SIZE 04 = T_CIECLEMNU
+DEFINE    DZ_CIENOM   CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+TEMPORARY T_FGNCLE    CHARACTER SIZE 2 RESET AT MODE
+;-------------------------------------------------------------------------------
+;
+; Table primaire.
+;
+FILE FACOD_PAIEMENT     PRIMARY &
+                        OCCURS 16 &
+                        NOITEM
+  ACCESS VIA     CIECLE,      &
+                 FCPCLE       &
+         USING   T_CIECLEMNU, &
+                 FCPCLE       &
+         REQUEST FCPCLE       &
+         ORDERBY FCPCLE
+
+  ACCESS VIA     CIECLE       &
+         USING   T_CIECLEMNU  &
+         ORDERBY FCPCLE
+
+
+  ITEM CIECLE OF FACOD_PAIEMENT  INITIAL T_CIECLEMNU
+
+
+;------------------------
+; Fichier compte débiteur
+;------------------------
+TEMPORARY T_CPTCLE    CHARACTER SIZE 6 ; Popup sur les comptes.
+TEMPORARY T_PECCLE    CHARACTER SIZE 4 ; Popup sur les comptes.
+TEMPORARY T_CPTTYPPAT CHARACTER SIZE 1 ; Popup sur les comptes.
+TEMPORARY T_CPTCATPAT CHARACTER SIZE 8 ; Popup sur les comptes.
+
+FILE VCPT_DSC REFERENCE
+
+  ACCESS VIA   CPTCLE    &
+         USING FCPCPTCLE OF FACOD_PAIEMENT
+
+
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+TITLE &
+@IF FRANCAIS
+      " Code de paiement " &
+@ELSE
+      " %%%e de paiement " &
+@ENDIF
+      CENTERED AT 3,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+    "Compte" &
+@ELSE
+    "Compte" &
+@ENDIF
+  AT 4,73
+
+TITLE &
+@IF FRANCAIS
+    "Code  Description française     Description anglaise       Mnt recu  débiteur" &
+@ELSE
+    "%%%e  Description française     Description anglaise       Mnt recu  débiteur" &
+@ENDIF
+  AT 5,3
+SKIP TO 6
+
+ALIGN(3,2,3)(,,8)(,,35)(,,65)(,,73)
+
+CLUSTER OCCUR WITH FACOD_PAIEMENT ID BASE 10
+
+FIELD FCPCLE OF FACOD_PAIEMENT  &
+      LABEL " " HIDDEN &
+      REQUIRED NOCHANGE &
+      LOOKUP NOTON FACOD_PAIEMENT &
+        VIA   CIECLE, FCPCLE &
+        USING T_CIECLEMNU, &
+              FCPCLE OF FACOD_PAIEMENT &
+        MESSAGE 2743; Ce code de paiement existe déjà
+
+FIELD FCPDSCFRA    OF FACOD_PAIEMENT
+
+FIELD FCPDSCANG    OF FACOD_PAIEMENT &
+      DEFAULT FCPDSCFRA OF FACOD_PAIEMENT
+
+FIELD FCPREC OF FACOD_PAIEMENT  SIZE 3
+
+FIELD FCPCPTCLE OF FACOD_PAIEMENT &
+        LOOKUP ON VCPT_DSC &
+          MESSAGE 2708 ; Ce compte n'existe pas.
+
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+; Pour la transformation du flag d'impression en 1 et 0
+;
+PROCEDURE INPUT FCPREC
+BEGIN
+  USE usflginp NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Pour afficher le falg sous la forme Oui ou Non
+;
+PROCEDURE OUTPUT FCPREC
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation de l'autorisation d'entrer des données
+;
+PROCEDURE INPUT FCPCLE
+BEGIN
+  USE ussecent NOLIST
+END
+
+;-------------------------------------------------------------------------------
+; Procédure pour le dépisteur du numéro de compte.
+;
+PROCEDURE INPUT FCPCPTCLE
+BEGIN
+  IF 0 = SIZE(FIELDTEXT)
+  THEN LET FIELDTEXT = OLDVALUE(FCPCPTCLE OF FACOD_PAIEMENT)
+
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_PECCLE    = " "
+    LET T_CPTTYPPAT = "@"
+    LET T_CPTCATPAT = "@"
+    RUN SCREEN mc103 MODE F PASSING T_CPTCLE   , &
+                                    T_CPTTYPPAT, &
+                                    T_CPTCATPAT, &
+                                    T_PECCLE     &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_CPTCLE)
+  END
+  IF FIELDTEXT = " " AND FCPREC OF FACOD_PAIEMENT = "0"
+  THEN LET FIELDTEXT = ""
+END
+
+
+PROCEDURE EDIT FCPCPTCLE
+BEGIN
+  IF FIELDTEXT = " " AND FCPREC = "1"
+  THEN ERROR 2734
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès pour l'écran par son code.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+PROCEDURE PREUPDATE
+BEGIN
+  FOR FACOD_PAIEMENT
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF FACOD_PAIEMENT &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF FACOD_PAIEMENT &
+       AND NOT NEWRECORD     OF FACOD_PAIEMENT &
+       AND NOT DELETEDRECORD OF FACOD_PAIEMENT &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+
+  END
+END
+
+
+BUILD LIST DETAIL
+@IF FORMAT
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+******************************* Code de paiement *******************************
+*                                                                       Compte *
+* Code  Description française     Description anglaise       Mnt recu  débiteur*
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxx     xxx     xxxxxx *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxx     xxx     xxxxxx *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxx     xxx     xxxxxx *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxx     xxx     xxxxxx *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxx     xxx     xxxxxx *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxx     xxx     xxxxxx *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxx     xxx     xxxxxx *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxx     xxx     xxxxxx *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxx     xxx     xxxxxx *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxx     xxx     xxxxxx *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxx     xxx     xxxxxx *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxx     xxx     xxxxxx *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxx     xxx     xxxxxx *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxx     xxx     xxxxxx *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxx     xxx     xxxxxx *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxx     xxx     xxxxxx *
+* xxxx xxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxx     xxx     xxxxxx *
+********************************************************************************
+@ENDIF

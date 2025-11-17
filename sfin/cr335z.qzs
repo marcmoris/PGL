@@ -1,0 +1,452 @@
+;/T/ Impression de l'état de comptes
+;
+;/P/ Programmeur...: Alain Côté
+;    Date création.: 2 août 1993
+;
+;    Description...: Impression état de comptes du client.
+;
+;/M/ François Déry, 4 mai 1999
+;       Lors de la conversion vers unix, sur l'élément D_MNTLIMCRTDEP j'ai
+;       changer le fill de null à blanc.
+;
+;/M/ Nancy Marceau, 1994/04/15
+;      - Imprimer les montants négatifs entre < >
+;      - Accéder la vue VCLC_CLI plutôt que CRCLIENT pour aller chercher la
+;        limite de crédit ainsi que la langue du client.
+;      - Imprimer limite de crédit du client si différente de zéro.
+;      - Imprimer les messages de limite de crédit losrqu'elle est dépassée.
+;
+; Le use est mis en commentaire car on doit rajouter l'option spacing 0
+; à l'énoncé SET REPORT pour l'impression du  montant de dépassement de la
+; limite de crédit à côté du message.
+;
+
+SET REPORT DEVICE DISC NAME $PRFICIMP NOLIMIT SPACING 0
+SET NOCLOSE
+
+SET PAGE LENGTH 66 WIDTH 220
+SET FORMFEED
+SET NOBLANKS
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Impression de l'état de comptes.
+;
+;
+ACCESS *WCR335C &
+  ;
+  ; Compagnie du menu, pour avoir l'adresse de la compagnie.
+  ;
+  LINK CIECLE OF WCR335C &
+    TO CIECLE OF MCCOMPAGNIE &
+  ;
+  ; Adresse du client.
+  ;
+  LINK REFCIECLE OF WCR335C , &
+       REFCLETYP OF WCR335C , &
+       REFCLENUM OF WCR335C , &
+       RADCLE    OF WCR335C   &
+    TO REFCIECLE , &
+       REFCLETYP , &
+       REFCLENUM , &
+       RADCLE OF MCREF_ADRESSE &
+  LINK REFCIECLE OF WCR335C , &
+       REFCLENUM OF WCR335C , &
+       CIECLE    OF WCR335C   &
+    TO CLICIECLE , &
+       CLICLE    , &
+       CIECLE OF VCLC_CLI
+
+SELECT VCLC_CLI IF CLIETACPT OF VCLC_CLI = "1"
+
+;
+; Le bas de page(PAGE FOOT) doit être imprimé que pour la dernière page
+; d'état de compte du client. Pour déceler la dernière page on utilise le
+; flag T_FLGDRN qui est égale à 1 si c'est le dernier record du client.
+; Voir le QTP pour le traitement de ce flag.
+;
+DEFINE D_ANNLIG  VARCHAR SIZE 132  = " "[1:130] IF T_FLGDRN = "0" &
+                               ELSE ""
+DEFINE D_ANNLIG2 VARCHAR SIZE 100  = " "[1:100] IF T_FLGDRN = "1" &
+                               ELSE ""
+
+;
+; Saisie du mémo
+;
+DEFINE D_MEMOFRA_1 CHARACTER SIZE 70 = PARM     ;Ligne 1 du mémo
+DEFINE D_MEMOFRA_2 CHARACTER SIZE 70 = PARM     ;Ligne 2 du mémo
+DEFINE D_MEMOFRA_3 CHARACTER SIZE 70 = PARM     ;Ligne 3 du mémo
+DEFINE D_MEMOANG_1 CHARACTER SIZE 70 = PARM     ;Ligne 1 du mémo
+DEFINE D_MEMOANG_2 CHARACTER SIZE 70 = PARM     ;Ligne 2 du mémo
+DEFINE D_MEMOANG_3 CHARACTER SIZE 70 = PARM     ;Ligne 3 du mémo
+DEFINE D_MEMO_1 CHARACTER SIZE 70 = D_MEMOFRA_1 IF CLILNG OF VCLC_CLI = "F" &
+                               ELSE D_MEMOANG_1
+DEFINE D_MEMO_2 CHARACTER SIZE 70 = D_MEMOFRA_2 IF CLILNG OF VCLC_CLI = "F" &
+                               ELSE D_MEMOANG_2
+DEFINE D_MEMO_3 CHARACTER SIZE 70 = D_MEMOFRA_3 IF CLILNG OF VCLC_CLI = "F" &
+                               ELSE D_MEMOANG_3
+
+DEFINE D_LIBLIMCRT CHARACTER SIZE 18 = "LIMITE DE CREDIT.:" &
+                    IF CLILNG OF VCLC_CLI = "F" AND CLCLIMCRT OF VCLC_CLI <> 0 &
+                    ELSE "CREDIT LIMIT.....:" &
+                    IF CLILNG OF VCLC_CLI = "A" AND CLCLIMCRT OF VCLC_CLI <> 0 &
+                    ELSE ""
+
+DEFINE D_MNTLIMCRT FLOAT SIZE 8 &
+   FLOAT "$" &
+   PICTURE " ^,^^^,^^^.^^" &
+   SIGNIFICANCE 4 &
+   BWZ            = CLCLIMCRT OF VCLC_CLI
+
+
+DEFINE D_MNTLIMCRTDEP FLOAT SIZE 8 &
+   PICTURE "^,^^^,^^^.^^" &
+   SIGNIFICANCE 4 &
+   BWZ            &
+   FILL " "       = T_SLDLIMCRT  OF WCR335C - &
+                    CLCLIMCRT OF VCLC_CLI  &
+      IF    T_SLDLIMCRT > CLCLIMCRT OF VCLC_CLI  &
+        AND CLCLIMCRT OF VCLC_CLI <> 0 &
+      ELSE 0
+
+
+
+
+;
+; On ajoute des NULS pour permettre l'impression du montant du dépassement
+; de la limite de crédit tout de suite à côté de la fin du message 1.
+;
+DEFINE D_ITVLIMFRA1 CHARACTER SIZE 70 = TRUNCATE(ITVLIMFRA1 OF WCR335C) + " $" + &
+                              "" + &
+                              "" &
+                              IF     T_SLDLIMCRT > CLCLIMCRT OF VCLC_CLI &
+                                AND  CLCLIMCRT OF VCLC_CLI <> 0 &
+                              ELSE ""
+DEFINE D_ITVLIMFRA2 CHARACTER SIZE 70 = ITVLIMFRA2 OF WCR335C &
+                                        IF     T_SLDLIMCRT > CLCLIMCRT OF VCLC_CLI &
+                                          AND  CLCLIMCRT OF VCLC_CLI <> 0 &
+                                        ELSE ""
+DEFINE D_ITVLIMFRA3 CHARACTER SIZE 70 = ITVLIMFRA3 OF WCR335C &
+                                        IF     T_SLDLIMCRT > CLCLIMCRT OF VCLC_CLI &
+                                          AND  CLCLIMCRT OF VCLC_CLI <> 0 &
+                                        ELSE ""
+DEFINE D_ITVLIMFRA4 CHARACTER SIZE 70 = ITVLIMFRA4 OF WCR335C &
+                                        IF     T_SLDLIMCRT > CLCLIMCRT OF VCLC_CLI &
+                                          AND  CLCLIMCRT OF VCLC_CLI <> 0 &
+                                        ELSE ""
+DEFINE D_ITVLIMFRA5 CHARACTER SIZE 70 = ITVLIMFRA5 OF WCR335C &
+                                        IF     T_SLDLIMCRT > CLCLIMCRT OF VCLC_CLI &
+                                          AND  CLCLIMCRT OF VCLC_CLI <> 0 &
+                                        ELSE ""
+
+
+;
+; On n'affiche pas le numéro du document si c'est un paiement non-appliqué.
+;
+DEFINE D_CARCLE CHARACTER SIZE 12 = CARCLE OF WCR335C
+
+; &
+;                                      IF CRHTYPTRA OF WCR335C <> "NA"
+
+;
+; Type de transaction pour l'état de compte. Les types de transactions
+; sont habituellement inscrit dans la légende de l'état de comptes.
+;
+DEFINE D_TYPTRS CHARACTER SIZE 1 = "I" IF CRHTYPTRA OF WCR335C = "FA" &
+                              ELSE "C" IF CRHTYPTRA OF WCR335C = "CR" &
+                              ELSE "C" IF CRHTYPTRA OF WCR335C = "NC" &
+                              ELSE "P" IF CRHTYPTRA OF WCR335C = "EN" &
+                              ELSE "X" IF CRHTYPTRA OF WCR335C = "MC" &
+                              ELSE " "
+
+
+DEFINE D_TIT1 CHARACTER SIZE 17 = "NO COMPTE CLIENT"       IF CLILNG OF VCLC_CLI = "F" &
+                            ELSE  "ACCOUNT #CLIENT "
+DEFINE D_TIT2 CHARACTER SIZE 60 = CENTER( ITVDSC OF WCR335C[1:60] )
+DEFINE D_TIT3 CHARACTER SIZE 25 = " #FACTURE         DATE" IF CLILNG OF VCLC_CLI = "F"  &
+                            ELSE  " #INVOICE         DATE"
+
+DEFINE D_TIT4 CHARACTER SIZE 25 = "MONTANT A PAYER :    "  IF CLILNG OF VCLC_CLI = "F" &
+                            ELSE  "BALANCE DUE :"
+
+DEFINE D_TIT5 CHARACTER SIZE 50 = &
+       "SOMMAIRE DE L'ETAT DE COMPTE (INTERET NON INCLUS)" IF G_CALINT <> "1" &
+  ELSE "SOMMAIRE DE L'ETAT DE COMPTE (INTERET INCLUS)"
+
+SORT ON CIECLE    OF WCR335C, &               ;Compagnie
+        REFCLENUM OF WCR335C, &               ;Code  client
+        RADCLE    OF WCR335C, &               ;Adresse d'état de compte
+        T_FLGTRI  OF WCR335C, &               ;Trie les documents ensuite les intérets
+        CRHDAT    OF WCR335C, &               ;Date de transaction
+        CARCLE    OF WCR335C                  ;No document
+
+
+
+
+PAGE HEADING &
+ TAB 220 "."  &
+SKIP 1 TAB 016 CIENOM  OF MCCOMPAGNIE &
+SKIP 1 TAB 016 CIEADR1 OF MCCOMPAGNIE &
+SKIP 1 TAB 016 CIEADR2 OF MCCOMPAGNIE &
+SKIP 1 TAB 016 CIEADR3 OF MCCOMPAGNIE &
+SKIP   TAB 016 CIEADR4 OF MCCOMPAGNIE &
+SKIP 1 TAB 016 CIECP   OF MCCOMPAGNIE &
+SKIP 2 TAB 037 D_TIT2  & ; Statetemnt
+SKIP 1 TAB 063 G_PECDATFIN &
+SKIP 1 TAB 003 D_TIT1  & ; No compte client
+SKIP 1 TAB 003 "-----------------" &
+SKIP 1 TAB 003 REFCLENUM &
+       TAB 011 RADNOM    OF MCREF_ADRESSE &
+SKIP 1 TAB 011 RADADR1   OF MCREF_ADRESSE &
+SKIP 1 TAB 011 RADADR2   OF MCREF_ADRESSE &
+SKIP 1 TAB 011 RADADR3   OF MCREF_ADRESSE &
+SKIP   TAB 011 RADADR4   OF MCREF_ADRESSE &
+SKIP 1 TAB 011 RADCP     OF MCREF_ADRESSE &
+SKIP 2 TAB 011 D_LIBLIMCRT           &
+       TAB 030 D_MNTLIMCRT           &
+               BWZ                   &
+SKIP 2 TAB 007 D_TIT3       &
+       TAB 038 ITVCOLTIT1 OF WCR335C &
+       TAB 058 ITVCOLTIT2 OF WCR335C &
+       TAB 076 ITVCOLTIT3 OF WCR335C &
+       TAB 094 ITVCOLTIT4 OF WCR335C &
+       TAB 109 ITVCOLTIT5 OF WCR335C &
+SKIP 1 TAB 007 "-----------------------------------------------------------------------------------------------------------------" &
+SKIP 1
+
+; #Facture         Date         Solde Cou.          31/60 J.          61/90 J.          91/120 J.      121+ Jours
+;----------------------------------------------------------------------------------------------------------------
+;
+;6378            92/06/30   <9,999,999.99>    <9,999,999.99>    <9,999,999.99>    <9,999,999.99>    <9,999,999.99>
+
+REPORT &
+ TAB 007 D_CARCLE             &
+ TAB 023 CRHDAT    OF WCR335C &
+ TAB 034 T_SLDCLI01  &
+         PICTURE " ^,^^^,^^^.^^ " &
+         LEADING SIGN "<"        &
+         TRAILING SIGN ">"       &
+         SIGNIFICANCE 5          &
+ TAB 052 T_SLDCLI02  &
+         PICTURE " ^,^^^,^^^.^^ " &
+         LEADING SIGN "<"        &
+         TRAILING SIGN ">"       &
+         SIGNIFICANCE 5          &
+ TAB 070 T_SLDCLI03  &
+         PICTURE " ^,^^^,^^^.^^ " &
+         LEADING SIGN "<"        &
+         TRAILING SIGN ">"       &
+         SIGNIFICANCE 5          &
+ TAB 088 T_SLDCLI04  &
+         PICTURE " ^,^^^,^^^.^^ " &
+         LEADING SIGN "<"        &
+         TRAILING SIGN ">"       &
+         SIGNIFICANCE 5          &
+ TAB 106 T_SLDCLI05   &
+         PICTURE " ^,^^^,^^^.^^ " &
+         LEADING SIGN "<"        &
+         TRAILING SIGN ">"       &
+         SIGNIFICANCE 5          &
+ TAB 052 D_ANNLIG2
+
+FOOTING AT RADCLE &
+SKIP 1 &
+ TAB 034 "--------------" &
+ TAB 052 "--------------" &
+ TAB 070 "--------------" &
+ TAB 088 "--------------" &
+ TAB 106 "--------------" &
+SKIP 1 &
+ TAB 034 T_SLDCLI01 SUBTOTAL &
+         PICTURE " ^,^^^,^^^.^^ " &
+         LEADING SIGN "<"        &
+         TRAILING SIGN ">"       &
+         SIGNIFICANCE 5          &
+ TAB 052 T_SLDCLI02 SUBTOTAL &
+         PICTURE " ^,^^^,^^^.^^ " &
+         LEADING SIGN "<"        &
+         TRAILING SIGN ">"       &
+         SIGNIFICANCE 5          &
+ TAB 070 T_SLDCLI03 SUBTOTAL &
+         PICTURE " ^,^^^,^^^.^^ " &
+         LEADING SIGN "<"        &
+         TRAILING SIGN ">"       &
+         SIGNIFICANCE 5          &
+ TAB 088 T_SLDCLI04 SUBTOTAL &
+         PICTURE " ^,^^^,^^^.^^ " &
+         LEADING SIGN "<"        &
+         TRAILING SIGN ">"       &
+         SIGNIFICANCE 5          &
+ TAB 106 T_SLDCLI05 SUBTOTAL  &
+         PICTURE " ^,^^^,^^^.^^ " &
+         LEADING SIGN "<"        &
+         TRAILING SIGN ">"       &
+         SIGNIFICANCE 5          &
+SKIP 1 &
+ TAB 034 "==============" &
+ TAB 052 "==============" &
+ TAB 070 "==============" &
+ TAB 088 "==============" &
+ TAB 106 "==============" &
+SKIP 2 &
+ TAB 006 D_TIT4 &
+ TAB 034 T_SLDTRA SUBTOTAL &
+         PICTURE " ^,^^^,^^^.^^ " &
+         LEADING SIGN "<"        &
+         TRAILING SIGN ">"       &
+         SIGNIFICANCE 5          &
+SKIP &
+ TAB 034 "==============" &
+SKIP 2 TAB 036 D_ITVLIMFRA1 D_MNTLIMCRTDEP "."&
+SKIP   TAB 036 D_ITVLIMFRA2 &
+SKIP   TAB 036 D_ITVLIMFRA3 &
+SKIP   TAB 036 D_ITVLIMFRA4 &
+SKIP   TAB 036 D_ITVLIMFRA5 &
+SKIP PAGE
+
+PAGE FOOTING &
+SKIP 2 TAB 036 D_MEMO_1 &
+SKIP 1 TAB 036 D_MEMO_2 &
+SKIP 1 TAB 036 D_MEMO_3 &
+SKIP 2 TAB 036 ITVCOMFRA1 &
+SKIP   TAB 036 ITVCOMFRA2 &
+SKIP   TAB 036 ITVCOMFRA3 &
+SKIP   TAB 036 ITVCOMFRA4 &
+SKIP   TAB 036 ITVCOMFRA5 &
+       TAB 220 "."
+
+
+FINAL FOOTING &
+  SKIP PAGE &
+  TAB 001 " " &
+SKIP 4 &
+   TAB 044 D_TIT5 &
+SKIP 1 &
+   TAB 062 G_PECDATFIN OF WCR335C &
+SKIP 4 TAB 002 " #Facture         Date"        &
+       TAB 033 ITVCOLTIT1 OF WCR335C &
+       TAB 053 ITVCOLTIT2 OF WCR335C &
+       TAB 071 ITVCOLTIT3 OF WCR335C &
+       TAB 089 ITVCOLTIT4 OF WCR335C &
+       TAB 104 ITVCOLTIT5 OF WCR335C &
+SKIP 1 TAB 002 "-----------------------------------------------------------------------------------------------------------------" &
+SKIP 2 "Total par Terme:" &
+ TAB 029 T_SLDCLI01 SUBTOTAL  &
+         PICTURE " ^,^^^,^^^.^^ " &
+         LEADING SIGN "<"        &
+         TRAILING SIGN ">"       &
+         SIGNIFICANCE 5          &
+ TAB 047 T_SLDCLI02 SUBTOTAL &
+         PICTURE " ^,^^^,^^^.^^ " &
+         LEADING SIGN "<"        &
+         TRAILING SIGN ">"       &
+         SIGNIFICANCE 5          &
+ TAB 065 T_SLDCLI03 SUBTOTAL &
+         PICTURE " ^,^^^,^^^.^^ " &
+         LEADING SIGN "<"        &
+         TRAILING SIGN ">"       &
+         SIGNIFICANCE 5          &
+ TAB 083 T_SLDCLI04  SUBTOTAL &
+         PICTURE " ^,^^^,^^^.^^ " &
+         LEADING SIGN "<"        &
+         TRAILING SIGN ">"       &
+         SIGNIFICANCE 5          &
+ TAB 101 T_SLDCLI05 SUBTOTAL  &
+         PICTURE " ^,^^^,^^^.^^ " &
+         LEADING SIGN "<"        &
+         TRAILING SIGN ">"       &
+         SIGNIFICANCE 5
+
+
+
+BUILD cr335zb
+
+@IF FORMAT
+
+                                                                                                                          Page: 999
+              XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+              xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+              xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+              xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+              xxx xxx
+
+                                                       ETAT DE COMPTE (STATEMENT)
+                                                               YYYY/MM/DD
+
+
+   NO COMPTE CLIENT
+   ----------------
+   XXXXXX     XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+              XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+              XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+              XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+              XXX XXX
+
+              LIMITE DE CREDIT.: 99,999,999
+
+
+ #Facture         Date         Solde Courant       31/60 Jours       61/90 Jours      91/120 Jours        121+ Jours
+ --------------------------------------------------------------------------------------------------------------------
+ XXXXXXXXXXXXXXX YY/MM/DD    $-999,999,999,99  $-999,999,999,99  $-999,999,999,99  $-999,999,999,99  $-999,999,999,99
+ XXXXXXXXXXXXXXX YY/MM/DD    $-999,999,999,99  $-999,999,999,99  $-999,999,999,99  $-999,999,999,99  $-999,999,999,99
+ XXXXXXXXXXXXXXX YY/MM/DD    $-999,999,999,99  $-999,999,999,99  $-999,999,999,99  $-999,999,999,99  $-999,999,999,99
+ XXXXXXXXXXXXXXX YY/MM/DD    $-999,999,999,99  $-999,999,999,99  $-999,999,999,99  $-999,999,999,99  $-999,999,999,99
+ XXXXXXXXXXXXXXX YY/MM/DD    $-999,999,999,99  $-999,999,999,99  $-999,999,999,99  $-999,999,999,99  $-999,999,999,99
+ XXXXXXXXXXXXXXX YY/MM/DD    $-999,999,999,99  $-999,999,999,99  $-999,999,999,99  $-999,999,999,99  $-999,999,999,99
+ XXXXXXXXXXXXXXX YY/MM/DD    $-999,999,999,99  $-999,999,999,99  $-999,999,999,99  $-999,999,999,99  $-999,999,999,99
+ XXXXXXXXXXXXXXX YY/MM/DD    $-999,999,999,99  $-999,999,999,99  $-999,999,999,99  $-999,999,999,99  $-999,999,999,99
+
+
+INTERETS:                    $-999,999,999,99
+                             ----------------  ----------------  ----------------  ----------------  ----------------
+
+TOTAUX:                      $-999,999,999,99  $-999,999,999,99  $-999,999,999,99  $-999,999,999,99  $-999,999,999,99
+
+
+
+  MONTANT A PAYER:           $-999,999,999,99
+  ===========================================
+
+                                   XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                                   XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                                   XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+                                   XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                                   XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                                   XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                                   XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                                   XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+                                   XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                                   XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                                   XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                                   XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                                   XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+                                           SOMMAIRE DE L'ETAT DE COMPTE (INTERET NON INCLUS)
+                                                             YYYY/MM/DD
+
+
+
+
+
+
+
+
+
+  #Facture      Date            Solde Courant       30/59 Jours       60/89 Jours      90/119 Jours        120+ Jours
+  --------------------------------------------------------------------------------------------------------------------
+
+  total par terme:           $-999,999,999.99  $-999,999,999.99  $-999,999,999.99  $-999,999,999.99  $-999,999,999.99
+
+
+
+
+  Grand total:               $-999,999,999.99
+  ===========================================
+
+
+
+@ENDIF

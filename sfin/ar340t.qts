@@ -1,0 +1,149 @@
+;/T/ Liste des produits inventoriés/Fournisseur-Catégorie-Section
+;
+;/P/ Réalisé par.........: Marc Poulin
+;    Date modification...: 20 mars 2000
+;    Description.........: Impression des produits inventoriés par catégorie, section et fournisseur.
+;
+;    Paramètres..........: Compagnie   (fourni par le système);
+;                          Produit     (Borne de début);
+;                          Produit     (Borne de fin);
+;                          Catégorie   (Une, plusieurs ou tous);
+;                          Section     (Une, plusieurs ou tous);
+;                          Fournisseur (Un, plusieurs ou tous);
+;                          Statut      (A=actif,I=inactif,<retour>=tous);
+;                          Tri         (1=Numérique, 2=Alphabétique).
+;
+;    Référence...........: Demande de changement 000030.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+USE ussetqts NOLIST   ; set process nolimit
+SET LOCK RECORD UPDATE
+
+RUN ar340t
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+; Sélection des produit par fournisseur.
+
+REQUEST FOURNISSEUR_PRODUIT
+
+ACCESS ARPRD_FOU LINK "----"                     , &
+                      FOUCLE OF ARPRD_FOU          &
+                   TO FOUCIECLE                  , &
+                      FOUCLE OF CPFOURNISSEUR OPT  &
+
+                 LINK CIECLE OF ARPRD_FOU        , &
+                      PRDCLE OF ARPRD_FOU          &
+                   TO CIECLE                     , &
+                      PRDCLE OF ARPRODUIT          &
+
+                 LINK "PRDCAT"                   , &
+                      PRDCAT OF ARPRODUIT          &
+                   TO XELNOM                     , &
+                      CBICLE OF VCBI_DSC      OPT   
+
+CHOOSE CIECLE PARM, & ; Compagnie du menu
+       FOUCLE PARM    ; Code de fournisseur
+
+DEFINE D_SECTION_PARM  CHARACTER SIZE 03 = PARM         ; Section du produit (représenté par les trois premiers chiffres du code produit)
+DEFINE D_PRDSTAT_PARM  CHARACTER SIZE 02 = PARM UPSHIFT ; Statut du produit
+
+SELECT ARPRODUIT   IF (D_PRDSTAT_PARM = " " OR D_PRDSTAT_PARM = PRDSTU OF ARPRODUIT)                         AND &
+                      (D_SECTION_PARM = " " OR D_SECTION_PARM = LJ(ASC(NCONVERT(PRDCLE OF ARPRODUIT)))[1:3]) AND &
+                      (PRDTYP OF ARPRODUIT = "I")
+
+SORT ON FOUCLE OF ARPRD_FOU &
+     ON PRDCLE OF ARPRODUIT
+
+SUBFILE WAR340A KEEP AT PRDCLE INCLUDE ARPRODUIT              , &
+                                       FOUCLE OF ARPRD_FOU    , &
+                                       FOUNOM OF CPFOURNISSEUR, &
+                                       D_SECTION_PARM         , &
+                                       D_PRDSTAT_PARM         , &
+                                       CBIDSC OF VCBI_DSC       &
+                                 INDEX WAR340A_IDX              &
+                               SEGMENT CIECLE                 , &
+                                       PRDCAT                 , &
+                                       PRDCLE                 
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+; Génération d'enregistrement par description de produit
+
+REQUEST DESCRIPTIONS_PRODUIT
+
+ACCESS *WAR340A 
+
+CHOOSE CIECLE PARM      , & ; Compagnie du menu
+       PRDCAT PARM      , & ; Catégorie de produit
+       PRDCLE PARM RANGE    ; Code de produit
+
+SORT ON CIECLE OF WAR340A &
+     ON FOUCLE OF WAR340A &
+     ON PRDCLE OF WAR340A
+
+SUBFILE WAR340B KEEP ALIAS A_1 IF PRDDSC1 OF WAR340A <> " " INCLUDE CIECLE  OF WAR340A, &
+                                                                    FOUCLE  OF WAR340A, &
+                                                                    PRDCLE  OF WAR340A, &
+                                                                    PRDDSC1 OF WAR340A  ALIAS PRDDSC &
+                                                              INDEX WAR340B_IDX         &
+                                                            SEGMENT CIECLE            , &
+                                                                    FOUCLE            , &
+                                                                    PRDCLE            
+
+SUBFILE WAR340B KEEP ALIAS A_2 IF PRDDSC2 OF WAR340A <> " " INCLUDE CIECLE  OF WAR340A, &
+                                                                    FOUCLE  OF WAR340A, &
+                                                                    PRDCLE  OF WAR340A, &
+                                                                    PRDDSC2 OF WAR340A  ALIAS PRDDSC &
+                                                              INDEX WAR340B_IDX         &
+                                                            SEGMENT CIECLE            , &
+                                                                    FOUCLE            , &
+                                                                    PRDCLE            
+
+SUBFILE WAR340B KEEP ALIAS A_3 IF PRDDSC3 OF WAR340A <> " " INCLUDE CIECLE  OF WAR340A, &
+                                                                    FOUCLE  OF WAR340A, &
+                                                                    PRDCLE  OF WAR340A, &
+                                                                    PRDDSC3 OF WAR340A  ALIAS PRDDSC &
+                                                              INDEX WAR340B_IDX         &
+                                                            SEGMENT CIECLE            , &
+                                                                    FOUCLE            , &
+                                                                    PRDCLE            
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+; Déterminer les quantités sorties (utilisées) dans les 12 derniers mois.
+
+REQUEST SORTIES_PRODUIT
+
+ACCESS *WAR340A  LINK  CIECLE    OF WAR340A                         , &
+                       PRDCLE    OF WAR340A                           &
+                   TO  CIECLE                                       , &
+                       PRDCLE    OF ARPRD_ENT                         & ; Produit par entrepôt
+
+                 LINK  CIECLE    OF ARPRD_ENT                       , &
+                       PRDCLE    OF ARPRD_ENT                       , &
+                       ENTCLE    OF ARPRD_ENT                       , &
+                       "06"                                           & ; Code associé à la sortie de produit
+                   TO  CIECLE                                       , &
+                       PRDCLE                                       , &
+                       ENTCLE                                       , &
+                       PRHTYP    OF ARPRD_HISTO                  OPT    ; Historique de transactions par produit
+
+SELECT ARPRD_HISTO IF  PRHDATREF OF ARPRD_HISTO >= SYSDATE - 10000 AND &  ; Sélection des sorties de la dernière année.
+                       PRHDATREF OF ARPRD_HISTO <= SYSDATE
+
+SORT ON CIECLE OF WAR340A &
+     ON FOUCLE OF WAR340A &
+     ON PRDCLE OF WAR340A &
+     ON ENTCLE OF ARPRD_ENT
+
+TEMPORARY T_PRHQTETRS  FLOAT SIZE 08
+ITEM T_PRHQTETRS SUBTOTAL PRHQTETRS OF ARPRD_HISTO RESET AT ENTCLE
+
+SUBFILE WAR340D KEEP AT ENTCLE INCLUDE ARPRD_ENT        , &
+                                       FOUCLE OF WAR340A, &
+                                       T_PRHQTETRS        &
+                                 INDEX WAR340D_IDX        &
+                               SEGMENT CIECLE           , &
+                                       FOUCLE           , &
+                                       PRDCLE           
+
+BUILD ar340t

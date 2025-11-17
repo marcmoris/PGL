@@ -1,0 +1,321 @@
+;/T/ Impression de l'inventaire physique des tranches avec valorisation et
+;    intervale de date.
+;
+;/P/ Programmeur..: René Bonneau
+;    Date Création: 1996-04-02
+;
+;    Description..: Le but de cette unité de traitement est d'imprimer
+;                   la liste de valorisation des tranches avec intervale
+;                   de l'inventaire de tranches de granit de Granicor.
+;
+;    Paramètres....: Date de début
+;                    Date de fin
+;
+;
+;/M/ Programeur...: Claudie Doyon
+;    Date ........: 1999-10-07
+;    Description .: Ajout du link avec la table pdrap_montage et du select
+;                   sur celle ci pour tenir compte des montages annuler.
+;
+;/M/ Programmeur..: Remy Demers
+;    Date.........: 1999-10-15
+;    Description..: link pdrap_montage optional
+;-------------------------------------------------------------------------------
+;
+; initialisation des paramètres globales de QUIZ.
+;
+CANCEL CLEAR
+
+USE ussetqzs NOLIST
+;==============================================================================
+;
+;    Sommaire de l'inventaire de tranches
+;    Valorisation" &
+;
+
+access *wpdtranche link blonumgra001apr of  wpdtranche              , &
+                        blonumgra002apr of  wpdtranche              , &
+                        blorecapr       of  wpdtranche              , &
+                        ciecle          of  wpdtranche                &
+                     to blonumgra001apr                             , &
+                        blonumgra002apr                             , &
+                        blorecapr                                   , &
+                        ciecle          of *wpdmontage_bloc optional  &
+
+                   link rmsnumseq       of  wpdmontage_bloc         , &
+                        ciecle          of  wpdmontage_bloc           &
+                     to rmsnumseq                                   , &
+                        ciecle          of *wpdrap_montage  optional  & 
+
+                   link rmsnumseq       of  wpdmontage_bloc         , &
+                        ciecle          of  wpdmontage_bloc           &
+                     to rmsnumseq                                   , &
+                        ciecle          of *wpdsciage_blocs optional  &
+
+                   link tranumtra002    of  wpdtranche              , &
+                        ciecle          of  wpdtranche                &
+                     to tranumtra002                                , &
+                        ciecle          of *wpdrec_tranche  optional  &
+
+                   link rctnumrec       of  wpdrec_tranche          , &
+                        ciecle          of  wpdrec_tranche            &
+                     to rctnumrec                                   , &
+                        ciecle          of *wpdreception    optional
+
+define v-tradatcre date = tradatcre of wpdtranche      if tradatcre of wpdtranche      <> 0 else 99991230
+define v-rctdatrec date = rctdatrec of wpdreception    if rctdatrec of wpdreception    <> 0 else 99991230
+define v-scbdatsci date = scbdatsci of wpdsciage_blocs if scbdatsci of wpdsciage_blocs <> 0 else 99991230
+
+define d-datsel date =  tradatcre of wpdtranche                       &
+                    if (v-tradatcre               <> 99991230)    and &
+                       (tradatcre of wpdtranche   <= v-rctdatrec) and &
+                       (tradatcre of wpdtranche   <= v-scbdatsci)     &
+                  else  rctdatrec of wpdreception                     &
+                    if (v-rctdatrec               <> 99991230)    and &
+                       (rctdatrec of wpdreception <= v-tradatcre) and &
+                       (rctdatrec of wpdreception <= v-scbdatsci)     &
+                  else  scbdatsci of wpdsciage_blocs
+
+DEFINE D-ANNEE CHAR SIZE 4 = ASCII(D-DATSEL)[1:4]
+DEFINE D-MOIS  CHAR SIZE 4 = ASCII(D-DATSEL)[5:2]
+
+DEFINE D-D INTEGER SIZE 4 = NCONV(D-ANNEE) + 1                        &
+                         IF D-MOIS = "11" OR D-MOIS = "12"            &
+                       ELSE NCONV(D-ANNEE)
+
+DEFINE DD-ANNEE CHARACTER SIZE 4 = ASCII(D-D)
+
+DEFINE D-DATDEB DATE = PARM
+DEFINE D-DATFIN DATE = PARM
+
+SELECT IF  (D-DATSEL >= D-DATDEB  AND &
+            D-DATSEL <= D-DATFIN) OR  &
+           (D-DATDEB = 0          AND &
+            D-DATFIN = 0)
+ 
+SELECT WPDRAP_MONTAGE IF RMOSTU OF WPDRAP_MONTAGE <> "A"  
+
+DEFINE D-NBRE-TRANCHE   INTEGER SIZE 2 = 1
+
+define d_mod      integer size 4 = mod(traepa of wpdtranche,5)
+define d_m_traepa integer size 4 = traepa of wpdtranche - d_mod    &
+                                   if (d_mod >= 0 and d_mod <= 2)  &
+                                   else traepa of wpdtranche + 2   &
+                                                    if d_mod = 3   &
+                                   else traepa of wpdtranche + 1
+
+
+define d-traepa-tri character size 3 = ascii(d_m_traepa,3)
+define d-traepa     character size 3 = ascii(d_m_traepa)
+
+sort on ciecle      of wpdtranche &
+     on tgrcodgra   of wpdtranche &
+     on tyfcodfin   of wpdtranche &
+     on d-traepa-tri   
+
+SET SUBFILE NAME WIG314Z1
+
+report summary                                           &
+  d_m_traepa                                             &
+  d-traepa                                               &
+  d-traepa-tri                                           &
+  ciecle                                                 &
+  tranumtra002 of wpdtranche                             &
+  tgrcodgra    of wpdtranche                             &
+  tyfcodfin    of wpdtranche                             &
+  traepa       of wpdtranche                             &
+  trasurmc2    of wpdtranche & ;  sub reset at traepa         &
+  tradatcre    of wpdtranche                             &
+  d-datdeb                                               &
+  d-datfin                                               &
+  d-nbre-tranche             & ;  sub reset at traepa         &
+  dd-annee       & 
+  d-datsel 
+
+BUILD ig314z1
+
+ACCESS *WIG314Z1                                        &
+  LINK DD-ANNEE         OF WIG314Z1,                    &
+       CIECLE           OF WIG314Z1                     &
+    TO CPRANN,                                          &
+       CIECLE           OF PDCOUT_PRODUCT    opt        &
+  LINK TGRCODGRA        OF WIG314Z1,                    &
+       CIECLE           OF WIG314Z1                     &
+    TO TGRCODGRA,                                       &
+       CIECLE           OF PDTYPE_GRANIT                &
+  LINK TYFCODFIN        OF WIG314Z1,                    &
+       CIECLE           OF WIG314Z1                     &
+    TO TYFCODFIN,                                       &
+       CIECLE           OF PDTYPE_FINI                  &
+  LINK CIECLE           OF WIG314Z1                     &
+    TO CIECLE           OF MCCOMPAGNIE
+
+SORTED ON CIECLE          OF WIG314Z1 &
+       ON TGRCODGRA       OF WIG314Z1 &
+       ON TYFCODFIN       OF WIG314Z1 &
+       ON D-TRAEPA-TRI    OF WIG314Z1
+
+DEFINE D-CPRCUTPOL      FLOAT SIZE 8 = &
+                        ((CPRCUTPOL OF PDCOUT_PRODUCT * 10000) * &
+                          TYFFACPOL OF PDTYPE_FINI )
+
+DEFINE D-CPRCUTBRU      FLOAT SIZE 8 = &
+                        ((CPRCUTBRU OF PDCOUT_PRODUCT * 10000) * &
+                          TYFFACBRU OF PDTYPE_FINI )
+
+DEFINE D-EPA            FLOAT SIZE 8 OUTPUT SCALE 4 = &
+                        ((TRAEPA OF WIG314Z1 + &
+                         CPREPATRTLAM OF PDCOUT_PRODUCT) / 1000)
+
+DEFINE D-COUT-MC2       FLOAT SIZE 8 = &
+                        ROUND((TGRCOUGRA OF PDTYPE_GRANIT * &
+                               D-EPA + &
+                              (CPRCUTSCI OF PDCOUT_PRODUCT * 10000) + &
+                               D-CPRCUTPOL + &
+                               D-CPRCUTBRU) / 100 , 2) * 100
+
+SET SUBFILE NAME WIG314Z2
+
+REPORT SUMMARY                      &
+  D_M_TRAEPA            OF WIG314Z1 &
+  D-TRAEPA              OF WIG314Z1 &
+  D-TRAEPA-TRI          OF WIG314Z1 &
+  CIECLE                OF WIG314Z1 &
+  TRANUMTRA002          OF WIG314Z1 &
+  TGRCODGRA             OF WIG314Z1 &
+  TYFCODFIN             OF WIG314Z1 &
+  TRAEPA                OF WIG314Z1 &
+  TRASURMC2             OF WIG314Z1 &
+  D-NBRE-TRANCHE        OF WIG314Z1 &
+  DD-ANNEE              OF WIG314Z1 &
+  D-COUT-MC2                        &
+  D-CPRCUTPOL                       &
+  D-CPRCUTBRU                       &
+  D-EPA                             &
+  CPRCUTPOL                         &
+  CPRCUTBRU                         &
+  CPRCUTSCI                         &
+  CPREPATRTLAM                      &
+  D-DATDEB OF WIG314Z1              &
+  D-DATFIN OF WIG314Z1              &
+  D-DATSEL
+
+BUILD ig314z3
+
+;================================================================================
+;
+;  CALCUL DE LA VALORISATION DE L'INVENTAIRE DE TRANCHES
+;
+ACCESS *WIG314Z2                                        &
+  LINK TGRCODGRA        OF WIG314Z2,                    &
+       CIECLE           OF WIG314Z2                     &
+    TO TGRCODGRA,                                       &
+       CIECLE           OF PDTYPE_GRANIT                &
+  LINK TYFCODFIN        OF WIG314Z2,                    &
+       CIECLE           OF WIG314Z2                     &
+    TO TYFCODFIN,                                       &
+       CIECLE           OF PDTYPE_FINI                  &
+  LINK CIECLE           OF WIG314Z2                     &
+    TO CIECLE           OF MCCOMPAGNIE
+
+;-------------------------------------------------------------------------------
+; Variables obligatoires pour les en-têtes standards.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = PARM
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = ""
+
+;-------------------------------------------------------------------------------
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE  7 = "IG314"
+
+;-------------------------------------------------------------------------------
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM        CHARACTER SIZE 40 = CENTRE (CIENOM OF MCCOMPAGNIE)
+
+DEFINE D-CIENOM         CHARACTER SIZE 20 = &
+                        TRUNCATE (CIENOM OF MCCOMPAGNIE)
+
+DEFINE D-COUT-TRANCHE   FLOAT SIZE 8 PICTURE " ^,^^^,^^^.^^" FLOAT "$" = &
+                        D-COUT-MC2 * TRASURMC2 OF WIG314Z2
+
+DEFINE D-TYFDSCFRA001   CHARACTER SIZE 6  = &
+                        TYFDSCFRA001 OF PDTYPE_FINI[1:6]
+
+DEFINE D-TGRDSCFRA001   CHARACTER SIZE 10 = &
+                        TGRDSCFRA001 OF PDTYPE_GRANIT[1:10]
+
+;DEFINE D-ERREUR         CHARACTER SIZE 4 = &
+;                        "****" IF NOT RECORD PDCOUT_PRODUCT EXIST
+
+SORTED ON CIECLE       OF WIG314Z2 &
+       ON TGRCODGRA    OF WIG314Z2 &
+       ON TYFCODFIN    OF WIG314Z2 &
+       ON D-TRAEPA-TRI OF WIG314Z2
+
+SET SUBFILE NAME WIG314Z3
+
+REP SUMMARY D-CPRCUTPOL CPRCUTPOL D-CPRCUTBRU CPRCUTBRU TGRCOUGRA &
+                TRAEPA CPREPATRTLAM CPRCUTSCI D-COUT-MC2 D-EPA
+
+
+DEFINE D-TITRE-CENTRE CHARACTER SIZE 80 = &
+        CENTRE ("SOMMAIRE DE L'INVENTAIRE DE TRANCHES PAR INTERVALE                              ")
+
+DEFINE D-TITRE-CENTRE-PROV CHARACTER SIZE 80 = &
+        "VALORISATION      DU : " + ASCII(D-DATDEB) + " AU : " + ASCII(D-DATFIN)
+
+DEFINE D-TITRE-CENTRE1 CHARACTER SIZE 80 = &
+        CENTRE (D-TITRE-CENTRE-PROV)
+
+USE ustitstd52 NOLIST
+
+
+SKIP 3 &
+  TAB 025 D-TITRE-CENTRE &
+SKIP 1 &
+  TAB 025 D-TITRE-CENTRE1 &
+SKIP 3 &
+  TAB 003 "TYPE        TYPE                    SURFACE            VALEUR           VALEUR   NOMBRE" &
+SKIP 1 &
+  TAB 003 "GRANIT      FINI    ÉPAISSEUR     MÈTRE CARRÉ        UTILISÉE           TOTALE  TRANCHE  ERREUR" &
+SKIP 1 &
+  TAB 003 "------      ----    ---------     -----------        --------          -------  -------  ------" &
+SKIP 2
+
+FOOTING AT D-TRAEPA-TRI                                                 &
+  TAB 003 D-TGRDSCFRA001 PRINT AT TGRCODGRA                             &
+  TAB 015 D-TYFDSCFRA001                                                &
+  TAB 023 D-TRAEPA PICTURE "^^^^"                                       &
+  TAB 034 TRASURMC2 OF WIG314Z2 SUB RESET AT D-TRAEPA-TRI PICTURE "^,^^^,^^^.^^^^"                &
+  TAB 050 D-COUT-MC2 OF WIG314Z2 AVERAGE RESET AT D-TRAEPA-TRI PICTURE "^^^,^^^,^^^.^^ "              &
+  TAB 066 D-COUT-TRANCHE SUB RESET AT D-TRAEPA-TRI PICTURE "^^^,^^^,^^^.^^ " &
+  TAB 083 D-NBRE-TRANCHE OF WIG314Z2 SUB RESET AT D-TRAEPA-TRI
+
+FOOTING AT TGRCODGRA                                                    &
+  SKIP 2                                                                &
+  TAB 003 "                                  ===========                          =======  =======        " &
+  SKIP 2                                                                &
+  TAB 05 "TOTAL:"                                                       &
+  TAB 34 TRASURMC2       SUBTOTAL RESET AT TGRCODGRA PICTURE "^,^^^,^^^.^^^^"    &
+  TAB 66 D-COUT-TRANCHE  SUBTOTAL RESET AT TGRCODGRA PICTURE "^^^,^^^,^^^.^^ "  &
+  TAB 83 D-NBRE-TRANCHE  SUBTOTAL RESET AT TGRCODGRA                    &
+  SKIP 2                                                                &
+  TAB 1 "---------------------------------------------------"           &
+  TAB 40 "--------------------------------------------------"           &
+  TAB 80 "--------------"                                               &
+SKIP 2
+
+
+FOOTING AT CIECLE                                                       &
+SKIP 2                                                                  &
+  TAB 05 "GRAND TOTAL"   D-CIENOM                                       &
+  TAB 34 TRASURMC2       SUBTOTAL  PICTURE"^,^^^,^^^.^^^^"              &
+  TAB 66 D-COUT-TRANCHE  SUBTOTAL  PICTURE "^^^,^^^,^^^.^^ "            &
+  TAB 83 D-NBRE-TRANCHE  SUBTOTAL                                       &
+  SKIP PAGE
+
+
+
+BUILD ig314z2

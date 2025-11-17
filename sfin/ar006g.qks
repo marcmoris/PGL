@@ -1,0 +1,312 @@
+;/T/ Réquisition d'achat - note
+;
+;/P/ Programmeur..: Guy Chabot
+;    Date Création:
+;
+;    Description..: Permet la saisie de note descriptive pour le détail
+;                   de chacune des lignes de détail.   Il est possible
+;                   d'imprimer les notes ou non sur le détail.
+;
+;/V/ Écran vérifier pour le passage à l'an 2000
+;
+;/M/ Programmeur.......: Patrick Langlois
+;    Date modification.: 09 Juin 1999
+;    Description.......: Migration Achat/Réception/Inventaire de l'environnement (BOC) 
+;
+
+SCREEN ar006g ACTIONBAR &
+              MODE LABEL "" AT 2,80  &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              FROM 11,01 TO 23,80 &
+              MESSAGE ON 24 &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU  , &
+                        T_CIENOM     , &
+                        T_PECCLEMNU  , &
+                        MCREF_ADRESSE, &
+                        ARREQUISITION
+
+USE ar006g.hlp NOLIST
+
+USE ussectmp NOLIST     ; Variable pour la sécurité
+"AR006G"                ; Nom de l'écran
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-écrans
+
+USE ustrasse NOLIST
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Notes générales             " ACTION DESIGNER D001
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%es générales             " ACTION DESIGNER D001
+@ENDIF
+
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_RAD_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE MCRAD_SEQ IN DICT
+
+;-------------------------------------------------------------------------------
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 04 ; Numéro de la compagnie
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie
+TEMPORARY T_PECCLEMNU CHARACTER SIZE 04 ; Période courante ou subséquente.
+
+DEFINE    DZ_CIECLE   CHARACTER SIZE 04 = T_CIECLEMNU
+DEFINE    DZ_CIENOM   CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+;
+; Table maitre passer en parametre.
+;
+FILE MCREF_ADRESSE       MASTER
+FILE ARREQUISITION       MASTER
+
+;-------------------------------------------------------------------------------
+;
+; Table primaire.
+;
+FILE ARREQ_NOTE          PRIMARY &
+                        OCCURS 5 &
+                        NOITEM
+  ACCESS VIA    CIECLE   , &
+                REQCLE   , &
+                REQCLENUM  &
+         USING  CIECLE    OF ARREQUISITION, &
+                REQCLE    OF ARREQUISITION, &
+                REQCLENUM OF ARREQUISITION  &
+        ORDERBY CIECLE   , &
+                REQCLE   , &
+                REQCLENUM   , &
+                RQNSEQ
+
+
+  ITEM CIECLE    OF ARREQ_NOTE INITIAL CIECLE    OF ARREQUISITION
+  ITEM REQCLE    OF ARREQ_NOTE INITIAL REQCLE    OF ARREQUISITION
+  ITEM REQCLENUM    OF ARREQ_NOTE INITIAL REQCLENUM    OF ARREQUISITION
+
+;-------------------------------------------------------------------------------
+;
+; Fichier permettant de prendre par défaut le terme d'escompte sur achat
+; du fournisseur.
+;
+FILE VFOC_FOU  REFERENCE
+  ACCESS VIA   FOUCIECLE, &
+               FOUCLE,    &
+               FOCCIECLE  &
+         USING FOUCIECLE OF ARREQUISITION, &
+               FOUCLE    OF ARREQUISITION, &
+               CIECLE    OF ARREQUISITION
+
+;-------------------------------------------------------------------------------
+;
+; Numéro de séquence des adresses pour les clients divers.
+;
+FILE MCRAD_SEQ         DESIGNER  TRANSACTION GEN_RAD_SEQ
+
+USE ushilite NOLIST     ; Hilite pour tous les écrans
+
+DRAW FROM  2, 1 TO  2,79
+DRAW FROM  2, 1 TO  12,1
+DRAW FROM  3,80 TO  12,80
+DRAW FROM  12,1  TO  12,80
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+      " Notes descriptives " &
+@ELSE
+      " %%%es descriptives " &
+@ENDIF
+      CENTERED AT 2,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP
+
+ALIGN(,3,17) (,43,50)
+
+FIELD PRDCLE OF ARREQUISITION &
+        DISPLAY PREDISPLAY   &
+@IF FRANCAIS
+        LABEL "Produit.....:"
+@ELSE
+        LABEL "%%%duit.....:"
+@ENDIF
+FIELD REQCLENUM OF ARREQUISITION &
+        DISPLAY PREDISPLAY   &
+@IF FRANCAIS
+        LABEL "Item.:"
+@ELSE
+        LABEL "%%%duit.....:"
+@ENDIF
+FIELD REQDSC OF ARREQUISITION &
+        DISPLAY PREDISPLAY   &
+@IF FRANCAIS
+        LABEL "Descirption.:"
+@ELSE
+        LABEL "%%%duit.....:"
+@ENDIF
+
+SKIP 1
+TITLE " Séq. Description                             Impression" &
+AT ,02
+
+ALIGN(2,2,3) (,,8) (,,51)
+
+CLUSTER OCCURS WITH ARREQ_NOTE ID BASE 10
+
+FIELD RQNSEQ OF ARREQ_NOTE &
+        HIDDEN    &
+        LABEL " " &
+        REQUIRED
+FIELD RQNDSC OF ARREQ_NOTE
+FIELD RQNIMP OF ARREQ_NOTE SIZE 3
+
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+; Pour la transformation du flag d'impression en 1 et 0
+;
+PROCEDURE INPUT RQNIMP
+BEGIN
+  USE usflginp NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Pour afficher le falg sous la forme Oui ou Non
+;
+PROCEDURE OUTPUT RQNIMP
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du sous-écran des notes générales.
+;
+PROCEDURE DESIGNER D001 NODATA
+BEGIN
+  IF REQSTUAPP OF ARREQUISITION = "A" OR &
+     REQSTUAPP OF ARREQUISITION = "X" OR &
+     REQSTUAPP OF ARREQUISITION = "C" OR &
+     REQSTUAPP OF ARREQUISITION = "R"
+  THEN ERROR 1505
+
+  IF ALTEREDRECORD OF ARREQ_NOTE
+  THEN ERROR 1390
+
+  RUN SCREEN ar006i PASSING ARREQ_NOTE MODE F
+  PUSH FIND
+END
+
+
+;
+; Procédure servant à modifier la première ligne d'une occurence
+; en Powerhouse Client.
+;
+PROCEDURE DESIGNER PH01
+BEGIN
+  ACCEPT RQNSEQ OF ARREQ_NOTE
+  ACCEPT RQNDSC OF ARREQ_NOTE
+  ACCEPT RQNIMP OF ARREQ_NOTE
+END
+
+
+
+;
+; Procédure servant à détruire la première ligne d'une occurence
+; en Powerhouse Client.
+;
+PROCEDURE DESIGNER PH02
+BEGIN
+  DELETE ARREQ_NOTE
+END
+;-------------------------------------------------------------------------------
+;
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  FOR ARREQ_NOTE
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF ARREQ_NOTE &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF ARREQ_NOTE &
+       AND NOT NEWRECORD     OF ARREQ_NOTE &
+       AND NOT DELETEDRECORD OF ARREQ_NOTE &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+
+    IF (REQSTUAPP OF ARREQUISITION = "A"   OR &
+        REQSTUAPP OF ARREQUISITION = "X"   OR &
+        REQSTUAPP OF ARREQUISITION = "C"   OR &
+        REQSTUAPP OF ARREQUISITION = "R") AND &
+       (ALTEREDRECORD OF ARREQ_NOTE       OR &
+        NEWRECORD     OF ARREQ_NOTE       OR &
+        DELETEDRECORD OF ARREQ_NOTE)
+    THEN ERROR 1505
+
+    ;
+    ; Mise à jour du timbre de modification si l'usager change la réquisition.
+    ;
+    IF    NOT NEWRECORD OF ARREQUISITION  &
+      AND ALTEREDRECORD OF ARREQ_NOTE
+    THEN BEGIN
+      LET REQDATMOD OF ARREQUISITION  = SYSDATE
+      LET REQHREMOD OF ARREQUISITION  = SYSTIME / 10000
+      LET REQUSRMOD OF ARREQUISITION  = TZ_LOGONID
+    END
+  END
+  ;
+  ; On incrémente le numéro d'adresse pour les clients divers.
+  ;
+  IF     FOUTYP OF VFOC_FOU = "D" &
+     AND RADCLE OF ARREQUISITION = 0
+  THEN BEGIN
+
+    START TRANSACTION GEN_RAD_SEQ
+    GET MCRAD_SEQ VIA REFCIECLE, &
+                      REFCLETYP, &
+                      REFCLENUM  &
+                  USING FOUCIECLE OF ARREQUISITION, &
+                        REFCLETYP OF ARREQUISITION, &
+                        FOUCLE    OF ARREQUISITION  &
+                  OPTIONAL
+    LET REFCIECLE OF MCRAD_SEQ = FOUCIECLE OF ARREQUISITION
+    LET REFCLETYP OF MCRAD_SEQ = REFCLETYP OF ARREQUISITION
+    LET REFCLENUM OF MCRAD_SEQ = FOUCLE    OF ARREQUISITION
+    LET RASNUMSEQ OF MCRAD_SEQ = RASNUMSEQ OF MCRAD_SEQ + 1
+    LET RADCLE    OF ARREQUISITION = RASNUMSEQ OF MCRAD_SEQ
+    PUT MCRAD_SEQ
+    COMMIT TRANSACTION GEN_RAD_SEQ
+  END
+END
+
+BUILD
+@IF FORMAT
+                                    ******************* Notes descriptives ********************
+                                    * Produit.....: xxxxxxxxxxxx              Item.: xxxxxxx  *
+                                    * Descirption.: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  *
+                                    *                                                         *
+                                    * Séq. Description                             Impression *
+                                    * xx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxx     *
+                                    * xx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxx     *
+                                    * xx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxx     *
+                                    * xx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxx     *
+                                    * xx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxx     *
+                                    ***********************************************************
+@ENDIF

@@ -1,0 +1,315 @@
+;/T/ Facturation
+;
+;/P/ Programmeur..: Steeve Duguay
+;    Date Création: 30 mars 1995
+;
+;    Description..: Grille de tarification
+;
+;/M/François Déry, 12 mai 1999
+;       Ajout du in dict sur la transaction pour unix.
+;
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN fa003a ACTIONBAR &
+              MODE LABEL "" AT 2,80 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              FOR 14 LINE &
+              ON LINE 9   &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        FATRAJET_PRODUIT
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie du menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; Compagnie du menu
+
+USE ustrasse NOLIST ; Transaction QUERY pour les sous-écrans
+
+USE ussectmp NOLIST     ; Variable pour la securite
+    "FA003A"            ; Nom de l'écran
+
+USE fa003a.hlp NOLIST   ; Use servant à la documentation de l'écran
+
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-ecran
+
+
+TRANSACTION T_GRT_VISUEL COMMIT ON UPDATE &
+                         READ WRITE &
+                         RESERVING FOR SHARE WRITE FAGRILLE_TARIF IN DICT
+
+;-------------------------------
+; Fichier des trajets / produits
+;-------------------------------
+
+FILE FATRAJET_PRODUIT       MASTER
+
+
+;-------------------------------------
+; Fichier de la grille de tarification
+;-------------------------------------
+
+FILE FAGRILLE_TARIF         PRIMARY &
+
+     TRANSACTION T_GRT_VISUEL FOR PROCESS, QUERY, UPDATE &
+
+                            OCCURS 10
+
+  ACCESS  VIA     CIECLE, &
+                  TRPCLE, &
+                  ETACLE  &
+          USING   T_CIECLEMNU,                &
+                  TRPCLE OF FATRAJET_PRODUIT, &
+                  ETACLE OF FAGRILLE_TARIF    &
+          REQUEST ETACLE &
+          ORDERBY ETACLE
+
+  ACCESS  VIA     CIECLE, &
+                  TRPCLE  &
+          USING   T_CIECLEMNU,                &
+                  TRPCLE OF FATRAJET_PRODUIT  &
+          ORDERBY ETACLE
+
+
+
+;--------------------------------------
+; Fichier des éléments de tarifications
+;--------------------------------------
+TEMPORARY T_ETACLE CHARACTER SIZE 4
+
+FILE FAELEMENT_TARIF        REFERENCE
+
+  ACCESS  VIA   CIECLE,    &
+                ETACLE     &
+          USING T_CIECLEMNU           ,  &
+                ETACLE OF FAGRILLE_TARIF
+
+
+;---------------------
+; Validation du statut
+;---------------------
+DEFINE    D_GRTSTU CHARACTER SIZE 16 = "GRTSTU"
+TEMPORARY T_GRTSTU CHARACTER SIZE 4
+
+FILE VCBI_DSC               REFERENCE &
+                            ALIAS MCCODE_BUIL_GRTSTU
+
+  ACCESS  VIA   XELNOM, &
+                CBICLE  &
+          USING D_GRTSTU, &
+                GRTSTU OF FAGRILLE_TARIF
+
+
+;-------------------------------------------------------------------------------
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+SKIP
+USE ushilite NOLIST     ; Hilite pour tout les écrans
+
+DRAW FROM  2, 1 TO  2,79
+DRAW FROM  2, 1 TO  14,1
+DRAW FROM  3,80 TO  14,80
+DRAW FROM  14,1  TO  14,80
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+      " Grille de tarification " &
+@ELSE
+      " %%% " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP
+
+
+TITLE &
+@IF FRANCAIS
+"Élément Description               Prix 1      Prix 2      Prix 3    Statut" &
+@ELSE
+      " %%% " &
+@ENDIF
+      AT ,3
+
+SKIP
+
+ALIGN (5,4,5) (,,11) (,,34) (,,46) (,,58) (,,73)
+
+CLUSTER OCCUR WITH FAGRILLE_TARIF ID BASE 10
+
+FIELD ETACLE OF FAGRILLE_TARIF                        &
+      LABEL " " HIDDEN                                &
+      REQUIRED NOCHANGE                               &
+      LOOKUP ON FAELEMENT_TARIF                       &
+        MESSAGE 2719,                                 &
+          NOTON FAGRILLE_TARIF                        &
+            VIA CIECLE,                               &
+                TRPCLE,                               &
+                ETACLE                                &
+          USING T_CIECLEMNU,                          &
+                TRPCLE OF FATRAJET_PRODUIT,           &
+                ETACLE OF FAGRILLE_TARIF              &
+        MESSAGE 2720 ; Cet élément de tarification existe déja
+                     ; au niveau de cette grille.
+
+FIELD ETADSCFRA OF FAELEMENT_TARIF                    &
+      DISPLAY SIZE 22
+
+FIELD GRTPRI1 OF FAGRILLE_TARIF
+FIELD GRTPRI2 OF FAGRILLE_TARIF
+FIELD GRTPRI3 OF FAGRILLE_TARIF
+
+FIELD GRTSTU  OF FAGRILLE_TARIF    &
+      DEFAULT "A"                  &
+      LOOKUP ON MCCODE_BUIL_GRTSTU &
+        MESSAGE 2721; Ce statut est invalide.
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour le code bilingue statut
+;
+;
+PROCEDURE INPUT GRTSTU
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_GRTSTU = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_GRTSTU, T_GRTSTU &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_GRTSTU)
+  END
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour l'élement de tarification
+;
+;
+PROCEDURE INPUT ETACLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_ETACLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN fa106 MODE F PASSING T_CIECLEMNU, T_ETACLE &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_ETACLE)
+  END
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+PROCEDURE APPEND
+BEGIN
+  ACCEPT ETACLE OF FAGRILLE_TARIF
+  DISPLAY ETADSCFRA OF FAELEMENT_TARIF
+  IF ETAGRA OF FAELEMENT_TARIF = "0"
+  THEN BEGIN
+       ACCEPT GRTPRI1 OF FAGRILLE_TARIF
+       ACCEPT GRTPRI2 OF FAGRILLE_TARIF
+       ACCEPT GRTPRI3 OF FAGRILLE_TARIF
+  END
+  ACCEPT GRTSTU OF FAGRILLE_TARIF
+END
+
+PROCEDURE ENTRY
+BEGIN
+  FOR FAGRILLE_TARIF
+  BEGIN
+    PERFORM APPEND
+  END
+END
+
+
+PROCEDURE DESIGNER 10
+BEGIN
+  ACCEPT ETACLE OF FAGRILLE_TARIF
+  DISPLAY ETADSCFRA OF FAELEMENT_TARIF
+  IF ETAGRA OF FAELEMENT_TARIF = "0"
+  THEN BEGIN
+       ACCEPT GRTPRI1 OF FAGRILLE_TARIF
+       ACCEPT GRTPRI2 OF FAGRILLE_TARIF
+       ACCEPT GRTPRI3 OF FAGRILLE_TARIF
+  END
+  ACCEPT GRTSTU OF FAGRILLE_TARIF
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR FAGRILLE_TARIF
+  BEGIN
+
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF FAGRILLE_TARIF      &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF FAGRILLE_TARIF      &
+     AND NOT NEWRECORD     OF FAGRILLE_TARIF      &
+     AND NOT DELETEDRECORD OF FAGRILLE_TARIF      &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+ END
+END
+
+BUILD
+@IF FORMAT
+**************************** Grille de tarification ***************************x
+*                                                                              *
+* Élément Description               Prix 1      Prix 2      Prix 3    Statut   *
+*   xxxx  xxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx    x      *
+*   xxxx  xxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx    x      *
+*   xxxx  xxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx    x      *
+*   xxxx  xxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx    x      *
+*   xxxx  xxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx    x      *
+*   xxxx  xxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx    x      *
+*   xxxx  xxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx    x      *
+*   xxxx  xxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx    x      *
+*   xxxx  xxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx    x      *
+*   xxxx  xxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx xxxxxxxxxxx    x      *
+********************************************************************************
+@ENDIF
+

@@ -1,0 +1,1431 @@
+;/T/ 2.3.1 Enregistrer la commande interne.
+;
+;/M/698/ Programmeur..: Martin Perron
+;    Date.........: 1999/11/30
+;    Description..: Ajout d'une procédure PROCESS (COMNUMCOMINT) pour mettre
+;                   les variables COMNUMCOM et PJTNUMPRO à jour dans la table
+;                   PDDETAIL_C_I.  
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1995-01-26
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   les commandes internes.
+;
+;    NOTE.........: Les procedure ENTRY sont recodes
+;
+;/M/ Programmeur...: Bernard Samson
+;    Date..........: 1999/10/15 
+;    Description...: Ajout d'un traitement sur la preupdate pour mettre la
+;                    valeur du flag comflgblc a BL lors de la saisie d'une
+;                    nouvelle commande et ajout de ce flag dans le critere de
+;                    recherche, pour n'avoir acces qu'aux commande des blocs.
+;
+;------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin     
+;    Date modification.: 19 mai 2000
+;    Description.......: Ajuster le traitement afin qu'en mode saisie, l'appel du traitement 
+;                        PD210H (Enregistrer la commande interne. / Critère fabrication) s'exécute
+;                        automatiquement. 
+;
+;    Référence.........: Demande de changement 000058.
+;
+;    Signets...........: MP-00-05-19_D58.
+;
+;------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin     
+;    Date modification.: 17 octobre 2001
+;    Description.......: Ajuster le traitement afin qu'un dépisteur soit disponible pour le numéro
+;                        de contact.
+;
+;    Référence.........: Demande directe - Demandeur: Nathalie Desrochers.
+;
+;    Signets...........: MP-01-10-17_DD.
+;
+;------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin     
+;    Date modification.: 19 octobre 2001
+;    Description.......: Ajuster l'interface pour permettre la saisie de l'élément de données
+;                        associé à la date de traitement de la commande.
+;
+;    Référence.........: Demande directe - Demandeur: Nathalie Desrochers.
+;
+;    Signets...........: MP-01-10-19_DD.
+;
+;------------------------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd210  ACTIONBAR                    &
+              MODE LABEL "" AT 2,80        &
+              NOACTION                     &
+              AUTOUPDATE                   &
+              ACTIVITIES CHANGE,FIND,ENTRY &
+              FIELDMARK RETAIN STARTUP     &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU ,      &
+                        T_CIENOM ,         &
+                        T_ECRAPP
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD210"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+USE pd210.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Adresse livraison               " ACTION DESIGNER D001
+  MENUITEM LABEL "Ajout Adresse                   " ACTION DESIGNER D012
+  MENUITEM LABEL "Détail commande                 " ACTION DESIGNER D002
+  MENUITEM LABEL "Prix globaux                    " ACTION DESIGNER D003
+  MENUITEM LABEL "Priorité                        " ACTION DESIGNER D004
+  MENUITEM LABEL "Prix / unité de travail         " ACTION DESIGNER D005
+  MENUITEM LABEL "Crédit                          " ACTION DESIGNER D006
+  MENUITEM LABEL "Critère de fabrication          " ACTION DESIGNER D007
+  MENUITEM LABEL "Livraison/crédit                " ACTION DESIGNER D008
+  MENUITEM LABEL "Révision                        " ACTION DESIGNER D009
+  MENUITEM LABEL "Vérification                    " ACTION DESIGNER D010
+  MENUITEM LABEL "Contact                         " ACTION DESIGNER D011
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%Adresse livraison            " ACTION DESIGNER D001
+  MENUITEM LABEL "%%%Ajout Adresse                " ACTION DESIGNER D012
+  MENUITEM LABEL "%%%Détail commande              " ACTION DESIGNER D002
+  MENUITEM LABEL "%%%Prix globaux                 " ACTION DESIGNER D003
+  MENUITEM LABEL "%%%Priorité                     " ACTION DESIGNER D004
+  MENUITEM LABEL "Prix / unité de travail         " ACTION DESIGNER D005
+  MENUITEM LABEL "%%%Crédit                       " ACTION DESIGNER D006
+  MENUITEM LABEL "%%%Critère de fabrication       " ACTION DESIGNER D007
+  MENUITEM LABEL "%%%Livraison/crédit             " ACTION DESIGNER D008
+  MENUITEM LABEL "%%%Révision                     " ACTION DESIGNER D009
+  MENUITEM LABEL "%%%Vérification                 " ACTION DESIGNER D010
+  MENUITEM LABEL "Contact                         " ACTION DESIGNER D011
+@ENDIF
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+TEMPORARY T_ECRAPP   CHARACTER SIZE 5  RESET AT STARTUP ; ecran apellant
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Sert à valider les codes bilingue et pour les sous-écrans de consultation
+;
+DEFINE    D_COMSTU    CHARACTER SIZE 16 = "COMSTU"
+TEMPORARY T_COMSTU    CHARACTER SIZE 04
+
+DEFINE    D_CLILNG CHARACTER SIZE 16 = "CLILNG"
+TEMPORARY T_CLILNG CHARACTER SIZE  4
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable temporaire du programme pour les pop-up
+;
+
+TEMPORARY T_CLICIECLE    CHARACTER SIZE 04 ; Popup sur les adresses du client
+TEMPORARY T_CLICLE       CHARACTER SIZE 06 ; Popup sur les adresses du client
+TEMPORARY T_REFCLETYP    CHARACTER SIZE 01 ; Popup sur les adresses du client
+TEMPORARY T_RADCLE       INTEGER UNSIGNED &
+                                   SIZE 02 ; Popup sur les adresses du client
+TEMPORARY T_TYPADR       CHARACTER SIZE 03 ; Popup sur les adresses du client
+TEMPORARY T_CCTCLE       INTEGER UNSIGNED &
+                                   SIZE 02 ; Popup sur les contacts
+TEMPORARY T_PJTABR       CHARACTER SIZE 02 ; Popup sur les commandes internes
+TEMPORARY T_PJTANN       CHARACTER SIZE 02 ; Popup sur les commandes internes
+TEMPORARY T_COMNUMCOMINT CHARACTER SIZE 03 ; Popup sur les commandes internes
+TEMPORARY T_COMNUMCOM    CHARACTER SIZE 07 ; Popup sur les commandes internes
+
+TEMPORARY T_DEVCLE       CHARACTER SIZE 03 ; Popup sur les devises
+
+;-------------------------------------------------------------------------------
+;
+; Commande interne
+;
+
+FILE PDCOMMAN_INTERNE PRIMARY &
+                      NOITEM &
+                      NODELETE
+
+  ACCESS VIA      CIECLE,         &
+                  PJTABR,         &
+                  COMNUMCOMINT    &
+         USING    T_CIECLEMNU,                         &
+                  PJTABR          OF PDCOMMAN_INTERNE, &
+                  COMNUMCOMINT    OF PDCOMMAN_INTERNE  &
+         REQUEST  PJTABR          OF PDCOMMAN_INTERNE, &
+                  COMNUMCOMINT    OF PDCOMMAN_INTERNE  &
+         ORDERBY  CIECLE,         &
+                  PJTANN,         &
+                  PJTABR,         &
+                  COMNUMCOMINT
+
+  ACCESS VIA      CIECLE,         &
+                  PJTABR          &
+         USING    T_CIECLEMNU,                         &
+                  PJTABR          OF PDCOMMAN_INTERNE  &
+         REQUEST  PJTABR          OF PDCOMMAN_INTERNE  &
+         ORDERBY  CIECLE,         &
+                  PJTANN,         &
+                  PJTABR,         &
+                  COMNUMCOMINT
+
+  ACCESS VIA      CIECLE          &
+         USING    T_CIECLEMNU     &
+         ORDERBY  CIECLE,         &
+                  PJTANN,         &
+                  PJTABR,         &
+                  COMNUMCOMINT
+
+  SELECT IF T_ECRAPP = "ifm01" &
+            AND COMFLGBLC OF PDCOMMAN_INTERNE = "BL" &
+         OR T_ECRAPP <> "ifm01" &
+            AND COMFLGBLC OF PDCOMMAN_INTERNE <> "BL" 
+
+  ITEM CLICIECLE    OF PDCOMMAN_INTERNE INITIAL "----"
+  ITEM CIECLE       OF PDCOMMAN_INTERNE INITIAL T_CIECLEMNU
+  ITEM COMSTU       OF PDCOMMAN_INTERNE INITIAL "C"
+
+  ITEM COMDATCRE    OF PDCOMMAN_INTERNE INITIAL SYSDATE
+  ITEM COMHRECRE    OF PDCOMMAN_INTERNE INITIAL SYSTIME / 10000
+  ITEM COMUSRCRE    OF PDCOMMAN_INTERNE INITIAL LOGONID
+
+;-------------------------------------------------------------------------------
+;
+; Priorité
+;
+
+FILE PDPRIORITE SECONDARY &
+                NOITEM
+
+  ACCESS VIA     CIECLE,          &
+                 PJTABR,          &
+                 PJTANN,          &
+                 COMNUMCOMINT,    &
+                 PRICODPRI        &
+         USING   T_CIECLEMNU,                          &
+                 PJTABR           OF PDCOMMAN_INTERNE, &
+                 PJTANN           OF PDCOMMAN_INTERNE, &
+                 COMNUMCOMINT     OF PDCOMMAN_INTERNE, &
+                 "99"
+
+  ITEM CIECLE           OF PDPRIORITE INITIAL T_CIECLEMNU
+  ITEM PRICODPRI        OF PDPRIORITE INITIAL "99"
+  ITEM PRIBCMTRF        OF PDPRIORITE INITIAL "0"
+  ITEM PRIBCMSCI        OF PDPRIORITE INITIAL "0"
+  ITEM PRIDSC           OF PDPRIORITE INITIAL "Priorité par défaut"
+  ITEM PRICPL           OF PDPRIORITE INITIAL "0"
+  ITEM PJTABR           OF PDPRIORITE FINAL   PJTABR          OF PDCOMMAN_INTERNE
+  ITEM PJTANN           OF PDPRIORITE FINAL   PJTANN          OF PDCOMMAN_INTERNE
+  ITEM PJTNUMSEQ        OF PDPRIORITE FINAL   PJTNUMSEQ       OF PDCOMMAN_INTERNE
+  ITEM COMNUMCOMINT     OF PDPRIORITE FINAL   COMNUMCOMINT    OF PDCOMMAN_INTERNE
+  ITEM PJTNUMPRO        OF PDPRIORITE FINAL   PJTABR          OF PDCOMMAN_INTERNE + &
+                                              PJTANN          OF PDCOMMAN_INTERNE + &
+                                              PJTNUMSEQ       OF PDCOMMAN_INTERNE
+  ITEM COMNUMCOM        OF PDPRIORITE FINAL   PJTABR          OF PDCOMMAN_INTERNE + &
+                                              PJTANN          OF PDCOMMAN_INTERNE + &
+                                              COMNUMCOMINT    OF PDCOMMAN_INTERNE
+
+
+;-------------------------------------------------------------------------------
+;
+; Commande interne
+;
+
+FILE PDCOMMAN_INTERNE DESIGNER ALIAS COM_VALIDE
+
+;----------------------------------------------------------------------------
+;
+; Client
+;
+
+FILE CRCLIENT DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+; Projet
+;
+
+FILE PDPROJET REFERENCE
+
+  ACCESS VIA      CIECLE,         &
+                  PJTABR          &
+         USING    T_CIECLEMNU,                         &
+                  PJTABR          OF PDCOMMAN_INTERNE  &
+         ORDERBY  CIECLE,  &
+                  PJTANN,  &
+                  PJTABR
+
+;-------------------------------------------------------------------------------
+;
+; Clients
+;
+
+FILE VCLC_CLI REFERENCE
+
+  ACCESS VIA     CLICIECLE, &
+                 CLICLE, &
+                 CIECLE &
+         USING   CLICIECLE OF PDCOMMAN_INTERNE, &
+                 CLICLE    OF PDCOMMAN_INTERNE, &
+                 T_CIECLEMNU
+
+;-------------------------------------------------------------------------------
+;
+; Adresse clients
+;
+
+FILE MCREF_ADRESSE    REFERENCE
+
+  ACCESS VIA   REFCIECLE,                &
+               REFCLETYP,                &
+               REFCLENUM,                &
+               RADCLE                    &
+         USING CLICIECLE        OF PDCOMMAN_INTERNE, &
+               "C",                                  &
+               CLICLE           OF PDCOMMAN_INTERNE, &
+               COMNUMADRFAC     OF PDCOMMAN_INTERNE
+
+;-------------------------------------------------------------------------------
+;
+; Contact
+;
+
+FILE CRCLI_CONTACT    REFERENCE
+
+  ACCESS VIA   CLICIECLE,       &
+               CLICLE,          &
+               CCTCLE           &
+         USING CLICIECLE        OF PDCOMMAN_INTERNE, &
+               CLICLE           OF PDCOMMAN_INTERNE, &
+               CCTCLE           OF PDCOMMAN_INTERNE
+
+
+;-------------------------------------------------------------------------------
+;
+; Code bilingue (Statut)
+;
+
+FILE VCBI_DSC  REFERENCE &
+               ALIAS A_CBI_COMSTU
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_COMSTU,                             &
+               COMSTU           OF PDCOMMAN_INTERNE
+
+
+;-------------------------------------------------------------------------------
+;
+; Code bilingue (Langue)
+;
+
+FILE VCBI_DSC         REFERENCE &
+                      ALIAS A_CBI_CLILNG
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_CLILNG,                             &
+               COMCODLNGCOR     OF PDCOMMAN_INTERNE
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation de la devise.
+;
+
+FILE VDEV_DSC         REFERENCE
+
+  ACCESS VIA   DEVCLE           &
+         USING COMDEV           OF PDCOMMAN_INTERNE
+
+;-----------------------------------------------------------------------------
+;
+; Carte de bloc
+;
+FILE IFBLOC DESIGNER 
+
+;-----------------------------------------------------------------------------
+;
+; Detail de la commande
+;
+FILE PDDETAIL_C_I DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Commande interne " &
+@ELSE
+      " %%%Commande interne " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 4
+
+
+ALIGN (2,3,19) (,21,22) (24,24,25) (31,31,32)
+
+
+FIELD PJTABR           OF PDCOMMAN_INTERNE       &
+        HIDDEN ID 05                             &
+        REQUIRED                                 &
+        NOCHANGE                                 &
+        LABEL "Num. commande.:"                  &
+        LOOKUP ON PDPROJET                       &
+            VIA      CIECLE,                     &
+                     PJTABR                      &
+            USING    T_CIECLEMNU,                &
+                     PJTABR OF PDCOMMAN_INTERNE  &
+            MESSAGE 3074 ; Le code de projet n'existe pas
+
+
+FIELD PJTANN           OF PDCOMMAN_INTERNE &
+        HIDDEN ID SAME                     &
+        DISPLAY                            &
+        NOCHANGE                           &
+        LABEL "-"
+
+FIELD COMNUMCOMINT     OF PDCOMMAN_INTERNE         &
+        HIDDEN ID SAME                             &
+        LABEL "-"                                  &
+        REQUIRED                                   &
+        NOCHANGE                                   &
+        NUMERIC                                    &
+        LOOKUP NOTON PDCOMMAN_INTERNE              &
+          VIA   CIECLE,                            &
+                PJTABR ,                           &
+                PJTANN ,                           &
+                COMNUMCOMINT                       &
+          USING T_CIECLEMNU,                       &
+                PJTABR       OF PDCOMMAN_INTERNE , &
+                PJTANN       OF PDCOMMAN_INTERNE , &
+                COMNUMCOMINT OF PDCOMMAN_INTERNE   &
+          MESSAGE 3082 ; Ce numéro de commande existe déjà
+
+
+FIELD COMNOM           OF PDCOMMAN_INTERNE &
+      HIDDEN ID SAME                       &
+      LABEL " "
+
+ALIGN (,3,19) (,,26)
+
+FIELD PJTABR           OF PDPROJET         &
+      LABEL "Projet........:"              &
+      DISPLAY
+
+FIELD PJTNOM           OF PDPROJET         &
+      DISPLAY
+
+ALIGN (2,3,19) (,,26)
+
+FIELD CLICLE           OF PDCOMMAN_INTERNE &
+      LABEL "Client........:"              &
+      HIDDEN ID 35                         &
+      REQUIRED                             &
+      LOOKUP ON VCLC_CLI                   &
+          MESSAGE 2968 ; Ce numéro de client n'existe pas
+
+FIELD CLINOM           OF VCLC_CLI         &
+      DISPLAY
+
+ALIGN (,3,19) (,,26) (55,55,69) ; MP-01-10-19_DD
+
+FIELD COMSTU           OF PDCOMMAN_INTERNE &
+      LABEL "Statut........:"              &
+      HIDDEN ID 36                         &
+      OMIT ON ENTRY                        &
+      REFRESH
+
+FIELD CBIDSC           OF A_CBI_COMSTU     &
+      DISPLAY                              &
+      REFRESH
+
+;-------------------------------------------
+; MP-01-10-19_DD
+
+FIELD COMDATTRA        OF PDCOMMAN_INTERNE &
+      ID 37                                &
+      NOENTRY                              &
+      FORMAT YYYYMMDD                      &
+      LABEL "Date traitée:"                
+
+;-------------------------------------------
+
+ALIGN (2,3,19) (32,33,49)
+
+FIELD COMDATCMD        OF PDCOMMAN_INTERNE &
+      FORMAT YYYYMMDD                      &
+      PATTERN "####/##/##"                 &
+      LABEL "Date commande.:"              &
+      HIDDEN ID 38                         &
+      DEFAULT SYSDATE
+
+FIELD PRIDATFIN        OF PDPRIORITE       &
+      FORMAT YYYYMMDD                      &
+      PATTERN "####/##/##"                 &
+      HIDDEN ID SAME                       &
+      LABEL "Date fin prévu:"           &
+      REQUIRED
+
+ALIGN (2,3,19)
+
+FIELD COMRPS           OF PDCOMMAN_INTERNE &
+      LABEL "Nom responsab.:"              &
+      HIDDEN ID 39                         &
+      REQUIRED
+
+DRAW 10,2 TO 10,79
+
+SKIP TO LINE 10
+
+TITLE &
+@IF FRANCAIS
+      " Adresse de facturation " &
+@ELSE
+      " %%%Adresse de facturation " &
+@ENDIF
+      CENTERED AT ,1
+
+SKIP TO LINE 12
+
+ALIGN (2,3,19) (23,,24)
+
+FIELD COMNUMADRFAC     OF PDCOMMAN_INTERNE &
+      HIDDEN ID 45                         &
+      SIZE 4                               &
+      LABEL "Adresse.......:"              &
+      LOOKUP ON MCREF_ADRESSE              &
+          MESSAGE 2981 ; Ce numéro d'adresse n'existe pas
+
+FIELD RADADR1          OF MCREF_ADRESSE    &
+      HIDDEN ID 50                         &
+      DISPLAY
+
+ALIGN (,,24)
+
+FIELD RADADR2          OF MCREF_ADRESSE    &
+      DISPLAY
+
+FIELD RADADR3          OF MCREF_ADRESSE    &
+      DISPLAY
+
+FIELD RADADR4          OF MCREF_ADRESSE    &
+      DISPLAY
+
+FIELD RADCP            OF MCREF_ADRESSE    &
+      DISPLAY
+
+ALIGN (,3,19)
+
+FIELD RADTEL           OF MCREF_ADRESSE    &
+      LABEL "Téléphone.....:"        &
+      DISPLAY
+
+FIELD RADFAX           OF MCREF_ADRESSE    &
+      LABEL "Fax...........:"              &
+      DISPLAY
+
+;------------------------------------------
+; MP-01-10-17_DD
+;
+ALIGN (2,3,19) (,,22)
+
+FIELD CCTCLE           OF PDCOMMAN_INTERNE &
+      HIDDEN                               &
+      LABEL "Contact.......:"              
+
+FIELD CCTNOM           OF CRCLI_CONTACT    &
+      DISPLAY
+
+; ------------------------------------------
+
+ALIGN (2,3,19) (,,24)
+
+FIELD COMDEV           OF PDCOMMAN_INTERNE &
+      LABEL "Devise........:"              &
+      HIDDEN ID 85                         &
+      DEFAULT DEVCLE OF VCLC_CLI           &
+      LOOKUP ON VDEV_DSC                   &
+         MESSAGE 3077 ; Cette devise n'existe pas
+
+FIELD DEVDSC    OF VDEV_DSC  &
+      DISPLAY
+
+FIELD COMCODLNGCOR     OF PDCOMMAN_INTERNE &
+      LABEL "Code langue...:"              &
+      HIDDEN ID 90                         &
+      DEFAULT CLILNG OF VCLC_CLI           &
+      LOOKUP ON A_CBI_CLILNG               &
+         MESSAGE 3079 ; Ce code de langue n'existe pas
+
+
+FIELD CBIDSC           OF A_CBI_CLILNG     &
+      DISPLAY
+
+ALIGN (2,3,19)
+
+FIELD COMCMDVAL        OF PDCOMMAN_INTERNE &
+      LABEL "Validé........:"           &
+      HIDDEN ID 95                         &
+      DEFAULT "0"                          &
+      SIZE 3
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur pour le champs.
+;
+PROCEDURE INPUT PJTABR OF PDCOMMAN_INTERNE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+
+    LET T_PJTABR       = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_PJTANN       = " "
+    LET T_COMNUMCOMINT = " "
+    LET T_COMNUMCOM    = " "
+
+    RUN SCREEN pd130 MODE F &
+                     PASSING T_PJTABR, &
+                             T_PJTANN, &
+                             T_COMNUMCOMINT, &
+                             T_COMNUMCOM,    &
+                             T_CIECLEMNU
+
+    LET     PJTANN       OF PDCOMMAN_INTERNE = TRUNCATE( T_PJTANN )
+    LET     COMNUMCOMINT OF PDCOMMAN_INTERNE = TRUNCATE( T_COMNUMCOMINT )
+    LET     COMNUMCOM    OF PDCOMMAN_INTERNE = TRUNCATE( T_COMNUMCOM )
+    ;
+    ; Doit être le dernier champ initialisé sinon on risque de perdre la valeur
+    ;
+    LET     FIELDTEXT                      = TRUNCATE( T_PJTABR )
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Assigne l'annéé du projet par défaut
+;
+PROCEDURE PROCESS PJTABR
+BEGIN
+  LET     PJTANN       OF PDCOMMAN_INTERNE = PJTANN    OF PDPROJET
+  LET     PJTNUMSEQ    OF PDCOMMAN_INTERNE = PJTNUMSEQ OF PDPROJET
+  DISPLAY PJTANN       OF PDCOMMAN_INTERNE
+  DISPLAY COMNUMCOMINT OF PDCOMMAN_INTERNE
+END
+
+;------------------------------------------------------------------------------
+;
+; Complete le numero de projet et le numero de commande
+;
+PROCEDURE PROCESS COMNUMCOMINT
+BEGIN
+  LET COMNUMCOM OF PDCOMMAN_INTERNE = PJTABR OF PDCOMMAN_INTERNE + &
+                                      PJTANN OF PDCOMMAN_INTERNE + &
+                                      COMNUMCOMINT OF PDCOMMAN_INTERNE
+
+  LET PJTNUMPRO OF PDCOMMAN_INTERNE = PJTABR OF PDCOMMAN_INTERNE + &
+                                              PJTANN OF PDCOMMAN_INTERNE + &
+                                              PJTNUMSEQ OF PDCOMMAN_INTERNE
+END
+;-------------------------------------------------------------------------------
+;
+; Appel du pop-up pour numéro de client
+;
+PROCEDURE INPUT CLICLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CLICLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd210n MODE F &
+                      PASSING T_CIECLEMNU ,      &
+                              T_CIENOM ,         &
+                              T_CLICLE
+    LET FIELDTEXT = TRUNCATE(T_CLICLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide le client
+;
+PROCEDURE EDIT CLICLE
+BEGIN
+  ;
+  ; Valide que le client est actif
+  ;
+  IF CLISTU OF VCLC_CLI = "I"
+  THEN BEGIN
+    ERROR 2966 ; Ce client est inactif
+  END
+  ;
+  ; Valide que toutes les commande du projet appartiennent au même client
+  ;
+  WHILE RETRIEVING COM_VALIDE &
+   VIA CIECLE,&
+       PJTABR &
+   USING T_CIECLEMNU,  &
+         PJTABR OF PDCOMMAN_INTERNE
+  BEGIN
+    IF CLICLE OF COM_VALIDE <> FIELDTEXT &
+       AND &
+       PJTPROMUL OF PDPROJET = "0"
+    THEN BEGIN
+      ERROR 3197 ; Code de client invalide
+    END
+  END
+  ;
+  ;
+  ;
+  GET MCREF_ADRESSE OPTIONAL
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour le code bilingue statut de la commande.
+;
+;
+PROCEDURE INPUT COMSTU
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_COMSTU = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_COMSTU, T_COMSTU
+    LET FIELDTEXT = TRUNCATE(T_COMSTU)
+  END
+END
+
+;------------------------------------------------------------------------------
+;
+; Validation du statut de la commande
+;
+PROCEDURE EDIT COMSTU
+BEGIN
+  IF FIELDTEXT <> "C" AND &
+     FIELDTEXT <> "T" AND &
+     FIELDTEXT <> "A" AND &
+     FIELDTEXT <> "X"
+  THEN BEGIN
+    ERROR 2942 ; Ce statut est invalide
+  END
+
+  ; Pour qu'une commande soit cancelle il faut que tous les blocs ne
+  ; soit pas expedies. Si tel est le cas alors tous les blocs sont
+  ; de-assigne
+
+  IF FIELDTEXT = "X" AND T_ECRAPP = "ifm01"
+  THEN BEGIN
+   
+    WHILE RETRIEVING IFBLOC                &
+       VIA   PJTABR,                       &
+             PJTANN,                       &
+             COMNUMCOMINT                  &
+       USING PJTABR OF PDCOMMAN_INTERNE,   &
+             PJTANN OF PDCOMMAN_INTERNE,   &
+             COMNUMCOMINT OF PDCOMMAN_INTERNE
+    BEGIN
+      IF EXNCLE OF IFBLOC <> 0
+      THEN ERROR 3290 ; PD390 Impossible de canceller cette commande
+    END
+
+  END  
+
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du pop-up pour l'adresse du client
+;
+PROCEDURE INPUT COMNUMADRFAC
+BEGIN
+
+  ; Appel du dépisteur
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CLICIECLE = CLICIECLE OF PDCOMMAN_INTERNE
+    LET T_REFCLETYP = CLIREFTYP OF VCLC_CLI
+    LET T_CLICLE    = CLICLE    OF PDCOMMAN_INTERNE
+    LET T_TYPADR    = ""
+    LET T_RADCLE    = 0
+
+    RUN SCREEN mc108 MODE F PASSING T_CLICIECLE, &
+                                    T_REFCLETYP, &
+                                    T_CLICLE   , &
+                                    T_TYPADR   , &
+                                    T_RADCLE
+    IF T_RADCLE <> 0
+    THEN BEGIN
+      LET FIELDTEXT = ASCII(T_RADCLE)
+    END
+    ELSE BEGIN
+       LET FIELDTEXT = ""
+    END
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Validation de l'adresse.
+;
+PROCEDURE EDIT COMNUMADRFAC
+BEGIN
+  ;
+  ; Valide que l'adresse a été saisi
+  ;
+  IF 0 = SIZE(FIELDTEXT) AND 0 = SIZE(ASCII(COMNUMADRFAC OF PDCOMMAN_INTERNE))
+  THEN BEGIN
+    ERROR 2984 ; Le numéro d'adresse doit être saisie
+  END
+  GET MCREF_ADRESSE OPTIONAL
+  IF "1" <> RADFACCR OF MCREF_ADRESSE
+  THEN BEGIN
+    ERROR 3090 ; Cette adresse n'est pas une adresse de facturation
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Traitement pour le champ
+;
+PROCEDURE PROCESS COMNUMADRFAC
+BEGIN
+  DISPLAY RADADR1 OF MCREF_ADRESSE
+  DISPLAY RADADR2 OF MCREF_ADRESSE
+  DISPLAY RADADR3 OF MCREF_ADRESSE
+  DISPLAY RADCP   OF MCREF_ADRESSE
+  DISPLAY RADTEL  OF MCREF_ADRESSE
+  DISPLAY RADFAX  OF MCREF_ADRESSE
+END
+
+;-------------------------------------------------------------------------------
+;
+; Dépisteur pour la devise
+;
+PROCEDURE INPUT COMDEV
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_DEVCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc101 PASSING T_DEVCLE MODE F
+    LET FIELDTEXT = TRUNCATE(T_DEVCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide que la devise a été saisie
+;
+PROCEDURE EDIT COMDEV
+BEGIN
+  IF 0 = SIZE(FIELDTEXT)
+  THEN BEGIN
+    IF 0 <> SIZE(TRUNCATE(DEVCLE OF VCLC_CLI))
+    THEN BEGIN
+      LET FIELDTEXT = DEVCLE OF VCLC_CLI
+    END
+    ELSE BEGIN
+      ERROR 9999 ; La devise doit être saisie
+    END
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide que le code de langue a été saisie
+;
+PROCEDURE EDIT COMCODLNGCOR
+BEGIN
+  IF 0 = SIZE(FIELDTEXT)
+  THEN BEGIN
+    IF 0 <> SIZE(TRUNCATE(CLITYP OF VCLC_CLI))
+    THEN BEGIN
+      LET FIELDTEXT = CLILNG OF VCLC_CLI
+    END
+    ELSE BEGIN
+      ERROR 2990 ; Le code de langue doit être saisie
+    END
+  END
+END
+
+;-------------------------------------------------------------------------------
+; MP-01-10-17_DD
+;
+; Appel du pop-up pour le numéro de contact
+;
+PROCEDURE INPUT CCTCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CLICIECLE = CLICIECLE OF PDCOMMAN_INTERNE
+    LET T_CLICLE    = CLICLE    OF PDCOMMAN_INTERNE
+    LET T_CCTCLE    = CCTCLE    OF PDCOMMAN_INTERNE
+    RUN SCREEN pd210r MODE F               &
+                      PASSING T_CLICIECLE, &
+                              T_CLICLE   , &
+                              T_CCTCLE
+    LET FIELDTEXT = ASCII(T_CCTCLE,2)
+  END
+END
+
+;-------------------------------------------------------------------------------
+; MP-01-10-17_DD
+;
+; Validation de présence unitaire sur le numéro de contact
+;
+PROCEDURE EDIT CCTCLE
+BEGIN
+  IF FIELDVALUE <> 0 
+  THEN BEGIN
+    GET CRCLI_CONTACT VIA CLICIECLE                    , &
+                          CLICLE                       , &
+                          CCTCLE                         &
+                    USING CLICIECLE OF PDCOMMAN_INTERNE, &
+                          CLICLE    OF PDCOMMAN_INTERNE, &
+                          FIELDVALUE   OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 728 ; Ce numéro de contact n'existe pas.
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Traitement pour les indicateurs dont la valeur est Oui ou Non.
+; Le procédure INPUT transpose les valeurs sous un code universel soit 1 et 0.
+;
+
+PROCEDURE INPUT COMCMDVAL
+BEGIN
+  USE usflginp NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; La procédure OUTPUT affiche les valeurs sous la forme Oui/Non.
+;
+PROCEDURE OUTPUT COMCMDVAL
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Procédure de saisie
+;
+PROCEDURE ENTRY
+BEGIN
+
+  ;
+  ;Mettre la valeur du flagcomflg = "BL" si la commande est faite a partir de la
+  ;gestion des bloc
+  ;
+  IF T_ECRAPP = "ifm01"
+  THEN LET COMFLGBLC OF PDCOMMAN_INTERNE = "BL"
+  
+  ACCEPT   PJTABR           OF PDCOMMAN_INTERNE
+  ACCEPT   COMNUMCOMINT     OF PDCOMMAN_INTERNE
+  ACCEPT   COMNOM           OF PDCOMMAN_INTERNE
+  DISPLAY  PJTABR           OF PDPROJET
+  DISPLAY  PJTNOM           OF PDPROJET
+  ACCEPT   CLICLE           OF PDCOMMAN_INTERNE
+  DISPLAY  CLINOM           OF VCLC_CLI
+  DISPLAY  COMSTU           OF PDCOMMAN_INTERNE
+  DISPLAY  CBIDSC           OF A_CBI_COMSTU
+  ACCEPT   COMDATCMD        OF PDCOMMAN_INTERNE
+  ACCEPT   PRIDATFIN        OF PDPRIORITE
+  ACCEPT   COMRPS           OF PDCOMMAN_INTERNE
+  ;
+  ; Appel du sous-écran pour les adresses
+  ;
+  RUN SCREEN pd210l &
+               MODE F &
+               PASSING VCLC_CLI, &
+                       T_RADCLE, &
+                       T_CIECLEMNU
+
+  IF T_RADCLE <> 0
+  THEN BEGIN
+    LET COMNUMADRFAC        OF PDCOMMAN_INTERNE = T_RADCLE
+  END
+  ELSE BEGIN
+    LET COMNUMADRFAC        OF PDCOMMAN_INTERNE = 1
+  END
+  EDIT     COMNUMADRFAC     OF PDCOMMAN_INTERNE
+  DISPLAY  COMNUMADRFAC     OF PDCOMMAN_INTERNE
+  DISPLAY  RADADR1          OF MCREF_ADRESSE
+  DISPLAY  RADADR2          OF MCREF_ADRESSE
+  DISPLAY  RADADR3          OF MCREF_ADRESSE
+  DISPLAY  RADADR4          OF MCREF_ADRESSE
+  DISPLAY  RADCP            OF MCREF_ADRESSE
+  DISPLAY  RADTEL           OF MCREF_ADRESSE
+  DISPLAY  RADFAX           OF MCREF_ADRESSE
+
+  ;-----------------------------------------------------------------------------
+  ;
+  ; Appel sous-écran pour les contacts
+  ;
+  RUN SCREEN pd210m &
+               MODE F &
+               PASSING VCLC_CLI, &
+                       T_CIECLEMNU
+
+  ACCEPT  CCTCLE       OF PDCOMMAN_INTERNE
+  DISPLAY CCTNOM       OF CRCLI_CONTACT
+
+  ACCEPT  COMDEV       OF PDCOMMAN_INTERNE
+  DISPLAY DEVDSC       OF VDEV_DSC
+
+  ACCEPT  COMCODLNGCOR OF PDCOMMAN_INTERNE
+  DISPLAY CBIDSC       OF A_CBI_CLILNG
+
+  ACCEPT  COMCMDVAL    OF PDCOMMAN_INTERNE
+
+
+  ;-----------------------------------------------------------------------------
+  ;
+  ; Adresse de livraison
+  ;
+
+  RUN SCREEN pd210a &
+      MODE SAME                 &
+      PASSING T_CIECLEMNU,      &
+              T_CIENOM,         &
+              PDCOMMAN_INTERNE, &
+             VCLC_CLI
+
+
+  ;-----------------------------------------------------------------------------
+  ;
+  ; Détail commande de la production
+  ;
+
+
+  IF T_ECRAPP <> "ifm01"
+  THEN RUN SCREEN pd210c &
+         MODE SAME                 &
+         PASSING T_CIECLEMNU,      &
+                 T_CIENOM,         &
+                 PDCOMMAN_INTERNE
+
+  ;-----------------------------------------------------------------------------
+  ;
+  ; D\351tail commande de la gestion de bloc
+  ;
+
+  IF T_ECRAPP = "ifm01" 
+  THEN RUN SCREEN pd210ca &
+         MODE SAME                 &
+         PASSING T_CIECLEMNU,      &
+                 T_CIENOM,         &
+                 T_ECRAPP,         &
+                 PDCOMMAN_INTERNE 
+
+  ;-----------------------------------------------------------------------------
+  ;
+  ; Prix globaux
+  ;
+  IF T_ECRAPP <> "ifm01"
+  THEN BEGIN
+    RUN SCREEN pd210d &
+        MODE SAME                 &
+        PASSING T_CIECLEMNU,      &
+                T_CIENOM,         &
+                PDCOMMAN_INTERNE
+  END  
+  ;-------------------------------------------------------------------------------
+  ; MP-00-05-19_D58.
+  ;
+  ; Critère de fabrication
+  ;
+  IF T_ECRAPP <> "ifm01"
+  THEN BEGIN
+    RUN SCREEN  pd210h            &
+      MODE SAME                   &
+      PASSING T_CIECLEMNU,        &
+              T_CIENOM,           &
+              PDCOMMAN_INTERNE    
+  END
+  ;-----------------------------------------------------------------------------
+  ;
+  ; Livraison/crédit
+  ;
+
+  IF T_ECRAPP <> "ifm01"
+  THEN RUN SCREEN pd210i &
+      MODE SAME                 &
+      PASSING T_CIECLEMNU,      &
+              T_CIENOM,         &
+              PDCOMMAN_INTERNE
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Mise à jour du timbre de validation
+;
+PROCEDURE DESIGNER 95
+BEGIN
+  ACCEPT COMCMDVAL    OF PDCOMMAN_INTERNE
+ 
+  LET    COMCMDDATVAL OF PDCOMMAN_INTERNE = SYSDATE
+  LET    COMCMDHREVAL OF PDCOMMAN_INTERNE = SYSTIME / 10000
+  LET    COMCMDUSRVAL OF PDCOMMAN_INTERNE = LOGONID
+END
+
+;-------------------------------------------------------------------------------
+;
+; Adresse de livraison
+;
+PROCEDURE DESIGNER D001
+BEGIN
+RUN SCREEN  pd210a &
+      PASSING T_CIECLEMNU,        &
+              T_CIENOM,           &
+              PDCOMMAN_INTERNE,   &
+              VCLC_CLI            &
+      MODE SAME
+END
+
+;-------------------------------------------------------------------------------
+;
+; Détail commande
+;
+PROCEDURE DESIGNER D002
+BEGIN
+
+; Ecran de ligne de commande pour le module production
+IF T_ECRAPP <> "ifm01"
+THEN RUN SCREEN pd210c &
+ MODE SAME                 &
+ PASSING T_CIECLEMNU,      &
+         T_CIENOM,         &
+         PDCOMMAN_INTERNE
+
+; Ecran de ligne de commande pour le module gestion de bloc
+IF T_ECRAPP = "ifm01"
+THEN RUN SCREEN pd210ca &
+ MODE SAME                 &
+ PASSING T_CIECLEMNU,      &
+         T_CIENOM,         &
+         T_ECRAPP,         &
+         PDCOMMAN_INTERNE 
+END
+
+;-------------------------------------------------------------------------------
+;
+; Prix globaux
+;
+PROCEDURE DESIGNER D003
+BEGIN
+IF T_ECRAPP <> "ifm01" 
+THEN BEGIN 
+RUN SCREEN  pd210d &
+      PASSING T_CIECLEMNU,        &
+              T_CIENOM,           &
+              PDCOMMAN_INTERNE    &
+      MODE SAME
+END
+ELSE BEGIN
+ERROR 3266 ; Vous ne pouvez pas ouvrir cet ecran a partir d'ici 
+END 
+END
+
+;-------------------------------------------------------------------------------
+;
+; Priorité
+;
+PROCEDURE DESIGNER D004
+BEGIN
+IF T_ECRAPP <> "ifm01"
+THEN BEGIN 
+RUN SCREEN  pd210o &
+      PASSING T_CIECLEMNU,        &
+              T_CIENOM,           &
+              PDCOMMAN_INTERNE    &
+      MODE SAME
+END
+ELSE BEGIN
+ERROR 3266 ;Vous ne povez pas entrer dans cet ecran a partir d'ici 
+END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Prix / unité de travail
+;
+PROCEDURE DESIGNER D005
+BEGIN
+IF T_ECRAPP <> "ifm01"
+THEN BEGIN 
+RUN SCREEN  pd210e &
+      PASSING T_CIECLEMNU,        &
+              T_CIENOM,           &
+              PDCOMMAN_INTERNE    &
+      MODE SAME
+END
+ELSE BEGIN
+ERROR 3266 ; Vous ne pouvez pas entrer dans cet écran à partir d'ici
+END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Crédit
+;
+PROCEDURE DESIGNER D006
+BEGIN
+RUN SCREEN  pd210g &
+      PASSING T_CIECLEMNU,        &
+              T_CIENOM,           &
+              PDCOMMAN_INTERNE    &
+      MODE SAME
+END
+
+;-------------------------------------------------------------------------------
+;
+; Critère de fabrication
+;
+PROCEDURE DESIGNER D007
+BEGIN
+
+  IF T_ECRAPP <> "ifm01"
+  THEN RUN SCREEN  pd210h &
+      PASSING T_CIECLEMNU,        &
+              T_CIENOM,           &
+              PDCOMMAN_INTERNE    &
+      MODE SAME
+  ELSE ERROR 3266 ; Vous ne pouvez pas entrer dans cet ecran a partir d'ici
+END
+
+;-------------------------------------------------------------------------------
+;
+; Livraison/crédit
+;
+PROCEDURE DESIGNER D008
+BEGIN
+
+  RUN SCREEN  pd210i &
+              PASSING T_CIECLEMNU,        &
+                      T_CIENOM,           &
+                      PDCOMMAN_INTERNE    &
+              MODE SAME
+END
+
+;-------------------------------------------------------------------------------
+;
+; Révision
+;
+PROCEDURE DESIGNER D009
+BEGIN
+  RUN SCREEN  pd210j &
+              PASSING T_CIECLEMNU,        &
+                      T_CIENOM,           &
+                      PDCOMMAN_INTERNE    &
+              MODE SAME
+END
+
+;-------------------------------------------------------------------------------
+;
+; Vérification
+;
+PROCEDURE DESIGNER D010
+BEGIN
+  RUN SCREEN  pd210k &
+              PASSING T_CIECLEMNU,        &
+                      T_CIENOM,           &
+                      PDCOMMAN_INTERNE    &
+              MODE SAME
+END
+
+;------------------------------------------------------------------------------
+;
+; Appel sous-écran pour les contacts
+;
+PROCEDURE DESIGNER D011
+BEGIN
+  RUN SCREEN pd210m &
+               MODE F &
+               PASSING VCLC_CLI, &
+                       T_CIECLEMNU
+END
+
+;------------------------------------------------------------------------------
+;
+; Sous-\351cran   Adresses suppl\351mentaires
+;
+PROCEDURE DESIGNER D012
+BEGIN
+
+   GET CRCLIENT OPT     &
+      VIA    CLICIECLE, &
+             CLICLE     &
+      USING  "----",    &
+             CLICLE OF PDCOMMAN_INTERNE
+  
+   IF ACCESSOK
+   THEN BEGIN
+      RUN SCREEN cr001d PASSING CRCLIENT &
+         MODE SAME
+   END
+END
+
+;
+; Valide les traitements permis par écran et par usager.
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDCOMMAN_INTERNE &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDCOMMAN_INTERNE &
+     AND NOT NEWRECORD     OF PDCOMMAN_INTERNE &
+     AND NOT DELETEDRECORD OF PDCOMMAN_INTERNE &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  IF NOT NEWRECORD OF PDCOMMAN_INTERNE &
+     AND &
+     ALTEREDRECORD OF PDCOMMAN_INTERNE
+  THEN BEGIN
+    LET COMDATDERMAJ     OF PDCOMMAN_INTERNE = SYSDATE
+    LET COMHREDERMAJ     OF PDCOMMAN_INTERNE = SYSTIME / 10000
+    LET COMUSRDERMAJ     OF PDCOMMAN_INTERNE = LOGONID
+  END
+
+  ; Si la commande est cancelle alors les blocs si rattachant
+  ; seront de-assignes et en plus les lignes de detail 
+  ; se rattachant a la commande seront supprimes
+  IF COMSTU OF PDCOMMAN_INTERNE = "X" AND T_ECRAPP = "ifm01"
+  THEN BEGIN
+
+    ; De-assignation des blocs
+    WHILE RETRIEVING IFBLOC                  &
+     VIA   PJTABR,                           &
+           PJTANN,                           &
+           COMNUMCOMINT                      &
+     USING PJTABR OF PDCOMMAN_INTERNE,       &
+           PJTANN OF PDCOMMAN_INTERNE,       &
+           COMNUMCOMINT OF PDCOMMAN_INTERNE
+    BEGIN
+      LET COMNUMCOMINT OF IFBLOC = " "
+      LET DCINUMLIG OF IFBLOC = " "
+      LET COEDATDEB OF IFBLOC = 0
+      LET IFLCLE OF IFBLOC = " "
+      PUT IFBLOC RESET
+    END
+
+   ; Suppression des lignes de commandes
+   WHILE RETRIEVING PDDETAIL_C_I             &
+     VIA   PJTABR,                           &
+           PJTANN,                           &
+           COMNUMCOMINT                      &
+     USING PJTABR OF PDCOMMAN_INTERNE,       &
+           PJTANN OF PDCOMMAN_INTERNE,       &
+           COMNUMCOMINT OF PDCOMMAN_INTERNE
+   BEGIN
+     DELETE PDDETAIL_C_I
+     PUT PDDETAIL_C_I RESET
+   END
+  
+  END
+END
+
+BUILD DETAIL LIST
+
+@IF FORMAT
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+******************************* Commande interne *******************************
+* Num. commande.: xx-xx-xxx    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        *
+* Projet........: xx     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              *
+* Client........: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              *
+* Statut........: x      xxxxxxxxxxxxxxxxxxxxxxxxx    Date traitée: xxxxxxxxxx *
+* Date commande.: xxxxxxxxxx    Date fin prévu: xxxxxxxxxx                     *
+* Nom responsab.: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+**************************** Adresse de facturation ****************************
+*                                                                              *
+* Adresse.......: xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                *
+*                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                *
+*                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                *
+*                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                *
+*                      xxxxxxx                                                 *
+* Téléphone.....: xxxxxxxxxxxxx                                                *
+* Fax...........: xxxxxxxxxxxxx                                                *
+* Contact.......: xx xxxxxxxxxxxxxxxxxxxx                                      *
+* Devise........: xxx  xxxxxxxxxxxxxxx                                         *
+* Code langue...: x    xxxxxxxxxxxxxxxxxxxxxxxxx                               *
+* Validé........: xxx                                                          *
+********************************************************************************
+@ENDIF 

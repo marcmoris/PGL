@@ -1,0 +1,512 @@
+;/T/ 2.5.6,2.5.7 Gérer les lots de transfert
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1995-03-16
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   les lots de transfert pour les factures.
+;
+;/M/ François Déry, 12 mai 1999
+;       Ajout du in dict sur la transaction des séquences.
+;-------------------------------------------------------------------------------
+
+SCREEN pd214  ACTIONBAR                    &
+              MODE LABEL "" AT 2,80        &
+              NOACTION                     &
+              FIELDMARK RETAIN STARTUP     &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU ,      &
+                        T_CIENOM
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD214"
+
+
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+USE pd214.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+;-------------------------------------------------------------------------------
+;
+; Déclaration de la transaction pour donner un numéro séquentiel
+;
+
+TRANSACTION NO_SEQ READ WRITE &
+                   RESERVING FOR PROTECTED WRITE PDSEQ_LOT IN DICT
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+;
+; Sert à valider les codes bilingue et pour les sous-écrans de consultation
+;
+DEFINE    D_LTRSTU       CHARACTER SIZE 16 = "LTRSTU"
+TEMPORARY T_LTRSTU       CHARACTER SIZE 04
+
+TEMPORARY D_DEL CHAR SIZE 1
+;-------------------------------------------------------------------------------
+;
+; Lot de transfert
+;
+
+FILE PDLOT_TRANSFERT PRIMARY &
+                     NOITEM
+
+  ACCESS VIA     CIECLE,          &
+                 LTRNUMLOT        &
+         USING   T_CIECLEMNU,                          &
+                 LTRNUMLOT        OF PDLOT_TRANSFERT   &
+         REQUEST LTRNUMLOT        OF PDLOT_TRANSFERT   &
+         ORDERBY CIECLE,          &
+                 LTRNUMLOT
+
+  ACCESS VIA     CIECLE          &
+         USING   T_CIECLEMNU     &
+         ORDERBY CIECLE,         &
+                 LTRNUMLOT
+
+  ITEM CIECLE    OF PDLOT_TRANSFERT INITIAL T_CIECLEMNU
+  ITEM LTRSTU    OF PDLOT_TRANSFERT INITIAL "C" ; Création
+
+  ITEM LTRDATCRE OF PDLOT_TRANSFERT INITIAL SYSDATE
+  ITEM LTRHRECRE OF PDLOT_TRANSFERT INITIAL SYSTIME / 10000
+  ITEM LTRUSRCRE OF PDLOT_TRANSFERT INITIAL LOGONID
+
+  ITEM LTRDATDERMAJ OF PDLOT_TRANSFERT FINAL SYSDATE &
+                                       IF NOT NEWRECORD OF PDLOT_TRANSFERT &
+                                          AND &
+                                          ALTEREDRECORD OF PDLOT_TRANSFERT
+
+  ITEM LTRHREDERMAJ OF PDLOT_TRANSFERT FINAL SYSTIME / 10000 &
+                                       IF NOT NEWRECORD OF PDLOT_TRANSFERT &
+                                          AND &
+                                          ALTEREDRECORD OF PDLOT_TRANSFERT
+
+  ITEM LTRUSRDERMAJ OF PDLOT_TRANSFERT FINAL LOGONID &
+                                       IF NOT NEWRECORD OF PDLOT_TRANSFERT &
+                                          AND &
+                                          ALTEREDRECORD OF PDLOT_TRANSFERT
+
+
+;-------------------------------------------------------------------------------
+;
+; LOT FACTURE
+;
+
+FILE PDLOT_FACTURE DETAIL &
+                   NOITEM &
+                   OCCURS 11 TIMES &
+                   COUNT INTO LTRNBRTRX OF PDLOT_TRANSFERT
+
+  ACCESS VIA     CIECLE,          &
+                 LTRNUMLOT        &
+         USING   T_CIECLEMNU,                          &
+                 LTRNUMLOT        OF PDLOT_TRANSFERT   &
+         ORDERBY CIECLE,          &
+                 FTRNUMFAC
+
+  ITEM CIECLE    OF PDLOT_FACTURE INITIAL T_CIECLEMNU
+  ITEM LTRNUMLOT OF PDLOT_FACTURE INITIAL LTRNUMLOT OF PDLOT_TRANSFERT FIXED
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro séquentiel pour les factures
+;
+
+FILE PDSEQ_LOT     DESIGNER &
+                   TRANSACTION NO_SEQ
+
+
+;-------------------------------------------------------------------------------
+;
+; Facture
+;
+
+FILE PDFACTURE   REFERENCE &
+                 OCCURS WITH PDLOT_FACTURE
+
+  ACCESS VIA     CIECLE,          &
+                 FTRNUMFAC        &
+         USING   T_CIECLEMNU,     &
+                 FTRNUMFAC        OF PDLOT_FACTURE
+
+;  ITEM FTRMNT OF PDFACTURE SUM INTO LTRMNT OF PDLOT_TRANSFERT
+
+
+;-------------------------------------------------------------------------------
+;
+; Client
+;
+
+FILE VCLC_CLI        REFERENCE OCCURS WITH PDLOT_FACTURE
+
+  ACCESS VIA     CLICIECLE,        &
+                 CLICLE,           &
+                 CIECLE            &
+         USING   "----",                                &
+                 CLICLE            OF PDFACTURE,        &
+                 T_CIECLEMNU
+
+
+;-------------------------------------------------------------------------------
+;
+; Code bilingue statut du lot de transfert
+;
+
+FILE VCBI_DSC  REFERENCE &
+               ALIAS A_CBI_LTRSTU
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_LTRSTU,                             &
+               LTRSTU              OF PDLOT_TRANSFERT
+
+
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Lot de transfert " &
+@ELSE
+      " %%%Lot de transfert " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+
+ALIGN (2,3,19) (40,41,57) (,,59)
+
+
+FIELD LTRNUMLOT        OF PDLOT_TRANSFERT  &
+        HIDDEN ID 05                       &
+        DISPLAY
+
+
+FIELD LTRSTU           OF PDLOT_TRANSFERT  &
+        HIDDEN ID 10
+
+
+FIELD CBIDSC           OF A_CBI_LTRSTU     &
+        DISPLAY                            &
+        SIZE 21
+
+
+ALIGN (,3,19) (,41,57)
+
+
+FIELD LTRNBRTRX        OF PDLOT_TRANSFERT  &
+        DISPLAY
+
+
+FIELD LTRMNT           OF PDLOT_TRANSFERT  &
+        DISPLAY
+
+
+DRAW 8,2 TO 8,79
+
+
+SKIP TO LINE 8
+
+
+TITLE &
+@IF FRANCAIS
+      " Facture " &
+@ELSE
+      " %%%Facture " &
+@ENDIF
+      CENTERED AT ,1
+
+
+SKIP TO LINE 10
+
+
+TITLE &
+@IF FRANCAIS
+      "Facture   T Client Nom                                             Montant" &
+@ELSE
+      "%%%Facture   T Client Nom                                             Montant" &
+@ENDIF
+      AT ,3
+
+
+ALIGN (02,02,03) (,,13) (,,15) (,,22) (,,63)
+
+
+CLUSTER OCCURS WITH PDLOT_FACTURE ID BASE 50
+
+
+FIELD FTRNUMFAC        OF PDLOT_FACTURE    &
+       HIDDEN                              &
+       LABEL " "                           &
+       LOOKUP ON PDFACTURE                 &
+         MESSAGE 3209 ; Ce numéro de facture n'existe pas
+
+
+FIELD FTRTYPFAC        OF PDFACTURE        &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD CLICLE           OF PDFACTURE        &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD CLINOM           OF VCLC_CLI         &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD FTRMNT           OF PDFACTURE        &
+       HIDDEN                              &
+       DISPLAY
+
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+;---------------------------------------------------------------------------
+;PROCEDURE EDIT FTRNUMFAC OF PDLOT_FACTURE
+;BEGIN
+;  LET LTRMNT OF PDLOT_TRANSFERT = LTRMNT OF PDLOT_TRANSFERT + FTRMNT OF PDFACTURE
+;  DISPLAY LTRMNT OF PDLOT_TRANSFERT
+;END
+;-------------------------------------------------------------------------------
+;
+;
+;
+
+PROCEDURE ENTRY
+BEGIN
+  DISPLAY LTRNUMLOT OF PDLOT_TRANSFERT
+  DISPLAY LTRSTU OF PDLOT_TRANSFERT
+  DISPLAY CBIDSC OF A_CBI_LTRSTU
+  DISPLAY LTRNBRTRX OF PDLOT_TRANSFERT
+  DISPLAY LTRMNT OF PDLOT_TRANSFERT
+  FOR PDLOT_FACTURE
+  BEGIN
+    ACCEPT FTRNUMFAC OF PDLOT_FACTURE
+    DISPLAY FTRTYPFAC OF PDFACTURE
+    DISPLAY CLICLE OF PDFACTURE
+    DISPLAY CLINOM OF VCLC_CLI
+    DISPLAY FTRMNT OF PDFACTURE
+     DISPLAY LTRMNT OF PDLOT_TRANSFERT
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDLOT_TRANSFERT &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDLOT_TRANSFERT &
+     AND NOT NEWRECORD     OF PDLOT_TRANSFERT &
+     AND NOT DELETEDRECORD OF PDLOT_TRANSFERT &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  ;
+  ; Incrémentation du numéro de séquence
+  ;
+  IF 0 = LTRNUMLOT OF PDLOT_TRANSFERT
+  THEN BEGIN
+    START TRANSACTION NO_SEQ
+    GET PDSEQ_LOT OPTIONAL      &
+      VIA   CIECLE              &
+      USING T_CIECLEMNU
+    IF NOT ACCESSOK
+    THEN BEGIN
+      LET CIECLE OF PDSEQ_LOT = T_CIECLEMNU
+    END
+    LET SLONUMSEQ        OF PDSEQ_LOT        = SLONUMSEQ        OF PDSEQ_LOT        + 1
+    LET LTRNUMLOT        OF PDLOT_TRANSFERT  = SLONUMSEQ        OF PDSEQ_LOT
+    PUT PDSEQ_LOT
+    DISPLAY LTRNUMLOT OF PDLOT_TRANSFERT
+  END
+
+
+
+  IF   (  ALTEREDRECORD     OF PDLOT_TRANSFERT &
+   OR    NEWRECORD         OF PDLOT_TRANSFERT)
+   ;(NOT DELETEDRECORD     OF PDLOT_TRANSFERT )
+ THEN BEGIN
+ IF D_DEL <> "1"
+ THEN BEGIN
+  LET LTRMNT OF PDLOT_TRANSFERT = 0
+   FOR PDLOT_FACTURE
+   BEGIN
+      LET LTRMNT OF PDLOT_TRANSFERT = LTRMNT OF PDLOT_TRANSFERT + &
+                                      FTRMNT OF PDFACTURE
+   END
+ END
+ END
+
+END
+
+;------------------------------------------------------------------------------
+PROCEDURE UPDATE
+BEGIN
+  PUT PDLOT_TRANSFERT
+  FOR PDLOT_FACTURE
+  BEGIN
+     PUT PDLOT_FACTURE
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Affiche le numéro de lot
+;
+
+PROCEDURE POSTUPDATE
+BEGIN
+  IF CORRECTMODE
+  THEN BEGIN
+    DISPLAY LTRNUMLOT OF PDLOT_TRANSFERT
+    WARNING = " "
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure de destruction
+;
+
+PROCEDURE DELETE
+BEGIN
+  FOR PDLOT_FACTURE
+  BEGIN
+    IF NOT DELETEDRECORD OF PDLOT_FACTURE
+    THEN BEGIN
+      DELETE PDLOT_FACTURE
+    END
+  END
+  DISPLAY LTRNBRTRX        OF PDLOT_TRANSFERT
+  DISPLAY LTRMNT           OF PDLOT_TRANSFERT
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Il ne faut pas détruire la facture mais le lien entre la facture et le lot.
+;
+
+PROCEDURE DETAIL DELETE
+BEGIN
+  IF NOT DELETEDRECORD OF PDLOT_FACTURE
+  THEN BEGIN
+    LET LTRMNT OF PDLOT_TRANSFERT = LTRMNT OF PDLOT_TRANSFERT - &
+                                    FTRMNT OF PDFACTURE
+    LET D_DEL = "1"
+    DELETE PDLOT_FACTURE
+  END
+  DISPLAY LTRNBRTRX        OF PDLOT_TRANSFERT
+  DISPLAY LTRMNT           OF PDLOT_TRANSFERT
+END
+
+
+BUILD DETAIL LIST
+
+@IF FORMAT
+
+2xxx               xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    x
+3------------------------------------------------------------------------------+
+4                                                                              |
+5  Numéro lot....: 9999999        Statut........: x xxxxxxxxxxxxxxxxxxxxxxxxx  |
+6  Nbr trans.....: 9999999        Montant.......: ^^^,^^^,^^^.^^-              |
+7                                                                              |
+8---------------------------- Transfert facture -------------------------------+
+9                                                                              |
+0 Facture   T Client Nom                                             Montant   |
+1 999999999 x xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx ^^^,^^^,^^^.^^-  |
+2 999999999 x xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx ^^^,^^^,^^^.^^-  |
+3 999999999 x xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx ^^^,^^^,^^^.^^-  |
+4 999999999 x xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx ^^^,^^^,^^^.^^-  |
+5 999999999 x xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx ^^^,^^^,^^^.^^-  |
+6 999999999 x xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx ^^^,^^^,^^^.^^-  |
+7 999999999 x xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx ^^^,^^^,^^^.^^-  |
+8 999999999 x xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx ^^^,^^^,^^^.^^-  |
+9 999999999 x xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx ^^^,^^^,^^^.^^-  |
+0 999999999 x xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx ^^^,^^^,^^^.^^-  |
+1 999999999 x xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx ^^^,^^^,^^^.^^-  |
+2                                                                              |
+3------------------------------------------------------------------------------+
+@ENDIF

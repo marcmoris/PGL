@@ -1,0 +1,260 @@
+;/T/ Facturation
+;
+;/P/ Programmeur..: Steeve Duguay
+;    Date Création: 30 mars 1995
+;
+;    Description..: Segment
+;
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN fa003b ACTIONBAR &
+              MODE LABEL "" AT 2,80 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              FOR 14 LINE &
+              ON LINE 9   &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        FATRAJET_PRODUIT
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie du menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; Compagnie du menu
+
+USE ustrasse NOLIST ; Transaction QUERY pour les sous-écrans
+
+USE ussectmp NOLIST     ; Variable pour la securite
+    "FA003B"            ; Nom de l'écran
+
+USE fa003b.hlp NOLIST   ; Use servant à la documentation de l'écran
+
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-ecran
+
+
+;-------------------------------
+; Fichier des trajets / produits
+;-------------------------------
+
+FILE FATRAJET_PRODUIT       MASTER
+
+
+;-------------------------------------
+; Fichier de la grille de tarification
+;-------------------------------------
+
+FILE FASEGMENT              PRIMARY &
+                            OCCURS 10
+
+  ACCESS  VIA     CIECLE, &
+                  TRPCLE, &
+                  SEGCLE  &
+          USING   T_CIECLEMNU,                &
+                  TRPCLE OF FATRAJET_PRODUIT, &
+                  SEGCLE OF FASEGMENT         &
+          REQUEST SEGCLE &
+          ORDERBY SEGSEQ
+
+  ACCESS  VIA     CIECLE, &
+                  TRPCLE, &
+                  SEGSEQ  &
+          USING   T_CIECLEMNU,                &
+                  TRPCLE OF FATRAJET_PRODUIT, &
+                  SEGSEQ OF FASEGMENT         &
+          REQUEST SEGSEQ &
+          ORDERBY SEGSEQ
+
+  ACCESS  VIA     CIECLE, &
+                  TRPCLE  &
+          USING   T_CIECLEMNU,                &
+                  TRPCLE OF FATRAJET_PRODUIT  &
+          ORDERBY SEGSEQ
+
+
+
+;--------------------------------------
+; Fichier des éléments de tarifications
+;--------------------------------------
+TEMPORARY T_SEGCLE CHARACTER SIZE 3
+TEMPORARY T_SEGMUL CHARACTER SIZE 3
+TEMPORARY T_TRPTYP CHARACTER SIZE 5
+
+FILE FATRAJET_PRODUIT       REFERENCE &
+                            ALIAS FATRAJET_PRODUIT2
+
+  ACCESS  VIA   CIECLE,    &
+                TRPCLE     &
+          USING T_CIECLEMNU           ,  &
+                SEGCLE OF FASEGMENT
+
+
+;-------------------------------------------------------------------------------
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+SKIP
+USE ushilite NOLIST     ; Hilite pour tout les écrans
+
+DRAW FROM  2, 1 TO  2,79
+DRAW FROM  2, 1 TO  14,1
+DRAW FROM  3,80 TO  14,80
+DRAW FROM  14,1  TO  14,80
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+      " Segment " &
+@ELSE
+      " %%% " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP
+
+
+TITLE &
+@IF FRANCAIS
+"Séquence   Trajet  Description " &
+@ELSE
+      " %%% " &
+@ENDIF
+      AT ,3
+
+SKIP
+
+ALIGN (5,4,5) (,,15) (,,22)
+
+CLUSTER OCCUR WITH FASEGMENT ID BASE 10
+
+FIELD SEGSEQ OF FASEGMENT                             &
+      LABEL " " HIDDEN                                &
+      REQUIRED
+
+FIELD SEGCLE OF FASEGMENT                             &
+      REQUIRED NOCHANGE                               &
+      LOOKUP ON FATRAJET_PRODUIT2                     &
+            VIA CIECLE,                               &
+                TRPCLE                                &
+          USING T_CIECLEMNU,                          &
+                SEGCLE OF FASEGMENT                   &
+        MESSAGE 2722,                                 &
+          NOTON FASEGMENT                             &
+            VIA CIECLE,                               &
+                TRPCLE,                               &
+                SEGCLE                                &
+          USING T_CIECLEMNU,                          &
+                TRPCLE OF FATRAJET_PRODUIT,           &
+                SEGCLE OF FASEGMENT                   &
+        MESSAGE 2723 ; Ce segment trajet / produit exist déja
+
+FIELD TRPDSCFRA OF FATRAJET_PRODUIT2                  &
+      DISPLAY
+
+CLUSTER
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour les trajets / produits.
+;
+;
+PROCEDURE INPUT SEGCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_SEGCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_SEGMUL = "0"
+    LET T_TRPTYP = "T"
+    RUN SCREEN fa102 MODE F PASSING T_CIECLEMNU, T_SEGCLE, T_SEGMUL, T_TRPTYP &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_SEGCLE)
+  END
+END
+
+PROCEDURE EDIT SEGCLE
+BEGIN
+  IF TRPSEG OF FATRAJET_PRODUIT2 <> "0"
+  THEN ERROR 2725; Le trajet / produit ne doit pas avoir l'option du
+                 ; segment multiple.
+
+  IF TRPTYP OF FATRAJET_PRODUIT2 <> "T"
+  THEN ERROR 2744; Le segment doit être un trajet
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR FASEGMENT
+  BEGIN
+
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF FASEGMENT           &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF FASEGMENT &
+     AND NOT NEWRECORD     OF FASEGMENT &
+     AND NOT DELETEDRECORD OF FASEGMENT &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+ END
+END
+
+BUILD LIST DETAIL
+@IF FORMAT
+*********************************** Segment ***********************************x
+* Séquence   Trajet  Description                                               *
+*   xxx       xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  *
+*   xxx       xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  *
+*   xxx       xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  *
+*   xxx       xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  *
+*   xxx       xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  *
+*   xxx       xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  *
+*   xxx       xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  *
+*   xxx       xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  *
+*   xxx       xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  *
+*   xxx       xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                  *
+********************************************************************************
+@ENDIF
+

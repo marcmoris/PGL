@@ -1,0 +1,264 @@
+;/P/ Liste des Commande
+;
+;/M/ Programmeur.......: Bernard Samson
+;    Date..............: 03-11-1999
+;    Description.......: Liste toute les commmandes internes
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date modification.: 28 février 2000
+;    Description.......: Refonte complète du rapprot pour permttre d'imprimer les commandes pour lesquelles il reste des quantités à 
+;                        expédiées ou à facturées.
+;
+;    Référence.........: Stabilisation du module gestion de blocs / Columbia (point 8).
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST
+SET NOBLANKS
+
+ACCESS PDCOMMAN_INTERNE LINK   CLICIECLE    OF PDCOMMAN_INTERNE          , &
+                               CLICLE       OF PDCOMMAN_INTERNE          , &
+                               CIECLE       OF PDCOMMAN_INTERNE            &
+                          TO   CLICIECLE                                 , &
+                               CLICLE                                    , &
+                               CIECLE       OF VCLC_CLI                    &
+
+                        LINK  (CIECLE       OF PDCOMMAN_INTERNE          , &
+                               PJTABR       OF PDCOMMAN_INTERNE          , &
+                               PJTANN       OF PDCOMMAN_INTERNE          , &
+                               COMNUMCOMINT OF PDCOMMAN_INTERNE          , &
+                               "99" )                                      &
+                          TO   CIECLE                                    , &
+                               PJTABR                                    , &
+                               PJTANN                                    , &
+                               COMNUMCOMINT                              , &
+                               PRICODPRI    OF PDPRIORITE                  &
+
+                        LINK   CIECLE       OF PDCOMMAN_INTERNE          , &
+                               PJTABR       OF PDCOMMAN_INTERNE          , &
+                               PJTANN       OF PDCOMMAN_INTERNE          , &
+                               COMNUMCOMINT OF PDCOMMAN_INTERNE            &
+                          TO   CIECLE                                    , &
+                               PJTABR                                    , &
+                               PJTANN                                    , &
+                               COMNUMCOMINT OF PDDETAIL_C_I                 
+
+CHOOSE CIECLE       PARM,  & ; Code de compagnie
+       PJTABR       PARM,  & ; Code de projet
+       PJTANN       PARM,  & ; Année du projet
+       COMNUMCOMINT PARM,  & ; Numéro de commande
+       COMFLGBLC "BL"        ; Code indiquant qu'il s'agit d'une commande de bloc
+
+DEFINE D_DATDEB     DATE              = PARM
+DEFINE D_DATFIN     DATE              = PARM
+DEFINE D_FLG_ACTIVE CHARACTER SIZE 01 = PARM
+
+; Le select prend les enregistrement repondant aux criteres suivant :
+; Le status de la commande correspond a celuis demandé en paramètre
+; La date de la commande est comprise dans les limites entrees si il y en a eu une
+
+SELECT PDCOMMAN_INTERNE IF (COMDATCMD OF PDCOMMAN_INTERNE >= D_DATDEB                    AND &
+                           (COMDATCMD OF PDCOMMAN_INTERNE <= D_DATFIN OR D_DATFIN =  0))
+
+;------------------------------------------------------------------------------------------------------------------
+; Sélectionner les commandes qui ne sont pas complètement expédiées et facturées - Sélection des commandes actives).
+
+DEF D_DCIQTECMD    INTEGER SIZE 08 = ROUND(DCIQTECMD    OF PDDETAIL_C_I * 100,0)
+DEF D_DCIQTEUNMPRD INTEGER SIZE 08 = ROUND(DCIQTEUNMPRD OF PDDETAIL_C_I * 100,0)
+DEF D_DCIQTEEXP    INTEGER SIZE 08 = ROUND(DCIQTEEXP    OF PDDETAIL_C_I * 100,0)
+DEF D_DCIQTEFCT    INTEGER SIZE 08 = ROUND(DCIQTEFCT    OF PDDETAIL_C_I * 100,0)
+
+SELECT PDDETAIL_C_I     IF (D_FLG_ACTIVE = "0")               OR &
+                           (D_FLG_ACTIVE = "1"               AND &
+                           (D_DCIQTECMD    <> D_DCIQTEUNMPRD  OR &
+                            D_DCIQTEUNMPRD <> D_DCIQTEEXP     OR &
+                            D_DCIQTEEXP    <> D_DCIQTEFCT))
+
+;------------------------------------------------------------------------------------------------------------------
+
+DEFINE D_NUMCOM CHARACTER SIZE 09 = PJTABR       OF PDCOMMAN_INTERNE  + "-" +  &
+                                    PJTANN       OF PDCOMMAN_INTERNE  + "-" +  &
+                                    COMNUMCOMINT OF PDCOMMAN_INTERNE
+
+;-------------------------------------------------------------------------------
+
+SORT ON D_NUMCOM                &
+     ON DCINUMLIG OF PDDETAIL_C_I
+
+;-------------------------------------------------------------------------------
+;
+; Variables obligatoires pour les en-têtes standards.
+;
+
+;-------------------------------------------------------------------------------
+
+DEFINE D_NOMRAP   CHARACTER SIZE 60 = PARM
+
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = PACK(D_NOMRAP + " actives") &
+                                   IF D_FLG_ACTIVE = "1"          &
+                                 ELSE D_NOMRAP
+
+;-------------------------------------------------------------------------------
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = " "                                                &
+                                   IF D_DATDEB = 0 AND D_DATFIN = 0                      &
+                                 ELSE "Entre le : " + ASCII( D_DATDEB , 8 )[3:2] + "/" + &
+                                                      ASCII( D_DATDEB , 8 )[5:2] + "/" + &
+                                                      ASCII( D_DATDEB , 8 )[7:2] +       &
+                                           " et : " + ASCII( D_DATFIN , 8 )[3:2] + "/" + &
+                                                      ASCII( D_DATFIN , 8 )[5:2] + "/" + &
+                                                      ASCII( D_DATFIN , 8 )[7:2]
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE  7 = "IF338"
+;
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = PARM
+
+;-------------------------------------------------------------------------------
+
+DEFINE D_CLINOM        CHARACTER SIZE 20 = CLINOMABR    OF VCLC_CLI        &
+                                        IF CLINOMABR    OF VCLC_CLI <> " " &
+                                      ELSE CLINOM       OF VCLC_CLI
+
+DEFINE D_DCICOM        CHARACTER SIZE 20 = DCICOM       OF PDDETAIL_C_I
+
+DEFINE D_QTE_RESTANTE  FLOAT     SIZE 08 = DCIQTECMD    OF PDDETAIL_C_I &
+                                         - DCIQTEUNMPRD OF PDDETAIL_C_I 
+
+;-------------------------------------------------------------------------------
+
+USE ustit180 NOLIST
+   SKIP 2                                 &
+  TAB 001 "Numéro de                                Date de   Date de   Numéro       Quantité         Quantité         Quantité        Quantité         Quantité                          " &
+   SKIP 1                                 &
+  TAB 001 "commande             Client              commande  fin       de ligne     commandée        assignée         expédiée        facturée         Restante          Commentaires    " &
+   SKIP 1                                 &
+  TAB 001 "---------  ----------------------------  --------  --------  --------  ---------------  ---------------  --------------  ---------------  ---------------  --------------------" &
+   SKIP 1
+
+REPORT                                      &
+  TAB 001 D_NUMCOM                          &
+          PRINT AT D_NUMCOM                 &
+  TAB 012 CLICLE       OF PDCOMMAN_INTERNE  &
+          PRINT AT D_NUMCOM                 &
+  TAB 020 D_CLINOM                          &
+          PRINT AT D_NUMCOM                 &
+  TAB 042 COMDATCMD    OF PDCOMMAN_INTERNE  &
+          PRINT AT D_NUMCOM                 &
+  TAB 052 PRIDATFIN    OF PDPRIORITE        &
+          PRINT AT D_NUMCOM                 &
+  TAB 065 DCINUMLIG    OF PDDETAIL_C_I      &
+  TAB 072 DCIQTECMD    OF PDDETAIL_C_I      &
+          PICTURE "^^^,^^^,^^^.^^ "         &
+          OUTPUT SCALE 2                    &
+          SIGNIFICANCE 5                    &
+          TRAILING SIGN "-"                 &
+          NOBWZ                             &
+  TAB 089 DCIQTEUNMPRD OF PDDETAIL_C_I      &
+          PICTURE "^^^,^^^,^^^.^^ "         &
+          OUTPUT SCALE 2                    &
+          SIGNIFICANCE 5                    &
+          TRAILING SIGN "-"                 &
+          NOBWZ                             &
+  TAB 106 DCIQTEEXP    OF PDDETAIL_C_I      &
+          PICTURE "^^^,^^^,^^^.^^ "         &
+          OUTPUT SCALE 2                    &
+          SIGNIFICANCE 5                    &
+          TRAILING SIGN "-"                 &
+          NOBWZ                             &
+  TAB 122 DCIQTEFCT    OF PDDETAIL_C_I      &
+          PICTURE "^^^,^^^,^^^.^^ "         &
+          OUTPUT SCALE 2                    &
+          SIGNIFICANCE 5                    &
+          TRAILING SIGN "-"                 &
+          NOBWZ                             &
+  TAB 139 D_QTE_RESTANTE                    &
+          PICTURE "^^^,^^^,^^^.^^ "         &
+          OUTPUT SCALE 2                    &
+          SIGNIFICANCE 5                    &
+          TRAILING SIGN "-"                 &
+          NOBWZ                             &
+  TAB 156 D_DCICOM                          &
+  RESERVE 3 LINES
+
+FOOTING AT D_NUMCOM                         &
+  TAB 072 "===============  ===============  ==============  ===============  ===============" &
+   SKIP 1                                   &
+  TAB 072 DCIQTECMD    OF PDDETAIL_C_I      &
+          SUBTOTAL                          &
+          PICTURE "^^^,^^^,^^^.^^ "         &
+          OUTPUT SCALE 2                    &
+          SIGNIFICANCE 5                    &
+          TRAILING SIGN "-"                 &
+          NOBWZ                             &
+  TAB 089 DCIQTEUNMPRD OF PDDETAIL_C_I      &
+          SUBTOTAL                          &
+          PICTURE "^^^,^^^,^^^.^^ "         &
+          OUTPUT SCALE 2                    &
+          SIGNIFICANCE 5                    &
+          TRAILING SIGN "-"                 &
+          NOBWZ                             &
+  TAB 106 DCIQTEEXP    OF PDDETAIL_C_I      &
+          SUBTOTAL                          &
+          PICTURE "^^^,^^^,^^^.^^ "         &
+          OUTPUT SCALE 2                    &
+          SIGNIFICANCE 5                    &
+          TRAILING SIGN "-"                 &
+          NOBWZ                             &
+  TAB 122 DCIQTEFCT    OF PDDETAIL_C_I      &
+          SUBTOTAL                          &
+          PICTURE "^^^,^^^,^^^.^^ "         &
+          OUTPUT SCALE 2                    &
+          SIGNIFICANCE 5                    &
+          TRAILING SIGN "-"                 &
+          NOBWZ                             &
+  TAB 139 D_QTE_RESTANTE                    &
+          SUBTOTAL                          &
+          PICTURE "^^^,^^^,^^^.^^ "         &
+          OUTPUT SCALE 2                    &
+          SIGNIFICANCE 5                    &
+          TRAILING SIGN "-"                 &
+          NOBWZ                             &
+   SKIP 2
+
+FINAL FOOTING                               &
+  TAB 001 "Nombre de commandes : "          &
+           COUNT AT D_NUMCOM                &
+           PICTURE "^^^,^^^"
+
+BUILD if338z
+
+
+@IF FORMAT
+IF338                                                                                GRANICOR INC.                                                                   PAGE:   9
+marcpoul                                                                     Liste des commandes actives                                                        99/99/99  99:99
+                                                                          Entre le : 99/99/99 et : 99/99/99
+
+Numéro de                                Date de   Date de   Numéro       Quantité         Quantité         Quantité        Quantité         Quantité                    
+commande             Client              commande  fin       de ligne     commandée        assignée         expédiée        facturée         Restante          Commentaires    
+---------  ----------------------------  --------  --------  --------  ---------------  ---------------  --------------  ---------------  ---------------  --------------------
+XX-XX-XXX  XXXXXX  XXXXXXXXXXXXXXXXXXXX  99/99/99  99/99/99     999    999,999,999.99-  999,999,999.99-  999,999,999.99- 999,999,999.99-  999,999,999.99-  XXXXXXXXXXXXXXXXXXXX
+                                                                999    999,999,999.99-  999,999,999.99-  999,999,999.99- 999,999,999.99-  999,999,999.99-  XXXXXXXXXXXXXXXXXXXX
+                                                                999    999,999,999.99-  999,999,999.99-  999,999,999.99- 999,999,999.99-  999,999,999.99-  XXXXXXXXXXXXXXXXXXXX
+                                                                999    999,999,999.99-  999,999,999.99-  999,999,999.99- 999,999,999.99-  999,999,999.99-  XXXXXXXXXXXXXXXXXXXX
+                                                                       ===============  ===============  ==============  ===============  ===============                
+                                                                       999,999,999.99-  999,999,999.99-  999,999,999.99- 999,999,999.99-  999,999,999.99-                
+
+XX-XX-XXX  XXXXXX  XXXXXXXXXXXXXXXXXXXX  99/99/99  99/99/99     999    999,999,999.99-  999,999,999.99-  999,999,999.99- 999,999,999.99-  999,999,999.99-  XXXXXXXXXXXXXXXXXXXX
+                                                                999    999,999,999.99-  999,999,999.99-  999,999,999.99- 999,999,999.99-  999,999,999.99-  XXXXXXXXXXXXXXXXXXXX
+                                                                       ===============  ===============  ==============  ===============  ===============                
+                                                                       999,999,999.99-  999,999,999.99-  999,999,999.99- 999,999,999.99-  999,999,999.99-                
+
+XX-XX-XXX  XXXXXX  XXXXXXXXXXXXXXXXXXXX  99/99/99  99/99/99     999    999,999,999.99-  999,999,999.99-  999,999,999.99- 999,999,999.99-  999,999,999.99-  XXXXXXXXXXXXXXXXXXXX
+                                                                999    999,999,999.99-  999,999,999.99-  999,999,999.99- 999,999,999.99-  999,999,999.99-  XXXXXXXXXXXXXXXXXXXX
+                                                                999    999,999,999.99-  999,999,999.99-  999,999,999.99- 999,999,999.99-  999,999,999.99-  XXXXXXXXXXXXXXXXXXXX
+                                                                       ===============  ===============  ==============  ===============  ===============                
+                                                                       999,999,999.99-  999,999,999.99-  999,999,999.99- 999,999,999.99-  999,999,999.99-                
+
+Nombre de commandes :   999,999
+@ENDIF

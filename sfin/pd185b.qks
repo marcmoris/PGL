@@ -1,0 +1,695 @@
+;/T/ 2.4.3 Enregistrer les opérations de surface (ARRET)
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1994-10-26
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   les opérations de surface pour une pièce de granit.
+;
+;/M/ François Déry, 12 mai 1999
+;       Ajout du in dict sur la transaction des séquences.
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd185b ACTIONBAR                     &
+              MODE LABEL "" AT 2,80         &
+              NOACTION                      &
+              FIELDMARK RETAIN STARTUP      &
+              HELP POPUP FROM 4,9 TO 20,72  &
+              RECEIVING T_CIECLEMNU ,       &
+                        T_CIENOM,           &
+                        PDOPERATION_SURF
+
+
+;-------------------------------------------------------------------------------
+;
+; Déclaration de la transaction pour donner un numéro séquentiel
+;
+
+TRANSACTION NO_SEQ READ WRITE &
+                   RESERVING FOR PROTECTED WRITE PDSEQ_OPER_SURF IN DICT
+
+
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD185B"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+USE pd185b.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Sert à valider les codes bilingue et pour les sous-écrans de consultation
+;
+DEFINE    D_QRTCODQRT    CHARACTER SIZE 16 = "QRTCODQRT"
+TEMPORARY T_QRTCODQRT    CHARACTER SIZE 04
+DEFINE    D_OSUSTU       CHARACTER SIZE 16 = "OSUSTU"
+TEMPORARY T_OSUSTU       CHARACTER SIZE 04
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour l'appel des dépisteur (pop-up)
+;
+
+TEMPORARY T_RAACODARR CHARACTER SIZE 04
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire au traitement
+;
+
+TEMPORARY T_SILENT CHARACTER SIZE 01
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire pour le calculd'un intervalle de temps
+;
+USE usdiftim NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Opération de surface
+;
+
+FILE PDOPERATION_SURF MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Arrêt opération de surface
+;
+
+FILE PDARRET_OP_SURF PRIMARY &
+                      NOITEM &
+                      OCCURS 8 TIMES
+
+  ACCESS VIA     CIECLE,          &
+                 OSUNUMRAP        &
+         USING   T_CIECLEMNU,                         &
+                 OSUNUMRAP        OF PDOPERATION_SURF &
+         ORDERBY CIECLE,          &
+                 OSUNUMRAP,       &
+                 AOSHREDEB,       &
+                 AOSHREFIN
+
+
+  ITEM CIECLE    OF PDARRET_OP_SURF INITIAL T_CIECLEMNU
+  ITEM OSUNUMRAP OF PDARRET_OP_SURF INITIAL  OSUNUMRAP    OF PDOPERATION_SURF
+  ITEM AOSDURSEC OF PDARRET_OP_SURF SUM INTO OSUDURSECARR OF PDOPERATION_SURF
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro séquentiel pour les opération de surface
+;
+
+FILE PDSEQ_OPER_SURF DESIGNER &
+                     TRANSACTION NO_SEQ
+
+
+;-------------------------------------------------------------------------------
+;
+; Arrêt opération de surface validation des plages horaire pour le rapport
+;
+
+FILE PDARRET_OP_SURF DESIGNER ALIAS AOS_ARRET_OP_SURFACE
+
+
+  ACCESS VIA     CIECLE,          &
+                 OSUNUMRAP        &
+         USING   T_CIECLEMNU,     &
+                 OSUNUMRAP        OF PDARRET_OP_SURF
+
+  SELECT &
+      IF ( (AOSHREDEB OF PDARRET_OP_SURF >= AOSHREDEB OF AOS_ARRET_OP_SURFACE    &
+            AND                                                                  &
+            AOSHREDEB OF PDARRET_OP_SURF < AOSHREFIN OF AOS_ARRET_OP_SURFACE)   &
+          OR                                                                     &
+           (AOSHREFIN OF PDARRET_OP_SURF >= AOSHREDEB OF AOS_ARRET_OP_SURFACE    &
+            AND                                                                  &
+            AOSHREFIN OF PDARRET_OP_SURF <= AOSHREFIN OF AOS_ARRET_OP_SURFACE))  &
+         OR                                                                      &
+           (AOSHREDEB OF PDARRET_OP_SURF <= AOSHREDEB OF AOS_ARRET_OP_SURFACE    &
+            AND                                                                  &
+            AOSHREFIN OF PDARRET_OP_SURF >= AOSHREFIN OF AOS_ARRET_OP_SURFACE)
+
+
+;-------------------------------------------------------------------------------
+;
+; Machine opération de surface
+;
+
+FILE PDMACH_OP_SURF  REFERENCE
+
+  ACCESS VIA     CIECLE,          &
+                 MOPCODMAC        &
+         USING   T_CIECLEMNU,     &
+                 MOPCODMAC        OF PDOPERATION_SURF
+
+
+;-------------------------------------------------------------------------------
+;
+; Raison d'arrêt
+;
+
+FILE PDRAISON_ARRET  REFERENCE OCCURS WITH PDARRET_OP_SURF
+
+  ACCESS VIA     CIECLE,          &
+                 RAACODARR        &
+         USING   T_CIECLEMNU,     &
+                 RAACODARR        OF PDARRET_OP_SURF
+
+
+;-------------------------------------------------------------------------------
+;
+; Code bilingue (Statut)
+;
+
+FILE VCBI_DSC  REFERENCE &
+               ALIAS A_CBI_OSUSTU
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_OSUSTU,                             &
+               OSUSTU              OF PDOPERATION_SURF
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Code bilingue (quart de travail)
+;
+
+FILE VCBI_DSC  REFERENCE &
+               ALIAS A_CBI_QRTCODQRT
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_QRTCODQRT,                          &
+               QRTCODQRT           OF PDOPERATION_SURF
+
+
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Opération de surface " &
+@ELSE
+      " %%%Opération de surface " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+
+ALIGN (,3,19) (,42,58)
+
+
+FIELD OSUNUMRAP        OF PDOPERATION_SURF &
+LABEL "Numéro rapport:"&
+        FIXED
+
+
+FIELD OSUDEP           OF PDOPERATION_SURF &
+LABEL "Hre départ....:"&
+        FIXED
+
+
+FIELD OSUDATPRD        OF PDOPERATION_SURF  FORMAT YYYYMMDD &
+PATTERN "####/##/##"&
+LABEL "Date product..:"&
+        FIXED
+
+
+FIELD OSUARR           OF PDOPERATION_SURF &
+LABEL "Hre fin.......:"&
+        FIXED
+
+
+ALIGN (,3,19) (,,24)
+
+
+FIELD MOPCODMAC        OF PDOPERATION_SURF &
+LABEL "Code machine..:"&
+        FIXED
+
+
+FIELD MOPDSC001        OF PDMACH_OP_SURF   &
+        FIXED
+
+
+FIELD QRTCODQRT        OF PDOPERATION_SURF &
+LABEL "Quart.........:"&
+        FIXED
+
+
+FIELD CBIDSC           OF A_CBI_QRTCODQRT  &
+        DISPLAY                            &
+        FIXED
+
+
+FIELD OSUSTU           OF PDOPERATION_SURF &
+LABEL "Statut.......:"&
+        FIXED
+
+
+FIELD CBIDSC           OF A_CBI_OSUSTU     &
+        DISPLAY                            &
+        FIXED
+
+
+DRAW 11,2 TO 11,79
+
+
+SKIP TO LINE 11
+
+
+TITLE &
+@IF FRANCAIS
+      " Arrêts opération surface " &
+@ELSE
+      " %%%Arrêts opération surface " &
+@ENDIF
+      CENTERED AT ,1
+
+
+SKIP TO LINE 13
+
+
+TITLE &
+@IF FRANCAIS
+  "        Arret    Départ   Code Description " &
+@ELSE
+  "%%%     Arret    Départ   Code Description " &
+@ENDIF
+  AT ,2
+
+
+SKIP TO LINE 14
+
+
+ALIGN (9,9,10) (,18,18) (,27,28) (,32,33) (,,38)
+
+
+CLUSTER OCCURS WITH PDARRET_OP_SURF ID BASE 35
+
+
+FIELD AOSHREDEB        OF PDARRET_OP_SURF  &
+        HIDDEN                             &
+        LABEL " "                          &
+        REQUIRED
+
+
+FIELD AOSHREFIN        OF PDARRET_OP_SURF  &
+        HIDDEN                             &
+        NOLABEL                            &
+        REQUIRED
+
+
+FIELD T_SILENT                             &
+        SILENT                             &
+        LOOKUP NOTON PDARRET_OP_SURF       &
+          VIA     CIECLE ,                 &
+                  OSUNUMRAP,               &
+                  AOSHREDEB,               &
+                  AOSHREFIN                &
+          USING   T_CIECLEMNU,                         &
+                  OSUNUMRAP        OF PDARRET_OP_SURF, &
+                  AOSHREDEB        OF PDARRET_OP_SURF, &
+                  AOSHREFIN        OF PDARRET_OP_SURF  &
+          MESSAGE 2921 ; Ce numéro de ligne existe déjà
+
+
+FIELD RAACODARR        OF PDARRET_OP_SURF  &
+        NOLABEL                            &
+        REQUIRED                           &
+        LOOKUP ON PDRAISON_ARRET           &
+          MESSAGE 2976 ; Cette raison n'existe pas
+
+
+FIELD AOSDSCARR        OF PDARRET_OP_SURF  &
+        HIDDEN                             &
+        NOLABEL
+
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour le champs raison d'arret
+;
+
+PROCEDURE INPUT RAACODARR
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_RAACODARR = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd114 MODE F &
+                     PASSING T_RAACODARR, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_RAACODARR )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les plages horraire des arrets
+;
+
+PROCEDURE EDIT AOSHREDEB
+BEGIN
+  ;
+  ; Valide que le temps d'arret est compris dans l'intervale du rapport
+  ;
+  IF AOSHREDEB OF PDARRET_OP_SURF < OSUDEP OF PDOPERATION_SURF &
+     OR                                                        &
+     AOSHREDEB OF PDARRET_OP_SURF > OSUARR OF PDOPERATION_SURF
+  THEN BEGIN
+    ERROR 3010 ; L'heure de début n'est pas compris dans l'intervale du rapport
+  END
+  ;
+  ; Fait le test seulement si l'heure de fin a déjà été saisie
+  ;
+  IF AOSHREFIN OF PDARRET_OP_SURF <> 0
+  THEN BEGIN
+    ;
+    ; Calcul de la durée de l'arret
+    ;
+    LET TZ_DATDEB   = OSUDATPRD        OF PDOPERATION_SURF
+    LET TZ_TMPDEB   = ASCII(AOSHREDEB  OF PDARRET_OP_SURF,4) + "00"
+    LET TZ_DATFIN   = OSUDATPRD        OF PDOPERATION_SURF
+    LET TZ_TMPFIN   = ASCII(AOSHREFIN  OF PDARRET_OP_SURF,4) + "00"
+
+    LET AOSDURSEC OF PDARRET_OP_SURF = DZ_DIFSECTOT
+    ;
+    ; Valide que l'intervalle n'est pas copris dans un déjà enregistrer
+    ;
+    GET AOS_ARRET_OP_SURFACE OPTIONAL
+    IF ACCESSOK
+    THEN BEGIN
+      ERROR 3005 ; Cette plage horraire chevauche une plage déjà enregistrer
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les plages horraire des arrets
+;
+
+PROCEDURE EDIT AOSHREFIN
+BEGIN
+  ;
+  ; Valide que le temps d'arret est compris dans l'intervale du rapport
+  ;
+  IF AOSHREFIN OF PDARRET_OP_SURF < OSUDEP OF PDOPERATION_SURF &
+     OR                                                        &
+     AOSHREFIN OF PDARRET_OP_SURF > OSUARR OF PDOPERATION_SURF
+  THEN BEGIN
+    ERROR 3011 ; L'heure de fin n'est pas compris dans l'intervale du rapport
+  END
+  ;
+  ; Valide que l'intervalle n'est pas copris dans un déjà enregistrer
+  ;
+  GET AOS_ARRET_OP_SURFACE OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    ERROR 3005 ; Cette plage horraire chevauche une plage déjà enregistrer
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Assigne une valeur par défaut
+;
+
+PROCEDURE INPUT AOSDSCARR
+BEGIN
+  IF 0 = SIZE(FIELDTEXT) AND ENTRYMODE
+  THEN BEGIN
+    LET FIELDTEXT = RAADSCFRA        OF PDRAISON_ARRET
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ;
+  ;
+  FOR PDARRET_OP_SURF
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF PDARRET_OP_SURF &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF PDARRET_OP_SURF &
+       AND NOT NEWRECORD     OF PDARRET_OP_SURF &
+       AND NOT DELETEDRECORD OF PDARRET_OP_SURF &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+    ;
+    ; Calcul de la durée de l'arret
+    ;
+    LET TZ_DATDEB   = OSUDATPRD        OF PDOPERATION_SURF
+    LET TZ_TMPDEB   = ASCII(AOSHREDEB  OF PDARRET_OP_SURF,4) + "00"
+    LET TZ_DATFIN   = OSUDATPRD        OF PDOPERATION_SURF
+    LET TZ_TMPFIN   = ASCII(AOSHREFIN  OF PDARRET_OP_SURF,4) + "00"
+
+    LET AOSDURSEC OF PDARRET_OP_SURF = DZ_DIFSECTOT
+
+    ;
+    ; Validation du statut du rapport
+    ;
+    IF ALTEREDRECORD OF PDARRET_OP_SURF
+    THEN BEGIN
+      ;
+      ; Si le rapport à déjà été valider il faut reprendre la validation
+      ;
+      IF OSUSTU OF PDOPERATION_SURF = "V"
+      THEN BEGIN
+        LET OSUSTU OF PDOPERATION_SURF = "E" ; En cours , il faut reprendre la validation
+        DISPLAY OSUSTU OF PDOPERATION_SURF
+        DISPLAY CBIDSC OF A_CBI_OSUSTU
+      END
+      ;
+      ; Si le rapport à été transferré il devient en correction
+      ;
+      IF OSUSTU OF PDOPERATION_SURF = "T"
+      THEN BEGIN
+        LET OSUSTU OF PDOPERATION_SURF = "C"  ; Correction après transfert
+        DISPLAY OSUSTU OF PDOPERATION_SURF
+        DISPLAY CBIDSC OF A_CBI_OSUSTU
+      END
+    END
+
+    IF NEWRECORD OF PDARRET_OP_SURF
+    THEN BEGIN
+      ;
+      ; Si le rapport à déjà été valider il faut reprendre la validation
+      ;
+      IF OSUSTU OF PDOPERATION_SURF = "V"
+      THEN BEGIN
+        LET OSUSTU OF PDOPERATION_SURF = "E" ; En cours , il faut reprendre la validation
+        DISPLAY OSUSTU OF PDOPERATION_SURF
+        DISPLAY CBIDSC OF A_CBI_OSUSTU
+      END
+      ;
+      ; Si le rapport à été transferré il devient en correction
+      ;
+      IF OSUSTU OF PDOPERATION_SURF = "T"
+      THEN BEGIN
+        LET OSUSTU OF PDOPERATION_SURF = "C"  ; Correction après transfert
+        DISPLAY OSUSTU OF PDOPERATION_SURF
+        DISPLAY CBIDSC OF A_CBI_OSUSTU
+      END
+    END
+  END
+  ;
+  ; Incrémentation du numéro de séquence
+  ;
+  IF 0 = OSUNUMRAP        OF PDOPERATION_SURF
+  THEN BEGIN
+    START TRANSACTION NO_SEQ
+    GET PDSEQ_OPER_SURF OPTIONAL        &
+      VIA   CIECLE                      &
+      USING T_CIECLEMNU
+    IF NOT ACCESSOK
+    THEN BEGIN
+      LET CIECLE OF PDSEQ_OPER_SURF = T_CIECLEMNU
+    END
+    LET SEONUMRAP     OF PDSEQ_OPER_SURF  = SEONUMRAP OF PDSEQ_OPER_SURF + 1
+    LET OSUNUMRAP     OF PDOPERATION_SURF = SEONUMRAP OF PDSEQ_OPER_SURF
+    PUT PDSEQ_OPER_SURF
+    DISPLAY OSUNUMRAP     OF PDOPERATION_SURF
+  END
+END
+
+
+PROCEDURE INTERNAL VALIDE_HEURE
+BEGIN
+  ;
+  ; Validation des plages horraire pour les arrêts
+  ;
+  WHILE RETRIEVING AOS_ARRET_OP_SURFACE
+  BEGIN
+    IF (AOSHREDEB OF PDARRET_OP_SURF <> AOSHREDEB OF AOS_ARRET_OP_SURFACE    &
+        AND                                                                  &
+        AOSHREFIN OF PDARRET_OP_SURF <> AOSHREFIN OF AOS_ARRET_OP_SURFACE)
+    THEN BEGIN
+      IF ( (AOSHREDEB OF PDARRET_OP_SURF >= AOSHREDEB OF AOS_ARRET_OP_SURFACE    &
+            AND                                                                  &
+            AOSHREDEB OF PDARRET_OP_SURF < AOSHREFIN OF AOS_ARRET_OP_SURFACE)   &
+          OR                                                                     &
+           (AOSHREFIN OF PDARRET_OP_SURF >= AOSHREDEB OF AOS_ARRET_OP_SURFACE    &
+            AND                                                                  &
+            AOSHREFIN OF PDARRET_OP_SURF <= AOSHREFIN OF AOS_ARRET_OP_SURFACE))  &
+         OR                                                                      &
+           (AOSHREDEB OF PDARRET_OP_SURF <= AOSHREDEB OF AOS_ARRET_OP_SURFACE    &
+            AND                                                                  &
+            AOSHREFIN OF PDARRET_OP_SURF >= AOSHREFIN OF AOS_ARRET_OP_SURFACE)
+      THEN BEGIN
+        ERROR 3005 ; Cette plage horraire chevauche une plage déjà enregistrer
+       END
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; update
+;
+PROCEDURE UPDATE
+BEGIN
+  PUT PDOPERATION_SURF
+  FOR PDARRET_OP_SURF
+  BEGIN
+    PUT PDARRET_OP_SURF
+    ;DO INTERNAL VALIDE_HEURE
+  END
+END
+
+
+BUILD
+
+@IF FORMAT
+
+2x                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    x
+3------------------------------------------------------------------------------+
+4                                                                              |
+5 Numéro rapport: 999999999              Hre départ....: HH:MM                 |
+6 Date product..: AA/MM/JJ               Hre fin.......: HH:MM                 |
+7 Code machine..: XXX  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                |
+8 Quart.........: X    xxxxxxx                                                 |
+9                                                                              |
+0---------------------------------- Arret -------------------------------------+
+1                                                                              |
+2        Arret    Départ Quart  Code Description                               |
+3                                                                              |
+4        HH:MM    HH:MM    X    XXXX XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX  |
+5        HH:MM    HH:MM    X    XXXX XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX  |
+6        HH:MM    HH:MM    X    XXXX XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX  |
+7        HH:MM    HH:MM    X    XXXX XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX  |
+8        HH:MM    HH:MM    X    XXXX XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX  |
+9        HH:MM    HH:MM    X    XXXX XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX  |
+0        HH:MM    HH:MM    X    XXXX XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX  |
+1        HH:MM    HH:MM    X    XXXX XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX  |
+2                                                                              |
+3------------------------------------------------------------------------------+
+@ENDIF

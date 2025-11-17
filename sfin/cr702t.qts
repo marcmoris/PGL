@@ -1,0 +1,602 @@
+;/T/ Transfert Relais Nordik : Factures compte a recevoir
+;
+;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur...: Marc Morissette
+;    Date Création.: 22-Nov-1993
+;
+;    Description...: Passerelle d'entré dans les Comptes à recevoir.
+;
+;    Paramètres....: ...
+;
+;    Particularités: ...
+;
+;/M/ Modifier par Nancy Marceau, 5 avril 1994
+;      - Modifier la passerelle d'entrée pour que :
+;           . Montant de vente = Montant d'imputation
+;           . Montant d'escompte = somme des escomptes de chaque ligne de facture
+;           . Montant de prime = somme des primes de chaque ligne de facture
+;
+;      - Générer une imputation pour le montant d'escompte et/ou le montant de
+;        prime selon les paramètres de passerelle.
+;
+;      - Si le montant d'escompte est positif ==> escompte sur ventes
+;           . Sommarisation du montant négativement
+;
+;      - Si le montant d'escompte est négatif ==> prime sur ventes
+;           . Sommarisation du montant positivement
+;
+;      - Valider que les paramètres sont définis.
+;/M/ Modifier par STEVE DES ROSIERS le 8 octobre 1994
+;       -eliminer le "garbage" venant du transfert de fichier par modem
+;
+;/M/ Marie-Josée Hamel, 96.02.13, remplacer élément par produit/élém. tarif.
+;-------------------------------------------------------------------------------
+;
+;
+
+USE ussetqts NOLIST
+
+RUN cr702t
+;
+; Pour arrêter la procédure en cas d'erreur
+;
+GLOBAL TEMPORARY G_ERREUR       CHARACTER SIZE 5
+GLOBAL TEMPORARY G_CIECLE       CHARACTER SIZE 4 PARM ; Compagnie de création
+GLOBAL TEMPORARY G_PECCLE       CHARACTER SIZE 4 PARM ; Période comptable
+GLOBAL TEMPORARY G_LCRCLE       CHARACTER SIZE 4 PARM ; Lot de création
+
+;---------------------------------------------------------------
+; Validation des données du fichier entrée CRCAR_CAS
+;
+REQUEST VALIDATION_FICHIER_ENTETE
+
+ACCESS CRCAR_CAS &
+; Vérification si la compagnie existe
+  LINK CASCIECLE OF CRCAR_CAS &
+    TO CIECLE OF MCCOMPAGNIE OPTIONAL &
+
+; Vérification si l'usager a accès à cette compagnie
+  LINK CASCIECLE OF CRCAR_CAS &
+    TO CIECLE OF VSEC_USR OPTIONAL &
+
+
+; Vérification de l'existance de la devise
+  LINK DEVCLE OF CRCAR_CAS &
+    TO DEVCLE OF MCDEVISE OPTIONAL &
+
+; Vérification si le client existe et appartient à cette compagnie
+  LINK "----" , &
+       CASCLICLE OF CRCAR_CAS , &
+       CASCIECLE OF CRCAR_CAS &
+    TO CLICIECLE, &
+       CLICLE   , &
+       CIECLE OF VCLC_CLI OPTIONAL &
+
+; Pour valider les codes de taxe fédéral et provincial
+  LINK CLCTAXTYPTPS OF VCLC_CLI, &
+       CLCTAXCODTPS OF VCLC_CLI &
+    TO TAXCLETYP , &
+       TAXCLECOD OF MCTAXE OPTIONAL &
+
+  LINK CLCTAXTYPTVP OF VCLC_CLI, &
+       CLCTAXCODTVP OF VCLC_CLI &
+    TO TAXCLETYP , &
+       TAXCLECOD OF MCTAXE ALIAS A_MCTAXE OPTIONAL &
+
+; Vérification du statut de la période comptable si elle existe
+  LINK G_CIECLE  , &
+       G_PECCLE  &
+    TO CIECLE  , &
+       PECCLE OF MCPERIODE_CIE OPTIONAL &
+
+; Vérification si un lot de type FA exist
+  LINK CASCIECLE OF                  CRCAR_CAS, &
+       G_PECCLE    , &
+       G_LCRCLE    , &
+        "FA" &
+   TO  CIECLE,  &
+       PECCLE   ,  &
+       LCRCLE   ,  &
+       LCRTYPECR  OF CRLOT  OPTIONAL &
+
+; Vérification si un numéro de facture identique n'existe pas déjà
+  LINK           CASCIECLE             OF CRCAR_CAS, &
+       CASCARCLE OF CRCAR_CAS &
+    TO CIECLE, &
+       CARCLE OF CRCPT_A_REC OPTIONAL
+
+; POUR ELIMINER LES IMPURETEES DU FICHIER D'ENTREE
+
+SELECT IF CASCIECLE OF CRCAR_CAS NE " "
+
+
+
+TEMPORARY T_MESERR CHARACTER SIZE 80 ; Pour les erreurs.
+
+@IF FRANCAIS
+ITEM T_MESERR = &
+       CASCIECLE OF CRCAR_CAS   + " Cette compagnie n'existe pas                                     " &
+     IF NOT RECORD MCCOMPAGNIE   EXIST  &
+
+ELSE   CASCIECLE OF CRCAR_CAS   + " Vous n'avez pas access a cette compagnie                         " &
+     IF NOT RECORD VSEC_USR      EXIST  &
+
+ELSE   G_CIECLE                 + " La compagnie demande en paramètre est diff. de celle du fichier  " &
+     IF G_CIECLE <> CASCIECLE OF CRCAR_CAS &
+
+ELSE   PECCLE    OF CRCAR_CAS   + " Cette période n'existe pas                                       " &
+     IF NOT RECORD MCPERIODE_CIE EXIST  &
+
+ELSE   PECCLE    OF CRCAR_CAS   + " Cette période est fermée                                         " &
+     IF PCCSTUCR OF MCPERIODE_CIE = "F" &
+
+ELSE   DEVCLE    OF CRCAR_CAS   + " Cette devise n'existe pas                                        " &
+     IF NOT RECORD MCDEVISE      EXIST  &
+
+ELSE   CASCLICLE OF CRCAR_CAS   + " Ce client n'existe pas / n'est pas définie dans cette compagnie  " &
+     IF NOT RECORD VCLC_CLI     EXIST  &
+
+ELSE   CASCLICLE OF CRCAR_CAS   + " Ce client n'as pas de code de taxe de définie                    " &
+     IF CLCTAXCODTPS OF VCLC_CLI = "" OR CLCTAXCODTVP OF VCLC_CLI = "" &
+
+ELSE   CASCLICLE OF CRCAR_CAS   + " Les code de taxe de ce client n'existe pas                       " &
+     IF NOT RECORD MCTAXE   EXIST OR NOT RECORD A_MCTAXE EXIST  &
+
+ELSE   CLCTAXCODTPS OF VCLC_CLI + " Le mode de taxation de ce code ne permet par de montant de TPS   " &
+     IF TAXMOD OF MCTAXE = "E" AND 0 <> NCO(CASMNTTPS OF CRCAR_CAS) &
+
+ELSE   CLCTAXCODTVP OF VCLC_CLI + " Le mode de taxation de ce code ne permet par de montant de TVQ   " &
+     IF TAXMOD OF A_MCTAXE = "E" AND 0 <> NCO(CASMNTTVP OF CRCAR_CAS) &
+
+ELSE   G_LCRCLE                 + " Ce lot n'existe pas / n'est pas de type Facture                  " &
+     IF NOT RECORD CRLOT         EXIST  &
+
+ELSE   G_LCRCLE                 + " Le lot est journalisé                                            " &
+     IF LCRDATJOU OF CRLOT <> 0         &
+
+ELSE   G_LCRCLE                 + " Le lot est authorisé à journalisation                            " &
+     IF LCRATRJOU OF CRLOT = "1"        &
+
+ELSE   G_LCRCLE                 + " Le lot ne doit pas avoir de transaction                          " &
+     IF LCRNBRTRS OF CRLOT <> 0        &
+
+ELSE   CASCARCLE OF CRCAR_CAS   + " Cette facture exist déjà                                         " &
+     IF RECORD CRCPT_A_REC       EXIST  &
+
+ELSE   CASCLICLE OF CRCAR_CAS   + " Ce client est inactif                                            " &
+     IF CLISTU OF VCLC_CLI = "I" &
+
+ELSE ""
+@ENDIF
+
+; affectation d'erreurs
+ITEM G_ERREUR = "ARRET" IF T_MESERR <> ""
+
+SUBFILE WCR702E KEEP IF G_ERREUR = "ARRET" &
+INCLUDE T_MESERR
+
+;---------------------------------------------------------------
+; Validation des données du fichier entrée CRCRI_CAS
+;
+REQUEST VALIDATION_FICHIER_DETAIL TERMINATE IF G_ERREUR = "ARRET"
+
+ACCESS CRCRI_CAS &
+; Vérification si la compagnie existe
+  LINK CASCIECLE OF CRCRI_CAS &
+    TO CIECLE OF MCCOMPAGNIE OPTIONAL &
+
+; Vérification si l'usager a accès à cette compagnie
+  LINK CASCIECLE OF CRCRI_CAS &
+    TO CIECLE OF VSEC_USR OPTIONAL &
+
+; Vérification si un numéro de facture identique n'existe pas déjà
+  LINK CASCIECLE OF CRCRI_CAS, &
+       CASCARCLE OF CRCRI_CAS &
+    TO CIECLE, &
+       CARCLE OF CRCPT_A_REC OPTIONAL &
+
+; Vérification de l'existance du projet
+  LINK CASCIECLE OF CRCRI_CAS , &
+       PROCLE    OF CRCRI_CAS &
+    TO CIECLE, &
+       PRJCLE OF GPPROJETS OPTIONAL &
+
+; Vérification de l'existance du Sous-projet
+  LINK CASCIECLE OF CRCRI_CAS , &
+       PROCLE    OF CRCRI_CAS , &
+       ACTCLE    OF CRCRI_CAS   &
+    TO CIECLE, &
+       PRJCLE, &
+       PRACLE OF GPPRO_ACTIVITE OPTIONAL &
+
+; Vérification de l'existance de l'équipement
+  LINK CASCIECLE OF CRCRI_CAS , &
+       (UNICAT OF CRCRI_CAS + UNICLE OF CRCRI_CAS)  &
+    TO CIECLE, &
+       IMMCLE OF IMIMMOBILISATION OPTIONAL &
+
+; Vérification de l'existance de l'élément facturable
+  LINK CASCIECLE OF CRCRI_CAS , &
+       ELECLE    OF CRCRI_CAS &
+    TO CIECLE, &
+       ELECLE OF CRELE_FACT OPTIONAL &
+
+; Vérification de l'existance du compte ctb
+  LINK CPTCLE OF CRELE_FACT &
+    TO CPTCLE OF MCCOMPTE OPTIONAL &
+
+; Vérification de l'existance de l'unité adm.
+
+  LINK CASCIECLE OF CRCRI_CAS , &
+       CRSUNACLE OF CRCRI_CAS  &
+    TO CIECLE, &
+       UNACLE OF MCUNITE_ADM OPTIONAL  &
+
+; Validation du lien compte /unité dans la charte
+  LINK CPTCLE    OF CRELE_FACT, &
+       CASCIECLE OF CRCRI_CAS , &
+       CRSUNACLE OF CRCRI_CAS   &
+    TO CPTCLE, &
+       CIECLE, &
+       UNACLE  OF MCCHARTE_UNA OPTIONAL &
+
+ ; Validation si les paramètres de passerelle sont définis.
+   LINK CASCIECLE OF CRCRI_CAS &
+     TO CIECLE    OF CRPARAM_CAS OPTIONAL &
+
+  LINK "1" TO CIENMC OF MCHOLDING OPTIONAL
+
+; POUR ELIMINER LES IMPURETEES DU FICHIER D'ENTREE
+
+SELECT IF CASCIECLE OF CRCRI_CAS NE " "
+
+
+TEMPORARY T_MESERR CHARACTER SIZE 80 ; Pour les erreurs.
+
+
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE CHARACTER SIZE 5 = "1" + G_PECCLE &
+         IF G_PECCLE[1:1] < "8" &
+         ELSE "0" + G_PECCLE
+; Ajustement pour le changement de siècle
+DEFINE D_CCUPECDEBA_SIE CHARACTER SIZE 5 = "1" + CCUPECDEBA OF MCCHARTE_UNA &
+         IF CCUPECDEBA OF MCCHARTE_UNA[1:1] < "8" &
+         ELSE "0" + CCUPECDEBA OF MCCHARTE_UNA
+; Ajustement pour le changement de siècle
+DEFINE D_CCUPECDEBI_SIE CHARACTER SIZE 5 = "1" + CCUPECDEBI OF MCCHARTE_UNA &
+         IF CCUPECDEBI OF MCCHARTE_UNA[1:1] < "8" &
+         ELSE "0" + CCUPECDEBI OF MCCHARTE_UNA
+
+
+@IF FRANCAIS
+ITEM T_MESERR = &
+       CASCIECLE OF CRCRI_CAS + " Cette compagnie n'existe pas                                     " IF NOT RECORD MCCOMPAGNIE   EXIST  &
+ELSE   CASCIECLE OF CRCRI_CAS + " Vous n'avez pas access a cette compagnie                         " IF NOT RECORD VSEC_USR      EXIST  &
+ELSE   PROCLE    OF CRCRI_CAS + " Ce projet n'existe pas                                           " IF NOT RECORD GPPROJETS EXIST       &
+ELSE   PROCLE    OF CRCRI_CAS + " Ce projet n'est pas actif                                        " IF PRJSTU OF GPPROJETS <> "A"       &
+ELSE   ACTCLE    OF CRCRI_CAS + " Cette activité n'existe pas                                      " IF NOT RECORD GPPRO_ACTIVITE    EXIST  &
+ELSE   ACTCLE    OF CRCRI_CAS + " Cette activité n'est pas actif                                   " IF PRASTU OF GPPRO_ACTIVITE <> "A"     &
+ELSE   CASCARCLE OF CRCRI_CAS + " Cette facture exist déjà                                         " IF RECORD CRCPT_A_REC       EXIST  &
+ELSE   UNICAT OF CRCRI_CAS + UNICLE OF CRCRI_CAS + " " + &
+         " Cette immobilisation n'existe pas                                    " IF NOT RECORD IMIMMOBILISATION EXIST  &
+ELSE   UNICAT OF CRCRI_CAS + UNICLE OF CRCRI_CAS + " " + &
+         " Cette immobilisation n'est pas actif                                 " IF IMMSTU OF IMIMMOBILISATION <> "A"        &
+ELSE   ELECLE    OF CRCRI_CAS + " Cette élément facturable n'existe pas                            " IF NOT RECORD CRELE_FACT    EXIST  &
+ELSE   CRSUNACLE OF CRCRI_CAS + " Ce unité administrative n'existe pas                             " IF NOT RECORD MCUNITE_ADM   EXIST  &
+ELSE   CRSUNACLE OF CRCRI_CAS  + " " + &
+       CPTCLE    OF CRELE_FACT + " Cette charte de compte n'existe pas               " IF NOT RECORD MCCHARTE_UNA  EXIST &
+ELSE   CRSUNACLE OF CRCRI_CAS  + " " + &
+       CPTCLE    OF CRELE_FACT + " La combinaison compte/unité adm. est inactif.     " &
+                                                                        IF ((D_PECCLE_SIE  >= D_CCUPECDEBA_SIE AND &
+                                                                            (D_PECCLE_SIE  <  D_CCUPECDEBI_SIE OR &
+                                                                                " " =  CCUPECDEBI OF MCCHARTE_UNA )) AND &
+                                                                            (HLDCHTCPTRLT OF MCHOLDING = "E") AND &
+                                                                             RECORD MCCHARTE_UNA EXIST) &
+ELSE   CPTCLE    OF CRELE_FACT + " On ne peut pas utliser ce compte dans une imputation.            " IF CPTTYP OF MCCOMPTE <> "R" &
+ELSE   CASCIECLE OF CRCRI_CAS  + " Les paramètres de passerelle ne sont pas définis.                " IF NOT RECORD CRPARAM_CAS  EXIST  &
+ELSE ""
+@ENDIF
+; affectation d'erreurs
+ITEM G_ERREUR = "ARRET" IF T_MESERR <> ""
+
+SUBFILE WCR702E KEEP IF G_ERREUR = "ARRET" &
+INCLUDE T_MESERR
+
+
+;---------------------------------------------------------------
+; Création de la facture
+;
+REQUEST CREATION_FACTURE TERMINATE IF G_ERREUR = "ARRET"
+
+ACCESS CRCAR_CAS &
+  LINK "----" , &
+       CASCLICLE OF CRCAR_CAS , &
+       CASCIECLE OF CRCAR_CAS &
+    TO CLICIECLE, &
+       CLICLE   , &
+       CIECLE OF VCLC_CLI
+
+; POUR ELIMINER LES IMPURETEES DU FICHIER D'ENTREE
+
+SELECT IF CASCIECLE OF CRCAR_CAS NE " "
+
+
+OUTPUT CRCPT_A_REC ADD
+ITEM CIECLE     OF CRCPT_A_REC = CASCIECLE OF CRCAR_CAS ; C    4  Numéro de la compagnie - Entité légale.
+ITEM CARCLE     OF CRCPT_A_REC = CASCARCLE OF CRCAR_CAS ; C   15  Numéro de la facture ou de la note de crédit.
+ITEM REFCIECLE  OF CRCPT_A_REC = "----"                 ; C    4  Compagnie
+ITEM REFCLETYP  OF CRCPT_A_REC = "C"                    ; C    1  Type de référence (C-lient, E-mploye, F-ournisseur)
+ITEM REFCLENUM  OF CRCPT_A_REC = CASCLICLE OF CRCAR_CAS ; C    6  Numéro de la référence
+ITEM RADCLE     OF CRCPT_A_REC = CLCADRETACPT OF VCLC_CLI ; IU   2  Numéro séquentiel d'adresse.
+ITEM CARDSC1    OF CRCPT_A_REC = CASREM1   OF CRCAR_CAS ; C   40  Description pour l'analyse de compte.
+ITEM CARDSC2    OF CRCPT_A_REC = CASREM2   OF CRCAR_CAS ; C   40  Description pour l'analyse de compte.
+ITEM PECCLE     OF CRCPT_A_REC = G_PECCLE               ; C    4  Numéro de la période comptable. (...)
+ITEM LCRCLE     OF CRCPT_A_REC = G_LCRCLE               ; C    4  Numéro du lot.
+ITEM CARTYPECR  OF CRCPT_A_REC = "FA"                   ; C    2  Type de facture.
+ITEM CARCMDCLI  OF CRCPT_A_REC = CASCMDCLI OF CRCAR_CAS ; C   15  Numéro de commande du client.
+ITEM CARDAT     OF CRCPT_A_REC = NCONVERT( CASDAT1   OF CRCAR_CAS ) ; IU   8  Date de la facture ou de la note de crédit.
+ITEM CARDATJOU  OF CRCPT_A_REC = 0                                  ; IU   8  Date de journalisation.
+ITEM CARHREJOU  OF CRCPT_A_REC = 0                                  ; IU   4  Heure de journalisation.
+ITEM CARTERNET  OF CRCPT_A_REC = CLCTERNET  OF VCLC_CLI            ; C    4  Terme net.
+ITEM CARDATNET  OF CRCPT_A_REC = 0                                  ; IU   8  Date due pour l'encaissement.
+ITEM CARTERESC1 OF CRCPT_A_REC = CLCTERESC1 OF VCLC_CLI            ; C    4  Terme d'escompte (1).
+ITEM CARDATESC1 OF CRCPT_A_REC = 0                                  ; IU   8  Date d'escompte (1).
+ITEM CARTERESC2 OF CRCPT_A_REC = CLCTERESC2 OF VCLC_CLI            ; C    4  Terme d'escompte (2).
+ITEM CARDATESC2 OF CRCPT_A_REC = 0                                  ; IU   8  Date d'escompte (2).
+ITEM CARTERFRS  OF CRCPT_A_REC = CLCTERFRS  OF VCLC_CLI            ; C    4  Terme de frais d'intérêt.
+ITEM CARDATFRS  OF CRCPT_A_REC = 0                                  ; IU   8  Date de frais d'intérêt.
+ITEM CARMNT     OF CRCPT_A_REC = NCONVERT( CASMNTCAN OF CRCAR_CAS ) ; F    8  Mnt brut de la facture ou note de crédit incluant les taxes.
+ITEM CARMNTNET  OF CRCPT_A_REC = NCONVERT( CASMNTCAN OF CRCAR_CAS ) - & ; F    8  Montant escomptable pour le calcul de l'escompte.
+                                 NCONVERT( CASMNTTVP OF CRCAR_CAS ) - &
+                                 NCONVERT( CASMNTTPS OF CRCAR_CAS )
+ITEM CARMNTTVP  OF CRCPT_A_REC = NCONVERT( CASMNTTVP OF CRCAR_CAS ) ; F    8  Montant de T.V.P.
+ITEM CARMNTTPS  OF CRCPT_A_REC = NCONVERT( CASMNTTPS OF CRCAR_CAS ) ; F    8  Montant de T.P.S.
+ITEM CARCUMCED  OF CRCPT_A_REC = 0                                  ; F    8  Montant total de cédulé.
+ITEM CARFLGCED  OF CRCPT_A_REC = "0"                                ; C    1  !Si la cédule a été modifiée par l'usager.
+ITEM HISCLE     OF CRCPT_A_REC = 0                                  ; IU   4  !Numéro d'historique pour les écritures comptable.
+ITEM CARCPTCAR  OF CRCPT_A_REC = CLCCPTCAR OF VCLC_CLI             ; C    6  Compte à recevoir pour l'écriture comptable.
+ITEM CARDATCRE  OF CRCPT_A_REC = NCONVERT( CASDATCRE OF CRCAR_CAS)  ; IU   8  Date de création du document.
+ITEM CARHRECRE  OF CRCPT_A_REC = SYSTIME / 10000                    ; IU   2  Heure de création du document.
+ITEM CARUSRCRE  OF CRCPT_A_REC = LOGONID                            ; C   12  Usager de création du document.
+
+SUBFILE WCR702A KEEP &
+  INCLUDE CIECLE OF CRCPT_A_REC, &
+          CARCLE OF CRCPT_A_REC, &
+          LCRCLE OF CRCPT_A_REC, &
+          CARMNT OF CRCPT_A_REC
+
+;---------------------------------------------------------------
+; Création de la l'imputation
+;
+REQUEST CREATION_IMPUTATION TERMINATE IF G_ERREUR = "ARRET"
+
+ACCESS CRCRI_CAS &
+
+; Pour avoir le compte ctb de l'élément facturable
+  LINK CASCIECLE OF CRCRI_CAS , &
+       ELECLE    OF CRCRI_CAS &
+    TO CIECLE, &
+       ELECLE OF CRELE_FACT &
+
+
+; Pour avoir les paramètres de passerelle de la compagnie.
+  LINK CASCIECLE OF CRCRI_CAS &
+    TO CIECLE OF CRPARAM_CAS &
+
+
+; Pour avoir le compte ctb de l'escompte sur ventes
+  LINK CIECLE    OF CRPARAM_CAS , &
+       CPSCODESC OF CRPARAM_CAS   &
+    TO CIECLE, &
+       ELECLE OF CRELE_FACT ALIAS A_CRELE_FACT_ESC &
+
+; Pour avoir le compte ctb de la prime sur ventes
+  LINK CIECLE    OF CRPARAM_CAS , &
+       CPSCODPRI OF CRPARAM_CAS   &
+    TO CIECLE, &
+       ELECLE OF CRELE_FACT ALIAS A_CRELE_FACT_PRI &
+
+
+; Pour être certain que la facture existe
+  LINK CASCIECLE OF CRCRI_CAS, &
+       CASCARCLE OF CRCRI_CAS &
+    TO CIECLE, &
+       CARCLE OF CRCPT_A_REC OPTIONAL  &
+
+; Pour avoir les codes de taxe fédéral et provincial
+  LINK REFCIECLE OF CRCPT_A_REC, &
+       REFCLENUM OF CRCPT_A_REC, &
+       CIECLE    OF CRCPT_A_REC &
+    TO CLICIECLE, &
+       CLICLE   , &
+       CIECLE OF VCLC_CLI
+
+; POUR ELIMINER LES IMPURETEES DU FICHIER D'ENTREE
+
+SELECT IF CASCIECLE OF CRCRI_CAS NE " "
+
+SORT ON CASCIECLE OF CRCRI_CAS &
+     ON CASCARCLE OF CRCRI_CAS
+
+TEMPORARY T_MESERR     CHARACTER SIZE 80 ; Pour les erreurs.
+TEMPORARY T_CRSMNT     FLOAT SIZE 8
+TEMPORARY T_CRSTOT     FLOAT SIZE 8
+
+TEMPORARY T_CRSMNTESC     FLOAT SIZE 8 ; Montant d'escompte de la facture
+TEMPORARY T_CRSMNTPRI     FLOAT SIZE 8 ; Montant de prime de la facture
+TEMPORARY T_CRSMNTESCTOT  FLOAT SIZE 8 ; Montant d'escompte total de la facture
+TEMPORARY T_CRSMNTPRITOT  FLOAT SIZE 8 ; Montant de prime total de la facture
+
+TEMPORARY T_UNACLE        CHARACTER SIZE 8 ; Unité administrative première imputation.
+TEMPORARY T_PROCLE        CHARACTER SIZE 8 ; Projet première imputation.
+TEMPORARY T_ACTCLE        CHARACTER SIZE 3 ; Sous-projet première imputation.
+TEMPORARY T_IMMCLE        CHARACTER SIZE 12
+
+
+
+ITEM T_CRSMNT = NCONVERT( CRSMNT    OF CRCRI_CAS ) + &
+                NCONVERT( CRSMNTTPS OF CRCRI_CAS ) + &
+                NCONVERT( CRSMNTTVP OF CRCRI_CAS ) - &
+                NCONVERT( CRSMNTESC OF CRCRI_CAS )
+
+ITEM T_CRSTOT SUBTOTAL T_CRSMNT RESET AT CASCARCLE
+
+
+  ; Si le montant d'escompte est positif c'est un escompte sur ventes et
+  ; la sommarisation se fait négativement.
+  ;
+ITEM T_CRSMNTESC = ( NCONVERT ( CRSMNTESC OF CRCRI_CAS )) * -1 &
+  IF 0 < NCONVERT (CRSMNTESC OF CRCRI_CAS)  &
+  ELSE 0
+
+ITEM T_CRSMNTESCTOT SUBTOTAL T_CRSMNTESC RESET AT CASCARCLE
+
+
+  ; Si le montant d'escompte est négatif c'est une prime sur ventes et
+  ; la sommarisation se fait positivement.
+  ;
+ITEM T_CRSMNTPRI = ( NCONVERT ( CRSMNTESC OF CRCRI_CAS )) * -1 &
+  IF 0 > NCONVERT (CRSMNTESC OF CRCRI_CAS)  &
+  ELSE 0
+
+ITEM T_CRSMNTPRITOT SUBTOTAL T_CRSMNTPRI RESET AT CASCARCLE
+
+
+  ; Permet de conserver les valeurs de la première imputation de la facture
+  ; pour l'imputation de l'escompte et de la prime sur ventes.
+
+ITEM T_UNACLE = CRSUNACLE OF CRCRI_CAS AT CASCARCLE RESET AT CASCARCLE TO CRSUNACLE OF CRCRI_CAS
+ITEM T_PROCLE = PROCLE    OF CRCRI_CAS AT CASCARCLE RESET AT CASCARCLE TO PROCLE OF CRCRI_CAS
+ITEM T_ACTCLE = ACTCLE    OF CRCRI_CAS AT CASCARCLE RESET AT CASCARCLE TO ACTCLE OF CRCRI_CAS
+ITEM T_IMMCLE = UNICAT    OF CRCRI_CAS + &
+                UNICLE    OF CRCRI_CAS AT CASCARCLE RESET AT CASCARCLE TO UNICAT OF CRCRI_CAS + UNICLE OF CRCRI_CAS
+
+
+
+@IF FRANCAIS
+ITEM T_MESERR = &
+     CASCARCLE OF CRCRI_CAS + " Cette facture n'existe pas " IF NOT RECORD CRCPT_A_REC       EXIST  &
+ELSE ""
+@ENDIF
+
+; affectation d'erreurs
+ITEM G_ERREUR = "ARRET" IF T_MESERR <> ""
+
+SUBFILE WCR702E KEEP IF G_ERREUR = "ARRET" &
+INCLUDE T_MESERR
+
+
+  ; Chaque ligne de facture produit une imputation.
+  ;
+OUTPUT CRCAR_IMPUTATION ADD
+ITEM CIECLE        OF CRCAR_IMPUTATION = CASCIECLE OF CRCRI_CAS ;C    4  Numéro de la compagnie - Entité légale.
+ITEM CARCLE        OF CRCAR_IMPUTATION = CASCARCLE OF CRCRI_CAS ;C   15  Numéro de la facture ou de la note de crédit.
+ITEM CRITIMSTP     OF CRCAR_IMPUTATION = SYSDATE * 1000000 + &
+                                         ROUND(SYSTIME / 100)   ;F    8  !Contient la date et l'heure, TIMESTAMP.
+ITEM PRJCLE        OF CRCAR_IMPUTATION = PROCLE OF CRCRI_CAS    ;C    8  Numéro de projet.
+ITEM PRACLE        OF CRCAR_IMPUTATION = ACTCLE OF CRCRI_CAS    ;C    3  Numéro d'activité.
+ITEM IMMCLE        OF CRCAR_IMPUTATION = UNICAT OF CRCRI_CAS + UNICLE OF CRCRI_CAS   ;C    2  Catégorie d'équipement
+ITEM CPTCLE        OF CRCAR_IMPUTATION = CPTCLE OF CRELE_FACT   ;C    6  Numéro de compte comptable.
+ITEM ELECLE        OF CRCAR_IMPUTATION = ELECLE OF CRCRI_CAS    ;C    4  Code d'élément facturable
+ITEM TRPCLE        OF CRCAR_IMPUTATION = TRPCLE OF CRELE_FACT
+ITEM ETACLE        OF CRCAR_IMPUTATION = ETACLE OF CRELE_FACT
+ITEM UNACLE        OF CRCAR_IMPUTATION = CRSUNACLE OF CRCRI_CAS ;C    8  No d'unité administrative selon la structure interne (...)
+ITEM CRICODDC      OF CRCAR_IMPUTATION = "C"                    ;C    1  Débit / Crédit
+ITEM CRITAXTYPTPS  OF CRCAR_IMPUTATION = "F"                    ;C    1  Type de taxe fédéral = F.
+ITEM CRITAXCODTPS  OF CRCAR_IMPUTATION = CLCTAXCODTPS OF VCLC_CLI ;C    2  Code de taxe fédéral(TPS).
+ITEM CRITAXTYPTVP  OF CRCAR_IMPUTATION = "P"                    ;C    1  Type de taxe provincial = P.
+ITEM CRITAXCODTVP  OF CRCAR_IMPUTATION = CLCTAXCODTVP OF VCLC_CLI ;C    2  Code de taxe provincial(TVP).
+ITEM CRIMNT        OF CRCAR_IMPUTATION = NCONVERT( CRSMNT    OF CRCRI_CAS )  ;F    8  Montant de l'imputation, incluant toutes taxes.
+ITEM CRIMNTTPS     OF CRCAR_IMPUTATION = NCONVERT( CRSMNTTPS OF CRCRI_CAS ) ;I    4  Montant de TPS.
+ITEM CRIMNTTVP     OF CRCAR_IMPUTATION = NCONVERT( CRSMNTTVP OF CRCRI_CAS ) ;I    4  Montant de TVP.
+
+
+  ; Génération de l'imputation d'escompte s'il y a lieu.
+  ;
+OUTPUT CRCAR_IMPUTATION ADD ALIAS A_CRCAR_IMPUTATION_ESC AT CASCARCLE &
+  IF T_CRSMNTESCTOT <> 0
+ITEM CIECLE        OF A_CRCAR_IMPUTATION_ESC = CASCIECLE OF CRCRI_CAS ;C    4  Numéro de la compagnie - Entité légale.
+ITEM CARCLE        OF A_CRCAR_IMPUTATION_ESC = CASCARCLE OF CRCRI_CAS ;C   15  Numéro de la facture ou de la note de crédit.
+ITEM CRITIMSTP     OF A_CRCAR_IMPUTATION_ESC = SYSDATE * 1000000 + &
+                                               ROUND(SYSTIME / 100)   ;F    8  !Contient la date et l'heure, TIMESTAMP.
+ITEM PRJCLE        OF A_CRCAR_IMPUTATION_ESC = T_PROCLE               ;C    8  Numéro de projet.
+ITEM PRACLE        OF A_CRCAR_IMPUTATION_ESC = T_ACTCLE               ;C    3  Numéro d'activité.
+ITEM IMMCLE        OF A_CRCAR_IMPUTATION_ESC = T_IMMCLE               ;C    2  Catégorie d'équipement
+ITEM CPTCLE        OF A_CRCAR_IMPUTATION_ESC = CPTCLE OF A_CRELE_FACT_ESC  ;C    6  Numéro de compte comptable.
+ITEM ELECLE        OF A_CRCAR_IMPUTATION_ESC = CPSCODESC OF CRPARAM_CAS ;C    4  Code d'élément facturable
+ITEM TRPCLE        OF A_CRCAR_IMPUTATION_ESC = TRPCLE OF A_CRELE_FACT_ESC
+ITEM ETACLE        OF A_CRCAR_IMPUTATION_ESC = ETACLE OF A_CRELE_FACT_ESC
+ITEM UNACLE        OF A_CRCAR_IMPUTATION_ESC = T_UNACLE               ;C    8  No d'unité administrative selon la structure interne (...)
+ITEM CRICODDC      OF A_CRCAR_IMPUTATION_ESC = "C"                    ;C    1  Débit / Crédit
+ITEM CRITAXTYPTPS  OF A_CRCAR_IMPUTATION_ESC = "F"                    ;C    1  Type de taxe fédéral = F.
+ITEM CRITAXCODTPS  OF A_CRCAR_IMPUTATION_ESC = CLCTAXCODTPS OF VCLC_CLI ;C    2  Code de taxe fédéral(TPS).
+ITEM CRITAXTYPTVP  OF A_CRCAR_IMPUTATION_ESC = "P"                    ;C    1  Type de taxe provincial = P.
+ITEM CRITAXCODTVP  OF A_CRCAR_IMPUTATION_ESC = CLCTAXCODTVP OF VCLC_CLI ;C    2  Code de taxe provincial(TVP).
+ITEM CRIMNT        OF A_CRCAR_IMPUTATION_ESC = T_CRSMNTESCTOT         ;F    8  Montant de l'imputation d'escompte.
+ITEM CRIMNTTPS     OF A_CRCAR_IMPUTATION_ESC = 0                      ;I    4  Montant de TPS.
+ITEM CRIMNTTVP     OF A_CRCAR_IMPUTATION_ESC = 0                      ;I    4  Montant de TVP.
+
+
+
+  ; Génération de l'imputation de prime de ventes s'il y a lieu.
+  ;
+OUTPUT CRCAR_IMPUTATION ADD ALIAS A_CRCAR_IMPUTATION_PRI AT CASCARCLE &
+  IF T_CRSMNTPRITOT <> 0
+ITEM CIECLE        OF A_CRCAR_IMPUTATION_PRI = CASCIECLE OF CRCRI_CAS ;C    4  Numéro de la compagnie - Entité légale.
+ITEM CARCLE        OF A_CRCAR_IMPUTATION_PRI = CASCARCLE OF CRCRI_CAS ;C   15  Numéro de la facture ou de la note de crédit.
+ITEM CRITIMSTP     OF A_CRCAR_IMPUTATION_PRI = SYSDATE * 1000000 + &
+                                               ROUND(SYSTIME / 100)   ;F    8  !Contient la date et l'heure, TIMESTAMP.
+ITEM PRJCLE        OF A_CRCAR_IMPUTATION_PRI = T_PROCLE               ;C    8  Numéro de projet.
+ITEM PRACLE        OF A_CRCAR_IMPUTATION_PRI = T_ACTCLE               ;C    3  Numéro d'activité.
+ITEM IMMCLE        OF A_CRCAR_IMPUTATION_PRI = T_IMMCLE               ;C    2  Catégorie d'équipement
+ITEM CPTCLE        OF A_CRCAR_IMPUTATION_PRI = CPTCLE OF A_CRELE_FACT_PRI  ;C    6  Numéro de compte comptable.
+ITEM ELECLE        OF A_CRCAR_IMPUTATION_PRI = CPSCODPRI OF CRPARAM_CAS    ;C    4  Code d'élément facturable
+ITEM TRPCLE        OF A_CRCAR_IMPUTATION_PRI = TRPCLE OF A_CRELE_FACT_PRI
+ITEM ETACLE        OF A_CRCAR_IMPUTATION_PRI = ETACLE OF A_CRELE_FACT_PRI
+ITEM UNACLE        OF A_CRCAR_IMPUTATION_PRI = T_UNACLE               ;C    8  No d'unité administrative selon la structure interne (...)
+ITEM CRICODDC      OF A_CRCAR_IMPUTATION_PRI = "C"                    ;C    1  Débit / Crédit
+ITEM CRITAXTYPTPS  OF A_CRCAR_IMPUTATION_PRI = "F"                    ;C    1  Type de taxe fédéral = F.
+ITEM CRITAXCODTPS  OF A_CRCAR_IMPUTATION_PRI = CLCTAXCODTPS OF VCLC_CLI ;C    2  Code de taxe fédéral(TPS).
+ITEM CRITAXTYPTVP  OF A_CRCAR_IMPUTATION_PRI = "P"                    ;C    1  Type de taxe provincial = P.
+ITEM CRITAXCODTVP  OF A_CRCAR_IMPUTATION_PRI = CLCTAXCODTVP OF VCLC_CLI ;C    2  Code de taxe provincial(TVP).
+ITEM CRIMNT        OF A_CRCAR_IMPUTATION_PRI = T_CRSMNTPRITOT         ;F    8  Montant de l'imputation, incluant toutes taxes.
+ITEM CRIMNTTPS     OF A_CRCAR_IMPUTATION_PRI = 0                      ;I    4  Montant de TPS.
+ITEM CRIMNTTVP     OF A_CRCAR_IMPUTATION_PRI = 0                      ;I    4  Montant de TVP.
+
+
+
+OUTPUT CRCPT_A_REC UPDATE AT CASCARCLE
+  ITEM CARCUMMNT  OF CRCPT_A_REC FINAL T_CRSTOT; F    8  Montant total sur l'imputation.
+
+REQUEST FIN TERMINATE IF G_ERREUR = "ARRET"
+
+ACCESS CRLOT
+
+
+CHOOSE CIECLE PARM, &
+       PECCLE PARM  RANGE, &
+       LCRCLE PARM
+
+; Ajustement pour le changement de siècle
+DEFINE D_ANNSIE CHARACTER SIZE 4 = PARM
+
+SELECT IF PECCLE OF CRLOT[1:2] = D_ANNSIE[3:2]
+
+OUTPUT CRLOT UPDATE
+ITEM LCRTYPECR OF CRLOT FINAL "PF" ; Attention voir l'écran CR720.qks pour
+                                   ; le traitement d'un lot PF
+
+DISPLAY "Terminer sans erreur "
+
+BUILD
+
+;
+;Attention il y a un quick en batch qui suit
+;

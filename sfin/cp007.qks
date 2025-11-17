@@ -1,0 +1,483 @@
+;/T/ Gestion des paiements à affectuer - écran maitre
+;
+;//M/GRA01/Francois Richard/1999-06-18
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;
+;/P/ Programmeur..: Thomas BRENNEUR
+;    Date Création: 18 Juin 1993
+;
+;    Description..: Sélection des documents à payer. Cet écran effectue
+;                   la synchronisation générale de la fonctionnalitée :
+;
+;                     1_ Sélection du lot à créer (type PP)
+;                     2_ Saisie des paramètres de recherche et
+;                        sélection des cédules à payer - CP007A.
+;                        (Attention au trigger TSLCSTO).
+;                     3_ Vérification et modification de la liste des
+;                        documents sélectionnés - CP007B.( Attention au
+;                        trigger TSLCDEL)
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cp007  ACTIONBAR &
+              MODE LABEL "" AT 2,80 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              AUTOUPDATE &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              ACTIVITIES ENTRY, CHANGE &
+              RECEIVING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        T_PECCLEMNU, &
+                        T_PECCLECOU, &
+                        T_FOUCIECLE, &
+                        T_EMPCIECLE
+
+TEMPORARY T_PECCLECOU_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_FIELDTEXT_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+USE ussectmp NOLIST
+    "CP007"
+
+USE cp007.hlp NOLIST
+
+USE usactecr NOLIST
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-Ecrans"
+  MENUITEM LABEL "Paramètres                      " ACTION DESIGNER D001
+  MENUITEM LABEL "Sélection des documents         " ACTION DESIGNER D002
+@ELSE
+ACTIONMENU LABEL "Subscreens"
+  MENUITEM LABEL "Paramètres                   %%%" ACTION DESIGNER D001
+  MENUITEM LABEL "Sélection des documents      %%%" ACTION DESIGNER D002
+@ENDIF
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE  4 ; Compagnie du menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie du menu
+TEMPORARY T_PECCLEMNU CHARACTER SIZE  4 ; Période comptable du mennu
+TEMPORARY T_PECCLECOU CHARACTER SIZE  4 ; Période comptable courante
+TEMPORARY T_FOUCIECLE CHARACTER SIZE  4 ; Compagnie du fournisseur
+TEMPORARY T_EMPCIECLE CHARACTER SIZE  4 ; Compagnie de l'employé
+
+;-------------------------------------------------------------------------------
+;
+; LOT DE PRÉPARATION DES PAIEMENTS
+;
+;   Attention : Cet écran permet à l'usager de saisie le numéro du lot de PP
+;               qu'il à créé et ensuite de saisir les paramètres de sélection
+;               des documents. Mais comme le lot existe déja, on à utilisé un
+;               TRUC pour faciliter la saisie. Au lieu de faire un FIND pour
+;               retrouver son lot et ensuite de modifier les paramètres, on
+;               simule un ENTRY pour que toutes les opérations soit faites
+;               sans changer de mode. Voir les procédures EDIT LCPCLE et
+;               ENTRY.
+;
+FILE CPLOT            PRIMARY
+
+  ACCESS  VIA     CIECLE   , &
+                  PECCLE   , &
+                  LCPCLE   , &
+                  LCPTYPECR  &
+          USING   T_CIECLEMNU    , &
+                  PECCLE OF CPLOT, &
+                  LCPCLE OF CPLOT, &
+                  "PP"             &
+          REQUEST PECCLE, &
+                  LCPCLE
+
+  ACCESS  VIA     CIECLE   , &
+                  PECCLE   , &
+                  LCPTYPECR  &
+          USING   T_CIECLEMNU    , &
+                  PECCLE OF CPLOT, &
+                  "PP"             &
+          REQUEST PECCLE &
+          ORDERBY CIECLE, &
+                  PECCLE, &
+                  LCPCLE
+
+  ACCESS  VIA     CIECLE   , &
+                  LCPTYPECR  &
+          USING   T_CIECLEMNU, &
+                  "PP"         &
+          ORDERBY CIECLE, &
+                  PECCLE, &
+                  LCPCLE
+
+
+  ITEM LCPREFTYP OF CPLOT INITIAL "F"
+
+;-------------------------------------------------------------------------------
+;
+; Valide la date du paiement par rapport à la période comptable.
+;
+FILE MCPERIODE_CTB REFERENCE
+
+  ACCESS  VIA   PECCLE  &
+          USING PECCLE OF CPLOT
+
+;
+; Validation du lot.
+;
+FILE CPLOT            REFERENCE &
+                      ALIAS A_LCP_EXISTE
+  ACCESS  VIA     CIECLE   , &
+                  PECCLE   , &
+                  LCPCLE     &
+          USING   T_CIECLEMNU     , &
+                  PECCLE OF CPLOT , &
+                  LCPCLE OF CPLOT
+
+
+;-------------------------------------------------------------------------------
+
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+
+DEFINE D_LCPMNTPYE FLOAT SIZE 8 = LCPCUMMNT OF CPLOT &
+                                + LCPCUMESC OF CPLOT
+
+
+TEMPORARY T_CIECLE    CHARACTER SIZE  4
+TEMPORARY T_CAPCLE    CHARACTER SIZE 15
+TEMPORARY T_TYPECR    CHARACTER SIZE  2
+TEMPORARY T_PECCLE    CHARACTER SIZE  4
+TEMPORARY T_LCPCLE    CHARACTER SIZE  4
+TEMPORARY T_CODMOD    CHARACTER SIZE  2 INITIAL "CP" RESET AT STARTUP
+
+;-------------------------------------------------------------------------------
+
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+DRAW 3,1 TO 7,80
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Gestion des paiements à effectuer " &
+@ELSE
+      " Payables Management " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+ALIGN (3,3,19) (,40,56)
+
+FIELD PECCLE OF CPLOT &
+label "Période ......:" &
+      ID 05 HIDDEN &
+      REQUIRED &
+      NOCHANGE
+
+FIELD D_LCPMNTPYE &
+      PICTURE "^^,^^^,^^^.^^ " &
+      TRAILING "-" INPUT SCALE 2 SIGNIFICANCE 5 &
+@IF FRANCAIS
+      LABEL "Montant payé..:" &
+@ELSE
+      LABEL "Paid amount...:" &
+@ENDIF
+      DISPLAY REFRESH
+
+FIELD LCPCLE OF CPLOT &
+label "Numéro de lot.:" &
+      ID SAME &
+      REQUIRED &
+      NOCHANGE &
+      NUMERIC SIGNIFICANCE 4
+
+FIELD LCPCUMESC OF CPLOT &
+      DISPLAY &
+@IF FRANCAIS
+      LABEL "Escompte pris.:" &
+@ELSE
+      LABEL "Taken disc....:" &
+@ENDIF
+      REFRESH
+
+FIELD LCPDATPAM OF CPLOT  FORMAT YYYYMMDD PATTERN "####/##/##" &
+label "Date paiement.:" &
+      ID 10 &
+      REQUIRED
+
+FIELD LCPCUMMNT OF CPLOT &
+      DISPLAY &
+@IF FRANCAIS
+      LABEL "Montant net...:" &
+@ELSE
+      LABEL "Net amount....:" &
+@ENDIF
+      REFRESH
+
+;-------------------------------------------------------------------------------
+; *** Sécurité d'accès ***
+;
+; Valide la sécurité d'accès pour l'écran par son code.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION & VALIDATION DE LA PÉRIODE COMPTABLE
+;
+;
+PROCEDURE INPUT PECCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = T_CIECLEMNU
+    LET T_PECCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc109 MODE F PASSING T_CIECLE, T_PECCLE, T_CODMOD
+    LET FIELDTEXT = TRUNCATE(T_PECCLE)
+  END
+END
+
+;
+; Validation de la période.
+;
+PROCEDURE EDIT PECCLE
+BEGIN
+  ; Ajustement pour le changement de siècle
+  IF FIELDTEXT[1:1] < "8"
+  THEN LET T_FIELDTEXT_SIE = "1" + FIELDTEXT
+  ELSE LET T_FIELDTEXT_SIE = "0" + FIELDTEXT
+
+  ; Ajustement pour le changement de siècle
+  IF T_PECCLECOU[1:1] < "8"
+  THEN LET T_PECCLECOU_SIE = "1" + T_PECCLECOU
+  ELSE LET T_PECCLECOU_SIE = "0" + T_PECCLECOU
+
+  IF T_FIELDTEXT_SIE < T_PECCLECOU_SIE
+  THEN ERROR 406 ; Cette période est fermée.
+
+  IF FIELDTEXT <> T_PECCLECOU
+  THEN WARNING 407 ; Cette période diffère de la période courante.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION & VALIDATION DU LOT
+;
+;
+PROCEDURE INPUT LCPCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PECCLE = PECCLE    OF CPLOT
+    LET T_TYPECR = "PP"
+    LET T_LCPCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cp103 MODE F PASSING T_TYPECR, T_CIECLEMNU, T_PECCLE, T_LCPCLE
+    LET FIELDTEXT = TRUNCATE(T_LCPCLE)
+  END
+
+  ;
+  ; Force l'éxécution du LOOKUP sur le lot et de la procédure EDIT.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(LCPCLE OF CPLOT))
+  THEN LET FIELDTEXT = LCPCLE OF CPLOT
+END
+
+
+;
+; Validation du lot.
+;
+PROCEDURE EDIT LCPCLE
+BEGIN
+  GET A_LCP_EXISTE &
+      VIA     CIECLE, &
+              PECCLE, &
+              LCPCLE  &
+      USING   T_CIECLEMNU    , &
+              PECCLE OF CPLOT, &
+              LCPCLE OF CPLOT  &
+      OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 436 ; Ce numéro de lot n'existe pas.
+
+  IF LCPTYPECR OF A_LCP_EXISTE <> "PP"
+  THEN ERROR 441 ; Ce lot n'est pas du bon type.
+
+  IF LCPDATJOU OF A_LCP_EXISTE <> 0
+  THEN ERROR 442 ; Le lot est déjà journalisé.
+
+  IF LCPATRJOU OF A_LCP_EXISTE = "1"
+  THEN ERROR 443 ; On ne peut pas utiliser un lot autorisé à la journalisation.
+
+  IF LCPUSR    OF A_LCP_EXISTE <> LOGONID
+  THEN ERROR 444 ; Ce lot ne vous est pas destiné.
+
+  IF LCPDATVAL OF A_LCP_EXISTE <> 0
+  THEN WARNING 445 ; Une liste de vérification a déjà été demandé pour ce lot.
+
+  IF LCPDATFIN OF A_LCP_EXISTE <> 0
+  THEN WARNING 501 ; Il y a déjà une sélection de faite sur ce lot.
+
+  GET CPLOT &
+      VIA     CIECLE, &
+              PECCLE, &
+              LCPCLE  &
+      USING   T_CIECLEMNU    , &
+              PECCLE OF CPLOT, &
+              LCPCLE OF CPLOT  &
+      OPTIONAL
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; VALIDATION DE LA DATE DE PAIEMENT
+;
+;
+PROCEDURE INPUT LCPDATPAM
+BEGIN
+  ;
+  ; On force l'exécution de la procédure EDIT
+  ;
+  IF NOT FINDMODE AND  &
+     0 = SIZE(FIELDTEXT)
+  THEN LET FIELDTEXT = ASCII(MOD(LCPDATPAM OF CPLOT,1000000),6)
+END
+
+;
+; Valide la date de paiement selon l'interval de date de la période.
+;
+PROCEDURE EDIT LCPDATPAM
+BEGIN
+  IF FIELDVALUE < PECDATDEB OF MCPERIODE_CTB
+  THEN ERROR 452 ; La date est inférieure à la date de début de la période
+
+  IF FIELDVALUE > PECDATFIN OF MCPERIODE_CTB
+  THEN ERROR 453 ; La date est supérieure à la date de fin de la période.
+END
+
+;-------------------------------------------------------------------------------
+;
+; VALIDATION DE LA SÉCURITÉ EN SAISIE DE DONNÉES
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; SAISIE D'UNE NOUVELLE SÉLECTION
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  ACCEPT PECCLE OF CPLOT
+  ACCEPT LCPCLE OF CPLOT
+  ACCEPT LCPDATPAM OF CPLOT
+  DISPLAY D_LCPMNTPYE
+  DISPLAY LCPCUMMNT OF CPLOT
+  DISPLAY LCPCUMESC OF CPLOT
+  ;
+  ; Saisie des paramètres de recherche et sélection des documents
+  ;
+  RUN SCREEN cp007a &
+        PASSING   T_CIECLEMNU, &
+                  T_FOUCIECLE, &
+                  T_EMPCIECLE, &
+                  CPLOT        &
+        MODE E
+  ;
+  ; Consultation & modification de la liste des documents à payer
+  ;
+  RUN SCREEN cp007b &
+        PASSING   T_CIECLEMNU, &
+                  T_FOUCIECLE, &
+                  T_EMPCIECLE, &
+                  CPLOT        &
+        MODE F
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF CPLOT &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF CPLOT &
+     AND NOT NEWRECORD     OF CPLOT &
+     AND NOT DELETEDRECORD OF CPLOT &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+END
+
+;-------------------------------------------------------------------------------
+;
+; ECRAN DE SAISIE DES PARAMÈTRES & SÉLECTION DES DOCUMENTS
+;
+;
+PROCEDURE DESIGNER D001
+BEGIN
+  RUN SCREEN cp007a &
+        PASSING   T_CIECLEMNU, &
+                  T_FOUCIECLE, &
+                  T_EMPCIECLE, &
+                  CPLOT        &
+        MODE E
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION & MODIFICATION DE LA LISTE DES DOCUMENTS À PAYER
+;
+;
+PROCEDURE DESIGNER D002
+BEGIN
+  RUN SCREEN cp007b &
+        PASSING   T_CIECLEMNU, &
+                  T_FOUCIECLE, &
+                  T_EMPCIECLE, &
+                  CPLOT        &
+        MODE F
+END
+
+BUILD
+@IF FORMAT
+
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+********************** Gestion des paiements à effectuer ***********************
+* Période ......: xxxxx                Montant payé..: xxxxxxxxxxxxxx          *
+* Numéro de lot.: xxxx                 Escompte pris.: xxxxxxxxxxxxxx          *
+* Date paiement.: xxxxxxxx             Montant net...: xxxxxxxxxxxxxx          *
+********************************************************************************
+@ENDIF

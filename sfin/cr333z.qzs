@@ -1,0 +1,401 @@
+;/T/ Rapport de Vérification des Mauvaises créances
+;
+;/P/ Programmeur...: Alain Côté
+;    Date Création.: 26 juillet 1993
+;
+;    Description...: La Liste de Verification des lots mauvaises créances
+;                    non journalisé au Grand-Livre. Remarques que le
+;                    rapport peut être executer même si le lot a été
+;                    journalisé.
+;
+;/V3.02.04/, Nancy Marceau, 94/06/09, (264)
+;
+;/M/ Francois Richard, 1999-07-12
+;
+;    Ajustement pour le changement de siècle
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST
+SET NOBLANK
+
+ACCESS *WCR333B &
+
+  LINK REFCIECLE OF WCR333B , &
+       REFCLETYP OF WCR333B , &
+       REFCLENUM OF WCR333B   &
+    TO REFCIECLE            , &
+       REFCLETYP            , &
+       REFCLENUM            OF MCREFERENCE OPTIONAL &
+
+  LINK CPTCLE    OF WCR333B   &
+    TO CPTCLE               OF VCPT_DSC    OPTIONAL &
+
+  LINK CIECLE    OF WCR333B , &
+       UNACLE    OF WCR333B   &
+    TO CIECLE               , &
+       UNACLE               OF MCUNITE_ADM OPTIONAL &
+
+  LINK CIECLE    OF WCR333B , &
+       PRJCLE    OF WCR333B   &
+    TO CIECLE               , &
+       PRJCLE               OF GPPROJETS    OPTIONAL &
+
+  LINK CIECLE    OF WCR333B , &
+       PRJCLE    OF WCR333B , &
+       PRACLE    OF WCR333B   &
+    TO CIECLE               , &
+       PRJCLE               , &
+       PRACLE               OF GPPRO_ACTIVITE  OPTIONAL &
+
+  LINK CIECLE OF WCR333B  , &
+       IMMCLE OF WCR333B    &
+    TO CIECLE             , &
+       IMMCLE             OF IMIMMOBILISATION OPTIONAL
+
+
+;
+; Titre de la liste.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+         "Vérification des mauvaises créances"
+@ELSE
+         "%%%Vérification des mauvaises créances"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = " "             ; titre2  du rapport
+
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "CR333"
+
+;
+; Nom de la compagnie du menu.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM
+
+;
+; Valeur bilingue pour les flags Oui/Non.
+;
+USE usflgdet NOLIST
+
+;
+; Indique si le lot est hors balance.
+;
+DEFINE D_HRSBLC    CHARACTER SIZE 3 =  DZ_FLGAFFO &
+                                         IF 0 <> LCRNBRTRSERR OF WCR333B &
+                                  ELSE DZ_FLGAFFN
+
+;
+; Indique si le lot est journalisé
+;
+DEFINE D_JOURNALISE CHAR SIZE 12 = &
+@IF FRANCAIS
+           "Journalisé" &
+@ELSE
+           "Posted" &
+@ENDIF
+           IF LCRDATJOU OF WCR333B <> 0
+
+;***********************
+; Pour le rendre à 20 caractères.
+;
+DEFINE D_PRJTIT    CHARACTER SIZE 20 = PRJDSC1 OF GPPROJETS
+
+DEFINE D_PRATIT    CHARACTER SIZE 20 = PRADSC1 OF GPPRO_ACTIVITE
+
+DEFINE D_IMMTIT    CHARACTER SIZE 18 = IMMDSC  OF IMIMMOBILISATION
+;***********************
+
+;
+; Différence nbre transactions réel et nbre transactions évalué
+;
+DEFINE D_LCRNBRTRSDIF INTEGER SIZE 4 = LCRNBRTRSVER OF WCR333B - &
+                                       LCRNBRTRS    OF WCR333B
+
+;
+; Différence Montant transaction réel et Montant transaction évalué
+;
+DEFINE D_LCRCUMMNTDIF FLOAT SIZE 8 = LCRCUMMNTVER OF WCR333B - &
+                                     LCRCUMMNT    OF WCR333B
+
+;
+; On vérifie si le montant de la mauvaise créance de type manuel balance avec le total de l'imputation.
+;
+DEFINE D_BALANCE  CHARACTER SIZE 1 = "*" IF     DPOTYPMAC OF WCR333B = "M" &
+                                            AND DPOMNTPAM OF WCR333B <> DPOCUMMNT OF WCR333B
+
+;
+; Détermine si on doit imprimer la description du nom du dépot ou de la
+; référence.
+;
+DEFINE D_REFNOM CHARACTER SIZE 20 = REFNOMABR OF MCREFERENCE &
+                                      IF 0 = SIZE (TRUNCATE( DPONOM OF WCR333B )) &
+                               ELSE DPONOM OF WCR333B
+
+;
+; Titre des ventilations.
+;   Si type 1, c'est l'imputation
+;   Si type 2, c'est une ventilation factures.
+;   Si type , pas de titre.
+;
+DEFINE D_TITVEN01 CHARACTER SIZE 176 =  &
+@IF FRANCAIS
+        "----------- Projet ---------- ----- Sous-projet ------ ------- Immobilisation -------- " + &
+        "----Unité administrative----- ----------Compte----------- -------Montant" &
+@ELSE
+        "%%%-------Compte-----------  ----Unité administrative-----  ---------Projet----------- " + &
+        "%%%-------Activité---------- -------Montant  " &
+@ENDIF
+          IF T_TYPDET OF WCR333B = "1" &
+   ELSE &
+        "                                                                       " + &
+@IF FRANCAIS
+        "---No facture--- -No cédule- ----Mnt à rec.  -----Mnt radié" &
+@ELSE
+        "%%%No facture--- -No cédule- ----Mnt à rec.  -----Mnt radié" &
+@ENDIF
+          IF T_TYPDET OF WCR333B = "2"
+
+;
+; Si c'est une ligne d'imputation il faut conserver la ligne d'impression, sinon
+; il faut l'effacer.
+;
+DEFINE D_EFFLIGIMP VARCHAR SIZE 162 = "" IF T_TYPDET OF WCR333B = "1" &
+                                 ELSE " "[1:160]
+
+;
+; Si c'est une ligne de ventilation de factures, il faut conserver la ligne
+; d'impression, sinon il faut l'effacer.
+;
+DEFINE D_EFFLIGFAC VARCHAR SIZE 162 = "" IF T_TYPDET OF WCR333B = "2" &
+                                 ELSE " "[1:160]
+
+;
+; Chaque ventilation doit avoir sont totales, il ne faut pas additionner le total
+; de l'imputation plus le total de la ventilation factures.
+;
+DEFINE D_TOTMNT  FLOAT SIZE 8  = DPIMNT    OF WCR333B IF T_TYPDET OF WCR333B = "1" &
+                            ELSE CRHMNTREC OF WCR333B
+
+; Ajustement pour le changement de siècle
+DEFINE D_DPOCLE_TRI CHARACTER SIZE 13 = "1" + DPOCLE OF WCR333B &
+    IF DPOCLE OF WCR333B[1:1] < "8" &
+    ELSE "0" + DPOCLE OF WCR333B
+
+SORT ON LCRCLE    OF WCR333B, &    ;No lot
+        DPODATCRE OF WCR333B, &    ;Date de création
+        DPOHRECRE OF WCR333B, &    ;Heure de création
+        D_DPOCLE_TRI        , &    ;No de M/C
+        T_TYPDET  OF WCR333B, &    ;Type de détail (Imputation Comptable/Ventilation facture)
+        DPITIMSTP OF WCR333B, &    ;Time stamp de l'imputation
+        CARCLE    OF WCR333B, &    ;No facture
+        CCDCLELIG OF WCR333B       ;No ligne de la cédule
+
+
+;
+; Impression de l'en-tête.
+;
+USE ustit180 NOLIST
+SKIP 2&
+@IF FRANCAIS
+ TAB 001 "Lot....: "   &
+@ELSE
+ TAB 001 "Batch..: "   &
+@ENDIF
+ TAB 011 LCRCLE OF WCR333B &
+ TAB 016 LCRDSC OF WCR333B &
+ TAB 060 D_JOURNALISE &
+ SKIP &
+@IF FRANCAIS
+ TAB 001 "Période: " &
+@ELSE
+ TAB 001 "Period.: " &
+@ENDIF
+ TAB 010 PECCLE OF WCR333B &
+SKIP 2 &
+  TAB 001 &
+"                                         Date           Numéro" &
+ SKIP &
+  TAB 001 &
+"*                Client                radiation        de M/C                     Description                          Montant radié" &
+ SKIP &
+  TAB 001 &
+"-     ---------------------------     ----------     ------------     ----------------------------------------         ---------------"
+
+
+HEADING AT D_DPOCLE_TRI &
+  TAB 001  D_BALANCE &
+  TAB 007  REFCLENUM OF WCR333B &
+  TAB 014  D_REFNOM &
+  TAB 040  DPODAT      OF WCR333B &
+  TAB 054  DPOCLE      OF WCR333B &
+  TAB 071  DPODSC1     OF WCR333B &
+  TAB 121  DPOMNTPAM   OF WCR333B &
+  TAB 135 "/" &
+  TAB 136  DEVCLE      OF MCREFERENCE &
+ SKIP &
+  TAB 071  DPODSC2     OF WCR333B
+
+
+
+HEADING AT T_TYPDET &
+SKIP 2
+
+
+REPORT &
+  TAB 003 D_TITVEN01 PRINT AT T_TYPDET &
+SKIP &
+  TAB 003 PRJCLE     OF WCR333B      &
+  TAB 012 D_PRJTIT   &
+  TAB 033 PRACLE     OF WCR333B      &
+  TAB 037 D_PRATIT   &
+  TAB 058 IMMCLE     OF WCR333B      &
+  TAB 071 D_IMMTIT   &
+  TAB 090 UNACLE     OF WCR333B      &
+  TAB 099 UNANOMABR  OF MCUNITE_ADM &
+  TAB 120 CPTCLE     OF WCR333B      &
+  TAB 127 CPTDSCABR  OF VCPT_DSC    &
+  TAB 140 DPIMNT       OF WCR333B       PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 5 &
+  TAB 003 D_EFFLIGIMP &
+ SKIP &
+  TAB 076 CARCLE    OF WCR333B &
+  TAB 096 CCDCLELIG OF WCR333B &
+  TAB 104 T_MNTCAR  OF WCR333B PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+  TAB 120 CRHMNTREC OF WCR333B PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+  TAB 003 D_EFFLIGFAC
+
+
+FOOTING AT T_TYPDET &
+SKIP 2 &
+  TAB 140 "---------------" &
+  TAB 003 D_EFFLIGIMP &
+ SKIP &
+  TAB 120 "---------------" &
+  TAB 003 D_EFFLIGFAC &
+ SKIP &
+  TAB 096 "Total:" &
+  TAB 140 D_TOTMNT SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+  TAB 003 D_EFFLIGIMP &
+ SKIP &
+  TAB 096 "Total:" &
+  TAB 120 D_TOTMNT SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+  TAB 003 D_EFFLIGFAC &
+SKIP
+
+
+
+FOOTING AT D_DPOCLE_TRI & 
+  TAB 001  "------------------------------------------------------------------------------------------------------------------" &
+  TAB 112  "---------------------------------------------------------------------"
+
+
+FOOTING AT LCRCLE &
+@IF FRANCAIS
+  TAB 135 "Total radié....:" &
+@ELSE
+  TAB 135 "%%%al radié....:" &
+@ENDIF
+  TAB 152 DPOMNTPAM  OF WCR333B SUBTOTAL AT D_DPOCLE_TRI &
+          PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+ SKIP 2 &
+@IF FRANCAIS
+  TAB 050   "    Vérifiés         Cumulés             Ecart        Hors balance(*)" &
+@ELSE
+  TAB 050   "%%% Vérifiés         Cumulés             Ecart        Hors balance(*)" &
+@ENDIF
+ SKIP 1 &
+  TAB 050   "--------------    --------------    --------------    --------------- "&
+ SKIP &
+@IF FRANCAIS
+  TAB 023   "Montant total.........:" &
+@ELSE
+  TAB 023   "%%%tant total.........:" &
+@ENDIF
+  TAB 050 LCRCUMMNTVER OF WCR333B   PICTURE "^^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5 &
+  TAB 068 LCRCUMMNT    OF WCR333B   PICTURE "^^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5 &
+  TAB 086 D_LCRCUMMNTDIF            PICTURE "^^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5 &
+  TAB 110 D_HRSBLC &
+SKIP &
+@IF FRANCAIS
+  TAB 023   "Nombre de transactions:" &
+@ELSE
+  TAB 023   "%%%bre de transactions:" &
+@ENDIF
+  TAB 056 LCRNBRTRSVER   OF WCR333B PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+  TAB 074 LCRNBRTRS      OF WCR333B PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+  TAB 092 D_LCRNBRTRSDIF            PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+  SKIP PAGE
+
+BUILD cr333z
+@IF FORMAT
+                                                                                                   1         1         1         1         1         1         1         1         1
+         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8
+123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+
+CR333                                                                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                             Page:9999
+99/99/99 HH:MM xxxxxxxxxxxx                                              Vérification des mauvaises créances
+                                                            xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+Lot....:  xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    Journalisé
+Période: 99-99
+
+                                         Date           Numéro
+*                Client                radiation        de M/C                     Description                          Montant radié
+-     ---------------------------     ----------     ------------     ----------------------------------------         ---------------
+x     123456 xxxxxxxxxxxxxxxxxxxx      xx/xx/xx      123456789012     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         999,999,999.99-/xxx
+                                                                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+  ----------- Projet ---------- ----- Sous-projet ------ -------- Equipement ----------- ----Unité administrative----- ----------Compte----------- -------Montant  TF TP -----------TPS  -----------TVQ  Fac. ---------- Client ---------
+  12345678 xxxxxxxxxxxxxxxxxxxx 123 xxxxxxxxxxxxxxxxxxxx 1212345678 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx xx 999,999,999.99- 999,999,999.99- xxx  123456 xxxxxxxxxxxxxxxxxxxx
+  12345678 xxxxxxxxxxxxxxxxxxxx 123 xxxxxxxxxxxxxxxxxxxx 1212345678 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx xx 999,999,999.99- 999,999,999.99- xxx  123456 xxxxxxxxxxxxxxxxxxxx
+  12345678 xxxxxxxxxxxxxxxxxxxx 123 xxxxxxxxxxxxxxxxxxxx 1212345678 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx xx 999,999,999.99- 999,999,999.99- xxx  123456 xxxxxxxxxxxxxxxxxxxx
+                                                                                                                                                   ---------------       --------------- ---------------
+                                                                                                                                                   999,999,999.99-       999,999,999.99- 999,999,999.99-
+
+
+                                                                          ---No facture--- -No cédule- ----Mnt à rec.  -----Mnt radié
+                                                                           123456789012345     99      999,999,999.99- 999,999,999.99-
+                                                                           123456789012345     99      999,999,999.99- 999,999,999.99-
+
+                                                                                                                       ---------------
+                                                                                                              Total:   999,999,999.99-
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+x     123456 xxxxxxxxxxxxxxxxxxxx      xx/xx/xx      123456789012     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         999,999,999.99-/xxx
+                                                                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+                                                                          ---No facture--- -No cédule- ----Mnt à rec.  -----Mnt radié
+                                                                           123456789012345     99      999,999,999.99- 999,999,999.99-
+                                                                           123456789012345     99      999,999,999.99- 999,999,999.99-
+                                                                           123456789012345     99      999,999,999.99- 999,999,999.99-
+
+                                                                                                                       ---------------
+                                                                                                              Total:   999,999,999.99-
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+x     123456 xxxxxxxxxxxxxxxxxxxx      xx/xx/xx      123456789012     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx         999,999,999.99-/xxx
+                                                                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+   ----------Compte-----------  ----Unité administrative-----  ---------Projet-----------  ---------Activité---------- -------Montant
+   123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99-
+   123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99-
+   123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99-
+
+                                                                                                                       ---------------
+                                                                                                              Total:   999,999,999.99-
+
+                                                                          ---No facture--- -No cédule- ----Mnt à rec.  -----Mnt radié
+                                                                           123456789012345     99      999,999,999.99- 999,999,999.99-
+                                                                           123456789012345     99      999,999,999.99- 999,999,999.99-
+
+                                                                                                                       ---------------
+                                                                                                              Total:   999,999,999.99-
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                                                      Total radié....: 999,999,999.99-
+
+                                                     Vérifiés         Cumulés             Ecart        Hors balance(*)
+                                                 --------------    --------------    --------------    ---------------
+                      Montant total.........:    999,999,999.99    999,999,999.99    999,999,999.99-         xxx
+                      Nombre de transactions:          9,999             9,999             9,999-
+@ENDIF

@@ -1,0 +1,255 @@
+;/T/ Validation sommaire des rapports de dépenses
+;
+;/P/ Programmeur...: Nancy Marceau
+;    Date Création.: 7 février 1994
+;
+;    Description...: Permet de faire une liste de validation des rapports
+;                    de dépenses.
+
+
+ USE ussetqzs NOLIST   ; permet de faire les SET REPORT DEV....
+ SET NOBLANK           ; Empêche l'impression de ligne blanche
+
+
+ACCESS *WCP308 &
+  LINK REFCIECLE OF WCP308, &
+       REFCLETYP OF WCP308, &
+       REFCLENUM OF WCP308, &
+       RADCLE    OF WCP308  &
+    TO REFCIECLE          , &
+       REFCLETYP          , &
+       REFCLENUM          , &
+       RADCLE             OF MCREF_ADRESSE OPTIONAL &
+
+  LINK REFCIECLE OF WCP308, &
+       REFCLETYP OF WCP308, &
+       REFCLENUM OF WCP308  &
+    TO REFCIECLE          , &
+       REFCLETYP          , &
+       REFCLENUM          OF MCREFERENCE OPTIONAL &
+
+  LINK CPTCLE   OF WCP308   &
+    TO CPTCLE             OF VCPT_DSC    OPTIONAL &
+
+  LINK CIECLE   OF WCP308 , &
+       UNACLE   OF WCP308   &
+    TO CIECLE             , &
+       UNACLE             OF MCUNITE_ADM OPTIONAL &
+
+  LINK CIECLE OF WCP308   , &
+       PRJCLE OF WCP308     &
+    TO CIECLE             , &
+       PRJCLE             OF GPPROJETS    OPTIONAL &
+
+  LINK CIECLE OF WCP308   , &
+       PRJCLE OF WCP308   , &
+       PRACLE OF WCP308     &
+    TO CIECLE             , &
+       PRJCLE             , &
+       PRACLE             OF GPPRO_ACTIVITE  OPTIONAL &
+
+  LINK CIECLE OF WCP308  , &
+       IMMCLE OF WCP308    &
+    TO CIECLE             , &
+       IMMCLE             OF IMIMMOBILISATION OPTIONAL &
+
+  LINK CLICIECLE OF WCP308  , &
+       CLICLE    OF WCP308  &
+    TO CLICIECLE , &
+       CLICLE OF CRCLIENT OPTIONAL
+
+
+
+ DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = & ; titre1  du rapport
+@IF FRANCAIS
+                   "Validation sommaire des rapports de dépenses"
+@ELSE
+                   "%%%Validation sommaire des rapports de dépenses"
+@ENDIF
+ DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = " " ; titre2  du rapport
+
+ DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "CP308Z"       ; numéro du rapport
+ DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM           ; nom de la compagnie
+
+
+USE usflgdet NOLIST                    ;Flag Bilingue (O/N)
+
+DEFINE D_HRSBLC    CHARACTER SIZE 3 =  DZ_FLGAFFO IF 0 <> LCPNBRTRSERR OF WCP308 &
+                                       ELSE DZ_FLGAFFN IF LCPNBRTRSERR OF WCP308 = 0
+
+DEFINE D_CAPRTU    CHARACTER SIZE 3 =  DZ_FLGAFFO      IF CAPRTU OF WCP308 = "1" &
+                                       ELSE DZ_FLGAFFN IF CAPRTU OF WCP308 = "0"
+
+DEFINE D_JOURNALISE CHAR SIZE 12 = &                                    ;Indique si Journalisé
+@IF FRANCAIS
+                            "Journalisé" &
+@ELSE
+                            "Posted" &
+@ENDIF
+                            IF LCPDATJOU OF WCP308 <> 0 ELSE " "
+
+
+DEFINE D_LCPNBRTRSDIF INTEGER SIZE 4 = LCPNBRTRSVER - LCPNBRTRS          ;Différence nbre transactions réel et nbre transactions évalué
+DEFINE D_LCPCUMMNTDIF FLOAT SIZE 8   = LCPCUMMNTVER - LCPCUMMNT           ;Différence Montant transaction réel et Montant transaction évalué
+;
+; Vérification si montant entré par l'usager balance avec le total imputation si
+; ne balance imprimer un "*"
+;
+DEFINE D_BALANCE  CHARACTER SIZE 1 = "*" IF CAPMNT    OF WCP308 <> &
+                                            CAPCUMMNT OF WCP308 ELSE " "
+
+
+SORT ON LCPCLE    OF WCP308 &          ; No lot
+     ON REFCLENUM OF WCP308 &          ; No Client
+     ON CAPDAT    OF WCP308 &          ; Date de facture
+     ON CAPCLE    OF WCP308 &          ; Numéro de facture
+     ON CCITIMSTP OF WCP308            ; Date et heure imputation
+
+
+
+ USE ustit220 NOLIST  ; Titre standard pour l'application à 220
+SKIP 2&
+@IF FRANCAIS
+ TAB 001 "Lot....: "   &
+@ELSE
+ TAB 001 "Batch..: "   &
+@ENDIF
+ TAB 011 LCPCLE OF WCP308  &
+ TAB 016 LCPDSC OF WCP308  &
+ TAB 061 "Hors balance = " &
+ TAB 076 D_HRSBLC          &
+ SKIP &
+@IF FRANCAIS
+ TAB 001 "Période: " &
+@ELSE
+ TAB 001 "Period.: " &
+@ENDIF
+ TAB 010 PECCLE OF WCP308 &
+ TAB 061 D_JOURNALISE     &
+SKIP 2 &
+  TAB 001 "                              Numéro          Ty      Date     Facture         Date             " &
+  TAB 106 "                                                      SS-            Unité                           Co Co  Refact" &
+SKIP &
+  TAB 001 "* Numéro employé              rapport         rd Ret  rapport  référée         due          Montant brut" &
+  TAB 106 "Dev          CTI         RTI     Montant net Projet   prj Immobilis.   adm.     Compte       Montant TF TP  client" &
+SKIP &
+  TAB 001 "- --------------------------- --------------- -- ---  -------- --------------- --------  ---------------" &
+  TAB 106 "---  ----------- ----------- --------------- -------- --- ------------ -------- ------ ------------- -- --  ------" &
+SKIP 2
+
+
+REPORT &
+  TAB 001  D_BALANCE                  PRINT AT CAPCLE &
+  TAB 003  REFCLENUM OF WCP308        PRINT AT REFCLENUM &
+  TAB 010  RADNOM OF MCREF_ADRESSE PRINT AT REFCLENUM &
+  TAB 051  CAPDSC1   OF WCP308        PRINT AT CAPCLE    &
+  TAB 092  CAPDSC2   OF WCP308        PRINT AT CAPCLE    &
+SKIP 1 &
+  TAB 031  CAPCLE      OF WCP308          PRINT AT CAPCLE &
+  TAB 047  CAPTYPECR   OF WCP308          PRINT AT CAPCLE &
+  TAB 050  D_CAPRTU                       PRINT AT CAPCLE &
+  TAB 055  CAPDAT      OF WCP308          PRINT AT CAPCLE &
+  TAB 064  T_CAPCLEREF OF WCP308          PRINT AT CAPCLE &
+  TAB 080  CAPDATNET   OF WCP308          PRINT AT CAPCLE &
+  TAB 090  CAPMNT      OF WCP308  &
+    PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 PRINT AT CAPCLE &
+  TAB 106  DEVCLE      OF MCREFERENCE     PRINT AT CAPCLE &
+  TAB 111  CAPMNTCTI   OF WCP308          PRINT AT CAPCLE &
+  TAB 123  CAPMNTRTI   OF WCP308          PRINT AT CAPCLE &
+  TAB 135  CAPMNTNET   OF WCP308  &
+    PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 PRINT AT CAPCLE &
+
+  TAB 151 PRJCLE       OF WCP308           &
+  TAB 160 PRACLE       OF WCP308           &
+  TAB 164 IMMCLE       OF WCP308           &
+  TAB 177 UNACLE       OF WCP308           &
+  TAB 185 CPTCLE       OF WCP308           &
+  TAB 193 CCIMNT       OF WCP308 PICTURE "^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 207 CCITAXCODTPS OF WCP308           &
+  TAB 210 CCITAXCODTVQ OF WCP308           &
+  TAB 214 CLICLE       OF WCP308
+
+
+FOOTING AT LCPCLE &
+SKIP 2 &
+  TAB 069 " Montant cumulé         Montant brut              CTI         RTI     Montant net                                          Montant imputé" &
+SKIP &
+  TAB 069 "---------------      ---------------      ----------- ----------- ---------------                                         ---------------" &
+SKIP &
+@IF FRANCAIS
+  TAB 011 "Total du Lot" &
+@ELSE
+  TAB 011 "Batch Total" &
+@ENDIF
+  TAB 024 LCPCLE      OF WCP308          &
+  TAB 069 LCPCUMMNT   OF WCP308 SUBTOTAL AT LCPCLE PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 090 CAPMNT      OF WCP308 SUBTOTAL AT CAPCLE PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 111 CAPMNTCTI   OF WCP308 SUBTOTAL AT CAPCLE &
+  TAB 123 CAPMNTRTI   OF WCP308 SUBTOTAL AT CAPCLE &
+  TAB 135 CAPMNTNET   OF WCP308 SUBTOTAL AT CAPCLE PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 191 CCIMNT      OF WCP308 SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+SKIP &
+  TAB 069 "---------------      ---------------      ----------- ----------- ---------------                                         ---------------" &
+SKIP PAGE
+
+FINAL FOOTING &
+SKIP 2 &
+  TAB 069 " Montant cumulé         Montant brut              CTI         RTI     Montant net                                          Montant imputé" &
+SKIP &
+  TAB 069 "---------------      ---------------      ----------- ----------- ---------------                                         ---------------" &
+SKIP &
+@IF FRANCAIS
+  TAB 011 "Total pour tous les lots" &
+@ELSE
+  TAB 011 "Batch Total For All" &
+@ENDIF
+  TAB 069 LCPCUMMNT   OF WCP308 SUBTOTAL AT LCPCLE PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 090 CAPMNT      OF WCP308 SUBTOTAL AT CAPCLE PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 111 CAPMNTCTI   OF WCP308 SUBTOTAL AT CAPCLE &
+  TAB 123 CAPMNTRTI   OF WCP308 SUBTOTAL AT CAPCLE &
+  TAB 135 CAPMNTNET   OF WCP308 SUBTOTAL AT CAPCLE PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 191 CCIMNT      OF WCP308 SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+SKIP &
+TAB 069 "---------------      ---------------      ----------- ----------- ---------------                                         ---------------" &
+SKIP PAGE
+
+BUILD cp308z
+
+@IF FORMAT
+
+                                                                                                   1         1         1         1         1         1         1         1         1         1          2         2
+         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8         9          0         1
+1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+CP308                                                                     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                                         Page: 9999
+99/99/99 HH:MM xxxxxxxxxxxx                                             Validation sommaire des rapports de dépenses
+                                                                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+Lot....:  xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     Hors balance = xxx  Journalisé
+Période: 99-99
+
+                              Numéro          Ty      Date     Facture         Date                                                                            SS-            Unité                           Co Co  Refact
+* Numéro employé              rapport         rd Ret  rapport  référée         due          Montant brut Dev          CTI         RTI     Montant net Projet   prj Équipement adm.     Compte         Montant TF TP  client
+- --------------------------- --------------- -- ---  -------- --------------- --------  --------------- ---  ----------- ----------- --------------- -------- --- ---------- -------- ------ --------------- -- --  ------
+x xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+                              xxxxxxxxxxxxxxx xx xxx  xx/xx/xx xxxxxxxxxxxxxxx xx/xx/xx  999,999,999.99- xxx  999,999.99- 999,999.99- 999,999,999.99- xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx 999,999,999.99- xx xx  xxxxxx
+                                                                                                                                                      xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx 999,999,999.99- xx xx  xxxxxx
+                                                                                                                                                      xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx 999,999,999.99- xx xx  xxxxxx
+
+
+x xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+                              xxxxxxxxxxxxxxx xx xxx  xx/xx/xx xxxxxxxxxxxxxxx xx/xx/xx  999,999,999.99- xxx  999,999.99- 999,999.99- 999,999,999.99- xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx 999,999,999.99- xx xx  xxxxxx
+                                                                                                                                                      xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx 999,999,999.99- xx xx  xxxxxx
+                                                                                                                                                      xxxxxxxx xxx xxxxxxxxxx xxxxxxxx xxxxxx 999,999,999.99- xx xx  xxxxxx
+
+
+                                                                     Montant cumulé         Montant brut              CTI         RTI     Montant net                                          Montant imputé
+                                                                    ---------------      ---------------      ----------- ----------- ---------------                                         ---------------
+          Total du lot xxxx                                         999,999,999.99-      999,999,999.99-      999,999.99- 999,999.99- 999,999,999.99-                                         999,999,999.99-
+                                                                    ---------------      ---------------      ----------- ----------- ---------------                                         ---------------
+
+
+                                                                     Montant cumulé         Montant brut              CTI         RTI     Montant net                                          Montant imputé
+                                                                    ---------------      ---------------      ----------- ----------- ---------------                                         ---------------
+          Total pour tous les lots                                  999,999,999.99-      999,999,999.99-      999,999.99- 999,999.99- 999,999,999.99-                                         999,999,999.99-
+                                                                    ---------------      ---------------      ----------- ----------- ---------------                                         ---------------
+@ENDIF

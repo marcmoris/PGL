@@ -1,0 +1,253 @@
+;/T/ Grand livre
+;
+;/M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur...: Chantal Martineau
+;    Date Création.: 04 Mai 1993
+;
+;/V3.00.02/ Alain Côté, 7 mars 1994, 224
+;
+;    Description...: Ce rapport présente l'analyse des transactions
+;                    ayant affectées les soldes au grand livre.
+;
+;-------------------------------------------------------------------------------
+;
+USE ussetqts NOLIST   ; permet de faire les SET ....
+SET LOCK RECORD UPDATE
+
+RUN gl304t
+
+GLOBAL TEMPORARY G_SELANNFIN CHAR SIZE 2   PARM                ; Année financiere
+
+GLOBAL TEMPORARY G_SELPECDEB CHAR SIZE 2   PARM                ; Période de Début (Sans année financière)
+GLOBAL TEMPORARY G_SELPECFIN CHAR SIZE 2   PARM                ; Période de Fin           "
+
+;-------------------------------------------------------------------------------
+; Cette requete sert à calculer le solde de début du compte
+; pour les paramètres choisit par l'usager.
+;
+; Prendre note que le solde est unique par :
+;   année financière - Compte - Compagnie - Unité
+;
+
+REQUEST CALCUL_SOLDE_DEBUT
+
+ACCESS MCSOLDE_ANNUEL &
+  LINK CPTCLE OF MCSOLDE_ANNUEL &
+    TO CPTCLE               OF VCPT_DSC OPTIONAL
+
+CHOOSE SANANN PARM  ,&                       ; Année financière (Une)
+       CIECLE PARM, &                       ; Compagnie (Une)
+       CPTCLE PARM RANGE, &                 ; Compte (Un, plusieurs, ou tous)
+       UNACLE PARM                          ; Unité (Un, plusieurs, ou tous)
+
+
+
+
+TEMPORARY T_OUV_SANCUMANN     FLOAT SIZE 8 ; Calcul le solde de début du compte
+
+
+  ITEM T_OUV_SANCUMANN = SANSLDOUV OF MCSOLDE_ANNUEL&   ;initialisation au solde d'ouverture
+                         IF "01" <= G_SELPECDEB
+
+  ITEM T_OUV_SANCUMANN = T_OUV_SANCUMANN  +  (SANCUMREE1 OF MCSOLDE_ANNUEL)&
+                         IF "02" <= G_SELPECDEB
+
+  ITEM T_OUV_SANCUMANN = T_OUV_SANCUMANN  +  (SANCUMREE2 OF MCSOLDE_ANNUEL)&
+                         IF "03" <= G_SELPECDEB
+
+  ITEM T_OUV_SANCUMANN = T_OUV_SANCUMANN  +  (SANCUMREE3 OF MCSOLDE_ANNUEL)&
+                         IF "04" <= G_SELPECDEB
+
+  ITEM T_OUV_SANCUMANN = T_OUV_SANCUMANN  +  (SANCUMREE4 OF MCSOLDE_ANNUEL)&
+                         IF "05" <= G_SELPECDEB
+
+  ITEM T_OUV_SANCUMANN = T_OUV_SANCUMANN  +  (SANCUMREE5 OF MCSOLDE_ANNUEL)&
+                         IF "06" <= G_SELPECDEB
+
+  ITEM T_OUV_SANCUMANN = T_OUV_SANCUMANN  +  (SANCUMREE6 OF MCSOLDE_ANNUEL)&
+                         IF "07" <= G_SELPECDEB
+
+  ITEM T_OUV_SANCUMANN = T_OUV_SANCUMANN  +  (SANCUMREE7 OF MCSOLDE_ANNUEL)&
+                         IF "08" <= G_SELPECDEB
+
+  ITEM T_OUV_SANCUMANN = T_OUV_SANCUMANN  +  (SANCUMREE8 OF MCSOLDE_ANNUEL)&
+                         IF "09" <= G_SELPECDEB
+
+  ITEM T_OUV_SANCUMANN = T_OUV_SANCUMANN  +  (SANCUMREE9  OF MCSOLDE_ANNUEL)&
+                         IF "10" <= G_SELPECDEB
+
+  ITEM T_OUV_SANCUMANN = T_OUV_SANCUMANN  +  (SANCUMREE10 OF MCSOLDE_ANNUEL)&
+                         IF "11" <= G_SELPECDEB
+
+  ITEM T_OUV_SANCUMANN = T_OUV_SANCUMANN  +  (SANCUMREE11 OF MCSOLDE_ANNUEL)&
+                         IF "12" <= G_SELPECDEB
+
+  ITEM T_OUV_SANCUMANN = T_OUV_SANCUMANN  +  (SANCUMREE12 OF MCSOLDE_ANNUEL)&
+                         IF "13" <= G_SELPECDEB
+
+  ITEM T_OUV_SANCUMANN = T_OUV_SANCUMANN  +  (SANCUMREE13 OF MCSOLDE_ANNUEL)&
+                         IF "14" <= G_SELPECDEB
+
+SUBFILE WGL304A INCLUDE&
+  SANANN OF MCSOLDE_ANNUEL, &
+  CIECLE OF MCSOLDE_ANNUEL, &
+  CPTCLE OF MCSOLDE_ANNUEL, &
+  UNACLE OF MCSOLDE_ANNUEL, &
+  T_OUV_SANCUMANN         , &
+  CPTCODDC  OF VCPT_DSC   , &
+  CPTNIVDET OF VCPT_DSC   , &
+  CPTDSC    OF VCPT_DSC
+
+
+;-------------------------------------------------------------------------------
+; Cette requete sert à imprimer le détaille ou le sommaire du comptes
+; information qui est contenu dans la  Vue VHIS_01 dépendant si le compte est détaillé ou sommaire)
+;     Détail   : imprime tous les transactions  (Détail contenu dans VHIS_01)
+;     Sommaire : imprime un sommaire par période - Type transaction - No lot
+
+REQUEST ANALYSE_TRANSACTION
+
+ACCESS *WGL304A &
+  LINK SANANN OF WGL304A                        , &
+       CIECLE OF WGL304A                        , &
+       CPTCLE OF WGL304A                        , &
+       UNACLE OF WGL304A                          &
+    TO SANANN                                   , &
+       CIECLE                                   , &
+       CPTCLE                                   , &
+       UNACLE               OF VHIS_01 OPTIONAL
+
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_VHI CHARACTER SIZE 5 = "1" + PECCLE OF VHIS_01 &
+         IF PECCLE OF VHIS_01[1:1] < "8" &
+         ELSE "0" + PECCLE OF VHIS_01
+
+; Ajustement pour le changement de siècle
+DEFINE D_G_SELANNFIN_SIE CHARACTER SIZE 3 = "1" + G_SELANNFIN[1:2] &
+         IF G_SELANNFIN[1:1] < "8" &
+         ELSE "0" + G_SELANNFIN[1:2]
+
+SELECT VHIS_01 IF     D_PECCLE_VHI >= (D_G_SELANNFIN_SIE + G_SELPECDEB) &
+                  AND D_PECCLE_VHI <= (D_G_SELANNFIN_SIE + G_SELPECFIN)
+
+
+TEMPORARY T_OUV_SANCUMANN_DC FLOAT SIZE 8 ; Pour inverser les signe solde d'ouverture
+TEMPORARY T_FLGDETHIS CHARACTER SIZE 1    ; Indique si un record dans la VHIS_01 existe.
+TEMPORARY T_HISDSCGEN CHARACTER SIZE 30   ; Si la description générale est absenteon prend le nom de la référence
+TEMPORARY T_CUMHECMNTDBT FLOAT SIZE 8     ; Cumulatif si le compte est sommaire (par Compte - période - Lot - type trans.)
+                                          ; du montant débit.
+TEMPORARY T_CUMHECMNTCRT FLOAT SIZE 8     ; Cumulatif si le compte est sommaire (par Compte - période - Lot - type trans.)
+                                          ; du montant crédit.
+TEMPORARY T_DIFFCUMMNT   FLOAT SIZE 8     ; Différence entre montant débit - montant crédit (Pour compte Sommaire)
+
+
+
+DEFINE D_TYPTRS CHARACTER SIZE 4 = HISCODMOD OF VHIS_01 + HISTYPECR OF VHIS_01 ;Pour déterminer type transaction
+
+SORT ON  CIECLE    OF WGL304A , &         ; Compagnie
+         CPTCLE    OF WGL304A , &         ; Compte
+         UNACLE    OF WGL304A , &         ; Unité
+         D_PECCLE_VHI , &         ; Période
+         HISNUMLOT OF VHIS_01 , &         ; Lot
+         D_TYPTRS                         ; Type transaction
+
+;
+; inversion du signe du montant du solde d'ouverture lorsque le compte
+; est créditeur.
+;
+  ITEM T_OUV_SANCUMANN_DC &
+       =     0 - T_OUV_SANCUMANN  OF WGL304A IF CPTCODDC OF WGL304A = "C" &
+       ELSE      T_OUV_SANCUMANN  OF WGL304A
+;
+; Indique s'il y a des transactions de sélectioner (va servir au quiz pour altérer les lignes de détails
+; lorsque le compte n'aura pas de transaction.)
+;
+  ITEM T_FLGDETHIS = "1" IF RECORD VHIS_01 EXIST ELSE "0"
+
+;
+; Cumulatif si le compte est sommaire (par Compte - période - Lot - type trans.)
+; du montant débit.
+;
+  ITEM T_CUMHECMNTDBT SUBTOTAL HECMNTDBT OF VHIS_01 &
+                        IF CPTNIVDET OF WGL304A = "S" &
+                        RESET AT D_TYPTRS
+
+;
+; Cumulatif si le compte est sommaire (par Compte - période - Lot - type trans.)
+; du montant crédit.
+;
+  ITEM T_CUMHECMNTCRT SUBTOTAL HECMNTCRT OF VHIS_01 &
+                        IF CPTNIVDET OF WGL304A = "S" &
+                        RESET AT D_TYPTRS
+
+;
+;Si le type de compte est détaillé (chaque transaction seront imprimer)
+;
+SUBFILE WGL304B KEEP  &
+IF CPTNIVDET OF WGL304A = "D" INCLUDE &
+  SANANN    OF WGL304A, &
+  CIECLE    OF WGL304A, &
+  CPTCLE    OF WGL304A, &
+  CPTDSC    OF WGL304A, &
+  UNACLE    OF WGL304A, &
+  PECCLE    OF VHIS_01, &
+  HISDAT    OF VHIS_01, &
+  D_TYPTRS            , &
+  HISNUMDOC OF VHIS_01, &
+  HISNUMLOT OF VHIS_01, &
+  REFCIECLE OF VHIS_01, &
+  REFCLETYP OF VHIS_01, &
+  REFCLENUM OF VHIS_01, &
+  HISDSCGEN           , &
+  HECMNTDBT OF VHIS_01, &
+  HECMNTCRT OF VHIS_01, &
+  HISDSCSAI OF VHIS_01, &
+  HISDSCSAI2 OF VHIS_01, &
+  T_OUV_SANCUMANN_DC  , &
+  T_FLGDETHIS, &
+  G_SELANNFIN, &
+  G_SELPECDEB, &
+  G_SELPECFIN
+
+;
+;Si le type de compte est sommaire (un regroupement par compte - periode - lot - type de transaction)
+;sera créér.
+;
+OUTPUT *WGL304B ALIAS A_WGL304B ADD AT D_TYPTRS &
+  IF CPTNIVDET OF WGL304A = "S"
+  ITEM SANANN      OF A_WGL304B FINAL SANANN OF WGL304A
+  ITEM CIECLE      OF A_WGL304B FINAL CIECLE OF WGL304A
+  ITEM CPTCLE      OF A_WGL304B FINAL CPTCLE OF WGL304A
+  ITEM CPTDSC      OF A_WGL304B FINAL CPTDSC OF WGL304A
+  ITEM UNACLE      OF A_WGL304B FINAL UNACLE OF WGL304A
+  ITEM PECCLE      OF A_WGL304B FINAL PECCLE    OF VHIS_01
+  ITEM HISDAT      OF A_WGL304B FINAL HISDATJOU OF VHIS_01
+  ITEM D_TYPTRS    OF A_WGL304B FINAL D_TYPTRS
+  ITEM HISNUMDOC   OF A_WGL304B FINAL "  "
+  ITEM HISNUMLOT   OF A_WGL304B FINAL HISNUMLOT OF VHIS_01
+  ITEM REFCIECLE   OF A_WGL304B FINAL  " "
+  ITEM REFCLETYP   OF A_WGL304B FINAL  " "
+  ITEM REFCLENUM   OF A_WGL304B FINAL  " "
+  ITEM HISDSCGEN   OF A_WGL304B FINAL  " "
+  ITEM HECMNTDBT   OF A_WGL304B FINAL T_CUMHECMNTDBT - T_CUMHECMNTCRT &
+                                        IF T_CUMHECMNTDBT > T_CUMHECMNTCRT &
+                                 ELSE 0
+  ITEM HECMNTCRT   OF A_WGL304B FINAL T_CUMHECMNTCRT - T_CUMHECMNTDBT &
+                                        IF T_CUMHECMNTCRT > T_CUMHECMNTDBT &
+                                 ELSE 0
+  ITEM HISDSCSAI   OF A_WGL304B FINAL  " "
+  ITEM HISDSCSAI2  OF A_WGL304B FINAL  " "
+  ITEM T_OUV_SANCUMANN_DC OF A_WGL304B FINAL T_OUV_SANCUMANN_DC
+  ITEM T_FLGDETHIS OF A_WGL304B FINAL T_FLGDETHIS
+  ITEM G_SELANNFIN OF A_WGL304B FINAL G_SELANNFIN
+  ITEM G_SELPECDEB OF A_WGL304B FINAL G_SELPECDEB
+  ITEM G_SELPECFIN OF A_WGL304B FINAL G_SELPECFIN
+
+BUILD gl304t

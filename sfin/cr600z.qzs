@@ -1,0 +1,496 @@
+;/T/ Comptes à recevoir en souffrance
+;
+;/P/ Programmeur...: Nancy Marceau
+;    Date Création.: 6 avril 1994
+;
+;    Description...: Ce rapport présente les Comptes à recevoir en souffrance.
+;                    Ce rapport permet d'avoir une vision globale des soldes à
+;                    recevoir en souffrance.
+;
+;                    Les transactions sont sélectionnées selon la date
+;                    demandée par l'usager, les soldes sont répartis dans la
+;                    bonne colonne selon l'intervalle déterminé par l'usager.
+;
+;
+;
+;    Paramètres....: Intervalle   (Obligatoire)
+;                    Jusqu'au     (Obligatoire)
+;                    Compte CAR   (Optionnel : un, plusieurs ou tous)
+;                    Client       (Optionnel : un, plusieurs ou tous)
+;                    Représentant (Optionnel : un, plusieurs ou tous)
+;
+;
+;    Particularités: ...
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST
+
+ACCESS *WCR600 &
+  ;
+  ; Pour avoir le nom et le téléphone du contact client.
+  ;
+  LINK ( CLICIECLE OF WCR600, &
+         CLICLE    OF WCR600, &
+         1 )                  &
+    TO CLICIECLE , &
+       CLICLE    , &
+       CCTCLE OF CRCLI_CONTACT OPTIONAL &
+
+
+  ;
+  ; Compte ctb à recevoir, pour avoir la description et la devise.
+  ;
+  LINK CARCPTCAR OF WCR600 &
+    TO CPTCLE OF             VCPT_DSC &
+
+
+  ;
+  ; Pour avoir le nom du représentant.
+  ;
+    LINK ("CLCREP",                                 &
+          CLCREP OF WCR600)                         &
+      TO XELNOM,                                    &
+         CBICLE OF VCBI_DSC ALIAS VCBI_CLCREP OPTIONAL  &
+
+  ;
+  ; Pour avoir le statut et la langue du client.
+  ;
+    LINK CLICIECLE OF WCR600, &
+         CLICLE    OF WCR600  &
+      TO CLICIECLE, &
+         CLICLE    OF CRCLIENT
+
+;
+; Titre du rapport.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+             "Ages des comptes à recevoir / sommaire"
+@ELSE
+             "Accounts receivable aging - summary"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 =  ITVDSC OF WCR600
+
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "CR600"
+
+;
+; Nom de la compagnie du menu.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM ; Nom de la compagnie.
+
+;
+; On calcule l'écart entre la limite de crédit et le solde au compte.
+;
+DEFINE D_ECART FLOAT SIZE 8 = CLCLIMCRT OF WCR600 - &
+                              T_SLD_CLI OF WCR600
+
+
+SORTED ON CIECLE    OF WCR600 , & ; No compagnie
+          CARCPTCAR OF WCR600 , & ; Compte ctb à recevoir
+          CLCREP    OF WCR600 , & ; Code de représentant client.
+          REFCLENUM OF WCR600     ; Numéro de client
+
+
+;
+; Impression de l'en-tête.
+;
+USE ustit220 NOLIST
+ SKIP &
+  TAB 115 &
+@IF FRANCAIS
+          "au" &
+@ELSE
+          "at" &
+@ENDIF
+  TAB 118 G_DATFIN OF WCR600 &
+ SKIP 2 &
+
+  TAB 001 &
+@IF FRANCAIS
+          "Compte CAR.....:" &
+@ELSE
+          "Account recev..:" &
+@ENDIF
+  TAB 018 CARCPTCAR OF WCR600 &
+  TAB 025 CPTDSC OF VCPT_DSC  &
+  TAB 068 &
+@IF FRANCAIS
+          "Devise.........:"  &
+@ELSE
+          "Currency.......:"  &
+@ENDIF
+  TAB 085 DEVCLE OF VCPT_DSC &
+ SKIP &
+  TAB 001 &
+@IF FRANCAIS
+          "Représentant...:" &
+@ELSE
+          "%%%Représentant:" &
+@ENDIF
+  TAB 018 CLCREP OF WCR600 &
+  TAB 025 CBIDSC OF VCBI_CLCREP  &
+ SKIP 2 &
+
+
+  TAB 102 &
+@IF FRANCAIS
+"Date du   Montant du" &
+@ELSE
+"%%%Date du   Montant du" &
+@ENDIF
+
+ SKIP &
+  TAB 102 &
+@IF FRANCAIS
+"dernier      dernier      Limite de         Solde                                                        Solde  " &
+@ELSE
+"%%%dernier      dernier      Limite de         Solde                                                        Solde  " &
+@ENDIF
+
+ SKIP &
+  TAB 001 &
+@IF FRANCAIS
+"           Client                                Langue  Statut  Contact              Téléphone       chèque       chèque         crédit      au compte        Écart" &
+@ELSE
+"%%%        Client                                Langue  Statut  Contact              Téléphone       chèque       chèque         crédit      au compte        Écart" &
+@ENDIF
+  TAB 171 ITVCOLTIT2 OF WCR600 &
+  TAB 186 ITVCOLTIT1 OF WCR600 &
+  TAB 200 &
+@IF FRANCAIS
+"      non dû  " &
+@ELSE
+"%%%   non dû  " &
+@ENDIF
+
+ SKIP &
+  TAB 001 &
+"-----------------------------------------------  ------  ------  -------------------- -------------- -------- ------------- -------------  -------------  -------------  -------------  -------------  ------------- "
+
+
+
+FOOTING AT REFCLENUM &
+  TAB 001 REFCLENUM OF WCR600 &
+  TAB 008 RADNOM    OF WCR600 &
+  TAB 053 CLILNG    OF CRCLIENT &
+  TAB 060 CLISTU    OF CRCLIENT &
+  TAB 066 CCTNOM    OF CRCLI_CONTACT &
+  TAB 087 CCTTEL    OF CRCLI_CONTACT &
+  TAB 102 T_DPODAT       OF WCR600  &
+  TAB 111 T_DPOMNTPAMTOT OF WCR600  &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+            BWZ                     &
+  TAB 126 CLCLIMCRT   OF WCR600 SUBTOTAL &
+            PICTURE "^^^,^^^,^^^ "  &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 2          &
+  TAB 140 T_SLD_CLI   OF WCR600 SUBTOTAL &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 155 D_ECART     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 170 T_SLD_02    OF WCR600 SUBTOTAL &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 185 T_SLD_01    OF WCR600 SUBTOTAL &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 200 T_SLD_NON_DU OF WCR600 SUBTOTAL &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5
+
+
+FOOTING AT CLCREP &
+SKIP 2 &
+ TAB 125 "-------------" &
+ TAB 140 "-------------"  &
+ TAB 155 "-------------"  &
+ TAB 170 "-------------"  &
+ TAB 185 "-------------"  &
+ TAB 200 "-------------"  &
+SKIP 1 &
+  TAB 056 "Total du représentant" &
+  TAB 078 CBIDSC OF VCBI_CLCREP   &
+  TAB 125 CLCLIMCRT OF WCR600 SUBTOTAL &
+            PICTURE "^^^^,^^^,^^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 2           &
+  TAB 140 T_SLD_CLI OF WCR600 SUBTOTAL &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 155 D_ECART     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 170 T_SLD_02 OF WCR600 SUBTOTAL &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 185 T_SLD_01 OF WCR600 SUBTOTAL &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 200 T_SLD_NON_DU OF WCR600 SUBTOTAL &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+SKIP &
+ TAB 125 "============="  &
+ TAB 140 "============="  &
+ TAB 155 "============="  &
+ TAB 170 "============="  &
+ TAB 185 "============="  &
+ TAB 200 "============="  &
+SKIP PAGE
+
+
+BUILD cr600za
+
+ACCESS *WCR600 &
+  ;
+  ; Pour avoir le nom et le téléphone du contact client.
+  ;
+  LINK ( CLICIECLE OF WCR600, &
+         CLICLE    OF WCR600, &
+         1 )                  &
+    TO CLICIECLE , &
+       CLICLE    , &
+       CCTCLE OF CRCLI_CONTACT OPTIONAL &
+
+
+  ;
+  ; Compte ctb à recevoir, pour avoir la description et la devise.
+  ;
+  LINK CARCPTCAR OF WCR600 &
+    TO CPTCLE OF             VCPT_DSC &
+
+
+  ;
+  ; Pour avoir le nom du représentant.
+  ;
+    LINK ("CLCREP",                                 &
+          CLCREP OF WCR600)                         &
+      TO XELNOM,                                    &
+         CBICLE OF VCBI_DSC ALIAS VCBI_CLCREP OPTIONAL
+
+
+;
+; Titre du rapport.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+             "Ages des comptes à recevoir / sommaire"
+@ELSE
+             "Accounts receivable aging - summary"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 =  ITVDSC OF WCR600
+
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "CR600B"
+
+;
+; Nom de la compagnie du menu.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM ; Nom de la compagnie.
+
+;
+; On calcule l'écart entre la limite de crédit et le solde au compte.
+;
+DEFINE D_ECART FLOAT SIZE 8 = CLCLIMCRT OF WCR600 - &
+                              T_SLD_CLI OF WCR600
+
+
+SORTED ON CIECLE    OF WCR600 , & ; No compagnie
+          CARCPTCAR OF WCR600 , & ; Compte ctb à recevoir
+          CLCREP    OF WCR600 , & ; Code de représentant client.
+          REFCLENUM OF WCR600     ; Numéro de client
+
+
+;
+; Impression de l'en-tête.
+;
+USE ustit220 NOLIST
+ SKIP &
+  TAB 115 &
+@IF FRANCAIS
+          "au" &
+@ELSE
+          "at" &
+@ENDIF
+  TAB 118 G_DATFIN OF WCR600 &
+ SKIP 2
+
+HEADING AT CARCPTCAR &
+ SKIP 2 &
+  TAB 001 &
+@IF FRANCAIS
+          "Compte CAR.....:" &
+@ELSE
+          "Account recev..:" &
+@ENDIF
+  TAB 018 CARCPTCAR OF WCR600 &
+  TAB 025 CPTDSC OF VCPT_DSC  &
+  TAB 068 &
+@IF FRANCAIS
+          "Devise.........:"  &
+@ELSE
+          "Currency.......:"  &
+@ENDIF
+  TAB 085 DEVCLE OF VCPT_DSC &
+ SKIP 2 &
+  TAB 129 &
+@IF FRANCAIS
+"Limite de         Solde                                                        Solde  " &
+@ELSE
+"%%%Limite de         Solde                                                        Solde  " &
+@ENDIF
+
+ SKIP &
+  TAB 132 &
+@IF FRANCAIS
+"crédit      au compte        Écart" &
+@ELSE
+"%%%        Client                                Langue  Statut  Contact              Téléphone       chèque       chèque         crédit      au compte        Écart" &
+@ENDIF
+  TAB 171 ITVCOLTIT2 OF WCR600 &
+  TAB 185 ITVCOLTIT1 OF WCR600 &
+  TAB 200 &
+@IF FRANCAIS
+"       non dû  " &
+@ELSE
+"%%%   non dû  " &
+@ENDIF
+
+ SKIP &
+  TAB 125 &
+"-------------  -------------  -------------  -------------  -------------  ------------- "
+
+FOOTING AT CLCREP &
+  TAB 001 &
+@IF FRANCAIS
+          "Représentant...:" &
+@ELSE
+          "%%%Représentant:" &
+@ENDIF
+  TAB 018 CLCREP OF WCR600 &
+  TAB 025 CBIDSC OF VCBI_CLCREP  &
+  TAB 125 CLCLIMCRT OF WCR600 SUBTOTAL &
+            PICTURE "^^^^,^^^,^^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 2           &
+  TAB 140 T_SLD_CLI OF WCR600 SUBTOTAL &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 155 D_ECART     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 170 T_SLD_02 OF WCR600 SUBTOTAL &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 185 T_SLD_01 OF WCR600 SUBTOTAL &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 200 T_SLD_NON_DU OF WCR600 SUBTOTAL &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5
+
+FOOTING AT CARCPTCAR &
+SKIP &
+ TAB 125 "-------------" &
+ TAB 140 "-------------"  &
+ TAB 155 "-------------"  &
+ TAB 170 "-------------"  &
+ TAB 185 "-------------"  &
+ TAB 200 "-------------"  &
+SKIP 1 &
+  TAB 040 "Total du compte CAR" &
+  TAB 060 CPTDSC OF VCPT_DSC    &
+  TAB 125 CLCLIMCRT OF WCR600 SUBTOTAL &
+            PICTURE "^^^^,^^^,^^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 2           &
+  TAB 140 T_SLD_CLI OF WCR600 SUBTOTAL &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 155 D_ECART     SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 170 T_SLD_02 OF WCR600 SUBTOTAL &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 185 T_SLD_01 OF WCR600 SUBTOTAL &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+  TAB 200 T_SLD_NON_DU OF WCR600 SUBTOTAL &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+SKIP &
+ TAB 125 "============="  &
+ TAB 140 "============="  &
+ TAB 155 "============="  &
+ TAB 170 "============="  &
+ TAB 185 "============="  &
+ TAB 200 "============="  &
+SKIP PAGE
+
+BUILD cr600zb
+
+@IF FORMAT
+         1         2         3         4         5         6         7         8         9        10        11        12        13        14        15        16        17        18        19        20        21        22
+1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+                                                                                           xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                         Page: 9999
+99/99/99 HH:MM xx    xxxxxxxxxx                                                                 Comptes à recevoir en souffrance
+                                                                                  XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                                                                                                        au 99/99/99
+
+Compte CAR.....: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   Devise.........: xxx
+Représentant...: xxxx   xxxxxxxxxxxxxxxxxxxxxxxxx
+
+                                                                                     Date du   Montant du
+                                                                                     dernier      dernier      Limite de         Solde                                                        Solde
+           Client                                Contact              Télépnone       chèque       chèque         crédit      au compte        Écart      xxxxxxxxxxx    xxxxxxxxxxx         non dû
+-----------------------------------------------  -------------------- -------------- -------- ------------- -------------  -------------  -------------  -------------  -------------  -------------
+123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxxxxxxxxxx (xxx) xxx-xxxx AA/MM/JJ 99999,999.99-  999,999,999-  99999,999.99-  99999,999.99-  99999,999.99-  99999,999.99-  99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxxxxxxxxxx (xxx) xxx-xxxx AA/MM/JJ 99999,999.99-  999,999,999-  99999,999.99-  99999,999.99-  99999,999.99-  99999,999.99-  99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxxxxxxxxxxxxxxxxx (xxx) xxx-xxxx AA/MM/JJ 99999,999.99-  999,999,999-  99999,999.99-  99999,999.99-  99999,999.99-  99999,999.99-  99999,999.99-
+                                                                                                            -------------  -------------  -------------  -------------  -------------  -------------
+                                       Total du représentant xxxxxxxxxxxxxxxxxxxxxxxxx                      9999,999,999-  99999,999.99-  99999,999.99-  99999,999.99-  99999,999.99-  99999,999.99-
+                                                                                                            =============  =============  =============  =============  =============  =============
+
+                                                                                                            -------------  -------------  -------------  -------------  -------------  -------------
+                                       Total du compte CAR xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              9999,999,999-  99999,999.99-  99999,999.99-  99999,999.99-  99999,999.99-  99999,999.99-
+                                                                                                            =============  =============  =============  =============  =============  =============
+
+                                                                                                            -------------  -------------  -------------  -------------  -------------  -------------
+                                       Grand total                                                          9999,999,999-  99999,999.99-  99999,999.99-  99999,999.99-  99999,999.99-  99999,999.99-
+                                                                                                            =============  =============  =============  =============  =============  =============
+
+@ENDIF
+

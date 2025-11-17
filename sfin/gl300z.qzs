@@ -1,0 +1,843 @@
+;/T/ Vérification des écritures
+;
+;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur...: Chantal Martineau
+;    Date Création.: 03-05-1993
+;
+;    Description...: La Liste de Vérification des écritures de Journal
+;                    donne les éléments de vérifications détallées et
+;                    sommaire pour les écritures au journal général.
+;
+;    Paramètres....: Compagnie
+;                    Periode CTB
+;                    No Lot
+;
+;    Particularités:
+;
+;/M/ Programmeur...: Martin Bruyère
+;    Date modif....: 1996-07-15
+;    Description...: Enlever projet, sous-projet et immobilisation.
+;                    Demande SOS: GRA01 - 9311 - XXX
+;
+;/M/ Francois Richard, 1999-07-12
+;
+;    Ajustement pour le changement de siècle
+;
+;-------------------------------------------------------------------------------
+
+ USE ussetqzs NOLIST   ; permet de faire les SET REPORT DEV....
+ SET REPORT NOBLANK    ; permet de ne pas imprmer les lignes blanches
+
+;===============================================================================
+; Impression Vérification des écriture (Détaillé)  Par compagnie
+;
+; Prendre note que ce rapport est presque identique à GL300C
+; Différence entre par Compagnie et Par Holding :
+; GL300A : (par compagnie)
+;   - On imprime pas la compagnie d'inter dans l'en-tête de l'écriture         (Serait égale à la compagnie passer en paramètre)
+;   - On n'imprime pas le numéro de compagnie de l'inputation à même l'unité.  (Serait égale à la compagnie passer en paramètre)
+; GL300C : (par holding)
+;   - la compagnie d'inter est imprimée
+;   - le numéro de compagnie de l'impuation est affiché à même l'unité administrative.
+;===============================================================================
+
+ACCESS *WGL300A
+
+
+
+  DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &  ; titre1  du rapport
+@IF FRANCAIS
+        "Vérification des écritures de journal"
+@ELSE
+        "Journal Entry Verification"
+@ENDIF
+  DEFINE DZ_NOMRAP2 CHARACTER SIZE 60  = " "             ; titre2  du rapport
+  DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "GL300A"        ; numéro du rapport
+  DEFINE DZ_CIENOM  CHARACTER SIZE 40  = PARM            ; Nom de la compagnie
+
+  USE usflgdet NOLIST                  ;Flag Bilingue (O/N)
+  DEFINE D_ECJFLGANN CHARACTER SIZE 3  = DZ_FLGAFFO IF ECJFLGANN OF WGL300A ="1" &
+                                         ELSE DZ_FLGAFFN IF ECJFLGANN OF WGL300A = "0"
+  DEFINE D_ECJTRFUNA CHARACTER SIZE 3  = DZ_FLGAFFO IF ECJTRFUNA OF WGL300A ="1" &
+                                         ELSE DZ_FLGAFFN IF ECJTRFUNA OF WGL300A = "0"
+  DEFINE D_HRSBLC    CHARACTER SIZE 3 =  DZ_FLGAFFO IF 0 <> LGLNBRTRSERR OF WGL300A &
+                                       ELSE DZ_FLGAFFN IF LGLNBRTRSERR OF WGL300A = 0
+
+  DEFINE D_LGLNBRTRSDIF INTEGER SIZE 4 = LGLNBRTRSVER OF WGL300A - LGLNBRTRS OF WGL300A
+  DEFINE D_LGLCUMMNTDIF FLOAT   SIZE 8 = LGLCUMMNTVER OF WGL300A - LGLCUMMNT OF WGL300A
+;***********************
+; Pour le rendre à 20 caractères.
+;
+DEFINE D_PRJTIT    CHARACTER SIZE 20 = PRJDSC1  OF WGL300A
+
+DEFINE D_PRATIT    CHARACTER SIZE 20 = PRADSC1 OF WGL300A
+
+DEFINE D_IMMTIT    CHARACTER SIZE 18 = IMMDSC  OF WGL300A
+;***********************
+  DEFINE D_JOURN     CHARACTER SIZE 12 = &                   ;Indique si le lot est journalisé
+@IF FRANCAIS
+      "Journalisé" &
+@ELSE
+      "Posted" &
+@ENDIF
+      IF LGLDATJOU OF WGL300A <> 0 ELSE " "
+
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE CHARACTER SIZE 5 = "1" + PECCLE OF WGL300A &
+         IF PECCLE OF WGL300A[1:1] < "8" &
+         ELSE "0" + PECCLE OF WGL300A
+
+; Ajustement pour le changement de siècle
+DEFINE D_ECJCLENUM_TRI CHARACTER SIZE 9 = "1" + ECJCLENUM OF WGL300A &
+   IF ECJCLENUM OF WGL300A[1:1] < "8" &
+   ELSE "0" + ECJCLENUM OF WGL300A
+
+SORT   ON  ECJCIECLE OF WGL300A, &    ;Compangie
+           D_PECCLE_SIE, &    ;Période
+           LGLCLE    OF WGL300A, &    ;Lot
+           D_ECJCLENUM_TRI     , &    ;No ecriture
+           ECJCLESEQ OF WGL300A, &    ;No séquence de l'écriture
+           ECINUMLIG OF WGL300A       ;No Ligne
+
+
+
+ USE ustit180 NOLIST  ; Titre standard pour l'application a 180
+@IF FRANCAIS
+SKIP 2 &
+ TAB 001 "Lot.....: "   &
+ TAB 012 LGLCLE  OF WGL300A      &
+ TAB 017 LGLDSC  OF WGL300A      &
+ TAB 060 D_JOURN                 &
+SKIP &
+ TAB 001 "Période.: " &
+ TAB 011 PECCLE  OF WGL300A      &
+SKIP 2 &
+ TAB 001 "      No.                                                                               Inter"  &
+ TAB 097 "-- Nbr période ---     Période  " &
+SKIP &
+ TAB 001 "*   écriture                Description                       Date     Type   Annulée   unité"  &
+ TAB 097 "initiale  restante   destination" &
+@ELSE
+ TAB 001 "%%%.....: "   &
+ TAB 011 LGLCLE  OF WGL300A      &
+ TAB 016 LGLDSC  OF WGL300A      &
+SKIP &
+ TAB 001 "%%%iode.: " &
+ TAB 010 PECCLE  OF WGL300A      &
+SKIP 2 &
+ TAB 001 "%%%   No.                                                                               Inter"  &
+ TAB 097 "%%%Nbr période ---     Période  " &
+SKIP &
+ TAB 001 "%%% écriture                Description                       Date     Type   Annulée   unité"  &
+ TAB 097 "%%%tiale  restante   destination" &
+@ENDIF
+SKIP &
+ TAB 001 "-  -----------   ----------------------------------------   --------   ----   -------   -----" &
+ TAB 097 "--------  --------   -----------" &
+SKIP 2
+
+
+
+HEADING AT ECJCLESEQ &
+  TAB 001 T_BALANCE OF WGL300A  &
+  TAB 004 ECJCLENUM OF WGL300A  &
+  TAB 013 ECJCLESEQ OF WGL300A  &
+  TAB 018 ECJDSC1   OF WGL300A  &
+  TAB 061 ECJDAT    OF WGL300A  &
+  TAB 073 ECJTYPECR OF WGL300A  &
+  TAB 080 D_ECJFLGANN           &
+  TAB 090 D_ECJTRFUNA           &
+  TAB 100 ECJNBRPERINI OF WGL300A  &
+  TAB 110 ECJNBRPERRES OF WGL300A  &
+  TAB 121 ECJPECDES    OF WGL300A  &
+SKIP &
+  TAB 018 ECJDSC2      OF WGL300A  &
+SKIP &
+  TAB 018 ECJDSC3      OF WGL300A  &
+SKIP 2
+
+
+
+REPORT &
+@IF FRANCAIS
+  TAB 002 "----Unité administrative----- ----------Compte----------- --Montant Déb.- --Montant Cré.- ---------- Client ---------" &
+          PRINT AT ECJCLESEQ &
+@ELSE
+  TAB 002 "%%%-Unité administrative----- ----------Compte----------- --Montant Déb.- --Montant Cré.- ---------- Client ---------" &
+          PRINT AT ECJCLESEQ &
+@ENDIF
+ SKIP &
+  TAB 002 UNACLE     OF WGL300A      &
+  TAB 011 UNANOMABR  OF WGL300A      &
+  TAB 032 CPTCLE     OF WGL300A      &
+  TAB 039 CPTDSCABR  OF WGL300A      &
+  TAB 060 T_MNT_DEBIT  OF WGL300A PICTURE "^^^,^^^,^^^.^^" SIGNIFICANCE 4 &
+  TAB 076 T_MNT_CREDIT OF WGL300A PICTURE "^^^,^^^,^^^.^^" SIGNIFICANCE 4 &
+  TAB 092 ECIFLGFAC    OF WGL300A &
+  TAB 099 CLICLE       OF WGL300A
+
+
+
+FOOTING AT ECJCLESEQ &
+       TAB 060 "--------------" &
+       TAB 076 "--------------" &
+      SKIP 1 &
+       TAB 060 T_MNT_DEBIT  OF WGL300A SUBTOTAL &
+               PICTURE "^^^,^^^,^^^.^^" SIGNIFICANCE 4 &
+       TAB 076 T_MNT_CREDIT OF WGL300A SUBTOTAL &
+               PICTURE "^^^,^^^,^^^.^^" SIGNIFICANCE 4 &
+       RESERVE 3 LINES
+
+
+
+FOOTING AT LGLCLE &
+      SKIP 2 &
+       TAB 060 "--------------" &
+       TAB 076 "--------------" &
+      SKIP 1 &
+@IF FRANCAIS
+       TAB 045 "Total du lot :" &
+@ELSE
+       TAB 045 "Batch Total:" &
+@ENDIF
+       TAB 060 T_MNT_DEBIT  SUBTOTAL &
+               PICTURE "^^^,^^^,^^^.^^" SIGNIFICANCE 4 &
+       TAB 076 T_MNT_CREDIT SUBTOTAL &
+               PICTURE "^^^,^^^,^^^.^^" SIGNIFICANCE 4 &
+      SKIP 1 &
+       TAB 060 "==============" &
+       TAB 076 "==============" &
+  " " &
+  SKIP 3 &
+  TAB 001 "------------------------------------------------------------------------------------------------------------------------------------" &
+ SKIP 1 &
+@IF FRANCAIS
+  TAB 051   "Vérifiés         Cumulés             Ecart        Hors balance(*)" &
+@ELSE
+  TAB 051   "%%%ifiés         Cumulés             Ecart        Hors balance(*)" &
+@ENDIF
+ SKIP 1 &
+  TAB 047   "--------------    --------------    --------------    ---------------" &
+ SKIP &
+@IF FRANCAIS
+  TAB 021   "Montant total.........:" &
+@ELSE
+  TAB 021   "%%%tant total.........:" &
+@ENDIF
+  TAB 047 LGLCUMMNTVER OF WGL300A   PICTURE "^^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5 &
+  TAB 065 LGLCUMMNT    OF WGL300A   PICTURE "^^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5 &
+  TAB 083 D_LGLCUMMNTDIF            PICTURE "^^,^^^,^^^.^^ "     TRAILING SIGN "-" SIGNIFICANCE 5 &
+  TAB 107 D_HRSBLC &
+SKIP &
+@IF FRANCAIS
+  TAB 021   "Nombre de transactions:" &
+@ELSE
+  TAB 021   "%%%bre de transactions:" &
+@ENDIF
+  TAB 053 LGLNBRTRSVER   OF WGL300A PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+  TAB 071 LGLNBRTRS      OF WGL300A PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+  TAB 089 D_LGLNBRTRSDIF            PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+SKIP PAGE
+
+
+
+BUILD gl300za
+
+
+
+
+
+;===============================================================================
+; Rapport sommaire à la fin du rapport (par compagnie)
+;
+; Prendre note que ce rapport est presque identique à GL300D
+; Différence entre par Compagnie et Par Holding :
+; GL300B : (par compagnie)
+;   - le numéro de compagnie de l'imputation n'est pas imprimer. (Serait égale à la compagnie passer en paramètre)
+; GL300D : (par holding)
+;   - le numéro de compagnie de l'imputation est affiché à même l'unité administrative.
+;===============================================================================
+
+
+ACCESS *WGL300A
+
+
+
+ DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &  ; titre1  du rapport
+@IF FRANCAIS
+        "Vérification des écritures de journal"
+@ELSE
+        "Journal Entry Verification"
+@ENDIF
+ DEFINE DZ_NOMRAP2 CHARACTER SIZE 60  =  &            ; titre2  du rapport
+@IF FRANCAIS
+        "Sommaire"
+@ELSE
+        "Summary"
+@ENDIF
+ DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "GL300B"         ; numéro du rapport
+ DEFINE DZ_CIENOM  CHARACTER SIZE 40  = PARM            ; Nom de la compagnie
+
+DEFINE D_JOURN     CHARACTER SIZE 12 = &                   ;Indique si le lot est journalisé
+@IF FRANCAIS
+    "Journalisé" &
+@ELSE
+    "Posted" &
+@ENDIF
+    IF LGLDATJOU OF WGL300A <> 0 ELSE " "
+
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE2 CHARACTER SIZE 5 = "1" + PECCLE OF WGL300A &
+         IF PECCLE OF WGL300A[1:1] < "8" &
+         ELSE "0" + PECCLE OF WGL300A
+
+SORT   ON  ECJCIECLE OF WGL300A, &    ;Compangie
+           D_PECCLE_SIE2, &    ;Période
+           LGLCLE    OF WGL300A, &    ;Lot
+           UNACLE    OF WGL300A, &    ;Unité
+           CPTCLE    OF WGL300A       ;Compte
+
+
+
+ USE ustit180 NOLIST  ; Titre standard pour l'application a 180
+SKIP 2 &
+@IF FRANCAIS
+ TAB 001 "Lot.....: "   &
+@ELSE
+ TAB 001 "Batch...: "   &
+@ENDIF
+ TAB 011 LGLCLE  OF WGL300A      &
+ TAB 017 LGLDSC  OF WGL300A      &
+ TAB 060 D_JOURN                 &
+SKIP &
+@IF FRANCAIS
+ TAB 001 "Période.: " &
+@ELSE
+ TAB 001 "Period..: " &
+@ENDIF
+ TAB 011 PECCLE  OF WGL300A      &
+SKIP 2 &
+@IF FRANCAIS
+  TAB 018 "   Unité administrative                Compte                      Débit           Crédit " &
+@ELSE
+@ENDIF
+ SKIP &
+  TAB 018 " -----------------------------   ---------------------------  --------------   -------------- " &
+ SKIP
+
+FOOTING AT CPTCLE &
+  TAB 018 UNACLE     OF WGL300A      &
+  TAB 027 UNANOMABR  OF WGL300A      &
+  TAB 050 CPTCLE     OF WGL300A      &
+  TAB 057 CPTDSCABR  OF WGL300A      &
+  TAB 080 T_MNT_DEBIT  OF WGL300A SUBTOTAL PICTURE "^^^,^^^,^^^.^^" SIGNIFICANCE 4 &
+  TAB 097 T_MNT_CREDIT OF WGL300A SUBTOTAL PICTURE "^^^,^^^,^^^.^^" SIGNIFICANCE 4
+
+
+
+FOOTING AT LGLCLE &
+      SKIP 2 &
+       TAB 080 "--------------" &
+       TAB 097 "--------------" &
+      SKIP 1 &
+@IF FRANCAIS
+       TAB 065 "Total du lot:" &
+@ELSE
+       TAB 065 "Batch Total:" &
+@ENDIF
+       TAB 080 T_MNT_DEBIT  SUBTOTAL &
+               PICTURE "^^^,^^^,^^^.^^" SIGNIFICANCE 4 &
+       TAB 097 T_MNT_CREDIT SUBTOTAL &
+               PICTURE "^^^,^^^,^^^.^^" SIGNIFICANCE 4 &
+      SKIP 1 &
+       TAB 080 "==============" &
+       TAB 097 "==============" &
+  SKIP PAGE
+
+
+
+BUILD gl300zb
+
+
+
+;===============================================================================
+; Impression Vérification des éciture (Détaillé) Pour le holding
+;
+; Prendre note que ce rapport est presque identique à GL300A
+; Différence entre par Compagnie et Par Holding :
+; GL300A : (par compagnie)
+;   - On imprime pas la compagnie d'inter dans l'en-tête de l'écriture.       (Serait égale à la compagnie passer en paramètre)
+;   - On n'imprime pas le numéro de compagnie de l'inputation à même l'unité. (Serait égale à la compagnie passer en paramètre)
+; GL300C : (par holding)
+;   - la compagnie d'inter est imprimée
+;   - le numéro de compagnie de l'impuation est affiché à même l'unité administrative.
+;===============================================================================
+
+ACCESS *WGL300A
+
+
+
+  DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &  ; titre1  du rapport
+@IF FRANCAIS
+        "Vérification des écritures de journal"
+@ELSE
+        "Journal Entry Verification"
+@ENDIF
+  DEFINE DZ_NOMRAP2 CHARACTER SIZE 60  = " "             ; titre2  du rapport
+  DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "GL300C"         ; numéro du rapport
+  DEFINE DZ_CIENOM  CHARACTER SIZE 40  = PARM            ; Nom de la compagnie
+
+  USE usflgdet NOLIST                  ;Flag Bilingue (O/N)
+  DEFINE D_ECJFLGANN CHARACTER SIZE 3  = DZ_FLGAFFO IF ECJFLGANN OF WGL300A ="1" &
+                                         ELSE DZ_FLGAFFN IF ECJFLGANN OF WGL300A = "0"
+  DEFINE D_ECJTRFUNA CHARACTER SIZE 3  = DZ_FLGAFFO IF ECJTRFUNA OF WGL300A ="1" &
+                                         ELSE DZ_FLGAFFN IF ECJTRFUNA OF WGL300A = "0"
+  DEFINE D_HRSBLC    CHARACTER SIZE 3 =  DZ_FLGAFFO IF 0 <> LGLNBRTRSERR OF WGL300A &
+                                       ELSE DZ_FLGAFFN IF LGLNBRTRSERR OF WGL300A = 0
+
+  DEFINE D_LGLNBRTRSDIF INTEGER SIZE 4 = LGLNBRTRSVER OF WGL300A - LGLNBRTRS OF WGL300A
+  DEFINE D_LGLCUMMNTDIF FLOAT   SIZE 8 = LGLCUMMNTVER OF WGL300A - LGLCUMMNT OF WGL300A
+;***********************
+; Pour le rendre à 20 caractères.
+;
+DEFINE D_PRJTIT    CHARACTER SIZE 20 = PRJDSC1  OF WGL300A
+
+DEFINE D_PRATIT    CHARACTER SIZE 20 = PRADSC1 OF WGL300A
+
+DEFINE D_IMMTIT    CHARACTER SIZE 18 = IMMDSC  OF WGL300A
+;***********************
+  DEFINE D_JOURN     CHARACTER SIZE 12 = &                   ;Indique si le lot est journalisé
+@IF FRANCAIS
+      "Journalisé" &
+@ELSE
+      "Posted" &
+@ENDIF
+      IF LGLDATJOU OF WGL300A <> 0 ELSE " "
+
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE3 CHARACTER SIZE 5 = "1" + PECCLE OF WGL300A &
+         IF PECCLE OF WGL300A[1:1] < "8" &
+         ELSE "0" + PECCLE OF WGL300A
+
+SORT   ON  ECJCIECLE OF WGL300A, &    ;Compangie
+           D_PECCLE_SIE3, &    ;Période
+           LGLCLE    OF WGL300A, &    ;Lot
+           ECJCLENUM OF WGL300A, &    ;No ecriture
+           ECJCLESEQ OF WGL300A, &    ;No séquence de l'écriture
+           ECINUMLIG OF WGL300A       ;No ligne
+
+
+
+ USE ustit180 NOLIST  ; Titre standard pour l'application a 180
+@IF FRANCAIS
+SKIP 2 &
+ TAB 001 "Lot.....: "   &
+ TAB 012 LGLCLE  OF WGL300A      &
+ TAB 017 LGLDSC  OF WGL300A      &
+ TAB 060 D_JOURN                 &
+SKIP &
+ TAB 001 "Periode.: " &
+ TAB 011 PECCLE  OF WGL300A      &
+SKIP 2 &
+ TAB 001 "      No.                                                                                Cie      Inter"  &
+ TAB 107 "-- Nbr période ---     Période  " &
+SKIP &
+ TAB 001 "*   écriture                Description                       Date     Type   Annulée   d'inter   unité"  &
+ TAB 107 "initiale  restante   destination" &
+@ELSE
+ TAB 001 "%%%.....: "   &
+ TAB 011 LGLCLE  OF WGL300A      &
+ TAB 016 LGLDSC  OF WGL300A      &
+SKIP &
+ TAB 001 "%%%iode.: " &
+ TAB 010 PECCLE  OF WGL300A      &
+SKIP 2 &
+ TAB 001 "%%%   No.                                                                                Cie      Inter"  &
+ TAB 107 "%%%Nbr période ---     Période  " &
+SKIP &
+ TAB 001 "%%% écriture                Description                       Date     Type   Annulée   d'inter   unité"  &
+ TAB 107 "initiale  restante   destination" &
+@ENDIF
+SKIP &
+ TAB 001 "-  -----------   ----------------------------------------   --------   ----   -------   -------   -----" &
+ TAB 107 "--------  --------   -----------" &
+SKIP 2
+
+
+
+HEADING AT ECJCLESEQ &
+  TAB 001 T_BALANCE OF WGL300A  &
+  TAB 004 ECJCLENUM OF WGL300A  &
+  TAB 013 ECJCLESEQ OF WGL300A  &
+  TAB 018 ECJDSC1   OF WGL300A  &
+  TAB 061 ECJDAT    OF WGL300A  &
+  TAB 073 ECJTYPECR OF WGL300A  &
+  TAB 081 D_ECJFLGANN           &
+  TAB 091 ECJCIEINT OF WGL300A  &
+  TAB 100 D_ECJTRFUNA           &
+  TAB 110 ECJNBRPERINI OF WGL300A  &
+  TAB 120 ECJNBRPERRES OF WGL300A  &
+  TAB 131 ECJPECDES    OF WGL300A  &
+SKIP &
+  TAB 018 ECJDSC2      OF WGL300A  &
+SKIP &
+  TAB 018 ECJDSC3      OF WGL300A  &
+SKIP 2
+
+
+
+REPORT &
+@IF FRANCAIS
+  TAB 002 "Cie- ----------- Projet ---------- ----- Sous-projet ------ ------- Immobilisation -------- ----Unité administrative-----" &
+          PRINT AT ECJCLESEQ &
+  TAB 124 "----------Compte----------- --Montant Déb.- --Montant Cré.- ---------- Client ---------" &
+          PRINT AT ECJCLESEQ &
+@ELSE
+  TAB 018 "%%%-------Compte-----------  -------Unité administrative-------  ---------Projet-----------" PRINT AT ECJCLESEQ &
+  TAB 111 "%%%------Activité----------  -----Débit----  ----Crédit----" PRINT AT ECJCLESEQ &
+@ENDIF
+ SKIP &
+;Cie- ----------- Projet ---------- ----- Sous-projet ------ -------- Equipement ----------- ----Unité administrative----- ----------Compte----------- --Montant Déb.- --Montant Cré.- ---------- Client ---------
+;1234 12345678 xxxxxxxxxxxxxxxxxxxx 123 xxxxxxxxxxxxxxxxxxxx 1212345678 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- 999,999,999.99- 123456 xxxxxxxxxxxxxxxxxxxx
+;1234 12345678 xxxxxxxxxxxxxxxxxxxx 123 xxxxxxxxxxxxxxxxxxxx 1212345678 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- 999,999,999.99- 123456 xxxxxxxxxxxxxxxxxxxx
+;1234 12345678 xxxxxxxxxxxxxxxxxxxx 123 xxxxxxxxxxxxxxxxxxxx 1212345678 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- 999,999,999.99- 123456 xxxxxxxxxxxxxxxxxxxx
+
+  TAB 002 CIECLE     OF WGL300A      &
+  TAB 007 PRJCLE     OF WGL300A      &
+  TAB 016 D_PRJTIT                   &
+  TAB 037 PRACLE     OF WGL300A      &
+  TAB 041 D_PRATIT                   &
+  TAB 062 IMMCLE     OF WGL300A      &
+  TAB 075 D_IMMTIT                   &
+  TAB 094 UNACLE     OF WGL300A      &
+  TAB 103 UNANOMABR  OF WGL300A      &
+  TAB 124 CPTCLE     OF WGL300A      &
+  TAB 131 CPTDSCABR  OF WGL300A      &
+  TAB 152 T_MNT_DEBIT  OF WGL300A PICTURE "^^^,^^^,^^^.^^" SIGNIFICANCE 4 &
+  TAB 168 T_MNT_CREDIT OF WGL300A PICTURE "^^^,^^^,^^^.^^" SIGNIFICANCE 4 &
+  TAB 184 ECIFLGFAC    OF WGL300A &
+  TAB 191 CLICLE       OF WGL300A
+
+
+FOOTING AT ECJCLESEQ &
+       TAB 140 "--------------" &
+       TAB 156 "--------------" &
+      SKIP 1 &
+       TAB 152 T_MNT_DEBIT  OF WGL300A SUBTOTAL &
+               PICTURE "^^^,^^^,^^^.^^" SIGNIFICANCE 4 &
+       TAB 168 T_MNT_CREDIT OF WGL300A SUBTOTAL &
+               PICTURE "^^^,^^^,^^^.^^" SIGNIFICANCE 4 &
+       RESERVE 3 LINES
+
+
+
+FOOTING AT LGLCLE &
+      SKIP 2 &
+       TAB 152 "--------------" &
+       TAB 168 "--------------" &
+      SKIP 1 &
+@IF FRANCAIS
+       TAB 125 "Total du lot:" &
+@ELSE
+       TAB 125 "Batch Total:" &
+@ENDIF
+       TAB 152 T_MNT_DEBIT  SUBTOTAL &
+               PICTURE "^^^,^^^,^^^.^^" SIGNIFICANCE 4 &
+       TAB 168 T_MNT_CREDIT SUBTOTAL &
+               PICTURE "^^^,^^^,^^^.^^" SIGNIFICANCE 4 &
+      SKIP 1 &
+       TAB 152 "==============" &
+       TAB 168 "==============" &
+  SKIP 3 &
+  TAB 001  "------------------------------------------------------------------------------------------------------------------" &
+  TAB 112  "----------------------------------------------------------" &
+ SKIP 1 &
+@IF FRANCAIS
+  TAB 050   "    Vérifiés         Cumulés             Ecart        Hors balance(*)" &
+@ELSE
+  TAB 050   "%%% Vérifiés         Cumulés             Ecart        Hors balance(*)" &
+@ENDIF
+ SKIP 1 &
+  TAB 050   "--------------    --------------    --------------    --------------- "&
+ SKIP &
+@IF FRANCAIS
+  TAB 023   "Montant total.........:" &
+@ELSE
+  TAB 023   "%%%tant total.........:" &
+@ENDIF
+  TAB 050 LGLCUMMNTVER OF WGL300A   PICTURE "^^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5 &
+  TAB 068 LGLCUMMNT    OF WGL300A   PICTURE "^^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5 &
+  TAB 087 D_LGLCUMMNTDIF            PICTURE "^^,^^^,^^^.^^ "     TRAILING SIGN "-" SIGNIFICANCE 5 &
+  TAB 109 D_HRSBLC &
+SKIP &
+@IF FRANCAIS
+  TAB 023   "Nombre de transactions:" &
+@ELSE
+  TAB 023   "%%%bre de transactions:" &
+@ENDIF
+  TAB 056 LGLNBRTRSVER   OF WGL300A PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+  TAB 074 LGLNBRTRS      OF WGL300A PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+  TAB 092 D_LGLNBRTRSDIF            PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+SKIP PAGE
+
+
+
+BUILD gl300zc
+
+
+
+
+
+;===============================================================================
+; Rapport sommaire à la fin du rapport  (pour le Holding)
+;
+; Prendre note que ce rapport est presque identique à GL300B
+; Différence entre par Compagnie et Par Holding :
+; GL300B : (par compagnie)
+;   - le numéro de compagnie de l'imputation n'est pas imprimer. (Serait égale à la compagnie passer en paramètre)
+; GL300D : (par holding)
+;   - le numéro de compagnie de l'imputation est affiché à même l'unité administrative.
+;===============================================================================
+
+
+ACCESS *WGL300A
+
+
+
+ DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &  ; titre1  du rapport
+@IF FRANCAIS
+        "Vérification des écritures de journal"
+@ELSE
+        "Journal Entry Verification"
+@ENDIF
+ DEFINE DZ_NOMRAP2 CHARACTER SIZE 60  =  &            ; titre2  du rapport
+@IF FRANCAIS
+        "Sommaire"
+@ELSE
+        "Summary"
+@ENDIF
+ DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "GL300D"         ; numéro du rapport
+ DEFINE DZ_CIENOM  CHARACTER SIZE 40  = PARM            ; Nom de la compagnie
+
+DEFINE D_JOURN     CHARACTER SIZE 12 = &                   ;Indique si le lot est journalisé
+@IF FRANCAIS
+    "Journalisé" &
+@ELSE
+    "Posted" &
+@ENDIF
+    IF LGLDATJOU OF WGL300A <> 0 ELSE " "
+
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE4 CHARACTER SIZE 5 = "1" + PECCLE OF WGL300A &
+         IF PECCLE OF WGL300A[1:1] < "8" &
+         ELSE "0" + PECCLE OF WGL300A
+
+SORT   ON  ECJCIECLE OF WGL300A, &    ;Compangie
+           D_PECCLE_SIE4, &    ;Période
+           LGLCLE    OF WGL300A, &    ;Lot
+           CIECLE    OF WGL300A, &    ;Compagnie
+           UNACLE    OF WGL300A, &    ;Unité
+           CPTCLE    OF WGL300A       ;Compte
+
+
+ USE ustit180 NOLIST  ; Titre standard pour l'application a 180
+SKIP 2 &
+@IF FRANCAIS
+ TAB 001 "Lot.....: "   &
+@ELSE
+ TAB 001 "Batch...: "   &
+@ENDIF
+ TAB 011 LGLCLE  OF WGL300A      &
+ TAB 017 LGLDSC  OF WGL300A      &
+ TAB 060 D_JOURN                 &
+SKIP &
+@IF FRANCAIS
+ TAB 001 "Période.: " &
+@ELSE
+ TAB 001 "Period..: " &
+@ENDIF
+ TAB 011 PECCLE  OF WGL300A      &
+SKIP 2 &
+@IF FRANCAIS
+  TAB 018 "       Unité administrative                    Compte                   Débit           Crédit " &
+@ELSE
+  TAB 018 "       Administrative unit                    Account                   Debit           Credit " &
+@ENDIF
+ SKIP &
+  TAB 018 "----------------------------------   ---------------------------   --------------   -------------- " &
+ SKIP
+
+
+FOOTING AT CPTCLE &
+  TAB 014 CIECLE     OF WGL300A      &
+  TAB 018 UNACLE     OF WGL300A      &
+  TAB 025 UNANOMABR  OF WGL300A      &
+  TAB 050 CPTCLE     OF WGL300A      &
+  TAB 057 CPTDSCABR  OF WGL300A      &
+  TAB 085 T_MNT_DEBIT  OF WGL300A SUBTOTAL PICTURE "^^^,^^^,^^^.^^" SIGNIFICANCE 4 &
+  TAB 102 T_MNT_CREDIT OF WGL300A SUBTOTAL PICTURE "^^^,^^^,^^^.^^" SIGNIFICANCE 4
+
+
+
+FOOTING AT LGLCLE &
+      SKIP 2 &
+       TAB 085 "--------------" &
+       TAB 102 "--------------" &
+      SKIP 1 &
+@IF FRANCAIS
+       TAB 070 "Total du lot:" &
+@ELSE
+       TAB 070 "Batch total:" &
+@ENDIF
+       TAB 085 T_MNT_DEBIT  SUBTOTAL &
+               PICTURE "^^^,^^^,^^^.^^" SIGNIFICANCE 4 &
+       TAB 102 T_MNT_CREDIT SUBTOTAL &
+               PICTURE "^^^,^^^,^^^.^^" SIGNIFICANCE 4 &
+      SKIP 1 &
+       TAB 085 "==============" &
+       TAB 102 "==============" &
+  SKIP PAGE
+
+
+
+BUILD gl300zd
+@IF FORMAT
+
+GL300A                                                                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             Page:9999
+99/99/99 HH:MM xxxxxxxxxxxx                                            Vérification des écritures de journal
+                                                            xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+Lot.....:  xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    Journalisé
+Période.: 99-99
+
+      No.                                                                               Inter   -- Nbr période ---     Période
+*   écriture                Description                       Date     Type   Annulée   unité   initiale  restante   destination
+-  -----------   ----------------------------------------   --------   ----   -------   -----   --------  --------   -----------
+x  12345678 12   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   99-99-99    xx      xxx      xxx       99        99         99-99
+                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+ ----Unité administrative----- ----------Compte----------- --Montant Déb.- --Montant Cré.- ---------- Client ---------
+ 12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- 999,999,999.99- 123456 xxxxxxxxxxxxxxxxxxxx
+ 12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- 999,999,999.99- 123456 xxxxxxxxxxxxxxxxxxxx
+ 12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- 999,999,999.99- 123456 xxxxxxxxxxxxxxxxxxxx
+
+
+x  12345678 12   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   99-99-99    xx      xxx      xxx        99       99         99-99
+                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+ ----Unité administrative----- ----------Compte----------- --Montant Déb.- --Montant Cré.- ---------- Client ---------
+ 12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- 999,999,999.99- 123456 xxxxxxxxxxxxxxxxxxxx
+ 12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- 999,999,999.99- 123456 xxxxxxxxxxxxxxxxxxxx
+ 12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- 999,999,999.99- 123456 xxxxxxxxxxxxxxxxxxxx
+
+                                                           --------------- ---------------
+                                                           999,999,999.99- 999,999,999.99-
+                                                           --------------  ---------------
+                                            Total du lot:  999,999,999.99- 999,999,999.99-
+                                                           =============== ===============
+
+
+------------------------------------------------------------------------------------------------------------------------------------
+                                                  Vérifiés         Cumulés             Ecart        Hors balance(*)
+                                              --------------    --------------    --------------    ---------------
+                    Montant total.........:   999,999,999.99    999,999,999.99    999,999,999.99-         xxx
+                    Nombre de transactions:         9,999             9,999             9,999-
+
+GL300B                                                                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                             Page:9999
+99/99/99 HH:MM xxxxxxxxxxxx                                            Vérification des écritures de journal
+                                                                                      Sommaire;
+
+Lot.....:  xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    Journalisé
+Période.: 99-99
+
+                     Unité administrative                  Compte                   Débit           Crédit
+                 -----------------------------   ---------------------------   --------------   --------------
+                 12345678 xxxxxxxxxxxxxxxxxxxx   123456 xxxxxxxxxxxxxxxxxxxx   999,999,999.99   999,999,999.99
+                 12345678 xxxxxxxxxxxxxxxxxxxx   123456 xxxxxxxxxxxxxxxxxxxx   999,999,999.99   999,999,999.99
+                 12345678 xxxxxxxxxxxxxxxxxxxx   123456 xxxxxxxxxxxxxxxxxxxx   999,999,999.99   999,999,999.99
+                 12345678 xxxxxxxxxxxxxxxxxxxx   123456 xxxxxxxxxxxxxxxxxxxx   999,999,999.99   999,999,999.99
+                 12345678 xxxxxxxxxxxxxxxxxxxx   123456 xxxxxxxxxxxxxxxxxxxx   999,999,999.99   999,999,999.99
+                 12345678 xxxxxxxxxxxxxxxxxxxx   123456 xxxxxxxxxxxxxxxxxxxx   999,999,999.99   999,999,999.99
+                 12345678 xxxxxxxxxxxxxxxxxxxx   123456 xxxxxxxxxxxxxxxxxxxx   999,999,999.99   999,999,999.99
+
+                                                                               --------------   --------------
+                                                                Total du lot:  999,999,999.99   999,999,999.99
+                                                                               ==============   ==============
+
+
+GL300C                                                                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                             Page:9999
+99/99/99 HH:MM xxxxxxxxxxxx                                            Vérification des écritures de journal
+                                                            xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+Lot.....: xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    Journalisé
+Période.: 99-99
+
+      No.                                                                                 Cie     Inter   -- Nbr période ---     Période
+*   écriture                Description                       Date     Type   Annulée   d'inter   unité   initiale  restante   destination
+-  -----------   ----------------------------------------   --------   ----   -------   -------   -----   --------  --------   -----------
+x  12345678 12   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   99-99-99    xx      xxx       xxxx     xxx       99        99         99-99
+                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+ Cie- ----------- Projet ---------- ----- Sous-projet ------ -------- Equipement ----------- ----Unité administrative----- ----------Compte----------- --Montant Déb.- --Montant Cré.- ---------- Client ---------
+ 1234 12345678 xxxxxxxxxxxxxxxxxxxx 123 xxxxxxxxxxxxxxxxxxxx 1212345678 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- 999,999,999.99- 123456 xxxxxxxxxxxxxxxxxxxx
+ 1234 12345678 xxxxxxxxxxxxxxxxxxxx 123 xxxxxxxxxxxxxxxxxxxx 1212345678 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- 999,999,999.99- 123456 xxxxxxxxxxxxxxxxxxxx
+ 1234 12345678 xxxxxxxxxxxxxxxxxxxx 123 xxxxxxxxxxxxxxxxxxxx 1212345678 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- 999,999,999.99- 123456 xxxxxxxxxxxxxxxxxxxx
+                                                                                                                                           --------------  --------------
+                                                                                                                                           999,999,999.99  999,999,999.99
+
+x  12345678 12   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   99-99-99    xx    xxx   xxxx   xxx      99       99         99-99
+                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+ Cie- ----------- Projet ---------- ----- Sous-projet ------ -------- Equipement ----------- ----Unité administrative----- ----------Compte----------- --Montant Déb.- --Montant Cré.- ---------- Client ---------
+ 1234 12345678 xxxxxxxxxxxxxxxxxxxx 123 xxxxxxxxxxxxxxxxxxxx 1212345678 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- 999,999,999.99- 123456 xxxxxxxxxxxxxxxxxxxx
+ 1234 12345678 xxxxxxxxxxxxxxxxxxxx 123 xxxxxxxxxxxxxxxxxxxx 1212345678 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- 999,999,999.99- 123456 xxxxxxxxxxxxxxxxxxxx
+ 1234 12345678 xxxxxxxxxxxxxxxxxxxx 123 xxxxxxxxxxxxxxxxxxxx 1212345678 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- 999,999,999.99- 123456 xxxxxxxxxxxxxxxxxxxx
+                                                                                                                                           999,999,999.99  999,999,999.99
+
+                                                                                                                                           --------------  --------------
+                                                                                                                            Total du lot:  999,999,999.99  999,999,999.99
+                                                                                                                                           ==============  ==============
+
+
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                    Vérifiés         Cumulés             Ecart        Hors balance(*)
+                                                --------------    --------------    --------------    ---------------
+                      Montant total.........:   999,999,999.99    999,999,999.99    999,999,999.99-         xxx
+                      Nombre de transactions:         9,999             9,999             9,999-
+
+GL300D                                                                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                             Page:9999
+99/99/99 HH:MM xxxxxxxxxxxx                                            Vérification des écritures de journal
+                                                                                      Sommaire
+
+Lot.....:  xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    Journalisé
+Période.: 99-99
+
+                        Unité administrative                   Compte                      Débit           Crédit
+                 ----------------------------------  ---------------------------      --------------   --------------
+                 1234 12345678 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx      999,999,999.99   999,999,999.99
+                 1234 12345678 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx      999,999,999.99   999,999,999.99
+                 1234 12345678 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx      999,999,999.99   999,999,999.99
+                 1234 12345678 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx      999,999,999.99   999,999,999.99
+                 1234 12345678 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx      999,999,999.99   999,999,999.99
+                 1234 12345678 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx      999,999,999.99   999,999,999.99
+                 1234 12345678 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx      999,999,999.99   999,999,999.99
+
+                                                                                      --------------   --------------
+                                                                      Total du lot:   999,999,999.99   999,999,999.99
+                                                                                      ==============   ==============
+
+@ENDIF

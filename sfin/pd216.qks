@@ -1,0 +1,1520 @@
+;/T/ 2.5.1 Enregistrer les caissons.
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1995-04-24
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   la liste d'emblalage.
+;
+;/M/ Programmeur..: Claudie Doyon
+;    Date.........: 1999/10/12
+;    Description..: Modification de la procédure préupdate pour empêcher la
+;                   modification de l'enregistrement si caisson expédié.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par......: Marc Poulin     
+;    Date modification: 03 mai 2000
+;    Description......: Ajustement du traitement PD216a (Enregistrer les caissons / Tranches) afin de corriger le calcul du poids
+;                       et de la surface estimés.
+;
+;    Référence........: Demande de changement 000047.
+;
+;    Signet...........: MP-00-05-03_D47.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par......: Marc Poulin     
+;    Date modification: 09 octobre 2001
+;    Description......: Modification de la valeur par défaut pour l'élément CAIETA associé au code d'état du caisson.
+;
+;    Référence........: Demande directe - Nathalie Desrochers.
+;
+;    Signet...........: MP-01-10-09_DD.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd216  ACTIONBAR                    &
+              MODE LABEL "" AT 2,80        &
+              NOACTION                     &
+              ACTIVITIES CHANGE,FIND,ENTRY,DELETE &
+              FIELDMARK RETAIN STARTUP     &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU ,      &
+                        T_CIENOM
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD216"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+USE pd216.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Tranche                         " ACTION DESIGNER D001
+  MENUITEM LABEL "Diagramme                       " ACTION DESIGNER D002
+  MENUITEM LABEL "Produit dimension               " ACTION DESIGNER D003
+  MENUITEM LABEL "Transfert prod dimen - diagramme" ACTION DESIGNER D004
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%Tranche                      " ACTION DESIGNER D001
+  MENUITEM LABEL "%%%Diagramme                    " ACTION DESIGNER D002
+  MENUITEM LABEL "%%%Produit dimension            " ACTION DESIGNER D003
+  MENUITEM LABEL "%%%Trans prod dimen - diagramme " ACTION DESIGNER D004
+@ENDIF
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable temporaire du programme pour les dépisteurs
+;
+
+TEMPORARY T_PJTABR       CHARACTER SIZE 02
+TEMPORARY T_PJTANN       CHARACTER SIZE 02
+TEMPORARY T_COMNUMCOMINT CHARACTER SIZE 03
+TEMPORARY T_COMNUMCOM    CHARACTER SIZE 07
+TEMPORARY T_CHAMP        INTEGER UNSIGNED SIZE 01
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire au traitement
+;
+
+TEMPORARY T_CAITRA       CHARACTER SIZE 01
+TEMPORARY T_CAIDIA       CHARACTER SIZE 01
+TEMPORARY T_CAIPDI       CHARACTER SIZE 01
+
+;-------------------------------------------------------------------------------
+;
+; Sert à valider les codes bilingue et pour les sous-écrans de consultation
+;
+DEFINE    D_CAISTU    CHARACTER SIZE 16 = "CAISTU"
+TEMPORARY T_CAISTU    CHARACTER SIZE 04
+DEFINE    D_CAISITEMB CHARACTER SIZE 16 = "CAISITEMB"
+TEMPORARY T_CAISITEMB CHARACTER SIZE 04
+DEFINE    D_CAISITENT CHARACTER SIZE 16 = "CAISITENT"
+TEMPORARY T_CAISITENT CHARACTER SIZE 04
+DEFINE    D_CAIETA    CHARACTER SIZE 16 = "CAIETA"
+TEMPORARY T_CAIETA    CHARACTER SIZE 04
+TEMPORARY T_CAIETAA   CHARACTER SIZE 04
+TEMPORARY T_CAIETAAA  CHARACTER SIZE 04
+TEMPORARY T_SILENT    CHAR SIZE 01
+TEMPORARY T_SILENTT   CHAR SIZE 01
+
+TEMPORARY T_ALTREC      CHARACTER        SIZE 01
+TEMPORARY T_NEWREC      CHARACTER        SIZE 01
+TEMPORARY T_DELREC      CHARACTER        SIZE 01
+TEMPORARY T_QTE_EMB     INTEGER SIGNED   SIZE 04
+
+;-------------------------------------------------------------------------------
+;
+; Caisson
+;
+
+FILE PDCAISSON   PRIMARY &
+                 NOITEM
+
+  ACCESS VIA     CIECLE,          &
+                 CAINUMCAI        &
+         USING   T_CIECLEMNU,                          &
+                 CAINUMCAI        OF PDCAISSON         &
+         REQUEST CAINUMCAI        OF PDCAISSON         &
+         ORDERBY CIECLE,          &
+                 CAINUMCAI
+
+  ACCESS VIA     CIECLE       &
+         USING   T_CIECLEMNU  &
+         ORDERBY CIECLE,      &
+                 CAINUMCAI
+
+
+  ITEM CIECLE           OF PDCAISSON INITIAL T_CIECLEMNU
+  ITEM CAISTU           OF PDCAISSON INITIAL "I"
+  ITEM CAIPOIEST        OF PDCAISSON INITIAL 0.00
+
+
+;-------------------------------------------------------------------------------
+;
+; Commande interne
+;
+
+FILE PDCOMMAN_INTERNE REFERENCE
+
+  ACCESS VIA     CIECLE,           &
+                 PJTABR,           &
+                 PJTANN,           &
+                 COMNUMCOMINT      &
+         USING   T_CIECLEMNU,                    &
+                 PJTABR            OF PDCAISSON, &
+                 PJTANN            OF PDCAISSON, &
+                 COMNUMCOMINT      OF PDCAISSON
+
+
+;-------------------------------------------------------------------------------
+;
+; Commande interne
+;
+
+FILE PDPROJET REFERENCE
+
+  ACCESS VIA     CIECLE,           &
+                 PJTABR            &
+         USING   T_CIECLEMNU,      &
+                 PJTABR            OF PDCAISSON
+
+
+;-------------------------------------------------------------------------------
+;
+; Bon de commande (P/O)
+;
+
+FILE PDBON_COMMANDE   REFERENCE
+
+  ACCESS VIA     CIECLE,          &
+                 BCMNUMBCM        &
+         USING   T_CIECLEMNU,     &
+                 BCMNUMBCM        OF PDBON_COMMANDE
+
+
+;-------------------------------------------------------------------------------
+;
+; Code bilingue (Statut)
+;
+
+FILE VCBI_DSC  REFERENCE &
+               ALIAS A_CBI_CAISTU
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_CAISTU,                             &
+               CAISTU              OF PDCAISSON
+
+
+FILE PDPRIORITE_DIAG DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+; Code bilingue (Site emballage)
+;
+
+FILE VCBI_DSC  REFERENCE &
+               ALIAS A_CBI_CAISITEMB
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_CAISITEMB,                          &
+               CAISITEMB           OF PDCAISSON
+
+
+;-------------------------------------------------------------------------------
+;
+; Code bilingue (Site entrepôt)
+;
+
+FILE VCBI_DSC  REFERENCE &
+               ALIAS A_CBI_CAISITENT
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_CAISITENT,                          &
+               CAISITENT           OF PDCAISSON
+
+
+;-------------------------------------------------------------------------------
+;
+; Code bilingue (État)
+;
+
+FILE VCBI_DSC  REFERENCE &
+               ALIAS A_CBI_CAIETA
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_CAIETA,                             &
+               CAIETA              OF PDCAISSON
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Sortie produit
+;
+
+FILE PDSORTIE_PRODUIT      REFERENCE
+
+  ACCESS VIA   CIECLE,          &
+               SPRNUMSOR        &
+         USING T_CIECLEMNU,     &
+               SPRNUMSOR           OF PDCAISSON
+
+
+;-------------------------------------------------------------------------------
+;
+; Réception
+;
+
+FILE PDRECEPTION REFERENCE
+
+  ACCESS VIA   CIECLE,           &
+               RCTNUMREC         &
+         USING T_CIECLEMNU,      &
+               RCTNUMREC           OF PDCAISSON
+
+
+;-------------------------------------------------------------------------------
+;
+; Lien caisson - bon livraison
+;
+
+FILE PDLIVRE_CAISSON REFERENCE
+
+  ACCESS VIA   CIECLE,          &
+               CAINUMCAI        &
+         USING T_CIECLEMNU,     &
+               CAINUMCAI           OF PDCAISSON
+
+
+;-------------------------------------------------------------------------------
+;
+; Bon livraison
+;
+
+FILE PDBON_LIVRAISON REFERENCE
+
+  ACCESS VIA   CIECLE,          &
+               EXPNUMEXP,       &
+               BLINUMBLI        &
+         USING T_CIECLEMNU,                               &
+               EXPNUMEXP        OF PDLIVRE_CAISSON,       &
+               BLINUMBLI        OF PDLIVRE_CAISSON
+
+
+;-------------------------------------------------------------------------------
+;
+; Expédition
+;
+
+FILE PDEXPEDITION REFERENCE
+
+  ACCESS VIA   CIECLE,          &
+               EXPNUMEXP        &
+         USING T_CIECLEMNU,     &
+               EXPNUMEXP        OF PDBON_LIVRAISON
+
+
+;-------------------------------------------------------------------------------
+;
+; Emballage diagramme
+;
+
+FILE PDEMBAL_DIAG DESIGNER
+
+  ACCESS VIA   CIECLE,          &
+               CAINUMCAI        &
+         USING T_CIECLEMNU,     &
+               CAINUMCAI           OF PDCAISSON
+
+
+FILE PDEMBAL_DIAG DESIGNER ALIAS PDEMBAL_DIAG_DIAG
+
+  ACCESS VIA   CIECLE,          &
+               CAINUMCAI        &
+         USING T_CIECLEMNU,     &
+               CAINUMCAI           OF PDCAISSON
+
+FILE PDDIAGRAMME DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+; Emballage tranche
+;
+
+FILE PDEMBAL_TRANCHE DESIGNER
+
+  ACCESS VIA   CIECLE,          &
+               CAINUMCAI        &
+         USING T_CIECLEMNU,     &
+               CAINUMCAI           OF PDCAISSON
+
+
+;-------------------------------------------------------------------------------
+;
+; Emballage produit dimension
+;
+
+FILE PDEMBAL_PROD_DIM DESIGNER
+
+  ACCESS VIA   CIECLE,          &
+               CAINUMCAI        &
+         USING T_CIECLEMNU,     &
+               CAINUMCAI           OF PDCAISSON
+
+;
+; Compagnie
+;
+
+FILE MCCOMPAGNIE DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Caisson " &
+@ELSE
+      " %%%Caisson " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+
+ALIGN (02,03,19)
+
+
+FIELD CAINUMCAI        OF PDCAISSON        &
+label "Num. caisson..:"&
+        HIDDEN ID 05                       &
+        REQUIRED                           &
+        NOCHANGE                           &
+        LOOKUP NOTON PDCAISSON             &
+         VIA     CIECLE,          &
+                 CAINUMCAI        &
+         USING   T_CIECLEMNU,                          &
+                 CAINUMCAI        OF PDCAISSON         &
+           MESSAGE 3130 ; Ce numéro de caisson existe déjà
+
+
+ALIGN (02,03,19) (,21,22) (24,24,25) (,,29)
+
+
+FIELD PJTABR           OF PDCAISSON        &
+        HIDDEN ID 07                       &
+        LABEL "Num. commande.:"            &
+        LOOKUP ON PDPROJET                 &
+          MESSAGE 3074 ; Le code de projet n'existe pas
+
+
+FIELD PJTANN           OF PDCAISSON        &
+        LABEL "-"                          &
+        DISPLAY
+
+
+FIELD COMNUMCOMINT     OF PDCAISSON        &
+        HIDDEN ID 09                       &
+        LABEL "-"                          &
+        NUMERIC                            &
+        BWZ                                &
+        LOOKUP ON PDCOMMAN_INTERNE         &
+         VIA     CIECLE,           &
+                 PJTABR,           &
+                 PJTANN,           &
+                 COMNUMCOMINT      &
+         USING   T_CIECLEMNU,                    &
+                 PJTABR            OF PDCAISSON, &
+                 PJTANN            OF PDCAISSON, &
+                 COMNUMCOMINT      OF PDCAISSON &
+    MESSAGE 3081 ; Ce numéro de commande n'existe pas
+
+
+FIELD COMNOM           OF PDCOMMAN_INTERNE &
+        DISPLAY
+
+
+FIELD CAIDSC           OF PDCAISSON        &
+label "Description...:"&
+        HIDDEN ID 15
+
+
+ALIGN (,03,19) (,,22) (47,48,64)
+
+
+FIELD CAISTU           OF PDCAISSON        &
+label "Statut........:"&
+        DISPLAY
+
+
+FIELD CBIDSC           OF A_CBI_CAISTU     &
+        DISPLAY
+
+
+FIELD BCMNUMBCM        OF PDCAISSON        &
+label "No de P/O...:"&
+        HIDDEN ID 17                       &
+        LOOKUP ON PDBON_COMMANDE           &
+          MESSAGE 3169 ; Ce numéro de bon de commande n'existe pas
+
+
+ALIGN (02,03,19) (,48,64)
+
+
+FIELD CAIDATEMB        OF PDCAISSON         FORMAT YYYYMMDD &
+PATTERN "####/##/##"&
+        LABEL "Date emballage:"            &
+        HIDDEN ID 20                       &
+        DEFAULT SYSDATE
+
+
+FIELD SPRNUMSOR        OF PDCAISSON        &
+label "No sortie.....:"&
+        DISPLAY
+
+ALIGN (02,03,19) (,,22) (,48,64)
+
+
+FIELD CAISITEMB        OF PDCAISSON        &
+label "Site emballage:"&
+        HIDDEN ID 25                       &
+        DEFAULT "GR"                       &
+        LOOKUP ON A_CBI_CAISITEMB          &
+          MESSAGE 3155 ; Ce site n'existe pas
+
+FIELD T_SILENTT SILENT
+
+FIELD CBIDSC           OF A_CBI_CAISITEMB  &
+        DISPLAY
+
+
+FIELD RCTNUMREC        OF PDCAISSON        &
+label "No. réception.:"&
+        DISPLAY
+
+
+ALIGN (02,03,19) (,,22) (,48,64)
+
+
+FIELD CAISITENT        OF PDCAISSON        &
+label "Site entrepôt.:"&
+        HIDDEN ID 35                       &
+        DEFAULT "GR"                       &
+        LOOKUP ON A_CBI_CAISITENT          &
+          MESSAGE 3155 ; Ce site n'existe pas
+
+FIELD T_SILENT SILENT
+
+FIELD CBIDSC           OF A_CBI_CAISITENT  &
+        DISPLAY
+
+
+FIELD EXPNUMEXP        OF PDEXPEDITION     &
+label "Num. expédi...:"&
+        DISPLAY
+
+
+FIELD CAIETA           OF PDCAISSON        &
+label "État..........:"&
+        HIDDEN ID 40                       &
+        DEFAULT "C"                        & ; MP-01-10-09_DD.
+        LOOKUP ON A_CBI_CAIETA             &
+          MESSAGE 3064 ; Ce code n'existe pas
+
+
+FIELD CBIDSC           OF A_CBI_CAIETA     &
+        DISPLAY
+
+
+FIELD CAIMC2           OF PDCAISSON        &
+label "Surface.......:"&
+        DISPLAY                            &
+        REFRESH
+
+
+ALIGN (,03,19) (47,48,64)
+
+
+FIELD CAIPOIEST        OF PDCAISSON        &
+        LABEL "Poids estimé..:"            &
+        PICTURE "^^^,^^^,^^^.^^^^"         & ; MP-00-05-03_D47.
+        DISPLAY                            &
+        REFRESH
+
+
+FIELD CAIPOIREE        OF PDCAISSON        &
+label "Poids réel....:"&
+        HIDDEN ID 45                       &
+        DEFAULT 0.00
+
+
+SKIP TO LINE 22
+
+
+ALIGN (,3,19) (,30,46) (,57,73)
+
+
+FIELD T_CAITRA                             &
+  LABEL "Tranche.......:"                  &
+  DISPLAY                                  &
+  REFRESH
+
+
+FIELD T_CAIDIA                             &
+  LABEL "Diagramme.....:"                  &
+  DISPLAY                                  &
+  REFRESH
+
+
+FIELD T_CAIPDI                             &
+  LABEL "Produit dimen.:"                  &
+  DISPLAY                                  &
+  REFRESH
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+
+
+;------------------------------------------------------------------------
+;
+;
+
+PROCEDURE INPUT CAINUMCAI
+BEGIN
+  IF 0 <> SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    LET FIELDTEXT = ASCII(NCONVERT(FIELDTEXT),9)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide le format du numéro de caisson
+;
+
+PROCEDURE EDIT CAINUMCAI
+BEGIN
+  IF     0 = SIZE(TRUNCATE(FIELDTEXT)) &
+     AND NOT MATCHPATTERN(FIELDTEXT,"#########")
+  THEN BEGIN
+    ERROR 9999
+  END
+END
+
+
+PROCEDURE OUTPUT CAINUMCAI
+BEGIN
+  LET FIELDTEXT = ASCII(NCONVERT(FIELDTEXT),9)
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel dépisteur num. commande interne (attention cet appel est particulier)
+;
+
+PROCEDURE INPUT PJTABR
+BEGIN
+  ;
+  ; Appel au dépisteur pour le champ
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_COMNUMCOM        = ""
+    LET T_PJTABR           = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_PJTANN           = ""
+    LET T_COMNUMCOMINT     = ""
+    LET T_CHAMP            = 1
+    RUN SCREEN pd124 MODE F                     &
+                     PASSING T_PJTABR,          &
+                             T_PJTANN,          &
+                             T_COMNUMCOMINT,    &
+                             T_COMNUMCOM,       &
+                             T_CHAMP,           &
+                             T_CIECLEMNU
+    LET FIELDTEXT          = TRUNCATE( T_COMNUMCOM )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Traitement pour le champ
+;
+
+PROCEDURE PROCESS PJTABR
+BEGIN
+  ;
+  ; Assigne la valeur pour l'année de la commande interne
+  ;
+  IF 0 <> SIZE(TRUNCATE(PJTABR OF PDCAISSON))
+  THEN BEGIN
+    GET PDPROJET
+    LET PJTANN OF PDCAISSON = PJTANN OF PDPROJET
+    LET PJTNUMSEQ OF PDCAISSON = PJTNUMSEQ OF PDPROJET
+    LET PJTNUMPRO OF PDCAISSON = PJTNUMPRO OF PDPROJET
+    DISPLAY PJTANN OF PDCAISSON
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel dépisteur num. commande interne (attention cet appel est particulier)
+;
+
+PROCEDURE INPUT COMNUMCOMINT
+BEGIN
+  ;
+  ; Appel au dépisteur pour le champ
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_COMNUMCOM        = ""
+    LET T_PJTABR           = PJTABR OF PDCAISSON
+    LET T_PJTANN           = PJTANN OF PDCAISSON
+    LET T_COMNUMCOMINT     = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_CHAMP            = 3
+    RUN SCREEN pd124 MODE F                     &
+                     PASSING T_PJTABR,          &
+                             T_PJTANN,          &
+                             T_COMNUMCOMINT,    &
+                             T_COMNUMCOM,       &
+                             T_CHAMP,           &
+                             T_CIECLEMNU
+    LET FIELDTEXT          = TRUNCATE( T_COMNUMCOMINT )
+  END
+;  IF 0 <> SIZE( TRUNCATE( T_PJTABR ) ) AND &
+;     0 =  SIZE( TRUNCATE( FIELDTEXT) )
+;  THEN BEGIN
+;    LET FIELDTEXT       = TRUNCATE( T_COMNUMCOMINT )
+;  END
+IF 0 = SIZE(TRUNC(FIELDTEXT))
+THEN ERROR = "Entrez une valeur"
+END
+
+;-------------------------------------------------------------------------------
+;
+; Initialise le champ comnumcom pour traitement dans pd216b
+;
+
+
+PROCEDURE PROCESS COMNUMCOMINT
+BEGIN
+  LET COMNUMCOM OF PDCAISSON = PJTABR OF PDCAISSON + &
+                               PJTANN OF PDCAISSON + &
+                               COMNUMCOMINT OF PDCAISSON
+
+
+END
+
+PROCEDURE EDIT COMNUMCOMINT
+BEGIN
+  GET PDCOMMAN_INTERNE OPT &
+         VIA     CIECLE,           &
+                 PJTABR,           &
+                 PJTANN,           &
+                 COMNUMCOMINT      &
+         USING   T_CIECLEMNU,                    &
+                 PJTABR            OF PDCAISSON, &
+                 PJTANN            OF PDCAISSON, &
+                 COMNUMCOMINT      OF PDCAISSON
+  IF ACCESSOK
+  THEN BEGIN
+   IF (COMSTU OF PDCOMMAN_INTERNE = "T") OR &
+      (COMSTU OF PDCOMMAN_INTERNE = "A") OR &
+      (COMSTU OF PDCOMMAN_INTERNE = "X")
+   THEN ERROR = "Le status de la commande interne ne permet pas de modifier"
+ END
+END
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur pour le champ
+;
+
+PROCEDURE INPUT CAISITEMB
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CAISITEMB = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 &
+               PASSING D_CAISITEMB, &
+                       T_CAISITEMB &
+               MODE F
+    LET FIELDTEXT = TRUNCATE(T_CAISITEMB)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur pour le champ
+;
+
+PROCEDURE INPUT CAISITENT
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CAISITENT = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 &
+               PASSING D_CAISITENT, &
+                       T_CAISITENT &
+               MODE F
+    LET FIELDTEXT = TRUNCATE(T_CAISITENT)
+  END
+END
+
+PROCEDURE EDIT CAISITENT
+BEGIN
+  IF 0 = BCMNUMBCM OF PDCAISSON
+  THEN BEGIN
+
+  GET MCCOMPAGNIE VIA CIECLE USING T_CIECLEMNU OPT
+  IF ACCESSOK
+  THEN BEGIN
+         IF 0 <> SIZE(TRUNC(CIESITENT OF MCCOMPAGNIE))
+         THEN BEGIN
+               IF FIELDTEXT <> CIESITENT OF MCCOMPAGNIE
+               THEN &
+ERROR "Le site d'entreposage doit être celui du défaut de la compagnie ! "
+              END
+       END
+  END
+  ELSE BEGIN
+         IF "T" = BCMCODTYPBCM OF PDBON_COMMANDE
+         THEN LET CAISITENT OF PDCAISSON = "US"
+         IF "S" = BCMCODTYPBCM OF PDBON_COMMANDE
+         THEN LET CAISITENT OF PDCAISSON = "SC"
+
+  END
+END
+
+PROCEDURE EDIT CAISITEMB
+BEGIN
+  IF 0 = BCMNUMBCM OF PDCAISSON
+  THEN BEGIN
+
+  GET MCCOMPAGNIE VIA CIECLE USING T_CIECLEMNU OPT
+  IF ACCESSOK
+  THEN BEGIN
+         IF 0 <> SIZE(TRUNC(CIESITENT OF MCCOMPAGNIE))
+         THEN BEGIN
+               IF FIELDTEXT <> CIESITENT OF MCCOMPAGNIE
+               THEN &
+ERROR "Le site d'emballage doit être celui du défaut de la compagnie ! "
+              END
+       END
+  END
+  ELSE BEGIN
+         IF "T" = BCMCODTYPBCM OF PDBON_COMMANDE
+         THEN LET CAISITENT OF PDCAISSON = "US"
+         IF "S" = BCMCODTYPBCM OF PDBON_COMMANDE
+         THEN LET CAISITENT OF PDCAISSON = "SC"
+  END
+
+END
+
+PROCEDURE EDIT BCMNUMBCM
+BEGIN
+  GET PDEMBAL_DIAG OPT
+  IF ACCESSOK
+  THEN ERROR = "IL Y A DEJA DES DONNÉES"
+
+  IF (PJTABR OF PDCAISSON = "" OR &
+     PJTANN OF PDCAISSON = "") AND &
+     0 <> BCMNUMBCM OF PDCAISSON
+  THEN &
+ERROR "Pour saisir un P/O vous devez avoir saisie préalablement un no de projet! "
+
+  IF PJTABR OF PDCAISSON <> PJTABR OF PDBON_COMMANDE OR &
+     PJTANN OF PDCAISSON <> PJTANN OF PDBON_COMMANDE
+  THEN &
+  ERROR "Le numéro de projet du P/O doit correspondre avec celui du caisson !"
+END
+
+PROCEDURE EDIT T_SILENT
+BEGIN
+  IF 0 = BCMNUMBCM OF PDCAISSON
+  THEN BEGIN
+
+  GET MCCOMPAGNIE VIA CIECLE USING T_CIECLEMNU OPT
+  IF ACCESSOK
+  THEN BEGIN
+         IF 0 <> SIZE(TRUNC(CIESITENT OF MCCOMPAGNIE))
+         THEN BEGIN
+               IF CAISITENT OF PDCAISSON <> CIESITENT OF MCCOMPAGNIE
+               THEN &
+ERROR "Le site d'entreposage doit être celui du défaut de la compagnie ! "
+              END
+       END
+  END
+  ELSE BEGIN
+         IF "T" = BCMCODTYPBCM OF PDBON_COMMANDE
+         THEN LET CAISITENT OF PDCAISSON = "US"
+         IF "S" = BCMCODTYPBCM OF PDBON_COMMANDE
+         THEN LET CAISITENT OF PDCAISSON = "SC"
+  END
+  DISPLAY CAISITENT OF PDCAISSON
+
+END
+
+PROCEDURE EDIT T_SILENTT
+BEGIN
+  IF 0 = BCMNUMBCM OF PDCAISSON
+  THEN BEGIN
+
+  GET MCCOMPAGNIE VIA CIECLE USING T_CIECLEMNU OPT
+  IF ACCESSOK
+  THEN BEGIN
+         IF 0 <> SIZE(TRUNC(CIESITENT OF MCCOMPAGNIE))
+         THEN BEGIN
+               IF CAISITEMB OF PDCAISSON <> CIESITENT OF MCCOMPAGNIE
+               THEN &
+ERROR "Le site d'emballage doit être celui du défaut de la compagnie ! "
+              END
+       END
+  END
+  ELSE BEGIN
+         IF "T" = BCMCODTYPBCM OF PDBON_COMMANDE
+         THEN LET CAISITEMB OF PDCAISSON = "US"
+         IF "S" = BCMCODTYPBCM OF PDBON_COMMANDE
+         THEN LET CAISITEMB OF PDCAISSON = "SC"
+  END
+  DISPLAY CAISITEMB OF PDCAISSON
+
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur pour le champ
+;
+
+PROCEDURE INPUT CAIETA
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CAIETA = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 &
+               PASSING D_CAIETA, &
+                       T_CAIETA &
+               MODE F
+    LET FIELDTEXT = TRUNCATE(T_CAIETA)
+  END
+  IF 0 = NCONVERT(COMNUMCOMINT OF PDCAISSON) AND "C" = FIELDTEXT
+  THEN ERROR "Vous ne pouvez pas saisir l'état 'C' sans numéro de commande !"
+  IF "I" <> CAISTU OF PDCAISSON AND FIELDTEXT <> CAIETA OF PDCAISSON
+  THEN ERROR &
+       "Vous ne pouvez pas modifier l'état si le statut est différent de 'I' !"
+  LET T_CAIETAA = CAIETA OF PDCAISSON
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide le poids réel
+;
+PROCEDURE EDIT CAIPOIREE
+BEGIN
+  IF 0 <> SIZE(TRUNCATE(FIELDTEXT)) AND CAISTU OF PDCAISSON <> "I"
+  THEN BEGIN
+    WARNING = "Ce caisson n'est pas en inventaire"
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Permet d'afficher une étoile pour indique le type de caisson
+;
+
+PROCEDURE POSTFIND
+BEGIN
+
+  LET T_CAITRA = " "
+  LET T_CAIDIA = " "
+  LET T_CAIPDI = " "
+
+
+  GET PDEMBAL_TRANCHE OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    LET T_CAITRA = "*"
+  END
+
+  GET PDEMBAL_DIAG OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    LET T_CAIDIA = "*"
+  END
+
+  GET PDEMBAL_PROD_DIM OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    LET T_CAIPDI = "*"
+  END
+
+  DISPLAY T_CAITRA
+  DISPLAY T_CAIDIA
+  DISPLAY T_CAIPDI
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Tranche
+;
+
+PROCEDURE DESIGNER D001
+BEGIN
+  ;
+  ; Valide que le caisson ne contient pas de diagramme
+  ;
+  GET PDEMBAL_DIAG OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    ERROR 3144 ; Le caisson contient déjà des diagrammes
+  END
+  ;
+  ; Valide que le caisson ne contient pas de produit de dimension
+  ;
+  GET PDEMBAL_PROD_DIM OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    ERROR 3146 ; Le caisson contient déjà des produits de dimension
+  END
+
+  RUN SCREEN  pd216a &
+              PASSING T_CIECLEMNU,        &
+                      T_CIENOM,           &
+                      PDCAISSON,          &
+                      PDCOMMAN_INTERNE    &
+              MODE SAME
+
+  LET T_CAITRA = " "
+  LET T_CAIDIA = " "
+  LET T_CAIPDI = " "
+
+  GET PDEMBAL_TRANCHE OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    LET T_CAITRA = "*"
+  END
+
+  GET PDEMBAL_DIAG OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    LET T_CAIDIA = "*"
+  END
+
+  GET PDEMBAL_PROD_DIM OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    LET T_CAIPDI = "*"
+  END
+  DISPLAY T_CAITRA
+  DISPLAY T_CAIDIA
+  DISPLAY T_CAIPDI
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Diagramme
+;
+
+PROCEDURE DESIGNER D002
+BEGIN
+  ;
+  ; Valide que le caisson ne contient pas de tranche
+  ;
+  GET PDEMBAL_TRANCHE OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    ERROR 3145 ; Le caisson contient déjà des tranches
+  END
+  ;
+  ; Valide que le caisson ne contient pas de produit de dimension
+  ;
+  GET PDEMBAL_PROD_DIM OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    ERROR 3146 ; Le caisson contient déjà des produits de dimension
+  END
+
+  RUN SCREEN  pd216b &
+              PASSING T_CIECLEMNU,        &
+                      T_CIENOM,           &
+                      PDCAISSON,          &
+                      PDCOMMAN_INTERNE    &
+              MODE SAME
+
+  LET T_CAITRA = " "
+  LET T_CAIDIA = " "
+  LET T_CAIPDI = " "
+
+  GET PDEMBAL_TRANCHE OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    LET T_CAITRA = "*"
+  END
+
+  GET PDEMBAL_DIAG OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    LET T_CAIDIA = "*"
+  END
+
+  GET PDEMBAL_PROD_DIM OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    LET T_CAIPDI = "*"
+  END
+
+  DISPLAY T_CAITRA
+  DISPLAY T_CAIDIA
+  DISPLAY T_CAIPDI
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Produit dimension
+;
+
+PROCEDURE DESIGNER D003
+BEGIN
+  ;
+  ; Valide que le caisson ne contient pas de tranche
+  ;
+  GET PDEMBAL_TRANCHE OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    ERROR 3145 ; Le caisson contient déjà des tranches
+  END
+  ;
+  ; Valide que le caisson ne contient pas de diagramme
+  ;
+  GET PDEMBAL_DIAG OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    ERROR 3144 ; Le caisson contient déjà des diagrammes
+  END
+
+  RUN SCREEN  pd216c &
+              PASSING T_CIECLEMNU,        &
+                      T_CIENOM,           &
+                      PDCAISSON,          &
+                      PDCOMMAN_INTERNE    &
+              MODE SAME
+
+  LET T_CAITRA = " "
+  LET T_CAIDIA = " "
+  LET T_CAIPDI = " "
+
+  GET PDEMBAL_TRANCHE OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    LET T_CAITRA = "*"
+  END
+
+  GET PDEMBAL_DIAG OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    LET T_CAIDIA = "*"
+  END
+
+  GET PDEMBAL_PROD_DIM OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    LET T_CAIPDI = "*"
+  END
+
+  DISPLAY T_CAITRA
+  DISPLAY T_CAIDIA
+  DISPLAY T_CAIPDI
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Transfert produit dimension - diagramme
+;
+
+PROCEDURE DESIGNER D004
+BEGIN
+  ;
+  ; Valide que le caisson ne contient pas de tranche
+  ;
+  GET PDEMBAL_TRANCHE OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    ERROR 3145 ; Le caisson contient déjà des tranches
+  END
+  ;
+  ; Valide que le caisson ne contient pas de diagramme
+  ;
+  GET PDEMBAL_DIAG OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    ERROR 3144 ; Le caisson contient déjà des diagrammes
+  END
+
+  RUN SCREEN  pd216d &
+              PASSING T_CIECLEMNU,        &
+                      T_CIENOM,           &
+                      PDCAISSON,          &
+                      PDCOMMAN_INTERNE    &
+              MODE SAME
+
+  LET T_CAITRA = " "
+  LET T_CAIDIA = " "
+  LET T_CAIPDI = " "
+
+  GET PDEMBAL_TRANCHE OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    LET T_CAITRA = "*"
+  END
+
+  GET PDEMBAL_DIAG OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    LET T_CAIDIA = "*"
+  END
+
+  GET PDEMBAL_PROD_DIM OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    LET T_CAIPDI = "*"
+  END
+
+  DISPLAY T_CAITRA
+  DISPLAY T_CAIDIA
+  DISPLAY T_CAIPDI
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+
+
+  IF CAISTU OF PDCAISSON = "E"
+  THEN ERROR "Vous ne pouvez modifier/saisir/détruire car caisson expédié"
+  
+ 
+
+;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDCAISSON &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDCAISSON &
+     AND NOT NEWRECORD     OF PDCAISSON &
+     AND NOT DELETEDRECORD OF PDCAISSON &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+   IF (COMSTU OF PDCOMMAN_INTERNE = "T") OR &
+      (COMSTU OF PDCOMMAN_INTERNE = "A") OR &
+      (COMSTU OF PDCOMMAN_INTERNE = "X")
+   THEN ERROR = "Le status de la commande interne ne permet pas de modifier"
+
+
+ ; IF 0 = SIZE(TRUNC(CAISTU OF PDCAISSON))
+ ; THEN BEGIN
+   IF CAIETA OF PDCAISSON = "S"
+   THEN LET CAISTU OF PDCAISSON = "T"
+   ;ELSE LET CAISTU OF PDCAISSON = "I"
+ ; END
+
+  DISPLAY CAISTU OF PDCAISSON
+
+  IF     ALTEREDRECORD     OF PDCAISSON &
+     AND NOT NEWRECORD     OF PDCAISSON &
+     AND NOT DELETEDRECORD OF PDCAISSON
+  THEN BEGIN
+
+  LET COMNUMCOM OF PDCAISSON = PJTABR OF PDCAISSON + &
+                               PJTANN OF PDCAISSON + &
+                               COMNUMCOMINT OF PDCAISSON
+
+    IF T_CAITRA = "*"
+       THEN BEGIN
+         WHILE RETRIEVING PDEMBAL_TRANCHE &
+               VIA   CIECLE,          &
+                     CAINUMCAI        &
+               USING T_CIECLEMNU,     &
+                     CAINUMCAI           OF PDCAISSON
+             BEGIN
+               LET COMNUMCOM    OF PDEMBAL_TRANCHE = COMNUMCOM    OF PDCAISSON
+               LET PJTABR       OF PDEMBAL_TRANCHE = PJTABR       OF PDCAISSON
+               LET PJTANN       OF PDEMBAL_TRANCHE = PJTANN       OF PDCAISSON
+               LET COMNUMCOMINT OF PDEMBAL_TRANCHE = COMNUMCOMINT OF PDCAISSON
+               LET PJTNUMPRO    OF PDEMBAL_TRANCHE = PJTNUMPRO    OF PDCAISSON
+              PUT PDEMBAL_TRANCHE RESET
+             END
+        END
+
+    IF T_CAIDIA = "*"
+       THEN BEGIN
+         WHILE RETRIEVING PDEMBAL_DIAG &
+               VIA   CIECLE,          &
+                     CAINUMCAI        &
+               USING T_CIECLEMNU,     &
+                     CAINUMCAI           OF PDCAISSON
+            BEGIN
+               LET COMNUMCOM    OF PDEMBAL_DIAG = COMNUMCOM    OF PDCAISSON
+               LET PJTABR       OF PDEMBAL_DIAG = PJTABR       OF PDCAISSON
+               LET PJTANN       OF PDEMBAL_DIAG = PJTANN       OF PDCAISSON
+               LET COMNUMCOMINT OF PDEMBAL_DIAG = COMNUMCOMINT OF PDCAISSON
+               LET PJTNUMPRO    OF PDEMBAL_DIAG = PJTNUMPRO    OF PDCAISSON
+              PUT PDEMBAL_DIAG RESET
+            END
+       END
+
+    IF T_CAIPDI = "*"
+       THEN BEGIN
+         WHILE RETRIEVING PDEMBAL_PROD_DIM &
+               VIA   CIECLE,          &
+                     CAINUMCAI        &
+               USING T_CIECLEMNU,     &
+                     CAINUMCAI           OF PDCAISSON
+             BEGIN
+               LET COMNUMCOM    OF PDEMBAL_PROD_DIM = COMNUMCOM    OF PDCAISSON
+               LET PJTABR       OF PDEMBAL_PROD_DIM = PJTABR       OF PDCAISSON
+               LET PJTANN       OF PDEMBAL_PROD_DIM = PJTANN       OF PDCAISSON
+               LET COMNUMCOMINT OF PDEMBAL_PROD_DIM = COMNUMCOMINT OF PDCAISSON
+               LET PJTNUMPRO    OF PDEMBAL_PROD_DIM = PJTNUMPRO    OF PDCAISSON
+             PUT PDEMBAL_PROD_DIM RESET
+
+            END
+       END
+
+
+
+         IF CAIETA OF PDCAISSON <> T_CAIETAA AND T_CAIETAA <> ""
+         THEN BEGIN
+                  LET T_CAIETAAA = CAIETA OF PDCAISSON;----modif en test
+
+                WHILE RETRIEVING PDEMBAL_DIAG_DIAG &
+                      VIA   CIECLE,          &
+                            CAINUMCAI        &
+                      USING T_CIECLEMNU,     &
+                            CAINUMCAI           OF PDCAISSON
+                BEGIN
+                  IF DIANUMDIA002 OF PDEMBAL_DIAG_DIAG <> ""
+                  THEN BEGIN
+                  GET PDDIAGRAMME &
+                      VIA     CIECLE,          &
+                              PJTABR,          &
+                              DIANUMDIA002     &
+                      USING   T_CIECLEMNU,                          &
+                              PJTABR           OF PDCOMMAN_INTERNE, &
+                              DIANUMDIA002     OF PDEMBAL_DIAG_DIAG
+                  GET PDPRIORITE_DIAG          &
+                      VIA     CIECLE,          &
+                              PJTABR,          &
+                              DIANUMDIA002     &
+                      USING   T_CIECLEMNU,                               &
+                              PJTABR           OF PDEMBAL_DIAG_DIAG,     &
+                              DIANUMDIA002     OF PDEMBAL_DIAG_DIAG
+                  LET T_ALTREC = "1"
+                  LET T_NEWREC = "0"
+                  LET T_DELREC = "0"
+;                  LET T_CAIETAAA = CAIETA OF PDCAISSON
+                  LET CAIETA OF PDCAISSON = T_CAIETAA
+                  LET T_QTE_EMB = EMDQTEPRD OF PDEMBAL_DIAG_DIAG * -1
+                  RUN SCREEN pd216by &
+                      PASSING PDCAISSON,         &
+                              PDEMBAL_DIAG_DIAG, &
+                              PDPRIORITE_DIAG,   &
+                              PDDIAGRAMME,       &
+                              T_QTE_EMB,         &
+                              T_ALTREC,          &
+                              T_NEWREC,          &
+                              T_DELREC,          &
+                              T_CIECLEMNU
+                END
+                END
+                WHILE RETRIEVING PDEMBAL_DIAG_DIAG &
+                      VIA   CIECLE,          &
+                            CAINUMCAI        &
+                      USING T_CIECLEMNU,     &
+                            CAINUMCAI           OF PDCAISSON
+                BEGIN
+                  IF DIANUMDIA002 OF PDEMBAL_DIAG_DIAG <> ""
+                  THEN BEGIN
+                  GET PDDIAGRAMME &
+                      VIA     CIECLE,          &
+                              PJTABR,          &
+                              DIANUMDIA002     &
+                      USING   T_CIECLEMNU,                          &
+                              PJTABR           OF PDCOMMAN_INTERNE, &
+                              DIANUMDIA002     OF PDEMBAL_DIAG_DIAG
+                  GET PDPRIORITE_DIAG          &
+                      VIA     CIECLE,          &
+                              PJTABR,          &
+                              DIANUMDIA002,    &
+                              PRICODPRI        &
+                      USING   T_CIECLEMNU,                               &
+                              PJTABR           OF PDEMBAL_DIAG_DIAG,     &
+                              DIANUMDIA002     OF PDEMBAL_DIAG_DIAG,     &
+                              PRICODPRI        OF PDPRIORITE_DIAG
+                  LET T_ALTREC = "0"
+                  LET T_NEWREC = "1"
+                  LET T_DELREC = "0"
+                  LET CAIETA OF PDCAISSON = T_CAIETAAA
+                  LET T_QTE_EMB = EMDQTEPRD OF PDEMBAL_DIAG_DIAG
+                  RUN SCREEN pd216by &
+                      PASSING PDCAISSON,            &
+                              PDEMBAL_DIAG_DIAG,    &
+                              PDPRIORITE_DIAG,      &
+                              PDDIAGRAMME,          &
+                              T_QTE_EMB,            &
+                              T_ALTREC,             &
+                              T_NEWREC,             &
+                              T_DELREC,             &
+                              T_CIECLEMNU
+                END
+                END
+         END
+  END
+
+
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+
+PROCEDURE POSTUPDATE
+BEGIN
+  DISPLAY CAISTU OF PDCAISSON
+END
+
+
+PROCEDURE DELETE
+BEGIN
+  IF (T_CAITRA <> "*" AND T_CAIDIA <> "*" AND T_CAIPDI <> "*") &
+     AND CAIETA OF PDCAISSON <> "S"
+   THEN BEGIN
+         INFO = "Etes-vous sur (Tapez sur une touche et MAJ sinon ne pas faire MAJ) ? " NOW RESP
+         IF CAISTU OF PDCAISSON = "A"
+         THEN BEGIN
+               IF LOGONID = "natadesr" OR LOGONID = "marcbern" ; Demande spécifique du client - Nathalie Desrochers - 2001/08/02
+                 THEN DELETE PDCAISSON
+               ELSE LET CAISTU OF PDCAISSON = "A"
+         END
+         ELSE LET CAISTU OF PDCAISSON = "A"
+       END
+  ELSE BEGIN
+         IF CAIETA OF PDCAISSON = "S"
+         THEN BEGIN
+                INFO = "Etes-vous sur (Tapez sur une touche et MAJ sinon ne pas faire MAJ) ? " NOW RESP
+                LET CAISTU OF PDCAISSON = "R"
+              END
+         ELSE BEGIN
+                ERROR "Vous devez effacer les informations des sous-ecrans !"
+              END
+       END
+END
+
+BUILD
+
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+*********************************** Caisson ************************************
+*                                                                              *
+* Num. caisson..: xxxxxxxxxxx                                                  *
+* Num projet....: xxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           *
+* Commande int..: xxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           *
+* Description...: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+* Statut........: x xxxxxxxxxxxxxxxxxxxxxxxxx                                  *
+* Date embalage.: xxxxxxxx                    No sortie.....: xxxxxxxxx        *
+* Site emballage: x xxxxxxxxxxxxxxxxxxxxxxxxx No. réception.: xxxxxxxxx        *
+* Site entrepôt.: x xxxxxxxxxxxxxxxxxxxxxxxxx Num. expédi...: xxxxxxxxxxx      *
+* État..........: x xxxxxxxxxxxxxxxxxxxxxxxxx Surface.......: xxxxxxxxxx       *
+* Poids estimer.: xxxxxxxxxxxxx               Poids réel....: xxxxxxxxxxxxx    *
+*                                                                              *
+*                                                                              *
+* Tranche.......: xxx        Diagramme.....: XXX        Produit dimen.: XXX    *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+********************************************************************************
+@ENDIF
+

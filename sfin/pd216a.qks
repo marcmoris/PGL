@@ -1,0 +1,1013 @@
+;/T/ 2.5.1 Enregistrer les caissons. (TRANCHE)
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1995-05-10
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   la liste d'emblalage.
+;
+;/M/ Programmeur..: Claudie Doyon
+;    Date ........: 1999-05-19
+;    État.........: Terminer
+;    Description..: Ajouter le champs Defaut de la table pdtranche_def
+;                   référence no.demande 631
+;
+;
+;/M/ Programmeur..: Claudie Doyon
+;    Date.........: 1999/10/12
+;    Description..: Modification de la procédure préupdate pour empêcher la
+;                   modification de l'enregistrement si caisson expédié.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par......: Marc Poulin     
+;    Date modification: 03 mai 2000
+;    Description......: Ajustement du traitement PD216a (Enregistrer les caissons / Tranches) afin de corriger le calcul du poids
+;                       et de la surface estimés.
+;
+;    Référence........: Demande de changement 000047.
+;
+;    Signet...........: MP-00-05-03_D47.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd216a ACTIONBAR                     &
+              MODE LABEL "" AT 2,80         &
+              NOACTION                      &
+              FIELDMARK RETAIN STARTUP      &
+              HELP POPUP FROM 4,9 TO 20,72  &
+              RECEIVING T_CIECLEMNU,        &
+                        T_CIENOM,           &
+                        PDCAISSON,          &
+                        PDCOMMAN_INTERNE
+
+
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+
+USE ussectmp  NOLIST
+    "PD216A"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+
+USE pd216a.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+TEMPORARY T_FLGEMB CHAR SIZE 1
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul de la surface et du volume d'une pièce de granit
+;
+
+USE usvarvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Sert à valider les codes bilingue et pour les sous-écrans de consultation
+;
+DEFINE    D_CAISTU    CHARACTER SIZE 16 = "CAISTU"
+TEMPORARY T_CAISTU    CHARACTER SIZE 04
+DEFINE    D_CAIETA    CHARACTER SIZE 16 = "CAIETA"
+TEMPORARY T_CAIETA    CHARACTER SIZE 04
+TEMPORARY T_TRAEPA    INTEGER   SIZE 04
+TEMPORARY T_TRAEPAPLU INTEGER   SIZE 04
+TEMPORARY T_TRAEPAMOI INTEGER   SIZE 04
+
+TEMPORARY T_SUM       INTEGER   SIZE 04 
+DEFINE    D_SUM       INTEGER   SIZE 04 = T_SUM
+
+;-------------------------------------------------------------------------------
+;
+; Variables nécessaires pour l'appel des dépisteurs (pop-up)
+;
+
+TEMPORARY T_TRANUMTRA002     CHARACTER SIZE 07
+TEMPORARY T_COD              INTEGER UNSIGNED SIZE 02
+TEMPORARY T_COMNUMCOM        CHARACTER SIZE 07
+TEMPORARY T_DCINUMLIG        CHARACTER SIZE 03
+
+
+;-------------------------------------------------------------------------------
+;
+; Dimension maximum et minimum des pièces de granit
+;
+
+USE usdimprd NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Caisson
+;
+
+FILE PDCAISSON MASTER
+
+;-------------------------------------------------------------------------------
+;
+; Commande interne
+;
+
+FILE PDCOMMAN_INTERNE MASTER
+
+FILE PDEMBAL_TRANCHE DESIGNER ALIAS DEL_TRANCHE 
+
+;-------------------------------------------------------------------------------
+;
+; Emballage tranche
+;
+
+FILE PDEMBAL_TRANCHE PRIMARY &
+                     NOITEM &
+                     OCCURS 16 TIMES
+
+  ACCESS VIA     CIECLE,          &
+                 CAINUMCAI        &
+         USING   T_CIECLEMNU,     &
+                 CAINUMCAI        OF PDEMBAL_TRANCHE
+
+
+  ITEM CIECLE           OF PDEMBAL_TRANCHE INITIAL T_CIECLEMNU
+  ITEM CAINUMCAI        OF PDEMBAL_TRANCHE INITIAL CAINUMCAI        OF PDCAISSON FIXED
+  ITEM PJTABR           OF PDEMBAL_TRANCHE INITIAL PJTABR           OF PDCOMMAN_INTERNE
+  ITEM PJTANN           OF PDEMBAL_TRANCHE INITIAL PJTANN           OF PDCOMMAN_INTERNE
+  ITEM PJTNUMSEQ        OF PDEMBAL_TRANCHE INITIAL PJTNUMSEQ        OF PDCOMMAN_INTERNE
+  ITEM PJTNUMPRO        OF PDEMBAL_TRANCHE INITIAL PJTNUMPRO        OF PDCOMMAN_INTERNE
+  ITEM COMNUMCOMINT     OF PDEMBAL_TRANCHE INITIAL COMNUMCOMINT     OF PDCOMMAN_INTERNE
+  ITEM COMNUMCOM        OF PDEMBAL_TRANCHE INITIAL COMNUMCOM        OF PDCOMMAN_INTERNE
+  ITEM EMTQTEPRD        OF PDEMBAL_TRANCHE INITIAL 1
+
+;-------------------------------------------------------------------------------
+;
+; Tranche
+;
+
+FILE PDTRANCHE REFERENCE OCCURS WITH PDEMBAL_TRANCHE OPEN 1
+
+  ACCESS VIA     CIECLE,          &
+                 TRANUMTRA002     &
+         USING   T_CIECLEMNU,     &
+                 TRANUMTRA002     OF PDEMBAL_TRANCHE
+
+FILE PDTRANCHE ALIAS PDTRANCHEE REFERENCE OCCURS WITH PDEMBAL_TRANCHE OPEN 2
+
+  ACCESS VIA     CIECLE,          &
+                 TRANUMTRA002     &
+         USING   T_CIECLEMNU,     &
+                 TRANUMTRA002     OF PDEMBAL_TRANCHE
+
+;-------------------------------------------------------------------------------
+
+FILE PDEMBAL_TRANCHE ALIAS A_PDEMBAL_TRANCHE DESIGNER 
+  ACCESS VIA CIECLE       , &
+             CAINUMCAI      &
+       USING T_CIECLEMNU  , &
+             CAINUMCAI   OF PDCAISSON
+
+;-------------------------------------------------------------------------------
+
+FILE PDBLOC DESIGNER
+
+
+;
+; Ajouter pour permettre d'ajouter le champs défaut
+;
+FILE PDTRANCHE_DEF REFERENCE OCCURS WITH PDEMBAL_TRANCHE
+
+ACCESS VIA CIECLE ,&
+           TRANUMTRA002 &
+       USING T_CIECLEMNU ,&
+             TRANUMTRA002 OF PDEMBAL_TRANCHE
+
+
+;-------------------------------------------------------------------------------
+;
+; Détail commande interne
+;
+
+FILE PDDETAIL_C_I REFERENCE OCCURS WITH PDEMBAL_TRANCHE
+
+  ACCESS VIA     CIECLE,          &
+                 COMNUMCOM,       &
+                 DCINUMLIG        &
+         USING   T_CIECLEMNU,                        &
+                 COMNUMCOM        OF PDCAISSON,      &
+                 DCINUMLIG        OF PDEMBAL_TRANCHE
+
+
+;-------------------------------------------------------------------------------
+;
+; Tranche
+;
+
+FILE PDTRANCHE DESIGNER ALIAS TRA_MAJ OPEN 4
+
+
+;-------------------------------------------------------------------------------
+;
+; Type de granit
+;
+
+FILE PDTYPE_GRANIT REFERENCE OCCURS WITH PDEMBAL_TRANCHE OPEN 1
+
+  ACCESS VIA   CIECLE,           &
+               TGRCODGRA         &
+         USING T_CIECLEMNU,      &
+               TGRCODGRA           OF PDTRANCHE
+
+
+FILE PDTYPE_GRANIT ALIAS PDTYPE_GRANITE REFERENCE OPEN 2
+
+  ACCESS VIA   CIECLE,           &
+               TGRCODGRA         &
+         USING T_CIECLEMNU,      &
+               TGRCODGRA           OF PDTRANCHEE
+
+;-------------------------------------------------------------------------------
+;
+; Code bilingue (Statut)
+;
+
+FILE VCBI_DSC  REFERENCE &
+               ALIAS A_CBI_CAISTU
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_CAISTU,                             &
+               CAISTU              OF PDCAISSON
+
+
+;-------------------------------------------------------------------------------
+;
+; Code bilingue (État)
+;
+
+FILE VCBI_DSC  REFERENCE &
+               ALIAS A_CBI_CAIETA
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_CAIETA,                             &
+               CAIETA              OF PDCAISSON
+
+;-------------------------------------------------------------------------------
+; MP-00-05-03_D47.
+
+TEMPORARY T_CAIPOIEST_OLD  FLOAT SIZE 08  OCCURS WITH PDEMBAL_TRANCHE
+TEMPORARY T_CAIMC2_OLD     FLOAT SIZE 08  OCCURS WITH PDEMBAL_TRANCHE
+
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Caisson " &
+@ELSE
+      " %%%Caisson " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+ALIGN (,03,19) (,48,64)
+
+FIELD CAINUMCAI        OF PDCAISSON        &
+        DISPLAY                            &
+        NUMERIC                            &
+        SIGNIFICANCE 9                     &
+        FIXED
+
+FIELD D_SUM &
+      LABEL "Qte...........:"&
+      DISPLAY
+
+;ALIGN (,03,19) (,,29)
+ALIGN (,03,19) (,21,22) (24,24,25) (,,29)
+
+
+FIELD PJTABR           OF PDCAISSON        &
+        DISPLAY FIXED &
+        LABEL "Num. commande.:"
+
+FIELD PJTANN           OF PDCAISSON        &
+        LABEL "-"                          &
+        DISPLAY FIXED
+
+
+FIELD COMNUMCOMINT     OF PDCAISSON        &
+        LABEL "-"                          &
+        NUMERIC                            &
+        BWZ DISPLAY FIXED
+
+;FIELD COMNUMCOM        OF PDCAISSON        &
+;        DISPLAY                            &
+;        FIXED
+
+
+FIELD COMNOM           OF PDCOMMAN_INTERNE &
+        DISPLAY                            &
+        FIXED
+
+
+ALIGN (,03,19) (,,22)
+
+
+FIELD CAISTU           OF PDCAISSON        &
+        DISPLAY                            &
+        FIXED
+
+
+FIELD CBIDSC           OF A_CBI_CAISTU     &
+        DISPLAY                            &
+        FIXED
+
+
+ALIGN (,03,19) (,,22) (,48,64)
+
+
+FIELD CAIETA           OF PDCAISSON        &
+        DISPLAY                            &
+        FIXED
+
+
+FIELD CBIDSC           OF A_CBI_CAIETA     &
+        DISPLAY                            &
+        FIXED
+
+
+FIELD CAIMC2           OF PDCAISSON        &
+        DISPLAY                            &
+        FIXED
+
+
+ALIGN (,03,19) (,48,64)
+
+
+FIELD CAIPOIEST        OF PDCAISSON        &
+        LABEL "Poids estimé..: "           &
+        PICTURE "^^^,^^^,^^^.^^^^"         & ; MP-00-05-03_D47.
+        DISPLAY                            &
+        FIXED
+
+
+FIELD CAIPOIREE        OF PDCAISSON        &
+        DISPLAY                            &
+        FIXED
+
+
+DRAW 11,02 TO 11,79
+
+
+SKIP TO LINE 11
+
+
+TITLE &
+@IF FRANCAIS
+      " Tranche " &
+@ELSE
+      " %%%Tranche " &
+@ENDIF
+      CENTERED AT ,1
+
+
+SKIP TO LINE 13
+
+
+TITLE &
+@IF FRANCAIS
+      " Tranche Lig Long Haut Épai Gra Fi Def  Tranche Lig Long Haut Épai Gra Fi Def" &
+@ELSE
+    "%%%ranche Lig Long Haut Épai Gra Fi       Tranche Lig Long Haut Épai Gra Fi " &
+@ENDIF
+      AT ,2
+
+
+DRAW 13,40 TO 23,40
+
+
+SKIP TO LINE 14
+
+
+;ALIGN (02,02,04) (,,12) (,,16) (,,21) (,,26) (,,31) (,,35)
+;modifier pour permettre d'ajouter le champs défaut
+
+
+ALIGN (02,02,03) (,,11) (,,15) (,,20) (,,25) (,,30) (,,34) (,,37)
+
+CLUSTER  OCCURS WITH PDEMBAL_TRANCHE ID BASE 25 FOR 1,39 VERTICAL
+
+
+FIELD TRANUMTRA002 OF PDEMBAL_TRANCHE      &
+        HIDDEN                             &
+        LABEL " "                          &
+        REQUIRED                           &
+        NOCHANGE                           &
+        NUMERIC                            &
+        LOOKUP ON PDTRANCHE                &
+          MESSAGE 2940, & ; Ce numéro de tranche n'existe pas
+               NOTON PDEMBAL_TRANCHE       &
+          VIA CIECLE,                      &
+              TRANUMTRA002                 &
+          USING T_CIECLEMNU,                    &
+                TRANUMTRA002 OF PDEMBAL_TRANCHE &
+          MESSAGE 3162 ; Cette tranche est déjà dans un caisson
+
+
+FIELD DCINUMLIG        OF PDEMBAL_TRANCHE  &
+        HIDDEN
+
+
+FIELD EMTLONVEN        OF PDEMBAL_TRANCHE  &
+        HIDDEN                             &
+        DEFAULT TRALON OF PDTRANCHE
+
+
+FIELD EMTHAUVEN        OF PDEMBAL_TRANCHE  &
+        HIDDEN                             &
+        DEFAULT TRAHAU OF PDTRANCHE
+
+
+FIELD EMTEPAVEN        OF PDEMBAL_TRANCHE  &
+        HIDDEN                             &
+        DEFAULT TRAEPA OF PDTRANCHE
+
+
+FIELD TGRCODGRA        OF PDTRANCHE        &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD TYFCODFIN        OF PDTRANCHE        &
+        HIDDEN                             &
+        DISPLAY
+
+FIELD DTRCODDEF OF PDTRANCHE_DEF  &
+      HIDDEN                       &
+      DISPLAY
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur (pop-up) pour le champ.
+;
+
+PROCEDURE INPUT TRANUMTRA002
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_COD          = 0 ; Toutes les tranches
+    LET T_TRANUMTRA002 = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd122 MODE F &
+                     PASSING T_TRANUMTRA002, &
+                             T_COD, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_TRANUMTRA002 )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que la tranche n'a pas le statut "T" terminé
+;
+
+PROCEDURE EDIT TRANUMTRA002
+BEGIN
+LET TRANUMTRA002 OF PDEMBAL_TRANCHE = FIELDTEXT
+get pdtranche opt &
+via ciecle,tranumtra002,trastu using t_cieclemnu,tranumtra002 of pdembal_tranche,"T"
+if accessok
+then error = "LE STATUT DE LA TRANCHE NE PERMET PAS CETTE OPÉRATION"
+
+
+ GET DEL_TRANCHE OPT &
+  VIA CIECLE ,TRANUMTRA002 USING T_CIECLEMNU,TRANUMTRA002 OF PDEMBAL_TRANCHE
+  IF ACCESSOK
+  THEN BEGIN
+    IF TRASTU OF PDTRANCHE = "I"
+    THEN BEGIN
+     DELETE DEL_TRANCHE
+     PUT DEL_TRANCHE
+    END
+    ELSE ERROR = "CETTE TRANCHE EST EMBALLER"
+  END
+;  IF TRASTU OF PDTRANCHE = "T" &
+;     OR &
+;     TRASTU OF PDTRANCHE = "E" &
+;     OR &
+;     TRASTU OF PDTRANCHE = "V"
+;  THEN BEGIN
+;    ERROR 3043 ; Le statut de la tranche ne permet pas cette opération
+;  END
+;  IF CAISTU OF PDCAISSON <> "I"
+;  THEN BEGIN
+;    ERROR 3194 ; Le caisson est déjà expédié
+;  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur pour le champ
+;
+
+PROCEDURE INPUT DCINUMLIG
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_COMNUMCOM = COMNUMCOM OF PDCAISSON
+    LET T_DCINUMLIG = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd107 MODE F &
+                     PASSING T_COMNUMCOM, &
+                             T_DCINUMLIG, &
+                             T_CIECLEMNU
+
+    LET FIELDTEXT = TRUNCATE( T_DCINUMLIG )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+
+PROCEDURE EDIT DCINUMLIG
+BEGIN
+  IF 0 = SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    ERROR 3044 ; Ce champ est requis
+  END
+  IF TGRCODGRA OF PDTRANCHE <> TGRCODGRA OF PDDETAIL_C_I &
+     OR &
+     TYFCODFIN OF PDTRANCHE <> TYFCODFIN OF PDDETAIL_C_I &
+     OR &
+     TPDTYPPRD OF PDDETAIL_C_I <> "TR"
+  THEN BEGIN
+    ERROR 3185 ; Cette tranche ne correspond à aucune ligne de détail de la commande
+  END
+  ;IF TRAEPA OF PDTRANCHE <> DCIEPA OF PDDETAIL_C_I
+  ;THEN ERROR &
+;-----------------------test
+  LET T_TRAEPA = TRAEPA OF PDTRANCHE
+  IF T_TRAEPA <> DCIEPA OF PDDETAIL_C_I
+  THEN BEGIN
+
+  GET PDCOMMAN_INTERNE &
+        VIA     CIECLE,          &
+                PJTABR,&
+                PJTANN,&
+                COMNUMCOMINT &
+        USING   T_CIECLEMNU,     &
+                PJTABR,&
+                PJTANN,&
+                COMNUMCOMINT  OF PDEMBAL_TRANCHE
+     LET T_TRAEPAPLU = T_TRAEPA + COMEPAPLU OF PDCOMMAN_INTERNE
+     LET T_TRAEPAMOI = T_TRAEPA - COMEPAMOI OF PDCOMMAN_INTERNE
+
+     IF DCIEPA OF PDDETAIL_C_I  > T_TRAEPAPLU OR DCIEPA OF PDDETAIL_C_I < T_TRAEPAMOI
+
+     THEN ERROR "L'épaisseur de la tranche est différente de celle du détail de la commande !"
+
+
+  END
+
+
+  END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation pour le champ
+;
+
+PROCEDURE EDIT EMTLONVEN
+BEGIN
+  ;
+  ; Simule l'option REQUIRED pour le champ
+  ;
+  IF 0 = SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    ERROR 3044 ; Ce champ est requis
+  END
+  ;
+  ; Valide que la dimension saisie est comprise dans l'intervalle permis
+  ;
+  IF FIELDVALUE > T_DIM_MAX_LON_TR OR &
+     FIELDVALUE < T_DIM_MIN_LON_TR
+  THEN BEGIN
+    ERROR 2947 ; Cette dimension hors des dimensions limites
+  END
+  ;
+  ; Valide que le champ n'est pas plus grand que celui de la tranche
+  ;
+  ; Validation a faire ...
+  ;
+  ; Verifier avec la longueur brut du bloc plutot que celui de la tranche
+  ; sinon ne pas valider ...
+  ; Prendre le bloc dans la tranche pour faire le lien
+
+  GET PDBLOC VIA CIECLE,                               &
+                 BLONUMGRA001APR,                      &
+                 BLONUMGRA002APR,                      &
+                 BLORECAPR                             &
+         USING   T_CIECLEMNU,                          &
+                 BLONUMGRA001APR OF PDTRANCHE,         &
+                 BLONUMGRA002APR OF PDTRANCHE,         &
+                 BLORECAPR       OF PDTRANCHE             OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+         IF FIELDVALUE > BLOLONBRU OF PDBLOC
+         THEN BEGIN
+         ERROR 3196 ; La dimension saisie est suppérieure à la dimension de la tranche
+  END
+
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation pour le champ
+;
+
+PROCEDURE EDIT EMTHAUVEN
+BEGIN
+  ;
+  ; Simule l'option REQUIRED pour le champ
+  ;
+  IF 0 = SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    ERROR 3044 ; Ce champ est requis
+  END
+  ;
+  ; Valide que la dimension saisie est comprise dans l'intervalle permis
+  ;
+  IF FIELDVALUE > T_DIM_MAX_HAU_TR OR &
+     FIELDVALUE < T_DIM_MIN_HAU_TR
+  THEN BEGIN
+    ERROR 2947 ; Cette dimension hors des dimensions limites
+  END
+  ;
+  ; Valide que le champ n'est pas plus grand que celui de la tranche
+  ;
+  ; Verifier avec la longueur brut du bloc plutot que celui de la tranche
+  ; sinon ne pas valider ...
+  ; Prendre le bloc dans la tranche pour faire le lien
+
+  GET PDBLOC VIA CIECLE,                               &
+                 BLONUMGRA001APR,                      &
+                 BLONUMGRA002APR,                      &
+                 BLORECAPR                             &
+         USING   T_CIECLEMNU,                          &
+                 BLONUMGRA001APR OF PDTRANCHE,         &
+                 BLONUMGRA002APR OF PDTRANCHE,         &
+                 BLORECAPR       OF PDTRANCHE             OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+         IF FIELDVALUE > BLOHAUBRU OF PDBLOC
+         THEN BEGIN
+         ERROR 3196 ; La dimension saisie est suppérieure à la dimension de la tranche
+         END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation pour le champ
+;
+
+PROCEDURE EDIT EMTEPAVEN
+BEGIN
+  ;
+  ; Simule l'option REQUIRED pour le champ
+  ;
+  IF 0 = SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    ERROR 3044 ; Ce champ est requis
+  END
+  ;
+  ; Valide que la dimension saisie est comprise dans l'intervalle permis
+  ;
+  IF FIELDVALUE > T_DIM_MAX_EPA_TR OR &
+     FIELDVALUE < T_DIM_MIN_EPA_TR
+  THEN BEGIN
+    ERROR 2947 ; Cette dimension hors des dimensions limites
+  END
+  ;
+  ; Valide que le champ n'est pas plus grand que celui de la tranche
+  ;
+  LET T_TRAEPA = TRAEPA OF PDTRANCHE
+  IF FIELDVALUE <> T_TRAEPA
+  THEN BEGIN
+
+  GET PDCOMMAN_INTERNE &
+        VIA     CIECLE,          &
+                PJTABR,&
+                PJTANN,&
+                COMNUMCOMINT &
+        USING   T_CIECLEMNU,     &
+                PJTABR,&
+                PJTANN,&
+                COMNUMCOMINT  OF PDEMBAL_TRANCHE
+
+     LET T_TRAEPAPLU = T_TRAEPA + COMEPAPLU OF PDCOMMAN_INTERNE
+     LET T_TRAEPAMOI = T_TRAEPA - COMEPAMOI OF PDCOMMAN_INTERNE
+
+     IF FIELDVALUE  > T_TRAEPAPLU OR FIELDVALUE < T_TRAEPAMOI
+
+     THEN ERROR 2096 ; La dimension saisie est suppérieure à la dimension de la tranche
+
+
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+  LET TPDTYPPRD OF PDCAISSON = "TR"
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul du volume d'une pièce de granit
+;
+
+USE uscalvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF CAISTU OF PDCAISSON = "E" and "marcpoul" <> logonid
+  THEN ERROR "Vous ne pouvez modifier/saisir/détruire car caisson expédié"
+
+
+  IF CAISTU OF PDCAISSON = "A" and "marcpoul" <> logonid
+  THEN ERROR "Vous ne pouvez modifier/saisir/détruire car caisson annulé"
+
+
+  IF     DELETEDRECORD OF PDEMBAL_TRANCHE &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDEMBAL_TRANCHE &
+     AND NOT NEWRECORD     OF PDEMBAL_TRANCHE &
+     AND NOT DELETEDRECORD OF PDEMBAL_TRANCHE &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  FOR EACH PDEMBAL_TRANCHE
+  BEGIN
+    ; --------------------------------------------------------------
+    ; MP-00-05-03_D47.
+    ;
+    ; Calcul de la surface et du volume vendu
+    ;
+    IF NOT DELETEDRECORD
+    THEN BEGIN
+      LET TZ_LARGEUR   = EMTLONVEN OF PDEMBAL_TRANCHE
+      LET TZ_HAUTEUR   = EMTHAUVEN OF PDEMBAL_TRANCHE
+      LET TZ_EPAISSEUR = EMTEPAVEN OF PDEMBAL_TRANCHE
+
+      DO INTERNAL CALVOL
+
+      LET EMTSURMC2VEN OF PDEMBAL_TRANCHE = TZ_MC2
+      LET EMTVOLMC3VEN OF PDEMBAL_TRANCHE = TZ_VOLUME
+
+      LET CAIPOIEST OF PDCAISSON = CAIPOIEST    OF PDCAISSON       - &
+                                   T_CAIPOIEST_OLD                 + &
+                                  (EMTQTEPRD    OF PDEMBAL_TRANCHE * &
+                                   TGRPOI       OF PDTYPE_GRANIT   * &
+                                   EMTVOLMC3VEN OF PDEMBAL_TRANCHE)
+
+      LET CAIMC2 OF PDCAISSON    = CAIMC2       OF PDCAISSON       - &
+                                   T_CAIMC2_OLD                    + &
+                                  (EMTQTEPRD    OF PDEMBAL_TRANCHE * &
+                                   EMTSURMC2VEN OF PDEMBAL_TRANCHE)
+    END
+    ELSE BEGIN
+      LET CAIPOIEST OF PDCAISSON = CAIPOIEST    OF PDCAISSON       - &
+                                   T_CAIPOIEST_OLD                 
+      LET CAIMC2 OF PDCAISSON    = CAIMC2       OF PDCAISSON       - &
+                                   T_CAIMC2_OLD                    
+    END
+
+    ; --------------------------------------------------------------
+
+    IF NOT DELETEDRECORD
+    THEN BEGIN
+      ;
+      ; Mise à jour du statut de la tranche
+      ;
+      GET TRA_MAJ &
+        VIA     CIECLE,          &
+                TRANUMTRA002     &
+        USING   T_CIECLEMNU,     &
+                TRANUMTRA002     OF PDEMBAL_TRANCHE
+
+      LET TRASTU OF TRA_MAJ = "E"
+      PUT TRA_MAJ
+    END
+    ELSE BEGIN
+      ;
+      ; Mise à jour du statut de la tranche
+      ;
+      GET TRA_MAJ &
+        VIA     CIECLE,          &
+                TRANUMTRA002     &
+        USING   T_CIECLEMNU,     &
+                TRANUMTRA002     OF PDEMBAL_TRANCHE
+
+      LET TRASTU OF TRA_MAJ = "I"
+      PUT TRA_MAJ
+    END
+  END
+
+ DISPLAY CAIMC2 OF PDCAISSON
+ DISPLAY CAIPOIEST OF PDCAISSON
+ DISPLAY CAIPOIREE OF PDCAISSON
+ DISPLAY D_SUM
+
+ WARNING = " "
+END
+;----------------------------------------------------------------------
+PROCEDURE UPDATE
+BEGIN
+  PUT PDCAISSON
+  PUT PDCOMMAN_INTERNE
+
+  FOR PDEMBAL_TRANCHE
+  BEGIN
+    PUT PDEMBAL_TRANCHE
+  END
+END
+
+;------------------------------------------------------------------------
+PROCEDURE FIND
+BEGIN
+   FOR MISSING PDEMBAL_TRANCHE
+   BEGIN
+     GET PDEMBAL_TRANCHE VIA CIECLE, CAINUMCAI USING T_CIECLEMNU, CAINUMCAI OF PDEMBAL_TRANCHE
+   END
+END
+;------------------------------------------------------------------------
+; MP-00-05-03_D47.
+
+PROCEDURE POSTUPDATE
+BEGIN
+  FOR PDEMBAL_TRANCHE
+  BEGIN
+    IF NOT DELETEDRECORD
+    THEN BEGIN
+      LET T_CAIPOIEST_OLD = EMTQTEPRD       OF PDEMBAL_TRANCHE * &  
+                            TGRPOI          OF PDTYPE_GRANIT   * &
+                            EMTVOLMC3VEN    OF PDEMBAL_TRANCHE
+
+      LET T_CAIMC2_OLD    = EMTQTEPRD       OF PDEMBAL_TRANCHE * & 
+                            EMTSURMC2VEN    OF PDEMBAL_TRANCHE
+    END
+    ELSE BEGIN
+      LET T_CAIPOIEST_OLD = 0
+      LET T_CAIMC2_OLD    = 0
+    END
+  END
+END
+
+PROCEDURE POSTFIND
+BEGIN
+; -----------------------------------------------------------
+; MP-00-05-03_D47.
+
+  FOR PDEMBAL_TRANCHE
+  BEGIN
+    LET T_CAIPOIEST_OLD = EMTQTEPRD       OF PDEMBAL_TRANCHE * &  
+                          TGRPOI          OF PDTYPE_GRANIT   * &
+                          EMTVOLMC3VEN    OF PDEMBAL_TRANCHE
+
+    LET T_CAIMC2_OLD    = EMTQTEPRD       OF PDEMBAL_TRANCHE * & 
+                          EMTSURMC2VEN    OF PDEMBAL_TRANCHE
+  END
+
+; -----------------------------------------------------------
+
+
+  WHILE RETRIEVING A_PDEMBAL_TRANCHE
+  BEGIN
+    LET T_SUM = T_SUM + EMTQTEPRD OF PDEMBAL_TRANCHE
+  END
+END
+
+BUILD detail list
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+*********************************** Caisson ************************************
+*                                                                              *
+* Num. caisson..: xxxxxxxxx                                                    *
+* Num. commande.: xxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           *
+* Statut........: x  xxxxxxxxxxxxxxxxxxxxxxxxx                                 *
+* État..........: x  xxxxxxxxxxxxxxxxxxxxxxxxx Surface.......: xxxxxxxxx       *
+* Poids estimer.: xxxxxxxxxxxxx                Poids réel....: xxxxxxxxxxxxx   *
+*                                                                              *
+*********************************** Tranche ************************************
+*                                                                              *
+*  Tranche Lig Long Haut Épai Gra Fi   *  Tranche Lig Long Haut Épai Gra Fi    *
+*  xxxxxxx xxx xxxx xxxx xxxx xxx xx   *  xxxxxxx xxx xxxx xxxx xxxx xxx xx    *
+*  xxxxxxx xxx xxxx xxxx xxxx xxx xx   *  xxxxxxx xxx xxxx xxxx xxxx xxx xx    *
+*  xxxxxxx xxx xxxx xxxx xxxx xxx xx   *  xxxxxxx xxx xxxx xxxx xxxx xxx xx    *
+*  xxxxxxx xxx xxxx xxxx xxxx xxx xx   *  xxxxxxx xxx xxxx xxxx xxxx xxx xx    *
+*  xxxxxxx xxx xxxx xxxx xxxx xxx xx   *  xxxxxxx xxx xxxx xxxx xxxx xxx xx    *
+*  xxxxxxx xxx xxxx xxxx xxxx xxx xx   *  xxxxxxx xxx xxxx xxxx xxxx xxx xx    *
+*  xxxxxxx xxx xxxx xxxx xxxx xxx xx   *  xxxxxxx xxx xxxx xxxx xxxx xxx xx    *
+*  xxxxxxx xxx xxxx xxxx xxxx xxx xx   *  xxxxxxx xxx xxxx xxxx xxxx xxx xx    *
+*                                      *                                       *
+********************************************************************************
+@ENDIF

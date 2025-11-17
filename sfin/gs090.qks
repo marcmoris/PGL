@@ -1,0 +1,1794 @@
+;/T/ Lancement en lot de programme
+
+;/P/ Prosig Informatique , Date de revision 13 Août 1993
+
+;/M/ François Déry, 30 avril 1999
+;       Modifier l'accèss au fichier de séquence car il a
+;       été converti en format interbase au lieu d'indexé.
+;       Installation du nouveau traitement Batch.
+;
+;/V3.02.00/ Daniel Labrie, 8 mars 1994, 73
+;/V3.02.00/ Alain Côté, 17 mars 1994, 208
+;/V3.03.00/ Marc Morissette,  9 Juin 1994, 266
+;/V3.03.00/ Marc Morissette, 10 Juin 1994, 262
+;/V3.03.02/ Alain Côté, 29 août 1994, 282
+;
+;/M/ Patrick Langlois, 25 août 1999
+;       Corriger les mode de transaction pour permettre à plusieurs usager d'utiliser
+;       l'écran en même temps
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par...: Marc Poulin
+;    Date..........: 07 mars 2000.
+;    Description...: Création de deux variables d'environnements supplémentaires afin de regrouper trois traitements différents 
+;                    (PD226T - Impression du bon de livraison, PD680 - Détail du bon de livraison et PD685 - Detail de facturation
+;                    du bon de livraison). Ces trois traitements s'exécutent sur deux type d'imprimantes (matricielle & laser) et
+;                    utilisent deux formes d'impressions différentes (format DOUANE et format Recto/Verso).
+;
+;    Référence.....: Demande de changement 000025.
+;
+;    Signet........: MP-00-03-07_D25.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN gs090 ACTIONBAR NOMODE NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 7,9 TO 20,72 &
+             RECEIVING D_XPRNOM, &
+                       D_LISPAR, &
+                       D_INDLON, &
+                       D_LISVAL
+
+
+;/D/*************************************************************************
+;/D/ NOTES EXPLICATIVES CONCERNANT LES NORMES POUR LA SAISIE DES PARAMETRES
+;/D/
+;/D/*************************************************************************
+;/D/
+;/D/ Definition des codes de saisie
+;/D/
+;/D/ D . = define optionel
+;/D/ DU. = define obligatoire (unique)
+;/D/ CU. = choose obligatoire (unique)
+;/D/ CO. = choose obligatoire (un ou plusieurs)
+;/D/ C . = choose optionel (un/plusieur/tous)
+;/D/ CR. = choose range (de...à)
+;/D/ P . = paramètre optionel   , sans retour de chariot
+;/D/ PU. = paramètre obligatoire, sans retour de chariot
+;/D/ RC. = Répétition d'un paramètre déja saisi ( Choose )
+;/D/ RD. = Répétition d'un paramètre déja saisi ( Define )
+;/D/ RP. = Répétition d'un paramètre déja saisi ( P ou PU )
+;/D/
+;/D/ DESCRIPTION DE LA SYNTAXE DE LA TABLE GSPR_DETAIL (%)
+;/D/
+;/D/         STRUCTURE : %C_EMPNO UNIQUE  [NO]GENERIC
+;/D/                      - ----- ------- ------------
+;/D/                      |   |       |        |
+;/D/ Code de saisie <-----'   |       |        |
+;/D/ Paramètre      <---------'       |        |
+;/D/                <-----------------'        |
+;/D/ Permet les (@) <--------------------------'
+;/D/
+;/D/*************************************************************************
+;/D/
+;/D/ INFORMATIONS COMPLEMENTAIRES A LA SAISIE DU PARAMETRE
+;/D/
+;/D/  %..F_NULL       : Ajout d'un retour de chario
+;/D/  %..F_SYSTIME    : Heure du jour.
+;/D/  %..F_SYSDATE    : Date  du jour.
+;/D/  %..F_LOGONID    : Login de l'usager
+;/D/  %..F_PRFICIMP   : Nom du fichier impression
+;/D/
+;/D/
+
+
+USE usactecr NOLIST
+
+@IF FRANCAIS
+  ACTIONMENU LABEL "Sous-Ecran"
+    MENUITEM LABEL "Cons. paramètres" ACTION DESIGNER VOIR
+    MENUITEM LABEL "Description"      ACTION DESIGNER AIDE
+@ELSE
+  ACTIONMENU LABEL "Subscreens"
+    MENUITEM LABEL "Parameters query" ACTION DESIGNER VOIR
+    MENUITEM LABEL "Description"      ACTION DESIGNER AIDE
+@ENDIF
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE GSXLG_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+
+;
+; Valeur recu de l'écran précédant.
+;
+DEFINE D_XPRNOM CHARACTER SIZE 7   ; Nom du programme
+DEFINE D_LISPAR CHARACTER SIZE 204 ; Liste des paramètres reçus
+DEFINE D_INDLON CHARACTER SIZE 112 ; Indice et longueur des paramètres(Maximum 12)
+DEFINE D_LISVAL CHARACTER SIZE 300 ; Liste des valeurs(data).
+
+;
+; On se sert du nom la liste ou de la procédure pour la sécurité.
+;
+USE ussectmp NOLIST
+  D_XPRNOM
+
+
+;****TRANSACTION LECTURE     READ ONLY
+
+
+FILE GSPROGRAMME TRANSACTION QUERY FOR QUERY,PROCESS &
+                 REFERENCE
+  ACCESS VIA XPRNOM &
+         USING D_XPRNOM
+
+;
+; Pour avoir la langue et la localisation de l'usager.
+;
+FILE GSUSAGER         REFERENCE
+  ACCESS VIA USRCLE &
+         USING LOGONID
+
+;
+; Préparation du Job
+;
+FILE GSJOB            PRIMARY &
+                      NOITEM
+  ITEM XLOCLE    OF GSJOB INITIAL XLOCLE    OF GSUSAGER
+  ITEM XIMCOD    OF GSJOB INITIAL XIMCOD    OF GSPROGRAMME
+  ITEM XJBNBRCOP OF GSJOB INITIAL XPRNBRCOP OF GSPROGRAMME
+  ITEM XJBFLGEXE OF GSJOB INITIAL XPRFLGEXE OF GSPROGRAMME
+  ITEM XPRNOM    OF GSJOB INITIAL XPRNOM    OF GSPROGRAMME
+  ITEM XJBDATSTP OF GSJOB INITIAL SYSDATE
+  ITEM XJBHRESTP OF GSJOB INITIAL SYSTIME
+  ITEM USRCLE    OF GSJOB INITIAL LOGONID
+  ITEM XJBSTU    OF GSJOB INITIAL "A"    ; En attente
+  ITEM XQBCLE    OF GSJOB INITIAL XQBCLE    OF GSPROGRAMME
+
+;
+; Résultat des paramètres saisie.
+;
+FILE GSXJB_PARAM      DESIGNER &
+                      TRANSACTION UPDATE FOR QUERY,PROCESS, UPDATE &
+                      NEED ALL
+
+;
+; Validation du code d'imprimante selon la localisation.
+;
+FILE GSXIM_LOCAL      REFERENCE
+  ACCESS VIA XLOCLE, XIMCOD &
+         USING XLOCLE OF GSJOB, &
+               XIMCOD OF GSJOB
+
+;
+; Recherche du nom physique de la queue batch
+;
+FILE GSQUEUE_BATCH REFERENCE
+  ACCESS VIA XQBCLE &
+         USING XQBCLE OF GSJOB
+
+;
+; Recherche du nom physique de la forme d'impression
+;
+FILE GSFORME REFERENCE
+  ACCESS VIA XFRCLE &
+         USING XFRCLE OF GSPROGRAMME
+
+TEMPORARY T_SELECT       CHARACTER SIZE 8    ; $ENDIF
+
+;
+; Détail des lignes du programme.
+;
+FILE GSPR_DETAIL      IN DICT DESIGNER
+  ACCESS VIA XPRNOM &
+         USING XPRNOM OF GSPROGRAMME &
+         ORDERBY XPRNOM, &
+                 XPDNUMLIG
+SELECT IF T_SELECT = ""  OR &
+          T_SELECT = UPSHIFT(XPDCMD OF GSPR_DETAIL)[1:8]
+
+;
+; Lecture des informations sur les paramètres.
+;
+FILE GSPARAMETRE      DESIGNER &
+                      OPEN READ
+;
+; Validation des values.
+;
+FILE GSXPA_VALUE      DESIGNER &
+                      OPEN READ
+;
+; Pour afficher le label du paramètre
+;
+FILE GSPARAMETRE      ALIAS A_XPA_LISTE &
+                      REFERENCE
+  ACCESS VIA XPANOM &
+         USING XPANOM OF GSXJB_PARAM
+;
+; Validation des codes bilingue
+;
+FILE MCCODE_BILINGUE  DESIGNER OPEN READ
+
+FILE VCBI_DSC         REFERENCE ALIAS JOB_DSC
+
+;
+; Numéro de séquence des jobs
+;
+FILE GSXLG_SEQ        DESIGNER &
+                      TRANSACTION GEN_NUM_SEQ
+
+;
+; Contient le fichier de commandes selon le système d'exploitation.
+;
+FILE GSFICHIER_CMD    DESIGNER &
+                      NEED ALL
+@IF UNIX
+  TEMPORARY T_RETURN INTEGER SIZE 1 INITIAL 10 ; Code ascii pour un <return>
+  TEMPORARY T_NULL   INTEGER SIZE 1 INITIAL 0  ; Code ascii pour un <null>
+  ITEM XFCFLGRET OF GSFICHIER_CMD FINAL CHAR(T_RETURN)
+@ELSE
+  TEMPORARY T_RETURN INTEGER SIZE 1 INITIAL 13 ; Code ascii pour un <return>
+@ENDIF
+
+;
+;
+; Sélection des enregistrements dans GSJOB pour en faire l'épuration.
+; On a deux sélection possible;
+; 1 - soit les numéros de jobs inférieure au numéro courant moin 1000;
+; 2 - soit les numéros de jobs supérieure au numéro courant, sert à éliminer
+;     les jobs qui sont restées sans être détruit. Cela arrive lorsque le numéro
+;     de job passe de 99999 à 1, les jobs 98000 à 99999 reste dans le système.
+;
+; Exemple: numéro courant est 3000
+;          donc on détruit tout ce qui est inféreur à 2000 et tout ce qui est
+;          supérieur à 3000
+;
+FILE GSJOB            DESIGNER &
+                      ALIAS A_GSJOB_DEL
+  SELECT IF    XJBCLE OF A_GSJOB_DEL < ASCII( XLSNUMSEQ OF GSXLG_SEQ - 1000,5) &
+            OR XJBCLE OF A_GSJOB_DEL > ASCII( XLSNUMSEQ OF GSXLG_SEQ ,5)
+;
+FILE GSXJB_PARAM      DESIGNER &
+                      ALIAS A_GSXJB_PARAM_DEL
+  SELECT IF    XJBCLE OF A_GSXJB_PARAM_DEL < ASCII( XLSNUMSEQ OF GSXLG_SEQ - 1000, 5) &
+            OR XJBCLE OF A_GSXJB_PARAM_DEL > ASCII( XLSNUMSEQ OF GSXLG_SEQ ,5)
+;
+; Fichier des traitements en lot
+;
+FILE GSTRAITEMENT     DESIGNER
+;
+; Pour le sous-écran de description
+;
+DEFINE D_XDECODMNE CHAR SIZE 3 = "XPR" ; Mnémonique de la table
+DEFINE D_XDENOM    CHAR SIZE 16= XPRNOM OF GSPROGRAMME ; Nom de l'entité
+
+
+;-------------------------------------------------------------------------------
+;
+; Les variables qui suivent representent les champs qui sont à l'écran
+;
+TEMPORARY T_FIELD        CHARACTER SIZE 65   ; Pour le parametre
+
+TEMPORARY T_CHOIX        CHARACTER SIZE 1    ; Choix exécution 01 à 99
+TEMPORARY T_VECTCHOIX    CHARACTER SIZE 4 OCCURS 99 TIMES
+                                             ; Vecteur qui garde les choix
+                                             ; d'exécution
+TEMPORARY T_INDCHOIX     INTEGER   SIZE   2  ; Indice du vecteur de choix
+TEMPORARY T_CHOIX1       CHARACTER SIZE 4    ; Permet de codifier les $IF avec
+TEMPORARY T_CHOIX2       CHARACTER SIZE 4    ; UN or.
+
+
+
+TEMPORARY T_XJPCLESEQ    INTEGER   SIZE   2 OCCURS 10
+TEMPORARY T_XPALBL       CHARACTER SIZE  15 OCCURS WITH T_XJPCLESEQ
+TEMPORARY T_XJPVALSAI    CHARACTER SIZE  65 OCCURS WITH T_XJPCLESEQ
+
+;
+; Variables de traitement
+;
+TEMPORARY T_AFTER        CHARACTER SIZE  20 ; Cmd pour execution en differe
+TEMPORARY T_CMD          CHARACTER SIZE 255 ; Commande de système exploitation
+TEMPORARY T_CODE         CHARACTER SIZE   2 ; Code de saisie, DU,CU...
+TEMPORARY T_COMPT        INTEGER   SIZE   2 ; Compteur
+TEMPORARY T_CONSULT      CHARACTER SIZE   1 INIT "N"
+                                            ; Consultation des param. saisie
+TEMPORARY T_DATA         CHARACTER SIZE 132 ; Contient les cmds de T-FICHIER-CMD
+TEMPORARY T_DERN_JOUR    INTEGER   SIZE   4 ; Dernier jour du mois.
+TEMPORARY T_ENTRY        CHARACTER SIZE   1 RESET AT STARTUP
+                                            ; Si entry fait au complet
+TEMPORARY T_FICCMD       CHARACTER SIZE  35 RESET AT STARTUP
+                                            ; Fichier commande
+TEMPORARY T_FICLOG       CHARACTER SIZE  35 ; Fichier de logfile
+TEMPORARY T_FICPRT       CHARACTER SIZE  35 ; Fichier d'impression
+TEMPORARY T_FICPRT2      CHARACTER SIZE  35 ; Fichier d'impression 2 ; MP-00-03-07_D25.
+TEMPORARY T_FICPRT3      CHARACTER SIZE  35 ; Fichier d'impression 3 ; MP-00-03-07_D25.
+TEMPORARY T_INDPAR       INTEGER   SIZE   2 ; Indice du paramètre dans la liste
+TEMPORARY T_MODPOW       CHARACTER SIZE   4 ; Mode pow de GSPR_DETAIL (QTP/QUIZ)
+TEMPORARY T_NBR_DEC      INTEGER   SIZE   2 ; Nombre de decimales apres le point
+TEMPORARY T_NBR_INT      INTEGER   SIZE   2 ; Nombre de chiffre avant le point
+TEMPORARY T_NUMDEB       INTEGER   SIZE   2 ; Pointeur
+TEMPORARY T_NUMPAR       INTEGER   SIZE   2 ; Compteur du no de parametre
+TEMPORARY T_OCCURRENCE   INTEGER   SIZE   2 ; Compt. pour l'affichage des param saisis
+TEMPORARY T_POSI_POINT   INTEGER   SIZE   2 ; Position du "." pour valider la decimale
+TEMPORARY T_REQOPT       CHARACTER SIZE   1 ; Champs requis ou optionel
+TEMPORARY T_RESTE        CHARACTER SIZE  65 ; Contient le reste de la ligne de
+                                            ; GSPR_DETAIL apres la donnee.
+TEMPORARY T_TYPSEL       CHARACTER SIZE  35 ; Type de sélection
+TEMPORARY T_UPDATE       CHARACTER SIZE   1 RESET AT STARTUP
+                                            ; Si update effectué
+TEMPORARY T_XIMCOD       CHARACTER SIZE   4 ; Pour sous-écran de consultation
+TEMPORARY T_XLOCLE       CHARACTER SIZE   4 ; Pour sous-écran de consultation
+TEMPORARY T_XPANOM       CHARACTER SIZE  16 ; Nom du param venant de GSPR_DETAIL
+TEMPORARY T_ZERO         CHARACTER SIZE  20 INIT "00000000000000000000"
+TEMPORARY T_VALSAI       CHARACTER SIZE  65 ; Valeur du paramètre saisi au clavier
+TEMPORARY T_VALUTI       CHARACTER SIZE  65 ; Valeur du paramètre apres traitement
+TEMPORARY T_XJBCLE       CHARACTER SIZE  5  ; Ecran de consultation
+TEMPORARY T_POSDEB       INTEGER   SIZE  2  ; Position de la chaine "QUICK"
+;-------------------------------------------------------------------------------
+;
+; Sert à valider les codes bilingue et pour les sous-écrans de consultation
+;
+DEFINE      D_FIELDNAME CHARACTER SIZE 16 = XPANOM OF GSPARAMETRE
+TEMPORARY   T_FIELDDATA CHARACTER SIZE 4
+DEFINE      D_XJBFLGEXE CHARACTER SIZE 16 = "XJBFLGEXE"
+TEMPORARY   T_XJBFLGEXE CHARACTER SIZE 4
+
+TEMPORARY T_USERNAME CHARACTER  SIZE 12 RESET AT STARTUP
+
+DEFINE D-NOM-LISTE  CHARACTER  SIZE 10 = "gs304z"
+
+;
+; Titre du programme selon la langue.
+;
+DEFINE D_XPRDSC CHARACTER  SIZE 60 = &
+@IF FRANCAIS
+  XPRDSCFRA OF GSPROGRAMME
+@ELSE
+  XPRDSCANG OF GSPROGRAMME
+@ENDIF
+
+;
+; Titre du programme selon la langue.
+;
+DEFINE D_XPRDSCCEN VARCHAR SIZE 60 = &
+   CENTER(  D_XPRDSC )
+
+
+;
+; Libelle du parametre a saisir
+;
+DEFINE D_LABEL  CHARACTER  SIZE 15 = &
+@IF FRANCAIS
+  XPALBLFRA OF GSPARAMETRE
+@ELSE
+  XPALBLANG OF GSPARAMETRE
+@ENDIF
+;
+; Description de l'imprimante.
+;
+DEFINE D_XILDSC CHARACTER  SIZE 20 = &
+@IF FRANCAIS
+  XILDSCFRA OF GSXIM_LOCAL
+@ELSE
+  XILDSCANG OF GSXIM_LOCAL
+@ENDIF
+;
+;
+; Label du nombre de jours.
+;
+DEFINE D_XJBNBRJRS CHARACTER  SIZE 15 = &
+@IF FRANCAIS
+  "Nombre jours..:" IF XJBFLGDIF OF GSJOB = "1"
+@ELSE
+  "Number of days:" IF XJBFLGDIF OF GSJOB = "1"
+@ENDIF
+;
+; Label pour les heures différées
+;
+DEFINE D_XJBHREDIF CHARACTER  SIZE 15 = &
+@IF FRANCAIS
+   "Heure.........:" IF XJBFLGDIF OF GSJOB = "1"
+@ELSE
+   "Time..........:" IF XJBFLGDIF OF GSJOB = "1"
+@ENDIF
+;
+; Label du paramètre dans la liste "paramètre saisies"
+;
+DEFINE D_XPALBL CHARACTER  SIZE 15 = &
+@IF FRANCAIS
+    XPALBLFRA OF A_XPA_LISTE
+@ELSE
+    XPALBLANG OF A_XPA_LISTE
+@ENDIF
+;
+; Help de GSPARAMETRE selon la langue.
+;
+DEFINE D_XPAHLP CHARACTER  SIZE 60 = &
+@IF FRANCAIS
+   XPAHLPFRA OF GSPARAMETRE
+@ELSE
+   XPAHLPANG OF GSPARAMETRE
+@ENDIF
+
+;
+; Libellé et message d'aide pour savoir si on imprime après un lancement
+; intéractif.
+;
+DEFINE D_LBLIMP CHARACTER  SIZE 15 = &
+@IF FRANCAIS
+   "Impression....:"
+@ELSE
+   "Print.........:"
+@ENDIF
+
+DEFINE D_HLPIMP CHARACTER  SIZE 60 = &
+@IF FRANCAIS
+   "Voulez-vous imprimer le résultat? (o/n)"
+@ELSE
+   "print result (y/n)"
+@ENDIF
+
+TEMPORARY T_FLGIMP CHARACTER  SIZE 1 RESET AT STARTUP
+
+USE ushilite NOLIST
+USE usdrwecr NOLIST
+
+HILITE DISPLAY HALFTONE
+
+SKIP 1
+
+ALIGN(,,2)
+FIELD D_XPRDSCCEN FIXED HILITE DISPLAY INVERSE UNDERLINE
+
+USE ustitoff NOLIST
+
+SKIP
+
+ALIGN (,,3) (,,19)
+FIELD D_LABEL DISPLAY
+
+FIELD T_FIELD FOR 1,60 POPUP ON REQUEST &
+@IF FRANCAIS
+         HELP "Tapez <*VOIR> pour consulter les paramètres déjà saisie"
+@ELSE
+         HELP "Enter <*SEE> to list parameters"
+@ENDIF
+
+SKIP TO GROUP 2
+FIELD T_TYPSEL DISPLAY
+
+SKIP TO GROUP 2
+FIELD D_XPAHLP DISPLAY
+
+SKIP
+DRAW ,1 TO ,80
+
+SKIP 1
+
+ALIGN(19,3,19) (,,21)
+
+FIELD XJBFLGEXE OF GSJOB HIDDEN ID 2 &
+      label "Exécution.....:"&
+          LOOKUP ON JOB_DSC &
+          VIA XELNOM, CBICLE &
+          USING D_XJBFLGEXE, XJBFLGEXE OF GSJOB &
+          MESSAGE 23 ; Code invalide
+
+FIELD CBIDSC OF JOB_DSC DISPLAY
+
+ALIGN(19,3,19) (,,27) (,,43) (,,53) (,,69)
+FIELD XJBFLGDIF OF GSJOB &
+     label "Différé.......:"&
+     HIDDEN ID 5 &
+     SIZE 3 DEFAULT "0"
+
+FIELD D_XJBNBRJRS DISPLAY HILITE DISPLAY OFF
+FIELD XJBNBRJRS OF GSJOB
+
+FIELD D_XJBHREDIF DISPLAY HILITE DISPLAY OFF
+FIELD XJBHREDIF OF GSJOB &
+      PATTERN "((0|1|!0)#|2(0|1|2|3))!:(0|1|2|3|4|5)#"
+
+ALIGN(19,3,19) (,,24) (,,29) (,53,69)
+FIELD XLOCLE OF GSJOB HIDDEN ID 10 DISPLAY &
+@IF FRANCAIS
+        LABEL "Imprimante....:"
+@ELSE
+        LABEL "Printer.......:"
+@ENDIF
+
+FIELD XIMCOD OF GSJOB &
+    LOOKUP ON GSXIM_LOCAL &
+      MESSAGE 18 ; Ce code d'imprimante n'existe pas...
+
+FIELD D_XILDSC DISPLAY
+
+FIELD XJBNBRCOP OF GSJOB &
+      label "Nbr de copies..:"
+
+
+SKIP TO 11
+
+DRAW ,1 TO ,80
+
+TITLE &
+@IF FRANCAIS
+      " Paramètres saisies " &
+@ELSE
+      " Input Parameters " &
+@ENDIF
+      CENTERED AT ,1
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      "No.  Paramètre       Valeur" &
+@ELSE
+      "No.  Parameter       Value"  &
+@ENDIF
+      AT ,3
+
+SKIP
+
+ALIGN (3,2,3) (,,8) (,,24)
+
+CLUSTER OCCURS WITH T_XJPCLESEQ ID BASE 15
+
+  FIELD T_XJPCLESEQ DISPLAY BWZ HIDDEN LABEL " "
+  FIELD T_XPALBL    DISPLAY
+  FIELD T_XJPVALSAI DISPLAY SIZE 56
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de la liste ou de la procédure.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Cette procédure écrit le paramètre saisie et enlève les espaces blancs
+; à la fin de la ligne.
+;
+;
+PROCEDURE INTERNAL PUT_CMD ;OK
+BEGIN
+  ;
+  ; Indique "fin de ligne", on doit enlever le séparateur avant d'écrire
+  ; la ligne dans le fichier de commande.
+  ;
+  IF "FN" = T_CODE
+  THEN LET T_DATA = XFCLIG OF GSFICHIER_CMD[1: &
+                    SIZE(TRUNCATE(XFCLIG OF GSFICHIER_CMD)) - 1]
+  ;
+  ; Dans le cas du code PU, il ne faut pas avoir de "cariage return" à chaque
+  ; paramètre et en plus il faut un caractère de fin ligne pour bien traiter
+  ; les espsaces blanc.
+  ;
+  IF T_CODE <> "PU" AND T_CODE <> "RP"
+  THEN BEGIN
+    LET XFCLIG OF GSFICHIER_CMD = TRUNCATE(T_DATA)
+@IF UNIX
+    ;
+    ; Si la ligne de commande de termine par un \, il faut complèter la ligne
+    ; avec des nulls. Car s'il y a des espaces entre le caractère \ et le
+    ; line feed cela ne fonctionne pas sur Unix.
+    ;
+    IF "" <> TRUNCATE(T_DATA)
+    THEN BEGIN
+      IF "\" = T_DATA[SIZE(TRUNCATE(T_DATA)):1]
+      THEN BEGIN
+        FOR 132
+        BEGIN
+          IF OCCURRENCE > SIZE(TRUNCATE(T_DATA))
+          THEN LET XFCLIG OF GSFICHIER_CMD = &
+                               XFCLIG OF GSFICHIER_CMD[1:OCCURRENCE - 1] + &
+                               CHARACTERS(T_NULL)
+        END
+      END
+    END
+@ENDIF
+    PUT GSFICHIER_CMD RESET
+  END
+  ELSE LET XFCLIG OF GSFICHIER_CMD = XFCLIG OF GSFICHIER_CMD[1: &
+                                     SIZE(TRUNCATE(XFCLIG OF GSFICHIER_CMD)) - 1] &
+                                    + &
+                                    TRUNCATE(T_DATA) + "|"
+END
+
+
+;*****************************************************************************
+; Procedure qui affiche les param. saisis dans le cluster de PARAMETRES
+; - Est appelee a l'interieur du WHILE RETRIEVING de la proc. AFFICHE-SAISIS
+;*****************************************************************************
+PROCEDURE INTERNAL AFFICHE-OCCURS
+BEGIN
+  FOR EACH T_XJPCLESEQ
+  BEGIN
+    IF OCCURRENCE = T_OCCURRENCE
+    THEN BEGIN
+      DISPLAY T_XJPCLESEQ FROM XJPCLESEQ OF GSXJB_PARAM
+      DISPLAY T_XPALBL    FROM D_XPALBL
+      DISPLAY T_XJPVALSAI FROM XJPVALSAI OF GSXJB_PARAM
+    END
+  END
+END
+
+;*****************************************************************************
+; Cette procedure affiche a l'ecran les parametre deja selectionnes
+;
+;*****************************************************************************
+PROCEDURE INTERNAL AFFICHE-SAISIS
+BEGIN
+  IF T_NUMPAR > 10
+  THEN BEGIN
+    LET T_NUMDEB = T_NUMPAR - 9
+  END
+  ELSE BEGIN
+    LET T_NUMDEB = 1
+  END
+
+
+  LET T_OCCURRENCE=1
+
+  WHILE RETRIEVING GSXJB_PARAM VIA XJBCLE &
+                               USING XJBCLE OF GSJOB
+  BEGIN
+    IF  T_NUMDEB <= XJPCLESEQ OF GSXJB_PARAM
+    THEN BEGIN
+      DO INTERNAL AFFICHE-OCCURS
+      LET T_OCCURRENCE = T_OCCURRENCE + 1
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Cette procédure envoie dans GSXJB_PARAM le parametre entré
+; pour être ensuite affiché par AFFICHE-SAISIS
+;
+;
+PROCEDURE INTERNAL PUT_SAISIE ; OK
+BEGIN
+  LET XJBCLE      OF GSXJB_PARAM = XJBCLE OF GSJOB
+  LET XJPCLESEQ   OF GSXJB_PARAM = T_NUMPAR
+  LET XJPVALSAI   OF GSXJB_PARAM = T_VALSAI
+  LET XJPVALUTI   OF GSXJB_PARAM = T_VALUTI
+  LET XPANOM      OF GSXJB_PARAM = T_XPANOM
+  PUT GSXJB_PARAM
+  DO INTERNAL AFFICHE-SAISIS
+  LET T_NUMPAR = T_NUMPAR + 1
+END
+
+;-------------------------------------------------------------------------------
+;
+; Cette procedure force l'impression d'une ligne blanche dans le fichier
+; commande.
+;
+;
+PROCEDURE INTERNAL NULL ;OK
+BEGIN
+  LET XFCLIG OF GSFICHIER_CMD = "-=-=-=-=-="
+  LET XFCLIG OF GSFICHIER_CMD = TRUNCATE(" ")
+  PUT GSFICHIER_CMD RESET
+END
+
+;-------------------------------------------------------------------------------
+;
+; Cette procédure sert à ré-écrire un parametre qui a déàa été saisie
+;
+;
+PROCEDURE INTERNAL REECRIT_PARAMETRE ; OK
+BEGIN
+  WHILE RETRIEVING GSXJB_PARAM VIA XJBCLE, &
+                                  XPANOM &
+                               USING XJBCLE OF GSJOB, &
+                                     T_XPANOM
+
+  BEGIN
+    LET T_DATA = XJPVALUTI OF GSXJB_PARAM
+    DO INTERNAL PUT_CMD
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Saisie d'un paramètre obligatoire.
+;
+PROCEDURE INTERNAL ACCEPT-OBLIGATOIRE ;ok
+BEGIN
+  LET T_FIELD = ""
+  LET T_REQOPT = "R" ; requis
+  ACCEPT T_FIELD
+  IF T_CODE >= "01" AND &
+     T_CODE <= "99"
+  THEN BEGIN
+    LET T_INDCHOIX = NCONVERT(T_CODE)
+
+    FOR T_VECTCHOIX
+    BEGIN
+      IF OCCURRENCE = T_INDCHOIX
+      THEN BEGIN
+        LET T_VECTCHOIX = T_FIELD
+      END
+    END
+
+    LET T_DATA = T_FIELD
+    DO INTERNAL PUT_SAISIE
+  END
+  ELSE BEGIN
+    LET T_DATA = T_FIELD
+    DO INTERNAL PUT_SAISIE
+    DO INTERNAL PUT_CMD
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Saisie d'un ou plusieur paramètres.
+;
+;
+PROCEDURE INTERNAL ACCEPT-BOUCLE ;ok
+BEGIN
+  LET T_FIELD = ""
+  LET T_REQOPT = "O" ; Optionnel
+  ACCEPT T_FIELD
+  IF T_FIELD <> ""
+  THEN BEGIN
+    LET T_DATA = T_FIELD
+    DO INTERNAL PUT_SAISIE
+    DO INTERNAL PUT_CMD
+    DO INTERNAL ACCEPT-BOUCLE
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Saisie de paramètres pour un choose range.
+;
+;
+PROCEDURE INTERNAL ACCEPT-RANGE ; ok
+BEGIN
+@IF FRANCAIS
+  LET T_TYPSEL = "(Borne de début / <retour>)"
+@ELSE
+  LET T_TYPSEL = "(Starting value / <return>)"
+@ENDIF
+  DISPLAY T_TYPSEL
+  ;
+  ; Le premier paramètre est optionnel pour arrêter la boucle
+  ;
+  LET T_FIELD = ""
+  LET T_REQOPT = "O" ; Optionnel
+  ACCEPT T_FIELD
+  IF T_FIELD <> ""
+  THEN BEGIN
+    LET T_DATA = T_FIELD
+    DO INTERNAL PUT_SAISIE
+    DO INTERNAL PUT_CMD
+    ;
+    ; Le deuxième paramètre du range est toujours obligatoire.
+    ;
+@IF FRANCAIS
+    LET T_TYPSEL = "(Borne de fin, requise)"
+@ELSE
+    LET T_TYPSEL = "(Last value, required)"
+@ENDIF
+    DISPLAY T_TYPSEL
+    DO INTERNAL ACCEPT-OBLIGATOIRE
+    DO INTERNAL ACCEPT-RANGE
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Cette procedure execute la procedure INTERNAL correspondant au
+; parametre indiquer dans le fichier GSPR_DETAIL
+;
+;
+PROCEDURE INTERNAL PARAMETRE
+BEGIN
+  ;
+  ; Code de ligne. (DU,CU...)
+  ;
+  LET T_CODE   = XPDCMD OF GSPR_DETAIL[2:2]   ; CODE DE PARAMETRE (C, CU...)
+  ;
+  ; Nom du paramètre.
+  ;
+  LET T_XPANOM = UPSHIFT(XPDCMD OF GSPR_DETAIL[ 4 : &
+                          INDEX(XPDCMD OF GSPR_DETAIL[4:17]," ") &
+                                              ] )
+  ;
+  ; Reste de la ligne.
+  ;
+  LET T_RESTE  = XPDCMD[4 + SIZE(TRUNCATE(T_XPANOM)):70]
+  ;
+  ; Les paramètres suivant ne sont pas demandés à l'usager, ce sont des
+  ; paramètre fixe.
+  ;
+  IF "F_" = T_XPANOM[1:2]
+  THEN BEGIN
+    ;
+    ; Ajout d'une ligne blanche.
+    ;
+    IF "F_NULL" = T_XPANOM
+    THEN BEGIN
+      DO INTERNAL NULL
+    END
+    ;
+    ; Date du jour.
+    ;
+    IF "F_SYSDATE" = T_XPANOM
+    THEN BEGIN
+      LET T_DATA = ASCII(SYSDATE)
+      DO INTERNAL PUT_CMD
+      IF "C" = T_CODE[1:1]
+      THEN DO INTERNAL NULL
+    END
+    ;
+    ; Heure du jour.
+    ;
+    IF "F_SYSTIME" = T_XPANOM
+    THEN BEGIN
+      LET T_DATA = ASCII(FLOOR(SYSTIME/100),6)
+      DO INTERNAL PUT_CMD
+      IF "C" = T_CODE[1:1]
+      THEN DO INTERNAL NULL
+    END
+    ;
+    ; USERNAME de l'usager.
+    ;
+    IF "F_LOGONID" = T_XPANOM
+    THEN BEGIN
+      LET T_DATA = LOGONID
+      DO INTERNAL PUT_CMD
+      IF "C" = T_CODE[1:1]
+      THEN DO INTERNAL NULL
+    END
+    ;
+    ; Nom du programme
+    ;
+    IF "F_XPRDSC" = T_XPANOM
+    THEN BEGIN
+      LET T_DATA = D_XPRDSC
+      DO INTERNAL PUT_CMD
+      IF "C" = T_CODE[1:1]
+      THEN DO INTERNAL NULL
+    END
+    ;
+    ; Nom du fichier d'impression.
+    ;
+    IF "F_PRFICIMP" = T_XPANOM
+    THEN BEGIN
+      LET T_DATA = T_FICPRT
+      DO INTERNAL PUT_CMD
+      IF "C" = T_CODE[1:1]
+      THEN DO INTERNAL NULL
+    END
+    ;
+    ; On vérifie si c'est un paramètre provenant du menu.
+    ;
+    LET T_INDPAR = INDEX(D_LISPAR,T_XPANOM)
+    IF 0 <> T_INDPAR
+    THEN BEGIN
+      ;
+      ; Exemple de contenu:
+      ;   D_LISPAR = "F_CIECLE        |F_CENCLE        |"
+      ;   D_INDLON = "001002|003004|"
+      ;   D_LISVAL = "02|1234|"
+      ;
+      ; On ramène l'indice de caractère en numéro de paramètre.
+      ; Ex: Si l'indice = 18 cela indique la paramètre 2.
+      ;     Si l'indice = 35 cela indique la paramètre 3.
+      ;
+      LET T_INDPAR = (T_INDPAR - 1) / 17 + 1
+      ;
+      ; On extrait la donnée selon les positions déterminés dans le menu.
+      ; Le premier chiffre nous donne la position dans la liste, le second
+      ; nous donne la longueur.
+      ;
+      LET T_DATA = &
+                 D_LISVAL[ NCONVERT(D_INDLON[(T_INDPAR - 1) * 7 + 1 : 3])&
+                         : &
+                           NCONVERT(D_INDLON[(T_INDPAR - 1) * 7 + 4 : 3])&
+                         ]
+      DO INTERNAL PUT_CMD
+      IF "C" = T_CODE[1:1]
+      THEN DO INTERNAL NULL
+    END
+  END
+  ELSE BEGIN
+    ;
+    ; Paramètre non-fixe.
+    ;
+    GET GSPARAMETRE VIA XPANOM &
+                        USING T_XPANOM OPTIONAL
+    IF NOT ACCESSOK
+    THEN SEVERE 27 ; Problème avec le paramètre demandé
+
+    DISPLAY D_LABEL
+    DISPLAY D_XPAHLP
+    ;
+    ; Define obligatoire
+    ;
+    IF  T_CODE = "DU" OR &
+        T_CODE = "PU" OR &
+       (T_CODE >= "01" AND &
+        T_CODE <= "99")            ; CE Choix d'éxécution
+    THEN BEGIN
+@IF FRANCAIS
+      LET T_TYPSEL = "(Obligatoire)"
+@ELSE
+      LET T_TYPSEL = "(Required)"
+@ENDIF
+      DISPLAY T_TYPSEL
+      DO INTERNAL ACCEPT-OBLIGATOIRE
+    END
+    ;
+    ; Define optionel
+    ;
+    IF T_CODE = "D " OR T_CODE = "P "
+    THEN BEGIN
+@IF FRANCAIS
+      LET T_TYPSEL = "(Optionnel)"
+@ELSE
+      LET T_TYPSEL = "(Optional)"
+@ENDIF
+      DISPLAY T_TYPSEL
+      LET T_FIELD = ""
+      LET T_REQOPT = "O" ; Optionnel
+      ACCEPT T_FIELD
+      LET T_DATA = T_FIELD
+      DO INTERNAL PUT_SAISIE
+      DO INTERNAL PUT_CMD
+    END
+    ;
+    ; Choose unique-obligatoire
+    ;
+    IF T_CODE = "CU"
+    THEN BEGIN
+@IF FRANCAIS
+      LET T_TYPSEL = "(Obligatoire)"
+@ELSE
+      LET T_TYPSEL = "(Required)"
+@ENDIF
+      DISPLAY T_TYPSEL
+      DO INTERNAL ACCEPT-OBLIGATOIRE
+      DO INTERNAL NULL
+    END
+    ;
+    ; Choose OBLIGATOIRE (Un ou plusieurs)
+    ;
+    IF T_CODE = "CO"
+    THEN BEGIN
+      ;
+      ; Le premier paramètre est obligatoire
+      ;
+@IF FRANCAIS
+      LET T_TYPSEL = "(Obligatoire)"
+@ELSE
+      LET T_TYPSEL = "(Required)"
+@ENDIF
+      DISPLAY T_TYPSEL
+      DO INTERNAL ACCEPT-OBLIGATOIRE
+      ;
+      ; Les suivants sont optionels.
+      ;
+@IF FRANCAIS
+      LET T_TYPSEL = "(Optionnel)"
+@ELSE
+      LET T_TYPSEL = "(Optional)"
+@ENDIF
+      DISPLAY T_TYPSEL
+      DO INTERNAL ACCEPT-BOUCLE
+      ;
+      ; Il faut terminer par un NULL pour le choose.
+      ;
+      DO INTERNAL NULL
+    END
+    ;
+    ; Choose OPTIONNEL (Un, plusieur ou tous)
+    ;
+    IF T_CODE = "C "
+    THEN BEGIN
+@IF FRANCAIS
+      LET T_TYPSEL = "(Optionnel / <return>=tous)"
+@ELSE
+      LET T_TYPSEL = "(Optional / <return>=all)"
+@ENDIF
+      DISPLAY T_TYPSEL
+      LET T_FIELD = ""
+      LET T_REQOPT = "O" ; Optionnel
+      ACCEPT T_FIELD
+      ;
+      ; Le premier est optionel, s'il y est blanc alors cela indique tous,
+      ; sinon on demande le suivant.
+      ;
+      IF T_FIELD = ""
+      THEN BEGIN
+        LET T_FIELD = "@"
+        LET T_DATA = "@"
+        LET T_VALUTI = T_DATA
+        DO INTERNAL PUT_SAISIE
+        DO INTERNAL PUT_CMD
+      END
+      ELSE BEGIN
+        LET T_DATA = T_FIELD
+        DO INTERNAL PUT_SAISIE
+        DO INTERNAL PUT_CMD
+        ;
+        ; On demande les suivants
+        ;
+@IF FRANCAIS
+        LET T_TYPSEL = "(Optionnel)"
+@ELSE
+        LET T_TYPSEL = "(Optional)"
+@ENDIF
+        DISPLAY T_TYPSEL
+        DO INTERNAL ACCEPT-BOUCLE
+        ;
+        ; Il faut terminer par un NULL pour le choose.
+        ;
+        DO INTERNAL NULL
+      END
+    END
+    ;
+    ; Choose range
+    ;
+    IF T_CODE = "CR"
+    THEN BEGIN
+@IF FRANCAIS
+      LET T_TYPSEL = "(Borne de début / <retour>=tous)"
+@ELSE
+      LET T_TYPSEL = "(Starting value / <return>=all )"
+@ENDIF
+      DISPLAY T_TYPSEL
+      LET T_FIELD = ""
+      LET T_REQOPT = "O" ; Optionnel
+      ACCEPT T_FIELD
+      ;
+      ; Le premier est optionel, s'il y est blanc alors cela indique tous,
+      ; sinon on demande le suivant.
+      ;
+      IF T_FIELD = ""
+      THEN BEGIN
+        LET T_FIELD = "@"
+        LET T_DATA = "@"
+        LET T_VALUTI = T_DATA
+        DO INTERNAL PUT_SAISIE
+        DO INTERNAL PUT_CMD
+      END
+      ELSE BEGIN
+        LET T_DATA = T_FIELD
+        DO INTERNAL PUT_SAISIE
+        DO INTERNAL PUT_CMD
+        ;
+        ; La deuxième valeur est obligatoire pour complèter l'intervalle
+        ;
+@IF FRANCAIS
+        LET T_TYPSEL = "(Borne de fin, requise)"
+@ELSE
+        LET T_TYPSEL = "(Last value, required)"
+@ENDIF
+        DISPLAY T_TYPSEL
+        DO INTERNAL ACCEPT-OBLIGATOIRE
+        DO INTERNAL ACCEPT-RANGE
+        ;
+        ; Il faut terminer par un NULL pour le choose.
+        ;
+        DO INTERNAL NULL
+      END
+    END
+    ;
+    ; Répétition d'un paramètre déja saisi
+    ;
+    IF T_CODE="RC" OR T_CODE = "RD" OR T_CODE = "RP"
+    THEN DO INTERNAL REECRIT_PARAMETRE
+
+    IF T_CODE="RC" AND T_DATA <> "@"
+    THEN DO INTERNAL NULL
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Traitement des lignes débutant par "!".
+;
+;
+PROCEDURE INTERNAL LIGNE_SPECIAL ;OK
+BEGIN
+  LET T_CODE = XPDCMD OF GSPR_DETAIL[2:2]
+  ;
+  ; Traitement de ligne spécial, sert surtout pour les programmes C.
+  ; Le but est de composer une ligne de commande constituer de constante
+  ; et de valeur saisie par l'usager(voir code "PU").
+  ;
+  ; EX:    Commande           XFCLIG               Commentaire
+  ;        ------------       -------------------  ----------------
+  ;        !DBGL950 "|        GL950 "|             début
+  ;        %PUPECCLE          GL950 "9201|         demande période ctb
+  ;        !+ , |             GL950 "9201, |       ajoute ,
+  ;        %PUEFICLE          GL950 "9201, TOMB|   demande code E/F
+  ;        !+ "|              GL950 "9201, TOMB"|  ajoute "
+  ;        !FN                GL950 "9201, TOMB"   (résultat)
+  ;
+  ;
+  ;
+  ; Indique début de ligne., on assigne la valeur incluant le caractère
+  ; de sépération.
+  ;
+  IF "DB" = T_CODE
+  THEN LET XFCLIG OF GSFICHIER_CMD = XPDCMD OF GSPR_DETAIL[4: &
+                                     SIZE(TRUNCATE(XPDCMD OF GSPR_DETAIL)) - 3]
+  ;
+  ; On ajoute la valeur à la suite. Il faut enlever le caractère de sépa-
+  ; ration de la ligne en traitement et ajouter la valeur avec le carac-
+  ; tère de séparation.
+  ;
+  IF "+ " = T_CODE
+  THEN LET XFCLIG OF GSFICHIER_CMD = XFCLIG OF GSFICHIER_CMD[1: &
+                                     SIZE(TRUNCATE(XFCLIG OF GSFICHIER_CMD)) - 1] &
+                                     + &
+                                     XPDCMD OF GSPR_DETAIL[4: &
+                                     SIZE(TRUNCATE(XPDCMD OF GSPR_DETAIL)) - 3]
+  ;
+  ; Indique "fin de ligne", on doit enlever le séparateur avant d'écrire
+  ; la ligne dans le fichier de commande.
+  ;
+  IF "FN" = T_CODE
+  THEN BEGIN
+    DO INTERNAL PUT_CMD
+  END
+END
+;-------------------------------------------------------------------------------
+;
+; Gére les choix d'execution demander à l'usager
+;
+PROCEDURE INTERNAL CHOIX_EXECUTION
+BEGIN
+  IF "$IF" = UPSHIFT(XPDCMD OF GSPR_DETAIL)[1:3] AND &
+     (NOT MATCHPATTERN(XPDCMD OF GSPR_DETAIL[4:2],"##") OR &
+      "00" = XPDCMD OF GSPR_DETAIL[4:2])
+  THEN SEVERE 27 ; Problème avec le paramètre demandé
+
+  IF "$IF" = UPSHIFT(XPDCMD OF GSPR_DETAIL)[1:3] ; $IF 0
+  THEN BEGIN
+    LET T_INDCHOIX = NCONVERT(XPDCMD OF GSPR_DETAIL[4:2])
+
+    LET T_CHOIX1 = UPSHIFT(XPDCMD OF GSPR_DETAIL)[7:4]
+    LET T_CHOIX2 = UPSHIFT(XPDCMD OF GSPR_DETAIL)[15:4]
+
+    FOR T_VECTCHOIX
+    BEGIN
+      IF OCCURRENCE = T_INDCHOIX
+      THEN BEGIN
+        IF T_VECTCHOIX   <> T_CHOIX1 AND &
+           T_VECTCHOIX   <> T_CHOIX2
+        THEN LET T_SELECT = "$ENDIF" + UPSHIFT(XPDCMD OF GSPR_DETAIL)[4:2]
+      END
+    END
+  END
+  IF T_SELECT = UPSHIFT(XPDCMD OF GSPR_DETAIL)[1:8]
+  THEN BEGIN
+    LET T_SELECT = ""
+  END
+END
+
+@IF VAXVMS
+  USE usvaxvms NOLIST
+@ENDIF
+@IF UNIX
+  USE usunix  NOLIST
+@ENDIF
+
+
+
+
+
+
+;------------------------------------------------------------------------------
+;
+; Si l'usager saisie "*voir" ou "*see" alors il visualisera les paramètres déjà
+; saisie.
+;
+;
+PROCEDURE INPUT T_FIELD ; OK
+BEGIN
+  LET T_VALSAI = ""
+  LET T_VALUTI = ""
+
+  IF "*VOIR" = UPSHIFT(FIELDTEXT) OR "*SEE" = UPSHIFT(FIELDTEXT)
+  THEN BEGIN
+    LET T_XJBCLE = XJBCLE OF GSJOB
+    RUN SCREEN gs090a PASSING T_XJBCLE MODE F
+    ERROR=" "
+  END
+  IF "*AIDE"=UPSHIFT(FIELDTEXT) OR "*HELP" = UPSHIFT(FIELDTEXT)
+  THEN BEGIN
+    RUN SCREEN gs007 PASSING D_XDECODMNE, D_XDENOM MODE F
+    ERROR=" "
+  END
+  ;
+  ; Sous-écran des codes bilingue.
+  ;
+  IF XPACAT OF GSPARAMETRE = "3" AND &
+     0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_FIELDDATA = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_FIELDNAME, T_FIELDDATA
+    LET FIELDTEXT = TRUNCATE(T_FIELDDATA)
+  END
+  ;
+  ; Validation si le champs est requis. Il faut faire ce traitement dans cette
+  ; procédure pour éviter un ROLLBACK de STARBASE. Car si on utilise l'énoncé
+  ; error dans la procédure ENTRY il fait un ROLLBACK, même si on utlise
+  ; une procédure INTERNAL.
+  ;
+  IF T_REQOPT = "R" AND &
+     0 = SIZE(FIELDTEXT)
+  THEN LET FIELDTEXT = "=-.=-.=-."
+  ;
+  ; Valeur par defaut provenant de GSPARAMETRE
+  ;
+  IF 0 = SIZE(FIELDTEXT)
+  THEN LET FIELDTEXT = TRUNCATE(XPAVALDEF OF GSPARAMETRE)
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide le champ T_FIELD selon les informations dans gsparametre.
+;
+;
+PROCEDURE EDIT T_FIELD ; Ok
+BEGIN
+  ;
+  ; Validation si le champs est requis. Il faut faire ce traitement dans cette
+  ; procédure pour éviter un ROLLBACK de STARBASE. Car si on utilise l'énoncé
+  ; error dans la procédure ENTRY et INPUT il fait un ROLLBACK, même si on utlise
+  ; une procédure INTERNAL.
+  ;
+  IF T_REQOPT = "R" AND &
+     FIELDTEXT = "=-.=-.=-."
+  THEN BEGIN
+    LET FIELDTEXT = ""
+    ERROR 19 ; Ce champs est obligatoire.
+  END
+  ;
+  ; Type caractère
+  ;
+  IF XPATYP OF GSPARAMETRE = "C" AND 0 = SIZE(TRUNCATE(T_FLGIMP))
+  THEN BEGIN
+    IF XPASIZ OF GSPARAMETRE < SIZE(TRUNCATE(FIELDTEXT))
+    THEN ERROR 24 ; Trop de caractères
+    ;
+    ; Transforme le contenu de fieldtext en MAJUSCULE ou minuscule ou null
+    ;
+    IF XPAFLGSHI OF GSPARAMETRE = "U"
+    THEN LET FIELDTEXT = UPSHIFT(FIELDTEXT)
+
+    IF XPAFLGSHI OF GSPARAMETRE = "D"
+    THEN LET FIELDTEXT = DOWNSHIFT(FIELDTEXT)
+  END
+  ;
+  ; Type numérique
+  ;
+  IF XPATYP OF GSPARAMETRE = "N" AND 0 = SIZE(TRUNCATE(T_FLGIMP))
+  THEN BEGIN
+    LET FIELDTEXT = TRUNCATE(LJ(FIELDTEXT))
+    IF NOT MATCHPATTERN(FIELDTEXT,"(#>)<(.#>)<")
+    THEN BEGIN
+      LET T_FIELD="" ; ??
+      ERROR 25 ; La valeur entrée doit être numérique
+    END
+    ;
+    ; Valide le nombre de décimale.
+    ;
+    IF 0 <> INDEX(FIELDTEXT,".")
+    THEN LET T_NBR_DEC = SIZE(FIELDTEXT) - INDEX(FIELDTEXT,".")
+    ELSE LET T_NBR_DEC = 0
+
+    IF T_NBR_DEC > XPANBRDEC OF GSPARAMETRE
+    THEN BEGIN
+      LET T_FIELD = "" ; ??
+      ERROR 15 ; Trop de décimamle.
+    END
+    ;
+    ; Valide la partie entière du nombre.
+    ;
+    IF T_NBR_DEC = 0
+    THEN LET T_NBR_INT = SIZE(FIELDTEXT) - T_NBR_DEC
+    ELSE LET T_NBR_INT = SIZE(FIELDTEXT) - T_NBR_DEC - 1 ; Pour le point
+
+    IF T_NBR_INT > (XPASIZ OF GSPARAMETRE - XPANBRDEC OF GSPARAMETRE)
+    THEN BEGIN
+      ERROR 24 ; Trop de caractéres
+    END
+
+    LET T_VALSAI = FIELDTEXT
+    ;
+    ; On complète la partie entière du nombre avec des zéros.
+    ; Exemple:  Longueur  Saisie    Résultat
+    ;              4        1         0001
+    ;              4        12        0012
+    ;
+    IF XPASIZ OF GSPARAMETRE > XPANBRDEC OF GSPARAMETRE
+    THEN LET FIELDTEXT = ZEROFILL( RJ( (T_VALSAI[1:T_NBR_INT])[1:XPASIZ OF GSPARAMETRE - XPANBRDEC OF GSPARAMETRE]) )
+    ELSE LET FIELDTEXT = ""
+
+    ;
+    ; On complète la partie décimale du nombre avec des zéros.
+    ; Exemple:  Longueur  Saisie    Résultat
+    ;              4.2      1         01.00
+    ;              4.2      12        12.00
+    ;              4.2      1.23      01.23
+    ;              4.2      .03       00.03
+    ;
+    IF XPANBRDEC OF GSPARAMETRE > 0
+    THEN BEGIN
+      LET FIELDTEXT = FIELDTEXT + "." + &
+                      (T_VALSAI[T_NBR_INT + 2:T_NBR_DEC]+ "000000")[1:XPANBRDEC OF GSPARAMETRE]
+    END
+  END
+  ;
+  ; Type date.
+  ;
+  IF XPATYP OF GSPARAMETRE = "D"  AND 0 = SIZE(TRUNCATE(T_FLGIMP))
+  THEN BEGIN
+    LET FIELDTEXT = TRUNCATE(LJ(FIELDTEXT))
+
+    IF NOT MATCHPATTERN(TRUNCATE(FIELDTEXT),"########")
+    THEN BEGIN
+      LET T_FIELD=""
+      ERROR = "La valeur entree doit etre une date sous la forme AAAAMMJJ"
+    END
+    ;
+    ; Valide le mois.
+    ;
+    IF FIELDTEXT[5:2] < "01" OR FIELDTEXT[5:2] > "12"
+    THEN ERROR = "La valeur entree doit etre une date sous la forme AAAAMMJJ"
+    ;
+    ; Valide le jour.
+    ;
+    LET T_DERN_JOUR  = LASTDAY(NCONVERT(FIELDTEXT)) ; Dern jour du mois.
+    ;
+    IF FIELDTEXT[7:2] < "01" OR T_DERN_JOUR < NCONVERT(FIELDTEXT)
+    THEN ERROR = "La valeur entree doit etre une date sous la forme AAAAMMJJ"
+  END
+  ;
+  ; On conserve la valeur saisie
+  ;
+  LET T_VALSAI = FIELDTEXT
+
+  ;
+  ; Type caractère
+  ;
+@IF VAXVMS
+  IF XPATYP OF GSPARAMETRE = "C" AND 0 = SIZE(TRUNCATE(T_FLGIMP))
+  THEN BEGIN
+; Correction pour les choose parm range. PGL no. demande 266.
+
+    IF XPASIZ OF GSPARAMETRE > SIZE( TRUNCATE( T_VALSAI ))
+    THEN BEGIN
+      LET FIELDTEXT = TRUNCATE( T_VALSAI ) + &
+                      " "[1:XPASIZ OF GSPARAMETRE - SIZE( TRUNCATE( T_VALSAI ))] + &
+                      CHAR(T_RETURN)
+    END
+  END
+@ENDIF
+  ;
+  ; On vérifie si l'usager peut faire de la recherche générique, par défaut
+  ; option est NOGENERIC, seul le mot clé GENERIC sur le ligne du paramètre
+  ; peut désactiver cette option.
+  ;
+ IF 0 <> INDEX(FIELDTEXT,"@") AND &
+     0 = INDEX(T_RESTE,"GENERIC") AND &
+    D_XPRNOM[1:2]<>"PD"
+  THEN ERROR 30 ; La recherche générique n'est pas permise.
+  ;
+  ; Validation selon le pattern dans GSPARAMETRE
+  ;
+  IF 0 <> SIZE(TRUNCATE(XPAPAT OF GSPARAMETRE)) AND 0 = SIZE(TRUNCATE(T_FLGIMP))
+  THEN BEGIN
+    IF NOT MATCHPATTERN(FIELDTEXT,TRUNCATE(XPAPAT OF GSPARAMETRE))
+    THEN ERROR 23 ; Valeur invalide.
+  END
+  ;
+  ; Transforme les flag Oui/Non en 1/0.
+  ;
+  IF XPACAT OF GSPARAMETRE = "1" OR 0 <> SIZE(TRUNCATE(T_FLGIMP))
+  THEN BEGIN
+    IF 0 = INDEX("ONY10",UPSHIFT(FIELDTEXT))
+    THEN ERROR 23 ; Code invalide.
+    LET FIELDTEXT = UPSHIFT(FIELDTEXT)
+
+    USE usflginp NOLIST
+  END
+  ;
+  ; Flag Français/ Anglais
+  ;
+  IF XPACAT OF GSPARAMETRE = "2" AND 0 = SIZE(TRUNCATE(T_FLGIMP))
+  THEN BEGIN
+    IF 0 = INDEX("FAE",FIELDTEXT)
+    THEN ERROR 23 ; Code invalide.
+
+    USE usflginp NOLIST
+  END
+  ;
+  ; Validation et traitement des codes bilingue
+  ;
+  IF XPACAT OF GSPARAMETRE = "3" AND 0 = SIZE(TRUNCATE(T_FLGIMP))
+  THEN BEGIN
+    GET MCCODE_BILINGUE VIA XELNOM, CBICLE &
+                 USING D_FIELDNAME, FIELDTEXT OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 23 ; Code invalide.
+  END
+  ;
+  ; Validation des valeurs pour le paramètre
+  ;
+  IF XPACAT OF GSPARAMETRE = "4"  AND 0 = SIZE(TRUNCATE(T_FLGIMP))
+  THEN BEGIN
+    GET GSXPA_VALUE VIA XPANOM, XPVCLE           &
+                    USING XPANOM OF GSPARAMETRE, &
+                          FIELDTEXT              &
+                    OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 23 ; Code invalide.
+  END
+  ;
+  ; Validation des codes unique.
+  ;
+  ;
+  ; Validation des codes unique.
+  ;
+  IF 0 = IND(T_RESTE,"REPEATING") AND 0 = SIZE(TRUNC(T_FLGIMP))
+  THEN BEGIN
+    GET GSXJB_PARAM VIA XJBCLE, XPANOM, XJPVALUTI &
+                    USING XJBCLE OF GSJOB, &
+                          XPANOM OF GSPARAMETRE, &
+                          FIELDTEXT &
+                    OPTIONAL
+    IF ACCESSOK
+    THEN ERROR 31 ; On ne peut pas saisir 2 fois le même paramètre.
+  END
+  ;
+  ; On conserve la valeur réelement utilisé par la procédure ou le rapport
+  ;
+  LET T_VALUTI = FIELDTEXT
+
+END
+
+;
+PROCEDURE OUTPUT T_FIELD ; ok
+BEGIN
+
+   IF XPACAT OF GSPARAMETRE = "1" OR 0 <> SIZE(TRUNCATE(T_FLGIMP))
+   THEN BEGIN
+    ;
+    ; On affiche l'indicateur sous la langue de l'usager.
+    ;
+    ;              Français  Anglais  Condition
+    ; Valeurs: 1 =   Oui       Yes      Vrai
+    ;          0 =   Non       No       Faux
+    ;
+    ;
+    USE usflgout NOLIST
+  END
+
+  IF XPACAT OF GSPARAMETRE = "2"
+  THEN BEGIN
+    ;
+    ; Flag Français / Anglais
+    ;
+    ;
+    ; On affiche l'indicateur sous la langue de l'usager.
+    ;
+    ;              Français   Anglais  Condition
+    ;              -----------------------------
+    ; Valeurs: 1 =  Francais  French     Vrai
+    ;          2 =  Anglais   English    Faux
+    ;
+    ;
+    USE uslngout NOLIST
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Consultation des codes bilingue pour le Flag d'éxécution.
+;
+PROCEDURE INPUT XJBFLGEXE ;ok
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_XJBFLGEXE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_XJBFLGEXE, T_XJBFLGEXE
+    LET FIELDTEXT = TRUNCATE(T_XJBFLGEXE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; affichage du champ
+;
+PROCEDURE PROCESS XJBFLGEXE
+BEGIN
+  DISPLAY XJBFLGEXE
+END
+
+;-------------------------------------------------------------------------------
+;
+; Traitement pour les indicateurs dont la valeur est Oui ou Non.
+; Le procédure EDIT transpose les valeurs sous un code universel soit 1 et 0.
+;
+PROCEDURE INPUT XJBFLGDIF
+BEGIN
+  USE usflginp NOLIST
+END
+
+
+;------------------------------------------------------------------------------
+;
+; Traitement selon le flag différé, on affiche les valeurs à droite du champ
+; selon la valeur du flag différé.
+;
+;
+PROCEDURE PROCESS XJBFLGDIF ; ok
+BEGIN
+  DISPLAY D_XJBNBRJRS
+  DISPLAY D_XJBHREDIF
+  LET XJBNBRJRS OF GSJOB = 0
+  LET XJBHREDIF OF GSJOB = ""
+  DISPLAY XJBNBRJRS OF GSJOB
+  DISPLAY XJBHREDIF OF GSJOB
+END
+
+;-------------------------------------------------------------------------------
+;
+; On affiche l'indicateur sous la langue de l'usager.
+;
+;              Français  Anglais  Condition
+; Valeurs: 1 =   Oui       Yes      Vrai
+;          0 =   Non       No       Faux
+;
+;
+PROCEDURE OUTPUT XJBFLGDIF
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Consultation des Codes d'imprimantes.
+;
+;
+PROCEDURE INPUT XIMCOD ;ok
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_XIMCOD = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gs112 MODE F PASSING T_XIMCOD
+    LET FIELDTEXT = TRUNCATE(T_XIMCOD)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Accepte le flag en différé...
+;
+;
+PROCEDURE DESIGNER 5 ; ok
+BEGIN
+  ACCEPT XJBFLGDIF OF GSJOB
+  IF XJBFLGDIF OF GSJOB = "1"
+  THEN BEGIN
+    ACCEPT XJBNBRJRS OF GSJOB
+    ACCEPT XJBHREDIF OF GSJOB
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Consultation des parametres deja saisis.
+;
+;
+PROCEDURE DESIGNER VOIR ; OK
+BEGIN
+  LET T_XJBCLE = XJBCLE OF GSJOB
+
+;; *** A revoir
+
+;  COMMIT TRANSACTION UPDATE
+
+  RUN SCREEN gs090a PASSING T_XJBCLE MODE F
+END
+
+;-------------------------------------------------------------------------------
+;
+; Consultation de l'aide selon le programme à l'écran.
+;
+;
+PROCEDURE DESIGNER AIDE NODATA
+BEGIN
+  RUN SCREEN gs007 PASSING D_XDECODMNE, D_XDENOM MODE F
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  DISPLAY D_XPRDSCCEN
+  ;
+  ; Assignation du numéro de job.
+  ;
+  START TRANSACTION GEN_NUM_SEQ
+  GET GSXLG_SEQ VIA XLSCLE USING "1" OPTIONAL
+  LET XLSCLE    OF GSXLG_SEQ = "1"
+  ;
+  ; On recommence à 1 si le compteur est rendu à 99999.
+  ;
+  IF XLSNUMSEQ OF GSXLG_SEQ = 99999
+  THEN LET XLSNUMSEQ OF GSXLG_SEQ = 0
+  LET XLSNUMSEQ OF GSXLG_SEQ = XLSNUMSEQ OF GSXLG_SEQ + 1
+  LET XJBCLE    OF GSJOB     = ASCII(XLSNUMSEQ OF GSXLG_SEQ, 5)
+  PUT GSXLG_SEQ
+  COMMIT TRANSACTION GEN_NUM_SEQ
+  ;
+  ; à tout les 1000 enregistrements de la table GSJOB, on active la destruction
+  ; des vieux enregistrements de cette table.
+  ;
+  IF 0 = MOD( XLSNUMSEQ OF GSXLG_SEQ , 1000 )
+  THEN BEGIN
+    WHILE RETRIEVING A_GSXJB_PARAM_DEL SEQUENTIAL
+    BEGIN
+      DELETE A_GSXJB_PARAM_DEL
+      PUT A_GSXJB_PARAM_DEL
+    END
+    WHILE RETRIEVING A_GSJOB_DEL SEQUENTIAL
+    BEGIN
+      DELETE A_GSJOB_DEL
+      PUT A_GSJOB_DEL
+    END
+  END
+  ;
+  ; Assigne la localisation de l'usager.
+  ;
+  LET XLOCLE OF GSJOB = XLOCLE OF GSUSAGER
+  DISPLAY XLOCLE       OF GSJOB
+  DISPLAY XIMCOD       OF GSJOB
+  DISPLAY D_XILDSC
+  DISPLAY XJBNBRCOP    OF GSJOB
+
+  ;
+  ; Il faut détruire le fichier de commande si l'usager recommence la saisie
+  ; sans faire de mise à jour.
+  ;
+  IF T_UPDATE = "N"
+  THEN BEGIN
+    DO INTERNAL DETRUIT_FICCMD
+  END
+  ;
+  ; Flag pour savoir si l'usager à fait le update.
+  ;
+  LET T_UPDATE = "N"
+  ;
+  ; Flag pour savoir si l'usager c'est rendu à la fin de la procédure ENTRY.
+  ;
+  LET T_ENTRY     = "N"
+
+  LET T_NUMPAR = 1
+
+  DO INTERNAL PREPARATION_FICHIER_CMD
+  DO INTERNAL CREATION_FICHIER_CMD
+
+  ;
+  ; Confirmation de l'éxécution du programme.
+  ;
+  ;
+  ; Il faut vérifier si le paramètre d'éxécution dans le programme permet
+  ; l'éxécution intéractive.
+  ;
+  IF XPRFLGEXE OF GSPROGRAMME = "I"
+  THEN BEGIN
+    ACCEPT XJBFLGEXE  OF GSJOB
+  END
+  DISPLAY XJBFLGEXE OF GSJOB
+  DISPLAY CBIDSC    OF JOB_DSC
+  ;
+  ; Lancement en batch
+  ;
+  IF XJBFLGEXE OF GSJOB = "L"
+  THEN BEGIN
+    ;
+    ; Paramètre pour le lancement différé
+    ;
+    ACCEPT XJBFLGDIF OF GSJOB
+    IF XJBFLGDIF OF GSJOB = "1"
+    THEN BEGIN
+      ACCEPT XJBNBRJRS OF GSJOB
+      ACCEPT XJBHREDIF OF GSJOB
+    END
+    ACCEPT XIMCOD OF GSJOB
+    DISPLAY D_XILDSC
+    ACCEPT XJBNBRCOP OF GSJOB
+  END
+
+  INFO 28 ; Faire une mise à jour pour éxécuter cette demande.
+  LET T_ENTRY = "O"
+END
+
+;*****************************************************************************
+;
+;
+;*****************************************************************************
+
+
+PROCEDURE PATH
+NULL
+
+PROCEDURE FIND
+DISABLE
+
+PROCEDURE DELETE
+DISABLE
+
+
+PROCEDURE PREUPDATE
+BEGIN
+  IF T_ENTRY <> "O"
+  THEN BEGIN
+    ERROR 29 ;La saisie est incomplete on ne peut pas faire de mise a jour
+  END
+  ;
+  ; Il faut mettre à jour le record GSJOB, car il a l'énnoncé RETURN à la fin
+  ; de cette procédure.
+  ;
+  PUT GSJOB
+@IF VAXVMS
+  ; Ajout d'un commit, car en mode interactif les données doivent
+  ; êtres inscrites dans la base de donnée
+  COMMIT
+@ENDIF
+
+  IF XJBFLGEXE OF GSJOB = "L" ; Si Lancement en Lot
+  THEN DO INTERNAL EXECUTION_LOT
+  ELSE DO INTERNAL EXECUTION_INTERACTIVE
+
+
+
+  LET T_UPDATE = "O"
+  RETURN
+
+END
+
+;-------------------------------------------------------------------------------
+;
+; Cette procedure detruit le fichier creer si on quitte sans faire de
+; mise a jour
+;
+;
+PROCEDURE EXIT ; ok
+BEGIN
+  IF T_UPDATE = "N"
+  THEN BEGIN
+    DO INTERNAL DETRUIT_FICCMD
+  END
+END
+
+
+BUILD

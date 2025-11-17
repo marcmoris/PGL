@@ -1,0 +1,2863 @@
+;/T/ réquisition
+;
+;/M/INTINV/Nicolas Groleau/1999-08-11
+;    Etat.........: [Terminer]
+;    Description..: GRA01
+;                   Ajout de la saisie automatique du numero d'item.
+;                   L'usager peut quand meme saisir un numero d'item.
+;                   Modification de l'edit de reqclenum.
+;
+;/P/ Programmeur..: Guy Chabot
+;    Date Création: 20 Avril 1994
+;    Description..:
+;
+;/M/ Modification.: Pierre Routhier
+;                23 octobre 1996
+;                Correction d'un bogue: Le calcul de la quantité demandée
+;                s'effectuait mal ce qui donnait une quantité erronée dans
+;                l'écran ar002.qks Gestion des produits.
+;
+;/M/ Modification.: Pierre Routhier
+;                   02 Mai 1997
+;                   Si notion de projet (HLDNTNPRO OF MCHOLDING) = Oui et
+;                   que le compte (CPTCLE) inscrit est un compte de nature
+;                   revenu (NACCLE = 4) ou dépense (NACCLE = 5) de la table
+;                   mcnature_ctb :
+;                      - On demande les projets et ce, de façon obligatoire.
+;
+;                   Si notion de projet (HLDNTNPRO OF MCHOLDING) = Non ou
+;                   que le compte (CPTCLE) inscrit est un compte de bilan
+;                   (actif, passif ou capital - NACCLE = 1 ou 2 ou 3) de la
+;                   table mcnature_ctb:
+;                      - On ne les demande pas du tout.
+;
+;/M/ Programmeur.......: Sylvie Chouinard
+;    Debut modification: 25 mai 1998
+;    Fin   modification: 25 mai 1998
+;    Etat..............: Termine
+;    Description.......: Changer le OR pour un AND dans la condition de
+;                        reinitialisation du projet/sous-projet de la
+;                        procdure process cptcle.
+;                        (SOS 159)
+;
+;/M/ Programmeur.......: Nancy Breton
+;    Date modification.: 04 Septembre 1998
+;    Description.......: Obliger la saisie "Mode de transport" et "terme de
+;                        commande" si aucun sur la fiche du fournisseur.
+;                   Empêcher de modifié le compte et l'unité adm si le
+;                        statut approuvé ou complété.
+;                        (SOS 211)
+;
+;/M/ Programmeur.......: Patrick Langlois
+;    Date modification.: 09 Juin 1999
+;    Description.......: Migration Achat/Réception/Inventaire
+;                        de l'environnement (BOC)
+;
+;/M/ Programmeur.......: Francois Richard
+;    Date modification : 19 juillet 1999
+;    Description.......: Aidé la saisie de prdcle
+;
+;/M/ Programmeur.......: Francois Richard
+;    Date modification : 6 Aout 1999
+;    Description.......: Validation de la saisie selon le statut de la
+;                        réquisition
+;
+;/V/ Écran vérifier pour le passage à l'an 2000
+;
+;------------------------------------------------------------------------------
+
+SCREEN ar006  ACTIONBAR &
+              MODE LABEL "" AT 2,80  &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU  , &
+                        T_CIENOM     , &
+                        T_PECCLEMNU  , &
+                        T_FOUCIECLE  , &
+                        T_REQCLEFND  , &
+                        T_REQCLENUMFND
+
+TEMPORARY T_CPTPECDEBA_VCPT CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CPTPECDEBI_VCPT CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_PECCLE_AR CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CCUPECDEBI_MCCHARTE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CCUPECDEBA_MCCHARTE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_PECCLE_ARREQ CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+USE ussectmp NOLIST     ; Variable pour la sécurité
+    "AR006"             ; Nom de l'écran
+
+USE ar006.hlp  NOLIST   ; Use servant à la documentation de l'écran
+
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-écrans
+
+USE ustrasse NOLIST
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Réquisition par fournisseur " ACTION DESIGNER D001
+  MENUITEM LABEL "Vérification                " ACTION DESIGNER D002
+  MENUITEM LABEL "Mémo - achat                " ACTION DESIGNER D003
+  MENUITEM LABEL "Commande d'achat            " ACTION DESIGNER D004
+  MENUITEM LABEL "Notes descriptives          " ACTION DESIGNER D005
+  MENUITEM LABEL "Soumission                  " ACTION DESIGNER D006
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%sul. par fournisseur     " ACTION DESIGNER D001
+  MENUITEM LABEL "%%%ification                " ACTION DESIGNER D002
+  MENUITEM LABEL "%%%o - achat                " ACTION DESIGNER D003
+  MENUITEM LABEL "%%%mande d'achat            " ACTION DESIGNER D004
+  MENUITEM LABEL "%%%es descriptives          " ACTION DESIGNER D005
+  MENUITEM LABEL "%%%mission                  " ACTION DESIGNER D006
+@ENDIF
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 04 ; Numéro de la compagnie
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie
+TEMPORARY T_PECCLEMNU CHARACTER SIZE 04 ; Période du menu
+TEMPORARY T_FOUCIECLE CHARACTER SIZE 04 ; Compagnie fournisseur
+TEMPORARY T_REQCLEFND CHARACTER SIZE 09 ; Numéro de réquisition en passing.
+TEMPORARY T_REQCLENUMFND INTEGER SIGNED SIZE 4
+TEMPORARY T_ARMTYPFND CHARACTER SIZE 1  INITIAL "1"
+TEMPORARY T_NUMREFFND CHARACTER SIZE 12
+TEMPORARY T_MOD       CHARACTER SIZE 2 ; Code de module.
+;-------------------------------------------------------------------------------
+
+DEFINE    DZ_CIECLE   CHARACTER SIZE 04 = T_CIECLEMNU
+DEFINE    DZ_CIENOM   CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_RAD_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE MCRAD_SEQ IN DICT
+
+;-------------------------------------------------------------------------------
+;
+; Table primaire.
+;
+FILE ARREQUISITION     PRIMARY &
+                      NOITEM
+
+  ITEM FOUCIECLE OF ARREQUISITION  INITIAL T_FOUCIECLE
+  ITEM CIECLE    OF ARREQUISITION  INITIAL T_CIECLEMNU
+  ITEM REFCLETYP OF ARREQUISITION  INITIAL "F"
+  ITEM REQSTUAPP OF ARREQUISITION  INITIAL "P"
+  ITEM REQUSRCRE OF ARREQUISITION  INITIAL TZ_LOGONID
+  ITEM REQDATCRE OF ARREQUISITION  INITIAL SYSDATE
+  ITEM REQHRECRE OF ARREQUISITION  INITIAL SYSTIME / 10000
+  ITEM REQDATMOD OF ARREQUISITION  FINAL   SYSDATE        &
+                                        IF NOT NEWRECORD OF ARREQUISITION  AND &
+                                           ALTEREDRECORD OF ARREQUISITION
+  ITEM REQHREMOD OF ARREQUISITION  FINAL   SYSTIME / 10000 &
+                                        IF NOT NEWRECORD OF ARREQUISITION  AND &
+                                           ALTEREDRECORD OF ARREQUISITION
+  ITEM REQUSRMOD OF ARREQUISITION  FINAL   TZ_LOGONID         &
+                                        IF NOT NEWRECORD OF ARREQUISITION  AND &
+                                           ALTEREDRECORD OF ARREQUISITION
+
+;-------------------------------------------------------------------------------
+;
+; Validation du numéro d'adresse et ajout de la nouvelle adresse pour les
+; fournisseur divers.
+;
+FILE MCREF_ADRESSE     SECONDARY &
+                      NOITEM &
+                      NODELETE
+
+  ACCESS  VIA   REFCIECLE, &
+                REFCLETYP, &
+                REFCLENUM, &
+                RADCLE &
+          USING FOUCIECLE OF ARREQUISITION, &
+                REFCLETYP OF ARREQUISITION, &
+                FOUCLE    OF ARREQUISITION, &
+                RADCLE    OF ARREQUISITION
+
+  ITEM REFCIECLE OF MCREF_ADRESSE FINAL FOUCIECLE OF ARREQUISITION &
+                    IF 0 <> SIZE(TRUNCATE(FOUCLE OF ARREQUISITION))
+  ITEM REFCLETYP OF MCREF_ADRESSE FINAL REFCLETYP OF ARREQUISITION &
+                    IF 0 <> SIZE(TRUNCATE(FOUCLE OF ARREQUISITION))
+  ITEM REFCLENUM OF MCREF_ADRESSE FINAL FOUCLE    OF ARREQUISITION &
+                    IF 0 <> SIZE(TRUNCATE(FOUCLE OF ARREQUISITION))
+  ITEM RADCLE    OF MCREF_ADRESSE FINAL RADCLE    OF ARREQUISITION &
+                    IF 0 <> SIZE(TRUNCATE(FOUCLE OF ARREQUISITION))
+  ITEM RADACHCP  OF MCREF_ADRESSE INITIAL "1" &
+                    IF 0 <> SIZE(TRUNCATE(FOUCLE OF ARREQUISITION))
+
+;-------------------------------------------------------------------------------
+;
+; Numéro de séquence des adresses pour les fournisseurs divers.
+;
+FILE MCRAD_SEQ         DESIGNER   TRANSACTION GEN_RAD_SEQ
+
+
+
+;------------------------------------------------------------------------------
+;
+; Validation de période d'engagement.
+;
+;FILE MCPERIODE_CIE     DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+; Catalogue du fournisseur pour obtenir le dernier coûtant du produit
+;
+FILE ARPRD_FOU         REFERENCE
+
+  ACCESS VIA   CIECLE,    &
+               PRDCLE,    &
+               FOUCIECLE, &
+               FOUCLE     &
+         USING CIECLE    OF ARREQUISITION, &
+               PRDCLE    OF ARREQUISITION, &
+               FOUCIECLE OF ARREQUISITION, &
+               FOUCLE    OF ARREQUISITION
+
+;-------------------------------------------------------------------------------
+;
+; Entrepot de la transaction.
+;
+FILE ARENTREPOT          REFERENCE &
+                        NOITEM
+
+  ACCESS VIA   CIECLE, &
+               ENTCLE  &
+         USING T_CIECLEMNU, &
+               ENTCLE OF ARREQUISITION
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation du projet et affichage de sa description.
+;
+FILE GPPROJETS          REFERENCE
+
+  ACCESS VIA CIECLE, &
+             PRJCLE  &
+         USING CIECLE OF ARREQUISITION, &
+               PRJCLE OF ARREQUISITION
+
+;-------------------------------------------------------------------------------
+;
+; Validation de l'activité et affichage de sa description.
+;
+FILE GPPRO_ACTIVITE        REFERENCE
+
+  ACCESS VIA CIECLE, &
+             PRJCLE, &
+             PRACLE  &
+         USING CIECLE OF ARREQUISITION, &
+               PRJCLE OF ARREQUISITION, &
+               PRACLE OF ARREQUISITION
+
+;------------------------------------------------------------------------------
+;
+; Codes bilingues du mode de transport.
+;
+DEFINE    D_REQTRP CHARACTER SIZE 16 = "CMDTRP"
+TEMPORARY T_REQTRP CHARACTER SIZE 4
+
+FILE VCBI_DSC          REFERENCE &
+                      ALIAS A_CBI_REQTRP
+  ACCESS  VIA XELNOM, &
+              CBICLE  &
+          USING D_REQTRP, &
+                REQTRP OF ARREQUISITION
+
+;------------------------------------------------------------------------------
+;
+; Codes bilingues du code de terme de commerce
+;
+DEFINE    D_REQFAB CHARACTER SIZE 16 = "CMDFAB"
+TEMPORARY T_REQFAB CHARACTER SIZE 4
+
+FILE VCBI_DSC          REFERENCE &
+                      ALIAS A_CBI_REQFAB
+  ACCESS  VIA XELNOM, &
+              CBICLE  &
+          USING D_REQFAB, &
+                REQFAB OF ARREQUISITION
+
+;-------------------------------------------------------------------------------
+;
+; Table des Codes Bilingue pour le statut de la réquisition. Il n'y a pas
+; de lookup il est simulé dans la procédure edit.
+;
+DEFINE    D_REQSTUAPP CHARACTER SIZE 16 = "REQSTUAPP"
+TEMPORARY T_REQSTUAPP CHARACTER SIZE  4
+TEMPORARY T_CNSFLD    CHARACTER SIZE 1 ; Conserver fieldtext du REQSTUAPP
+
+FILE VCBI_DSC          REFERENCE &
+                      ALIAS A_CBI_REQSTUAPP
+  ACCESS  VIA   XELNOM, &
+                CBICLE  &
+          USING D_REQSTUAPP, &
+                REQSTUAPP OF ARREQUISITION
+
+;-------------------------------------------------------------------------------
+; Validation des adresses d'expédition
+TEMPORARY T_ADECLE     CHARACTER SIZE 5
+
+FILE ARADRESSE_EXP     REFERENCE
+  ACCESS VIA   ADECLE &
+         USING ADECLE OF ARREQUISITION
+
+;-------------------------------------------------------------------------------
+;
+; Validation de la charte de compte.
+;
+FILE MCCHARTE_UNA      REFERENCE
+
+  ACCESS  VIA   CPTCLE, &
+                CIECLE, &
+                UNACLE &
+          USING CPTCLE OF ARREQUISITION, &
+                CIECLE OF ARREQUISITION, &
+                UNACLE OF ARREQUISITION
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation du code de taxe fédéral.
+;
+FILE MCTAXE            REFERENCE &
+                      ALIAS A_TAX_TPS
+  ACCESS VIA   TAXCLETYP, &
+               TAXCLECOD &
+         USING REQTAXTYPTPS OF ARREQUISITION, &
+               REQTAXCODTPS OF ARREQUISITION
+
+;-------------------------------------------------------------------------------
+;
+; Validation du code de taxe provincial.
+;
+FILE MCTAXE            REFERENCE &
+                      ALIAS A_TAX_TVP
+  ACCESS VIA   TAXCLETYP, &
+               TAXCLECOD &
+         USING REQTAXTYPTVQ OF ARREQUISITION, &
+               REQTAXCODTVQ OF ARREQUISITION
+
+;-------------------------------------------------------------------------------
+;
+; Pour valider le compte et afficher la description lors de la
+; saisie.
+;
+FILE VCPT_DSC          REFERENCE
+
+  ACCESS VIA   CPTCLE    &
+         USING CPTCLE OF ARREQUISITION
+
+;-------------------------------------------------------------------------------
+;
+; Pour valider l'unité administrative et afficher la description lors de la
+; saisie.
+;
+FILE MCUNITE_ADM       REFERENCE
+
+  ACCESS VIA   CIECLE, &
+               UNACLE  &
+         USING CIECLE OF ARREQUISITION, &
+               UNACLE OF ARREQUISITION
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Fichier permettant de prendre par défaut le terme d'escompte sur achat
+; du fournisseur.
+;
+FILE VFOC_FOU          REFERENCE
+
+  ACCESS VIA   FOUCIECLE, &
+               FOUCLE,    &
+               FOCCIECLE  &
+         USING FOUCIECLE OF ARREQUISITION, &
+               FOUCLE    OF ARREQUISITION, &
+               CIECLE    OF ARREQUISITION
+
+
+;-------------------------------------------------------------------------------
+;
+; Fichier de produti à l'intérieur de l'entrepôt.
+;
+FILE VPRE_PRD          REFERENCE
+
+  ACCESS VIA   CIECLE, &
+               PRDCLE, &
+               ENTCLE  &
+         USING CIECLE OF ARREQUISITION, &
+               PRDCLE OF ARREQUISITION, &
+               ENTCLE OF ARREQUISITION
+
+;-------------------------------------------------------------------------------
+;
+; Fichier du terme d'escompte d'achat du fournisseur.
+;
+FILE VTER_DSC          REFERENCE
+
+  ACCESS VIA    TERCLE  &
+         USING  REQTERESCACH OF ARREQUISITION
+
+
+;-------------------------------------------------------------------------------
+;
+; Paramètres pour la compagnie consolidé(holding)
+;
+FILE MCHOLDING         REFERENCE
+  ACCESS VIA CIENMC USING "1"
+
+
+;-------------------------------------------------------------------------------
+;
+; Destruction des notes descriptives.
+;
+FILE ARREQ_NOTE        DELETE  &
+                      NOITEMS &
+                      ALIAS A_RQN_DELETE
+
+  ACCESS VIA    CIECLE   , &
+                REQCLE   , &
+                REQCLENUM     &
+         USING  CIECLE    OF ARREQUISITION , &
+                REQCLE    OF ARREQUISITION , &
+                REQCLENUM    OF ARREQUISITION
+
+;-------------------------------------------------------------------------------
+;
+; Destruction des soumissions
+;
+FILE ARREQ_SOUMISSION  DELETE  &
+                      NOITEMS &
+                      ALIAS A_RSO_DELETE
+
+  ACCESS VIA    CIECLE   , &
+                REQCLE   , &
+                REQCLENUM     &
+         USING  CIECLE    OF ARREQUISITION , &
+                REQCLE    OF ARREQUISITION , &
+                REQCLENUM    OF ARREQUISITION
+
+
+;-------------------------------------------------------------------------------
+;
+; Permet de conserver le taux de la devise à chacune des modifications.
+;
+FILE MCDEVISE          DESIGNER
+
+
+;-------------------------------------------------------------------------------
+;
+; Permet de donner le numéro de commande déjà réservé.
+;
+FILE ARRESERVATION     DESIGNER
+
+  SELECT IF 0 = RESDATUTI OF ARRESERVATION
+
+
+FILE ARPRODUIT           DESIGNER
+
+  SELECT IF ("I" = PRDTYP OF ARPRODUIT OR &
+             "N" = PRDTYP OF ARPRODUIT)
+
+FILE ARPRD_ENT           DESIGNER
+
+FILE ARREQUISITION       DESIGNER ALIAS A_ARREQUISITION
+  ACCESS VIA   CIECLE, &
+               PRDCLE &
+         USING CIECLE OF ARREQUISITION, &
+               PRDCLE OF ARREQUISITION
+
+FILE MCCOMPTE            REFERENCE
+  ACCESS VIA   CPTCLE &
+         USING CPTCLE OF ARREQUISITION
+
+FILE MCNATURE_CTB        REFERENCE
+  ACCESS VIA   NACCLE &
+         USING NACCLE OF MCCOMPTE
+
+;-------------------------------------------------------------------------------
+;
+; Valide l'immobilisation et affiche la description.
+;
+TEMPORARY T_IMMCLE CHARACTER SIZE 12 ; Popup sur les immobilisations.
+
+FILE IMIMMOBILISATION REFERENCE
+
+  ACCESS  VIA   CIECLE, &
+                IMMCLE &
+          USING CIECLE OF ARREQUISITION , &
+                IMMCLE OF ARREQUISITION
+
+  SELECT IF IMMSTU OF IMIMMOBILISATION = "A"
+
+FILE GSUSAGER DESIGNER &
+                   OPEN READ SHARE
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_ENTCLE    CHARACTER SIZE 4  ; Entrepôt pour écran dépisteur.
+TEMPORARY T_PRDCLE    CHARACTER SIZE 12 ; Produit pour écran dépisteur.
+
+TEMPORARY T_TAXCLETYP CHARACTER SIZE 1 ; Popup sur les codes de taxes
+TEMPORARY T_TAXCLECOD CHARACTER SIZE 2 ; Popup sur les codes de taxes
+TEMPORARY T_TAXMODPAT CHARACTER SIZE 5 ; Popup sur les codes de taxes
+
+TEMPORARY T_TERCLE    CHARACTER SIZE  4 ; Popup sur terme d'escompte.
+TEMPORARY T_TERCAT    CHARACTER SIZE  4 ; Popup sur terme d'escompte.
+
+TEMPORARY T_CPTCLE    CHARACTER SIZE 6 ; Popup sur les comptes.
+TEMPORARY T_PECCLE    CHARACTER SIZE 4 ; Popup sur les comptes.
+TEMPORARY T_CPTTYPPAT CHARACTER SIZE 1 ; Popup sur les comptes.
+TEMPORARY T_CPTCATPAT CHARACTER SIZE 8 ; Popup sur les comptes.
+
+TEMPORARY T_UNACLE    CHARACTER SIZE 8 ; Popup sur unités administratives.
+
+TEMPORARY T_PRJCLE    CHARACTER SIZE 8 ; Popup sur les projets.
+TEMPORARY T_PRJSTUPAT CHARACTER SIZE 8 ; Popup sur les projets.
+
+TEMPORARY T_PRACLE    CHARACTER SIZE 3 ; Popup sur les activités.
+TEMPORARY T_PRASTUPAT CHARACTER SIZE 5 ; Popup sur les activités.
+
+TEMPORARY T_FOUCLE    CHARACTER SIZE 6 ; Popup sur le fournisseur.
+TEMPORARY T_REQPRIUNI CHARACTER SIZE 14 ; Popup sur dernier coûtant
+TEMPORARY T_PRIX_FOU  FLOAT     SIZE 8
+TEMPORARY T_TAX_TPS   CHARACTER SIZE 2
+TEMPORARY T_TAX_TVQ   CHARACTER SIZE 2
+
+TEMPORARY T_SELFOU    CHARACTER SIZE  1 ; En mode de sélection de fournisseurs
+TEMPORARY T_CMDCLE    CHARACTER SIZE  9 ; Popup sur réservation.
+TEMPORARY T_CMDCLEFND CHARACTER SIZE  9 ; Appel de la commande.
+TEMPORARY T_CMDAJTFND CHARACTER SIZE  3 INITIAL "000" ; Appel de la commande
+TEMPORARY T_FLGCMD    CHARACTER SIZE  1 INITIAL "0"   ; Popup réservation
+;
+; Pour le calcul des taxes.
+;
+TEMPORARY T_FLGMOD       CHARACTER SIZE 1  ; Flag pour déceler s'il y eu modif.
+TEMPORARY T_TAXMODTPSOLD CHARACTER SIZE 1  ; Pour diminuer le bon cumul de taxe.
+TEMPORARY T_TAXMODTVQOLD CHARACTER SIZE 1  ; Pour diminuer le bon cumul de taxe.
+
+TEMPORARY T_REQSTUOLD CHARACTER SIZE 1 INITIAL "P" ; Pour conserver ancienne valeur
+
+;
+; Temporaires nécessaires au calcul des taxes
+;
+USE ustaxtmp NOLIST
+
+DEFINE D_DEVCLE    CHARACTER SIZE 04 = " " &
+          IF DEVCLE OF VFOC_FOU = DEVCLE OF MCHOLDING OR &
+             0 = SIZE(TRUNCATE(FOUCLE OF ARREQUISITION)) &
+          ELSE "/" + DEVCLE OF VFOC_FOU
+
+DEFINE D_NOT CHARACTER SIZE 1 = " "
+
+DEFINE D_PRDQTETOT    FLOAT  SIZE 8  = &  ; Pour valider que la quantité
+                                          ; requis dépasse pas qté maximum
+  PREQTECOM OF VPRE_PRD + &
+  PREQTEPHY OF VPRE_PRD + &
+  REQQTEREQ OF ARREQUISITION
+
+TEMPORARY T_VALRADSIL CHARACTER SIZE 1
+TEMPORARY T_CMDCLEECR CHARACTER SIZE 9
+TEMPORARY T_PREQTEDEM FLOAT     SIZE 8
+TEMPORARY T_STATUT    CHARACTER SIZE 1
+TEMPORARY T_REQCLEOLD CHARACTER SIZE 9
+TEMPORARY T_FLAG_ALT  CHARACTER SIZE 1 ; Flag pour un record en modification
+TEMPORARY T_FLAG_ENT  CHARACTER SIZE 1 ; Flag pour un record en entrée
+
+
+TEMPORARY T_ITEM_COMPT          INTEGER   SIZE 4   RESET AT STARTUP
+TEMPORARY T_USRCLE              CHARACTER SIZE 12   RESET AT STARTUP
+
+USE usvarprd NOLIST ; Sert à la saisie de prdcle
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST     ; Draw pour les écrans 80  colonnes
+USE ustitstd NOLIST     ; En-tête pour les écrans 80  colonnes
+USE ushilite NOLIST     ; Hilite pour tous les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Réquisition d'achat " &
+@ELSE
+      "%%%quisition d'achat " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+;-------------------------------------------------------------------------------
+
+SKIP
+ALIGN (3,3,19) (,43,59) (,,61)
+FIELD ENTCLE OF ARREQUISITION  &
+        HIDDEN ID 5  &
+        REQUIRED &
+        NOCHANGE &
+        LOOKUP ON ARENTREPOT &
+          MESSAGE 1337 ; Cette entrepot n'existe pas...
+
+FIELD REQSTUAPP OF ARREQUISITION  ID SAME &
+        LABEL "Statut (Item).:" &
+        LOOKUP ON A_CBI_REQSTUAPP &
+          MESSAGE 1370         & ; Ce statut est invalide
+        NOENTRY
+
+FIELD CBIDSC    OF A_CBI_REQSTUAPP &
+        DISPLAY &
+        SIZE 15
+
+ALIGN (3,3,19) (,43,59)
+
+FIELD REQCLE    OF ARREQUISITION &
+        HIDDEN ID 10 &
+        REQUIRED &
+        NOCORRECT &
+        NOCHANGE
+
+FIELD REQDATAPP OF ARREQUISITION  FORMAT YYYYMMDD DISPLAY
+
+
+ALIGN (3,3,19) (,,28) (,,70)
+FIELD FOUCLE    OF ARREQUISITION &
+        HIDDEN ID 15 &
+        DUPLICATE
+
+FIELD RADNOM OF MCREF_ADRESSE &
+        DISPLAY
+
+FIELD T_VALRADSIL SILENT
+
+ALIGN (2,3,19) (,,28)
+FIELD ADECLE OF ARREQUISITION &
+        REQUIRED &
+        HIDDEN ID 17  &
+        IF FOUCLE OF ARREQUISITION <> " " &
+        LABEL "Adresse d'exp.:" &
+        LOOKUP ON ARADRESSE_EXP &
+          MESSAGE 1488 ;Cette adresse d'expédition d'existe pas.
+
+FIELD ADENOM OF ARADRESSE_EXP &
+        DISPLAY
+
+ALIGN (3,3,19)
+FIELD REQNOMREQ OF ARREQUISITION &
+        HIDDEN ID 20
+
+ALIGN (3,3,19) (,,24)
+FIELD REQTRP OF ARREQUISITION &
+        HIDDEN ID 25 &
+        LOOKUP ON A_CBI_REQTRP &
+          MESSAGE 1364 ; Ce mode de transport n'existe pas.
+
+FIELD CBIDSC OF A_CBI_REQTRP &
+        DISPLAY &
+        SIZE 15
+
+
+ALIGN (3,3,19) (,,24) (,45,54)
+FIELD REQFAB OF ARREQUISITION &
+        HIDDEN ID 30 &
+        LOOKUP ON A_CBI_REQFAB &
+          MESSAGE 1365 ; Ce code de terme de commerce n'existe pas.
+
+FIELD CBIDSC OF A_CBI_REQFAB &
+        DISPLAY  &
+        SIZE 15
+
+FIELD REQLIE OF ARREQUISITION &
+        LABEL "Endroit: "
+
+ALIGN (3,3,19)
+FIELD T_CMDCLEECR &
+        HIDDEN ID 35 &
+        LABEL "Commande......:" &
+        IF FOUCLE OF ARREQUISITION <> " " 
+
+ALIGN (3,3,19) (,43,59)
+FIELD REQCLENUM       OF ARREQUISITION &
+        HIDDEN ID 40 &
+        REQUIRED  &
+        NOCHANGE  &
+        LOOKUP NOTON ARREQUISITION &
+          VIA   CIECLE   , &
+                REQCLE   , &
+                REQCLENUM     &
+         USING  CIECLE    OF ARREQUISITION, &
+                REQCLE    OF ARREQUISITION, &
+                REQCLENUM    OF ARREQUISITION  &
+          MESSAGE 1437 ; Cet item existe déjà dans la réquisition...
+
+FIELD REQFLGSOU    OF ARREQUISITION &
+        DUPLICATE &
+        SIZE 3    &
+        IF FOUCLE OF ARREQUISITION = " "
+
+ALIGN (3,3,19) (,,33)
+FIELD PRDCLE       OF ARREQUISITION &
+        HIDDEN ID 45 &
+        REQUIRED &
+        LOOKUP ON VPRE_PRD &
+          MESSAGE 1373 ; Ce produit n'existe pas pour l'entrepôt de la commande.
+
+FIELD REQDSC       OF ARREQUISITION &
+        REQUIRED IF PRDTYP OF VPRE_PRD = "D"  ; Description est saisie si le
+                                              ; produit est de type divers.
+
+ALIGN (3,3,19)
+FIELD REQDATREQ OF ARREQUISITION  FORMAT YYYYMMDD &
+        HIDDEN ID 50 &
+        PATTERN "(####/##/##)|(!0)"
+
+ALIGN (2,3,19)(,,28)(,43,59)(,,68)
+FIELD CPTCLE OF ARREQUISITION &
+        HIDDEN ID 55       &
+        REQUIRED           &
+        LOOKUP ON VCPT_DSC &
+          MESSAGE 1313 ; Ce compte n'existe pas.
+
+FIELD CPTDSCABR OF VCPT_DSC &
+        DISPLAY &
+        SIZE 12
+
+FIELD UNACLE OF ARREQUISITION  &
+        REQUIRED              &
+        LOOKUP ON MCUNITE_ADM &
+          MESSAGE 1314 ; Cette unité administrative n'existe pas dans la charte.
+
+FIELD UNANOMABR OF MCUNITE_ADM &
+        DISPLAY &
+        SIZE 12
+
+FIELD PRJCLE OF ARREQUISITION &
+        HIDDEN ID 60
+
+FIELD PRJDSC1 OF GPPROJETS &
+        DISPLAY &
+        SIZE 12
+
+FIELD PRACLE OF ARREQUISITION
+
+FIELD PRADSC1 OF GPPRO_ACTIVITE &
+        DISPLAY &
+        SIZE 12
+
+ALIGN (3,3,19) (,,33)
+FIELD IMMCLE       OF ARREQUISITION &
+        ID 63                    &
+        LABEL "Equipement....:" &
+        LOOKUP ON IMIMMOBILISATION &
+            MESSAGE 491 ; Cette immobilisation n'existe pas ou est inactive.
+
+FIELD IMMDSC OF IMIMMOBILISATION DISPLAY
+
+ALIGN (3,3,19) (,43,59) (,,62) (,67,73)
+FIELD REQQTEREQ    OF ARREQUISITION &
+        HIDDEN ID 65 &
+        REQUIRED
+FIELD REQTAXCODTPS OF ARREQUISITION &
+        LABEL "Code taxe F/P.:" &
+        DUPLICATE
+FIELD REQTAXCODTVQ OF ARREQUISITION &
+        DUPLICATE
+
+FIELD REQTERESCACH OF ARREQUISITION &
+        LABEL "Esc.: "               &
+        IF FOUCLE OF ARREQUISITION <> " "
+
+ALIGN (3,3,19) (,43,59)
+FIELD REQPRIUNI    OF ARREQUISITION &
+        HIDDEN ID 70
+
+FIELD REQMNTTPS    OF ARREQUISITION &
+        DISPLAY &
+        PICTURE "^^^,^^^,^^^.^^ " TRAIL "-" SIGNIF 5
+
+FIELD REQMNTNET    OF ARREQUISITION &
+        DISPLAY &
+        PICTURE "^^^,^^^,^^^.^^ " TRAIL "-" SIGNIF 5
+
+FIELD REQMNTTVQ    OF ARREQUISITION &
+        DISPLAY &
+        PICTURE "^^^,^^^,^^^.^^ " TRAIL "-" SIGNIF 5
+
+ALIGN (,43,59)
+FIELD REQMNTESC    OF ARREQUISITION &
+        DISPLAY &
+        PICTURE "^^^,^^^,^^^.^^ " TRAIL "-" SIGNIF 5
+
+ALIGN (,3,19) (,43,59) (,,75)
+FIELD DEVTAU       OF ARREQUISITION &
+        DISPLAY
+
+FIELD REQMNTTOT    OF ARREQUISITION &
+@IF FRANCAIS
+        LABEL "Total.:" &
+@ELSE
+        LABEL "%%%al.:" &
+@ENDIF
+        DISPLAY &
+        PICTURE "^^^,^^^,^^^.^^ " TRAIL "-" SIGNIF 5
+
+FIELD D_DEVCLE &
+        DISPLAY
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+
+  ;
+  ; Si l'écran n'est pas appelé par le menu, alors on interdit la saisie,
+  ; la destruction et la modification des données.
+  ;
+  IF T_REQCLEFND <> ""
+  THEN BEGIN
+    LET TZ_SECENT = "0"
+    LET TZ_SECMOD = "0"
+    LET TZ_SECDEL = "0"
+  END
+
+END
+;-------------------------------------------------------------------------------
+;
+; Calcul du remboursement de TPS.
+;
+PROCEDURE INTERNAL CALCUL_CTI
+BEGIN
+  LET REQMNTCTI OF ARREQUISITION = 0
+  ;
+  ; Calcul du remboursement fédéral.
+  ;
+  LET REQMNTCTI OF ARREQUISITION = &
+                ROUND( REQMNTTPS OF ARREQUISITION * TAXPCTCTI OF A_TAX_TPS )
+END
+;-------------------------------------------------------------------------------
+;
+; Calcul du remboursement de TVQ.
+;
+PROCEDURE INTERNAL CALCUL_RTI
+BEGIN
+  LET REQMNTRTI OF ARREQUISITION = 0
+  ;
+  ; Calcul du remboursement provincial.
+  ;
+  LET REQMNTRTI OF ARREQUISITION = &
+                ROUND( REQMNTTVQ OF ARREQUISITION * TAXPCTCTI OF A_TAX_TVP )
+END
+;-------------------------------------------------------------------------------
+;
+; Calcul des taxes (provinciale et fédérale)
+;
+PROCEDURE INTERNAL CALCUL_TAXES
+BEGIN
+  LET REQMNTTPS OF ARREQUISITION = 0
+  LET REQMNTTVQ OF ARREQUISITION = 0
+  ;
+  ; On prend le montant brut de la ligne de soumission pour le calcul des taxes.
+  ;
+  LET TZ_MNTTXB = REQMNTTOT OF ARREQUISITION
+  ;
+  ; Use standard pour le calcul des taxes
+  ;
+  USE ustaxcal NOLIST
+
+  LET REQMNTTPS OF ARREQUISITION = TZ_MNTTPS
+  LET REQMNTTVQ OF ARREQUISITION = TZ_MNTTVP
+
+  ;
+  ; Si le mode de taxation est "EN SUS", il faut mettre à jour le cumulatif brut
+  ; de la soumission.
+  ;
+  IF TAXMOD OF A_TAX_TPS = "S"
+  THEN BEGIN
+    LET REQMNTTOT OF ARREQUISITION = REQMNTTOT OF ARREQUISITION + &
+        ROUND( REQMNTTPS OF ARREQUISITION * DEVTAU OF MCDEVISE )
+
+  END
+  ;
+  IF TAXMOD OF A_TAX_TVP = "S"
+  THEN BEGIN
+     LET REQMNTTOT OF ARREQUISITION = REQMNTTOT OF ARREQUISITION + &
+         ROUND( REQMNTTVQ OF ARREQUISITION * DEVTAU OF MCDEVISE )
+  END
+  ;
+  ; Calcul des montants de taxe remboursables (CTI & RTI)
+  ;
+  DO INTERNAL CALCUL_CTI
+  DO INTERNAL CALCUL_RTI
+  ;
+  ; Montant net de la ligne de soumission
+  ;
+  LET REQMNTNET OF ARREQUISITION = REQMNTTOT OF ARREQUISITION - &
+                                  REQMNTTPS OF ARREQUISITION - &
+                                  REQMNTTVQ OF ARREQUISITION
+END
+;-------------------------------------------------------------------------------
+;
+; Calcul de l'escompte si le terme du fournisseur est spécifié.
+;
+PROCEDURE INTERNAL CALCUL_ESCOMPTE
+BEGIN
+  LET REQMNTESC OF ARREQUISITION = 0
+  ;
+  ; On calcule le montant d'escompte en utilisant le pourcentage d'escompte
+  ; du terme.
+  ;
+  IF REQTERESCACH OF ARREQUISITION <> ""
+  THEN BEGIN
+    LET REQMNTESC OF ARREQUISITION = ROUND(REQMNTNET OF ARREQUISITION * &
+                                            TERPCT    OF VTER_DSC )
+
+    LET REQMNTTOT OF ARREQUISITION = REQMNTTOT OF ARREQUISITION - &
+                                    REQMNTESC OF ARREQUISITION
+
+    IF TAXMOD OF A_TAX_TPS = "S"
+    THEN LET REQMNTTOT OF ARREQUISITION = REQMNTTOT OF ARREQUISITION - &
+                                         REQMNTTPS OF ARREQUISITION
+
+    IF TAXMOD OF A_TAX_TVP = "S"
+    THEN LET REQMNTTOT OF ARREQUISITION = REQMNTTOT OF ARREQUISITION - &
+                                         REQMNTTVQ OF ARREQUISITION
+    ;
+    ; On recalcule les taxes pour tenir compte de l'escompte.
+    ;
+    IF 0 <> REQMNTESC OF ARREQUISITION
+    THEN BEGIN
+      DO INTERNAL CALCUL_TAXES
+    END
+  END
+END
+;-------------------------------------------------------------------------------
+;
+; Calcul des montants.
+;
+PROCEDURE INTERNAL CALCUL_MONTANT
+BEGIN
+  ;
+  ; Calcul du montant brut du produit
+  ;
+  LET REQMNTTOT OF ARREQUISITION = &
+    ROUND ( REQQTEREQ OF ARREQUISITION * &
+            REQPRIUNI OF ARREQUISITION /100000 )
+
+  ;
+  ; Cette procédure calcule les montants de taxe ainsi que les montants de
+  ; CTI et RTI.
+  ;
+  DO INTERNAL CALCUL_TAXES
+  ;
+  ; On calcule l'escompte.
+  ;
+  DO INTERNAL CALCUL_ESCOMPTE
+  ;
+  ; On affiche les variables modifiées par les calculs.
+  ;
+  DISPLAY REQMNTNET OF ARREQUISITION
+  DISPLAY REQMNTTPS OF ARREQUISITION
+  DISPLAY REQMNTTVQ OF ARREQUISITION
+  DISPLAY REQMNTTOT OF ARREQUISITION
+  DISPLAY REQMNTESC OF ARREQUISITION
+  DISPLAY D_DEVCLE
+  LET DEVTAU OF ARREQUISITION = DEVTAU OF MCDEVISE
+  DISPLAY DEVTAU    OF ARREQUISITION
+END
+
+;-------------------------------------------------------------------------------
+;
+; Dépisteur de l'entrepot.
+;
+PROCEDURE INPUT ENTCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_ENTCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN ar100 MODE F PASSING T_CIECLEMNU, &
+                                    T_ENTCLE
+    LET FIELDTEXT = TRUNCATE(T_ENTCLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour le code bilingue statut de la réquisition.
+;
+PROCEDURE INPUT REQSTUAPP
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_REQSTUAPP = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_REQSTUAPP, &
+                                    T_REQSTUAPP
+    LET FIELDTEXT = TRUNCATE(T_REQSTUAPP)
+  END
+END
+;-------------------------------------------------------------------------------
+;
+; Validation de ne pas saisir le statut 'P' ou le 'S'.
+;
+PROCEDURE EDIT REQSTUAPP
+BEGIN
+  IF     "P" = FIELDTEXT &
+     AND "R" = OLDVALUE(REQSTUAPP OF ARREQUISITION)
+  THEN NULL
+  ELSE BEGIN
+    IF     "R" = FIELDTEXT &
+       AND "P" <> OLDVALUE(REQSTUAPP OF ARREQUISITION)
+    THEN ERROR 1427 ; Ce statut n'est pas disponible à la saisie.
+    ELSE BEGIN
+      IF   ("P" = REQSTUAPP OF ARREQUISITION   OR &
+            "C" = REQSTUAPP OF ARREQUISITION   OR &
+            "S" = REQSTUAPP OF ARREQUISITION)  OR &
+           ("A" = REQSTUAPP OF ARREQUISITION  AND &
+            "P" <> OLDVALUE(REQSTUAPP OF ARREQUISITION))
+      THEN ERROR 1427 ; Ce statut n'est pas disponible à la saisie.
+    END
+  END
+  IF (FOUCLE       OF ARREQUISITION = " " OR &
+      REQPRIUNI    OF ARREQUISITION = 0   OR &
+      ADECLE       OF ARREQUISITION = " " OR &
+      CPTCLE       OF ARREQUISITION = " " OR &
+      UNACLE       OF ARREQUISITION = " " OR &
+ ;    PRJCLE       OF ARREQUISITION = " " OR &
+ ;    PRACLE       OF ARREQUISITION = " " OR &
+      REQTRP       OF ARREQUISITION = " " OR &
+      REQFAB       OF ARREQUISITION = " " OR &
+ ;    IMMCLE       OF ARREQUISITION = " " OR &
+      REQTAXCODTPS OF ARREQUISITION = " " OR &
+      REQTAXCODTVQ OF ARREQUISITION = " " ) AND &
+      FIELDTEXT = "A"
+  THEN ERROR 1496 ;Approbation impossible; Réquisition incomplète.
+
+END
+
+;
+; Uniquement si le statut est à "P" ont peux approuver.
+;
+PROCEDURE PROCESS REQSTUAPP
+BEGIN
+  IF "A" = REQSTUAPP OF ARREQUISITION
+  THEN BEGIN
+    LET REQDATAPP OF ARREQUISITION = SYSDATE
+    DISPLAY REQDATAPP OF ARREQUISITION
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Pour afficher le statut 'P' lors de la saisie initialie.
+;
+PROCEDURE PROCESS ENTCLE
+BEGIN
+  DISPLAY REQSTUAPP OF ARREQUISITION
+  DISPLAY CBIDSC    OF A_CBI_REQSTUAPP
+END
+
+;-------------------------------------------------------------------------------
+;
+; Pour le choix du fournisseur
+;
+PROCEDURE INPUT FOUCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    IF "1" = REQFLGSOU OF ARREQUISITION
+    THEN BEGIN
+      LET T_SELFOU = "1"
+      RUN SCREEN ar006h MODE SAME PASSING   T_CIECLEMNU  , &
+                                            T_CIENOM     , &
+                                            T_PECCLEMNU  , &
+                                            T_SELFOU  , &
+                                            ARREQUISITION
+      LET FIELDTEXT = FOUCLE OF ARREQUISITION
+    END
+    ELSE BEGIN
+      LET T_FOUCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+      RUN SCREEN cp104 MODE F PASSING T_FOUCIECLE, &
+                                      T_FOUCLE, &
+                                      T_CIECLEMNU
+      LET FIELDTEXT = TRUNCATE(T_FOUCLE)
+    END
+  END
+END
+;-------------------------------------------------------------------------------
+;
+; Le fournisseur doit être Actif.
+;
+PROCEDURE EDIT FOUCLE
+BEGIN
+  IF 0 <> SIZE(TRUNCATE(T_CMDCLEECR))
+  THEN ERROR 1429 ; Impossible de modifier le # avec un # de commande,
+
+  IF 0 <> SIZE(TRUNCATE(FOUCLE OF ARREQUISITION))
+  THEN BEGIN
+    GET VFOC_FOU VIA    FOUCIECLE, &
+                        FOUCLE,    &
+                        FOCCIECLE  &
+                USING   FOUCIECLE OF ARREQUISITION, &
+                        FOUCLE    OF ARREQUISITION, &
+                        CIECLE    OF ARREQUISITION  OPTIONAL
+    IF ACCESSOK
+    THEN BEGIN
+      IF "D" <> FOUTYP OF VFOC_FOU
+      THEN LET RADCLE OF ARREQUISITION = FOCADRACH OF VFOC_FOU
+    END
+    ELSE ERROR 1347 ;Ce fournisseur n'existe pas.
+
+    IF FOUSTU OF VFOC_FOU = "I"
+    THEN ERROR 1391 ; Le fournisseur est inactif.
+
+    IF FOURTU OF VFOC_FOU = "1"
+    THEN WARNING 1392 ; Le fournisseur est présentement retenu.
+    ;
+    ;
+    GET MCDEVISE VIA    DEVCLE &
+                 USING  DEVCLE OF VFOC_FOU OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 1425 ; La devise du fournisseur n'existe pas.
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE PROCESS FOUCLE
+BEGIN
+  DISPLAY REQPRIUNI OF ARREQUISITION
+  DISPLAY REQFLGSOU OF ARREQUISITION
+  GET MCREF_ADRESSE &
+        VIA     REFCIECLE, &
+                REFCLETYP, &
+                REFCLENUM, &
+                RADCLE     &
+        USING   FOUCIECLE OF ARREQUISITION, &
+                REFCLETYP OF ARREQUISITION, &
+                FOUCLE    OF ARREQUISITION, &
+                RADCLE    OF ARREQUISITION  OPTIONAL
+  DISPLAY RADNOM    OF MCREF_ADRESSE
+  IF T_SELFOU = "1"
+  THEN BEGIN
+    IF 0 <> SIZE(TRUNCATE(FOCTAXCODTPS OF VFOC_FOU))
+    THEN LET REQTAXCODTPS OF ARREQUISITION = FOCTAXCODTPS OF VFOC_FOU
+
+    IF 0 <> SIZE(TRUNCATE(FOCTAXCODTVQ OF VFOC_FOU))
+    THEN LET REQTAXCODTVQ OF ARREQUISITION = FOCTAXCODTVQ OF VFOC_FOU
+
+    DISPLAY REQTAXCODTPS
+    DISPLAY REQTAXCODTVQ
+    EDIT REQPRIUNI
+    EDIT REQTAXCODTPS
+    EDIT REQTAXCODTVQ
+  END
+END
+
+;------------------------------------------------------------------------------
+;
+; Valide le numéro d'adresse
+;
+PROCEDURE EDIT T_VALRADSIL
+BEGIN
+  IF 0 = SIZE(TRUNCATE(FOUCLE OF ARREQUISITION))
+  THEN BEGIN
+    GET MCDEVISE VIA    DEVCLE &
+                 USING  DEVCLE OF MCHOLDING
+  END
+  ELSE BEGIN
+    GET MCREF_ADRESSE &
+        VIA     REFCIECLE, &
+                REFCLETYP, &
+                REFCLENUM, &
+                RADCLE     &
+        USING   FOUCIECLE OF ARREQUISITION, &
+                REFCLETYP OF ARREQUISITION, &
+                FOUCLE    OF ARREQUISITION, &
+                RADCLE    OF ARREQUISITION  OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 1363 ; Cette adresse n'existe pas pour ce fournisseur.
+  END
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+PROCEDURE INPUT REQNOMREQ
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_USRCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gs104 MODE F PASSING T_USRCLE
+    LET FIELDTEXT = T_USRCLE
+  END
+
+  IF 0<>SIZE(TRUNC(FIELDTEXT)) OR (0=SIZE(TRUNC(FIELDTEXT)) AND REQNOMREQ = ' ')
+  THEN BEGIN
+    GET GSUSAGER VIA USRCLE USING FIELDTEXT OPTIONAL
+    IF ACCESSOK
+    THEN LET FIELDTEXT = TRUNCATE(USREMPNOM OF GSUSAGER)
+    ELSE ERROR 193 ; MC093 Cet usage n'existe pas.
+  END
+  ELSE LET FIELDTEXT = ''
+END
+
+;-------------------------------------------------------------------------------
+;
+; Pour la transformation du flag de soumission en 1 et 0
+;
+PROCEDURE INPUT REQFLGSOU
+BEGIN
+  USE usflginp NOLIST
+END
+;-------------------------------------------------------------------------------
+;
+; Pour afficher le falg sous la forme Oui ou Non
+;
+PROCEDURE OUTPUT REQFLGSOU
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour l'adresse d'expédition.
+;
+PROCEDURE INPUT ADECLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_ADECLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN ar119 MODE F PASSING T_ADECLE
+    LET FIELDTEXT = TRUNCATE(T_ADECLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour le numéro de réservation.
+;
+PROCEDURE INPUT T_CMDCLEECR
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_ENTCLE = ENTCLE OF ARREQUISITION
+    LET T_FOUCLE = FOUCLE OF ARREQUISITION
+    RUN SCREEN ar112 MODE F PASSING &
+        T_CIECLEMNU, T_ENTCLE, T_FOUCIECLE, T_FOUCLE, T_CMDCLE, T_FLGCMD
+    LET FIELDTEXT = TRUNCATE(T_CMDCLE)
+  END
+  ELSE BEGIN
+    USE usinpcmd NOLIST
+  END
+END
+;------------------------------------------------------------------------------
+;
+; Vérification de la réservtion du numéro.
+;
+PROCEDURE EDIT T_CMDCLEECR
+BEGIN
+  GET ARRESERVATION &
+    VIA   CIECLE, &
+          CMDCLE  &
+    USING CIECLE OF ARREQUISITION,  &
+          T_CMDCLEECR &
+    OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    IF FOUCLE OF ARREQUISITION <> FOUCLE OF ARRESERVATION
+    THEN ERROR 1481 ; Ce numéro n'est pas réservé pour ce fournisseur.
+  END
+  ELSE ERROR 1479 ; Ce numéro de commande n'est pas réservé
+END
+
+
+;------------------------------------------------------------------------------
+;
+PROCEDURE INPUT REQCLENUM
+BEGIN
+  IF 0=SIZE(TRUNCATE(FIELDTEXT)) AND NOT FINDMODE
+  THEN LET FIELDTEXT = ASCII(REQCLENUM,6)[1:3] + '.' + ASCII(REQCLENUM,6)[4:3]
+END
+
+
+;------------------------------------------------------------------------------
+;
+PROCEDURE EDIT REQCLENUM
+BEGIN
+  GET A_ARREQUISITION VIA CIECLE                  , &
+                          REQCLE                    &
+                    USING CIECLE OF ARREQUISITION , &
+                          REQCLE OF ARREQUISITION   &
+                  ORDERBY REQCLENUM DESCENDING      &
+                  OPTIONAL
+
+  LET T_ITEM_COMPT = REQCLENUM OF A_ARREQUISITION / 1000
+
+  IF FIELDVALUE = 0
+  THEN BEGIN
+    LET FIELDVALUE   = (T_ITEM_COMPT + 1) * 1000
+    LET T_ITEM_COMPT =  T_ITEM_COMPT + 1
+  END
+  ELSE BEGIN
+    IF T_ITEM_COMPT < FLOOR(FIELDVALUE/1000)
+    THEN LET T_ITEM_COMPT = FLOOR(FIELDVALUE/1000)
+  END
+END
+
+
+
+;------------------------------------------------------------------------------
+;
+; Cette procédure permet de faire un écran dépisteur pour les produits
+; de l'entrepôt.
+;
+PROCEDURE INPUT PRDCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_ENTCLE = ENTCLE OF ARREQUISITION
+    LET T_PRDCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN ar103 MODE F PASSING T_CIECLEMNU, T_ENTCLE, T_PRDCLE
+    LET FIELDTEXT = TRUNCATE(T_PRDCLE)
+   END
+   ELSE BEGIN
+      USE usinpprd NOLIST
+   END
+
+
+END
+;-------------------------------------------------------------------------------
+;
+; Cette procédure permet de valider que le statut du produit est actif
+;
+PROCEDURE EDIT PRDCLE
+BEGIN
+  IF PRDSTU OF VPRE_PRD = "I"
+  THEN ERROR 1374 ; Ce produit est inactif.
+END
+;-------------------------------------------------------------------------------
+;
+; Cette procédure permet d'affecter la première ligne de description du produit
+; sur la ligne de commande si le type de produit n'est pas divers. Elle permet
+; aussi de prendre le prix unitaire par défaut de l'entrepôt.
+;
+PROCEDURE PROCESS PRDCLE
+BEGIN
+  ;
+  ; On prend le dernier coûtant chez le fournisseur s'il est différent de
+  ; zéro sinon on prend celui de l'entrepôt. Dans le cas, où il est à zéro
+  ; il sera alors saisi plus tard.
+  ;
+  IF PDFDERCOU OF ARPRD_FOU <> 0
+  THEN LET REQPRIUNI OF ARREQUISITION = PDFDERCOU OF ARPRD_FOU
+  ELSE LET REQPRIUNI OF ARREQUISITION = PREDERCOU OF VPRE_PRD
+
+  DISPLAY REQPRIUNI OF ARREQUISITION
+
+  DO INTERNAL CALCUL_MONTANT
+END
+
+;-------------------------------------------------------------------------------
+;
+; Cette procédure permet de valider la quantité requis du produit lorsqu'une
+; gestion des maximums s'applique.
+;
+PROCEDURE EDIT REQQTEREQ
+BEGIN
+  IF FIELDVALUE <= 0
+  THEN ERROR 1499
+
+  USE usvalmul NOLIST ; Pour valider la quantité s'il y a une restriction de
+                      ; format.
+  IF    PREFLGGESMAX OF VPRE_PRD = "1"  &
+    AND D_PRDQTETOT > PREQTEMAX OF VPRE_PRD
+  THEN WARNING 1375 ; La quantité commandée dépasse le maximum permis dans
+                    ; l'entrepôt.
+END
+;-------------------------------------------------------------------------------
+;
+; Cette procédure permet de faire l'appel du calcul des montants.
+;
+PROCEDURE PROCESS REQQTEREQ
+BEGIN
+  DO INTERNAL CALCUL_MONTANT
+END
+;-------------------------------------------------------------------------------
+;
+; Sous-écran de consultation des codes de taxe.
+;
+PROCEDURE INPUT REQTAXCODTPS
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TAXCLETYP = REQTAXTYPTPS OF ARREQUISITION
+    LET T_TAXCLECOD = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_TAXMODPAT = "@"
+    RUN SCREEN mc111 MODE F PASSING T_TAXCLETYP, &
+                                    T_TAXCLECOD, &
+                                    T_TAXMODPAT &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_TAXCLECOD)
+  END
+  ;
+  ; Par défaut on utilise le code de taxe de TPS du fournisseur.
+  ;
+  IF     0 =  SIZE( FIELDTEXT ) &
+     AND NEWRECORD OF ARREQUISITION &
+     AND 0 =  SIZE(TRUNCATE(REQTAXCODTPS OF ARREQUISITION)) &
+     AND 0 <> SIZE(TRUNCATE(FOCTAXCODTPS OF VFOC_FOU))
+  THEN LET FIELDTEXT = FOCTAXCODTPS OF VFOC_FOU
+
+END
+;-------------------------------------------------------------------------------
+;
+; Validation du code de taxe fédéral.
+;
+PROCEDURE EDIT REQTAXCODTPS
+BEGIN
+  IF 0 <> SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    GET A_TAX_TPS OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 1376 ; Ce code de taxe n'existe pas.
+    ;
+    ; Initialise le flag à Oui dans la procédure EDIT. Car si l'usager saisi
+    ; une valeur la procédure EDIT est exécutée.
+    ;
+    LET T_FLGMOD = "1"
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE PROCESS REQTAXCODTPS
+BEGIN
+  EDIT REQTAXCODTVQ OF ARREQUISITION
+END
+
+;-------------------------------------------------------------------------------
+;
+; Sous-écran de consultation des codes de taxe.
+;
+PROCEDURE INPUT REQTAXCODTVQ
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TAXCLETYP = REQTAXTYPTVQ OF ARREQUISITION
+    LET T_TAXCLECOD = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_TAXMODPAT = "@"
+    RUN SCREEN mc111 MODE F PASSING T_TAXCLETYP, &
+                                    T_TAXCLECOD, &
+                                    T_TAXMODPAT &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_TAXCLECOD)
+  END
+  ;
+  ; Par défaut on utilise le code de taxe de TVQ du fournisseur.
+  ;
+  IF     0 =  SIZE( FIELDTEXT ) &
+     AND NEWRECORD OF ARREQUISITION &
+     AND 0 =  SIZE(TRUNCATE(REQTAXCODTVQ OF ARREQUISITION)) &
+     AND 0 <> SIZE(TRUNCATE(FOCTAXCODTVQ OF VFOC_FOU))
+  THEN LET FIELDTEXT = FOCTAXCODTVQ OF VFOC_FOU
+  ;
+  ; Force l'éxécution de la procédure edit, car il y a une relation entre
+  ; deux champs(taxe).
+  ;
+  IF    NOT FINDMODE  &
+    AND 0 = SIZE(FIELDTEXT) &
+    AND T_FLGMOD = "1"
+  THEN LET FIELDTEXT = REQTAXCODTVQ OF ARREQUISITION
+
+END
+;-------------------------------------------------------------------------------
+;
+; Validation du code de taxe provincial
+;
+PROCEDURE EDIT REQTAXCODTVQ
+BEGIN
+  IF 0 <> SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    GET A_TAX_TVP OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 1376 ; Ce code de taxe n'existe pas.
+
+    IF    TAXMOD    OF A_TAX_TVP = "I" &
+      AND TAXFLGNET OF A_TAX_TVP = "2" &
+      AND TAXMOD    OF A_TAX_TPS = "S"
+    THEN ERROR 1379 ; Codes de taxe TVQ inclus et TPS en sus sont incompatibles.
+  END
+END
+;-------------------------------------------------------------------------------
+;
+; Cette procédure permet de faire l'appel de la procédure de calcul des montants.
+;
+PROCEDURE PROCESS REQTAXCODTVQ
+BEGIN
+  DO INTERNAL CALCUL_MONTANT
+END
+;-------------------------------------------------------------------------------
+;
+; Consultation des termes d'escompte d'achat.
+;
+PROCEDURE INPUT REQTERESCACH
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TERCAT = "ESC"
+    LET T_TERCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cp102 MODE F PASSING T_TERCLE, T_TERCAT &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_TERCLE)
+  END
+  ;
+  ; Par défaut on utilise le code de terme escompte d'achat du fournisseur.
+  ;
+  IF     0 =  SIZE( FIELDTEXT ) &
+     AND NEWRECORD OF ARREQUISITION &
+     AND 0 =  SIZE(TRUNCATE(REQTERESCACH OF ARREQUISITION)) &
+     AND 0 <> SIZE(TRUNCATE(FOCTERESCACH OF VFOC_FOU))
+  THEN LET FIELDTEXT = FOCTERESCACH OF VFOC_FOU
+END
+;-------------------------------------------------------------------------------
+;
+; Cette procédure permet de valider que le terme saisi est de type ESC
+; (escompte)
+;
+PROCEDURE EDIT REQTERESCACH
+BEGIN
+  IF 0 <> SIZE (TRUNCATE(FIELDTEXT) )
+  THEN BEGIN
+    GET VTER_DSC  OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 1377 ; Ce terme d'escompte d'achat n'existe pas.
+
+    ELSE BEGIN
+      IF TERCAT OF VTER_DSC <> "ESC"
+      THEN ERROR 1378 ; Ce terme n'est pas de type escompte.
+    END
+  END
+END
+;-------------------------------------------------------------------------------
+;
+; Cette procédure permet de faire l'appel de la procédure de calcul des montants.
+;
+PROCEDURE PROCESS REQTERESCACH
+BEGIN
+  DO INTERNAL CALCUL_MONTANT
+END
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le dépisteur du numéro de compte.
+;
+PROCEDURE INPUT CPTCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_PECCLE    = T_PECCLEMNU
+    LET T_CPTTYPPAT = "@"
+    LET T_CPTCATPAT = "@"
+    RUN SCREEN mc103 MODE F PASSING T_CPTCLE   , &
+                                    T_CPTTYPPAT, &
+                                    T_CPTCATPAT, &
+                                    T_PECCLE     &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_CPTCLE)
+  END
+  ;
+  ; Par défaut on utilise le compte d'inventaire du produit.
+  ;
+  IF     0 =  SIZE( FIELDTEXT ) &
+     AND 0 =  SIZE(TRUNCATE(CPTCLE OF ARREQUISITION)) &
+     AND 0 <> SIZE(TRUNCATE(PRDCPTINV OF VPRE_PRD))
+  THEN LET FIELDTEXT = PRDCPTINV OF VPRE_PRD
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation si le compte est actif.
+;
+;
+PROCEDURE EDIT CPTCLE
+BEGIN
+  ;
+  ; Note: La période de fin, est la première période d'inactivité.
+  ;
+
+  ; Ajustement pour le changement de siècle
+  IF PECCLE OF ARREQUISITION[1:1] < "8"
+  THEN LET T_PECCLE_AR = "1" + PECCLE OF ARREQUISITION
+  ELSE LET T_PECCLE_AR = "0" + PECCLE OF ARREQUISITION
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBI OF VCPT_DSC[1:1] < "8"
+  THEN LET T_CPTPECDEBI_VCPT = "1" + CPTPECDEBI OF VCPT_DSC
+  ELSE LET T_CPTPECDEBI_VCPT = "0" + CPTPECDEBI OF VCPT_DSC
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBA OF VCPT_DSC[1:1] < "8"
+  THEN LET T_CPTPECDEBA_VCPT = "1" + CPTPECDEBA OF VCPT_DSC
+  ELSE LET T_CPTPECDEBA_VCPT = "0" + CPTPECDEBA OF VCPT_DSC
+
+  IF T_PECCLE_AR >= T_CPTPECDEBA_VCPT AND &
+     ( &
+       T_PECCLE_AR < T_CPTPECDEBI_VCPT OR &
+       CPTPECDEBI OF VCPT_DSC = "" &
+     )
+  THEN NULL
+  ELSE ERROR 1380 ; Ce compte est inactif.
+
+  IF CPTTYP OF VCPT_DSC <> "R"
+  THEN ERROR 1381 ; On ne peut pas utiliser ce compte dans une commande.
+
+  IF     DEVCLE OF VCPT_DSC <> DEVCLE OF VFOC_FOU  &
+     AND DEVCLE OF VCPT_DSC <> DEVCLE OF MCHOLDING
+  THEN ERROR 1382 ; On ne peut pas utiliser ce compte à cause de la devise.
+END
+
+PROCEDURE PROCESS CPTCLE
+BEGIN
+  IF NACCLE OF MCNATURE_CTB <> 4 AND &
+     NACCLE OF MCNATURE_CTB <> 5
+  THEN BEGIN
+    LET PRJCLE OF ARREQUISITION = ""
+    LET PRACLE OF ARREQUISITION = ""
+    DISPLAY PRJCLE  OF ARREQUISITION
+    DISPLAY PRJDSC1 OF GPPROJETS
+    DISPLAY PRACLE  OF ARREQUISITION
+    DISPLAY PRADSC1 OF GPPRO_ACTIVITE
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Dépisteur de l'unité administrative et obligation du lookup.
+;
+PROCEDURE INPUT UNACLE
+BEGIN
+  ;
+  ; Popup sur les unités administratives.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE = CPTCLE OF ARREQUISITION
+    LET T_PECCLE = T_PECCLEMNU
+    LET T_UNACLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    ;
+    ; Il y a trois popup possible:
+    ;  1) sur les unités administrative par compagnie(MCUNITE_ADM).
+    ;  2) sur les unités administrative d'une charte de compte(MCCHARTE_UNA).
+    ;  3) sur les unités administrative qui ne sont pas définis dans la charte
+    ;     de compte(MCUNITE_ADM, MCCHARTE_UNA).
+    ;
+    IF HLDCHTCPT OF MCHOLDING = "0"
+    THEN RUN SCREEN mc104 MODE F PASSING T_CIECLEMNU, T_UNACLE
+    ELSE BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN RUN SCREEN mc115 MODE F PASSING T_CIECLEMNU, T_CPTCLE, T_UNACLE, &
+                                           T_PECCLE
+      ELSE RUN SCREEN mc116 MODE F PASSING T_CIECLEMNU, T_CPTCLE, T_UNACLE, &
+                                           T_PECCLE
+    END
+    LET FIELDTEXT = TRUNCATE(T_UNACLE)
+  END
+
+  ;
+  ; Force le lookup de l'unité pour la charte.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(UNACLE OF ARREQUISITION))
+  THEN LET FIELDTEXT = UNACLE OF ARREQUISITION
+
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 = SIZE(TRUNCATE(UNACLE OF ARREQUISITION))
+  THEN LET FIELDTEXT = PRDUNAINV OF VPRE_PRD
+
+END
+;-------------------------------------------------------------------------------
+;
+;
+; Validation si l'unité administrative est active.
+;
+;
+PROCEDURE EDIT UNACLE
+BEGIN
+  IF HLDCHTCPT OF MCHOLDING = "1"
+  THEN BEGIN
+    GET MCCHARTE_UNA OPTIONAL
+    ;
+    ; Si la charte est incluse, le lien est obligatoire.
+    ;
+    IF NOT ACCESSOK
+    THEN BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN ERROR 1314 ; La combinaison compte/unité administrative n'existe pas.
+    END
+    ELSE BEGIN
+      ;
+      ; Si la charte est Exclusive et que la période fait partie de
+      ; l'intervalle de périodes de la charte alors c'est une erreur.
+      ;
+      ; Si la charte est inclusive et que la période ne fait pas partie de
+      ; l'intervalle de périodes de la charte alors c'est une erreur.
+      ;
+      ; Ajustement pour le changement de siècle
+      IF PECCLE OF ARREQUISITION[1:1] < "8"
+      THEN LET T_PECCLE_ARREQ = "1" + PECCLE OF ARREQUISITION
+      ELSE LET T_PECCLE_ARREQ = "0" + PECCLE OF ARREQUISITION
+
+      ; Ajustement pour le changement de siècle
+      IF CCUPECDEBA OF MCCHARTE_UNA[1:1] < "8"
+      THEN LET T_CCUPECDEBA_MCCHARTE = "1" + CCUPECDEBA OF MCCHARTE_UNA
+      ELSE LET T_CCUPECDEBA_MCCHARTE = "0" + CCUPECDEBA OF MCCHARTE_UNA
+
+      ; Ajustement pour le changement de siècle
+      IF CCUPECDEBI OF MCCHARTE_UNA[1:1] < "8"
+      THEN LET T_CCUPECDEBI_MCCHARTE = "1" + CCUPECDEBI OF MCCHARTE_UNA
+      ELSE LET T_CCUPECDEBI_MCCHARTE = "0" + CCUPECDEBI OF MCCHARTE_UNA
+
+      IF ( &
+           T_PECCLE_ARREQ >= T_CCUPECDEBA_MCCHARTE AND &
+           ( &
+             T_PECCLE_ARREQ < T_CCUPECDEBI_MCCHARTE OR &
+             CCUPECDEBI OF MCCHARTE_UNA = " " &
+           ) &
+         )
+      THEN BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "E"
+        THEN ERROR 1384 ; La combinaison compte/unité administrative est inactive.
+      END
+      ELSE BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "I"
+        THEN ERROR 1384 ; La combinaison compte/unité administrative est inactive.
+      END
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Popup sur les projets.
+;
+PROCEDURE INPUT PRJCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PRJSTUPAT = "A"
+    LET T_PRJCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gp104 MODE F PASSING T_CIECLEMNU, &
+                                    T_PRJCLE   , &
+                                    T_PRJSTUPAT  &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_PRJCLE)
+  END
+
+  ;
+  ; Pour forcer la procédure EDIT
+  ;
+  IF     NOT FINDMODE &
+     AND 0  = SIZE (TRUNCATE(FIELDTEXT)) &
+     AND "" <> TRUNCATE(PRJCLE OF ARREQUISITION)
+  THEN LET FIELDTEXT = PRJCLE OF ARREQUISITION
+
+  IF (HLDNTNPRO OF MCHOLDING    = "1" AND &
+      NACCLE    OF MCNATURE_CTB = 4   AND &
+      FIELDTEXT                 = "" ) OR &
+     (HLDNTNPRO OF MCHOLDING    = "1" AND &
+      NACCLE    OF MCNATURE_CTB = 5   AND &
+      FIELDTEXT                 = "" )
+  THEN ERROR 889
+
+END
+
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation du projet, le projet est optionnel dans la ligne de commande.
+;
+PROCEDURE EDIT PRJCLE
+BEGIN
+  IF FIELDTEXT <> " "
+  THEN BEGIN
+    GET GPPROJETS  OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 1385 ; Ce projet n'existe pas.
+
+    IF PRJSTU OF GPPROJETS <> "A"
+    THEN ERROR 1386 ; Ce projet n'est pas actif.
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Si le projet est absent, l'activité doit être à blanc.
+;
+;
+PROCEDURE PROCESS PRJCLE
+BEGIN
+  IF 0 = SIZE(TRUNCATE(PRJCLE OF ARREQUISITION))
+  THEN BEGIN
+    LET PRACLE OF ARREQUISITION = " "
+    DISPLAY PRACLE OF ARREQUISITION
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Dépisteur pour l'activité.
+;
+PROCEDURE INPUT PRACLE
+BEGIN
+  IF PRJCLE OF ARREQUISITION = ""
+  THEN ERROR 889
+  ;
+  ; Popup sur les activités.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PRJCLE    = PRJCLE OF ARREQUISITION
+    LET T_PRASTUPAT = "A"
+    LET T_PRACLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gp108 MODE F PASSING T_CIECLEMNU, &
+                                    T_PRJCLE   , &
+                                    T_PRACLE   , &
+                                    T_PRASTUPAT WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_PRACLE)
+  END
+  ;
+  ; Force le lookup de l'activité car il est en liaison avec le projet
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(PRJCLE OF ARREQUISITION))
+  THEN LET FIELDTEXT = PRACLE OF ARREQUISITION
+END
+;-------------------------------------------------------------------------------
+;
+; Validation de l'activité, l'activité est optionnelle dans la ligne de réquisition.
+;
+PROCEDURE EDIT PRACLE
+BEGIN
+  GET GPPRO_ACTIVITE  OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 1387 ; Cette activité n'existe pas.
+
+  IF "" <> TRUNCATE( PRJCLE OF ARREQUISITION )
+  THEN BEGIN
+    IF PRASTU OF GPPRO_ACTIVITE <> "A"
+    THEN ERROR 1388 ; Cette activité est inactive.
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour le code bilingue mode de transport.
+;
+;
+PROCEDURE INPUT REQTRP
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_REQTRP = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_REQTRP, T_REQTRP
+    LET FIELDTEXT = TRUNCATE(T_REQTRP)
+  END
+
+  ;
+  ; Par défaut on utilise le code de transport du fournisseur.
+  ;
+  IF     0 = SIZE( FIELDTEXT ) &
+     AND NEWRECORD OF ARREQUISITION &
+     AND REQTRP    OF ARREQUISITION = ""
+  THEN BEGIN
+     IF CMDTRP    OF VFOC_FOU <> ""
+     THEN LET FIELDTEXT = CMDTRP OF VFOC_FOU
+     ELSE LET FIELDTEXT = REQTRP OF ARREQUISITION
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Popup pour la catégorie d'équipement
+;
+PROCEDURE INPUT IMMCLE
+BEGIN
+  IF 0 <> SIZE(FIELDTEXT)            AND &
+    (CHANGEMODE OR CORRECTMODE)       AND &
+    (REQSTUAPP OF ARREQUISITION = "X"  OR &
+     REQSTUAPP OF ARREQUISITION = "A"  OR &
+     REQSTUAPP OF ARREQUISITION = "R"  OR &
+     REQSTUAPP OF ARREQUISITION = "C")
+  THEN BEGIN
+       LET FIELDTEXT = OLDVALUE(IMMCLE OF ARREQUISITION)
+       WARNING 1489 ;Cet élément ne peut être modifié dù au statut
+                    ;d'approbation de la réquisition.
+  END
+  ELSE BEGIN
+       IF 0 <> SIZE(FIELDTEXT)          AND &
+         (CHANGEMODE OR CORRECTMODE)     AND &
+         (REQSTUAPP OF ARREQUISITION <> "P" AND &
+          NOT ENTRYMODE)                 OR &
+         (REQSTUAPP OF ARREQUISITION <> "P" AND ENTRYMODE)
+       THEN BEGIN
+            LET FIELDTEXT = OLDVALUE(IMMCLE OF ARREQUISITION)
+            WARNING 1490 ;Cet élément ne peut être modifié; La
+                         ;réquisition doit être préliminaire.
+       END
+  END
+
+  ;***************************************************************
+
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_IMMCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN im102 MODE F &
+                     PASSING T_CIECLEMNU , &
+                             T_IMMCLE  WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE( T_IMMCLE )
+  END
+
+  IF     0 = SIZE(FIELDTEXT) &
+     AND 0 = SIZE(TRUNCATE(IMMCLE OF ARREQUISITION))
+  THEN BEGIN
+     IF 0 <> SIZE(TRUNCATE(PRAIMMCLE OF GPPRO_ACTIVITE))
+     THEN LET FIELDTEXT = PRAIMMCLE OF GPPRO_ACTIVITE
+     ELSE LET FIELDTEXT = IMMCLE OF ARREQUISITION
+  END
+
+  IF 0=SIZE(FIELDTEXT)
+  THEN LET FIELDTEXT = OLDVALUE(IMMCLE OF ARREQUISITION)
+
+  IF FIELDTEXT = " "
+  THEN LET FIELDTEXT = ""
+END
+
+
+PROCEDURE EDIT IMMCLE
+BEGIN
+   IF IMMTYP OF IMIMMOBILISATION <> "E" AND &
+      FIELDTEXT <> " "
+   THEN ERROR 1503
+END
+
+PROCEDURE PROCESS IMMCLE
+BEGIN
+  IF IMMCLE OF ARREQUISITION <> " "
+  THEN INFORMATION = IMMDSC OF IMIMMOBILISATION
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour le code bilingue code de terme de commerce
+;
+;
+PROCEDURE INPUT REQFAB
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_REQFAB = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_REQFAB, T_REQFAB
+    LET FIELDTEXT = TRUNCATE(T_REQFAB)
+  END
+  ;
+  ; Par défaut on utilise le code de transport du fournisseur.
+  ;
+  IF     0 = SIZE( FIELDTEXT ) &
+     AND NEWRECORD OF ARREQUISITION &
+     AND REQFAB    OF ARREQUISITION = ""
+  THEN BEGIN
+    IF CMDFAB    OF VFOC_FOU <> ""
+    THEN LET FIELDTEXT = CMDFAB OF VFOC_FOU
+    ELSE LET FIELDTEXT = REQFAB OF ARREQUISITION
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+PROCEDURE INPUT REQPRIUNI
+BEGIN
+  ;
+  ; Popup sur le dernier coûtant du produit.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PRDCLE    = PRDCLE OF ARREQUISITION
+    LET T_REQPRIUNI = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN ar104 MODE F PASSING T_CIECLEMNU, T_PRDCLE, T_REQPRIUNI &
+                       WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_REQPRIUNI)
+  END
+  ;
+  ; Par défaut on utilise le dernier coûtant du produit de l'entrepôt.
+  ;
+  IF     0 = SIZE( FIELDTEXT ) &
+     AND NEWRECORD OF ARREQUISITION &
+     AND REQPRIUNI OF ARREQUISITION = 0 &
+     AND PREDERCOU OF VPRE_PRD <> 0
+  THEN LET FIELDTEXT = ASCII(PREDERCOU OF VPRE_PRD,11)[1:7] + "." + &
+                       ASCII(PREDERCOU OF VPRE_PRD,11)[8:4]
+  ;
+  ; Force l'éxécution de la procédure EDIT si non présent sur le produit
+  ; entrepôt car ce champ est obligatoire.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT)
+  THEN LET FIELDTEXT = ASCII(REQPRIUNI OF ARREQUISITION,11)[1:7] + "." + &
+                       ASCII(REQPRIUNI OF ARREQUISITION,11)[8:4]
+END
+
+;-------------------------------------------------------------------------------
+;
+; Cette procédure permet de faire l'appel de la procédure de calcul des taxes.
+;
+PROCEDURE PROCESS REQPRIUNI
+BEGIN
+  DO INTERNAL CALCUL_MONTANT
+
+  LET T_PRIX_FOU = 0
+  LET T_TAX_TPS  = " "
+  LET T_TAX_TVQ  = " "
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT REQDSC
+BEGIN
+  LET FIELDTEXT = TRUNCATE( FIELDTEXT )
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  ACCEPT ENTCLE OF ARREQUISITION
+  DISPLAY CBIDSC OF A_CBI_REQSTUAPP
+  DISPLAY REQDATAPP OF ARREQUISITION
+  ACCEPT REQCLE OF ARREQUISITION
+  ACCEPT FOUCLE OF ARREQUISITION
+  DISPLAY RADNOM OF MCREF_ADRESSE
+  EDIT T_VALRADSIL
+
+  IF FOUCLE OF ARREQUISITION < > " "
+  THEN ACCEPT ADECLE OF ARREQUISITION
+  ELSE DISPLAY ADECLE OF ARREQUISITION
+
+  DISPLAY ADENOM OF ARADRESSE_EXP
+  ACCEPT REQNOMREQ OF ARREQUISITION
+  ACCEPT REQTRP OF ARREQUISITION
+  DISPLAY CBIDSC OF A_CBI_REQTRP
+  ACCEPT REQFAB OF ARREQUISITION
+  DISPLAY CBIDSC OF A_CBI_REQFAB
+  ACCEPT REQLIE OF ARREQUISITION
+
+  IF FOUCLE OF ARREQUISITION < > " "
+  THEN ACCEPT T_CMDCLEECR
+  ELSE DISPLAY T_CMDCLEECR
+
+  ACCEPT REQCLENUM OF ARREQUISITION
+
+  IF FOUCLE OF ARREQUISITION = " "
+  THEN ACCEPT REQFLGSOU OF ARREQUISITION
+  ELSE DISPLAY REQFLGSOU OF ARREQUISITION
+
+  ACCEPT PRDCLE OF ARREQUISITION
+
+  IF PRDTYP OF VPRE_PRD = "D"
+  THEN ACCEPT REQDSC OF ARREQUISITION
+  ELSE BEGIN
+    LET REQDSC OF ARREQUISITION = PRDDSC1 OF VPRE_PRD
+    DISPLAY REQDSC OF ARREQUISITION
+  END
+  ACCEPT REQDATREQ OF ARREQUISITION
+
+  ACCEPT  CPTCLE OF ARREQUISITION
+  DISPLAY CPTDSCABR OF VCPT_DSC
+  INFORMATION = CPTDSC OF VCPT_DSC
+  ACCEPT  UNACLE OF ARREQUISITION
+  DISPLAY UNANOMABR OF MCUNITE_ADM
+  INFORMATION = UNANOM OF MCUNITE_ADM
+  ;
+  ; Si notion de projet.
+  ;
+  IF (HLDNTNPRO OF MCHOLDING = "1" AND NACCLE OF MCNATURE_CTB = 4) OR &
+     (HLDNTNPRO OF MCHOLDING = "1" AND NACCLE OF MCNATURE_CTB = 5)
+  THEN BEGIN
+
+    WHILE 0 = SIZE(TRUNCATE(PRJCLE OF ARREQUISITION))
+    BEGIN
+      ACCEPT  PRJCLE OF ARREQUISITION
+      DISPLAY PRJDSC1 OF GPPROJETS
+      IF 0 <> SIZE(TRUNCATE(PRJCLE OF ARREQUISITION))
+      THEN BEGIN
+        INFORMATION = PRJDSC1 OF GPPROJETS
+        ACCEPT  PRACLE OF ARREQUISITION
+        DISPLAY PRADSC1 OF GPPRO_ACTIVITE
+        INFORMATION = PRADSC1 OF GPPRO_ACTIVITE
+        LET T_FLAG_ENT = "1"
+      END
+    END
+  END
+  ELSE BEGIN
+    LET PRJCLE OF ARREQUISITION = " "
+    LET PRACLE OF ARREQUISITION = " "
+  END
+  ACCEPT IMMCLE    OF ARREQUISITION
+  ACCEPT REQQTEREQ OF ARREQUISITION
+  ACCEPT REQTAXCODTPS OF ARREQUISITION
+  ACCEPT REQTAXCODTVQ OF ARREQUISITION
+
+  IF FOUCLE OF ARREQUISITION < > " "
+  THEN ACCEPT REQTERESCACH OF ARREQUISITION
+  ELSE DISPLAY REQTERESCACH OF ARREQUISITION
+
+  ACCEPT REQPRIUNI OF ARREQUISITION
+
+  IF "1" = REQFLGSOU OF ARREQUISITION
+  THEN BEGIN
+    LET T_SELFOU = "0"
+    RUN SCREEN ar006h MODE SAME PASSING   T_CIECLEMNU  , &
+                                          T_CIENOM     , &
+                                          T_PECCLEMNU  , &
+                                          T_SELFOU  , &
+                                          ARREQUISITION
+  END
+
+  RUN SCREEN ar006g MODE E &
+                 PASSING  T_CIECLEMNU  , &
+                          T_CIENOM     , &
+                          T_PECCLEMNU  , &
+                          MCREF_ADRESSE, &
+                          ARREQUISITION
+
+  DISPLAY REQMNTTPS OF ARREQUISITION
+  DISPLAY REQMNTNET OF ARREQUISITION
+  DISPLAY REQMNTTVQ OF ARREQUISITION
+  DISPLAY REQMNTESC OF ARREQUISITION
+  DISPLAY DEVTAU    OF ARREQUISITION
+  DISPLAY REQMNTTOT OF ARREQUISITION
+  DISPLAY D_DEVCLE
+
+END
+
+;------------------------------------------------------------------------------
+;
+;
+PROCEDURE DESIGNER 5
+BEGIN
+  IF REQSTUAPP OF ARREQUISITION = "P" OR &
+     REQSTUAPP OF ARREQUISITION = "R"
+  THEN ACCEPT REQSTUAPP OF ARREQUISITION
+END 
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+PROCEDURE DESIGNER 15
+BEGIN
+  IF REQSTUAPP OF ARREQUISITION = "P" OR & 
+     REQSTUAPP OF ARREQUISITION = "R"
+  THEN BEGIN
+    ACCEPT FOUCLE OF ARREQUISITION
+    IF 0 <> SIZE(TRUNCATE(FOUCLE OF ARREQUISITION))
+    THEN BEGIN
+      IF FOUTYP OF VFOC_FOU = "D"
+      THEN BEGIN
+         RUN SCREEN ar006e &
+                 PASSING MCREF_ADRESSE &
+                 MODE F
+      END
+      DISPLAY RADNOM OF MCREF_ADRESSE
+    END
+    ELSE BEGIN
+      LET T_CMDCLEECR = ""
+      LET REQTERESCACH OF ARREQUISITION = ""
+      DISPLAY T_CMDCLEECR
+      DISPLAY REQTERESCACH OF ARREQUISITION
+    END
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+PROCEDURE DESIGNER 17
+BEGIN
+  IF REQSTUAPP OF ARREQUISITION = "P" OR & 
+     REQSTUAPP OF ARREQUISITION = "R"
+  THEN BEGIN
+    IF FOUCLE OF ARREQUISITION < > " "
+    THEN ACCEPT ADECLE OF ARREQUISITION
+    ELSE DISPLAY ADECLE OF ARREQUISITION
+
+    DISPLAY ADENOM OF ARADRESSE_EXP
+  END
+END
+
+;------------------------------------------------------------------------------
+;
+;
+PROCEDURE DESIGNER 20
+BEGIN
+  IF REQSTUAPP OF ARREQUISITION = "P" OR & 
+     REQSTUAPP OF ARREQUISITION = "R"
+  THEN ACCEPT REQNOMREQ OF ARREQUISITION
+END
+
+;----------------------------------------------------------------------------
+;
+;
+;
+PROCEDURE DESIGNER 25
+BEGIN
+  IF REQSTUAPP OF ARREQUISITION = "P" OR & 
+     REQSTUAPP OF ARREQUISITION = "R"
+  THEN ACCEPT REQTRP OF ARREQUISITION
+END
+
+;-----------------------------------------------------------------------------
+;
+;
+;
+PROCEDURE DESIGNER 30
+BEGIN
+  IF REQSTUAPP OF ARREQUISITION = "P" OR & 
+     REQSTUAPP OF ARREQUISITION = "R"
+  THEN BEGIN
+    ACCEPT REQFAB OF ARREQUISITION
+    ACCEPT REQLIE OF ARREQUISITION
+  END
+END
+
+;-----------------------------------------------------------------------------
+;
+;
+;
+PROCEDURE DESIGNER 35
+BEGIN
+  IF REQSTUAPP OF ARREQUISITION = "P" OR & 
+     REQSTUAPP OF ARREQUISITION = "R"
+  THEN ACCEPT T_CMDCLEECR
+END
+
+;------------------------------------------------------------------------------
+;
+;
+;
+PROCEDURE DESIGNER 40
+BEGIN
+  IF 0 <> SIZE(TRUNC(FOUCLE OF ARREQUISITION)) AND &
+    ( REQSTUAPP OF ARREQUISITION = "P" OR & 
+      REQSTUAPP OF ARREQUISITION = "R" )
+  THEN ACCEPT REQFLGSOU OF ARREQUISITION
+
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+PROCEDURE DESIGNER 45
+BEGIN
+  IF REQSTUAPP OF ARREQUISITION = "P" OR &
+     REQSTUAPP OF ARREQUISITION = "R"
+  THEN BEGIN
+    ACCEPT PRDCLE OF ARREQUISITION
+    IF PRDTYP OF VPRE_PRD = "D"
+    THEN ACCEPT REQDSC OF ARREQUISITION
+    ELSE BEGIN
+      LET REQDSC OF ARREQUISITION = PRDDSC1 OF VPRE_PRD
+      DISPLAY REQDSC OF ARREQUISITION
+    END
+  END
+END
+
+;------------------------------------------------------------------------------
+;
+;
+;
+PROCEDURE DESIGNER 50
+BEGIN 
+   IF REQSTUAPP OF ARREQUISITION = "P" OR &
+      REQSTUAPP OF ARREQUISITION = "R"
+   THEN ACCEPT REQDATREQ OF ARREQUISITION
+END
+
+;------------------------------------------------------------------------------
+;
+;
+;
+PROCEDURE DESIGNER 55
+BEGIN
+  IF REQSTUAPP OF ARREQUISITION = "P"
+  THEN BEGIN
+    ACCEPT  CPTCLE OF ARREQUISITION
+    DISPLAY CPTDSCABR OF VCPT_DSC
+    INFORMATION = CPTDSC OF VCPT_DSC
+    ACCEPT  UNACLE OF ARREQUISITION
+    DISPLAY UNANOMABR OF MCUNITE_ADM
+    INFORMATION = UNANOM OF MCUNITE_ADM
+  END
+  ;
+  ; Si notion de projet.
+  ;
+  IF (HLDNTNPRO OF MCHOLDING = "1" AND NACCLE OF MCNATURE_CTB = 4) OR &
+     (HLDNTNPRO OF MCHOLDING = "1" AND NACCLE OF MCNATURE_CTB = 5)
+  THEN BEGIN
+
+    WHILE 0 = SIZE(TRUNCATE(PRJCLE OF ARREQUISITION))
+    BEGIN
+      ACCEPT  PRJCLE OF ARREQUISITION
+      DISPLAY PRJDSC1 OF GPPROJETS
+      IF 0 <> SIZE(TRUNCATE(PRJCLE OF ARREQUISITION))
+      THEN BEGIN
+        INFORMATION = PRJDSC1 OF GPPROJETS
+        ACCEPT  PRACLE OF ARREQUISITION
+        DISPLAY PRADSC1 OF GPPRO_ACTIVITE
+        INFORMATION = PRADSC1 OF GPPRO_ACTIVITE
+        LET T_FLAG_ENT = "1"
+      END
+    END
+  END
+  ELSE BEGIN
+    LET PRJCLE OF ARREQUISITION = " "
+    LET PRACLE OF ARREQUISITION = " "
+  END
+END
+
+PROCEDURE DESIGNER 60
+BEGIN
+  IF REQSTUAPP OF ARREQUISITION = "P"
+  THEN BEGIN
+    IF (HLDNTNPRO OF MCHOLDING = "1" AND NACCLE OF MCNATURE_CTB = 4) OR &
+       (HLDNTNPRO OF MCHOLDING = "1" AND NACCLE OF MCNATURE_CTB = 5)
+    THEN BEGIN
+      WHILE 0 = SIZE(TRUNCATE(PRJCLE OF ARREQUISITION))
+      BEGIN
+        ACCEPT  PRJCLE OF ARREQUISITION
+        DISPLAY PRJDSC1 OF GPPROJETS
+        IF 0 <> SIZE(TRUNCATE(PRJCLE OF ARREQUISITION))
+        THEN BEGIN
+          INFORMATION = PRJDSC1 OF GPPROJETS
+          ACCEPT  PRACLE OF ARREQUISITION
+          DISPLAY PRADSC1 OF GPPRO_ACTIVITE
+          INFORMATION = PRADSC1 OF GPPRO_ACTIVITE
+          LET T_FLAG_ALT = "1"
+        END
+      END
+      IF T_FLAG_ALT <> "1"
+      THEN BEGIN
+        ACCEPT  PRJCLE OF ARREQUISITION
+        DISPLAY PRJDSC1 OF GPPROJETS
+        IF 0 <> SIZE(TRUNCATE(PRJCLE OF ARREQUISITION))
+        THEN BEGIN
+          INFORMATION = PRJDSC1 OF GPPROJETS
+          ACCEPT  PRACLE OF ARREQUISITION
+          DISPLAY PRADSC1 OF GPPRO_ACTIVITE
+          INFORMATION = PRADSC1 OF GPPRO_ACTIVITE
+        END
+      END
+    END
+  END
+END
+
+;------------------------------------------------------------------------------
+;
+;
+;
+PROCEDURE DESIGNER 63
+BEGIN
+  IF REQSTUAPP OF ARREQUISITION = "P" OR &
+     REQSTUAPP OF ARREQUISITION = "R" 
+  THEN ACCEPT IMMCLE OF ARREQUISITION
+END
+
+;-----------------------------------------------------------------------------
+;
+;
+;
+PROCEDURE DESIGNER 65
+BEGIN
+  IF REQSTUAPP OF ARREQUISITION = "P" OR &
+     REQSTUAPP OF ARREQUISITION = "R" 
+  THEN BEGIN
+    ACCEPT REQQTEREQ OF ARREQUISITION
+    ACCEPT REQTAXCODTPS OF ARREQUISITION
+    ACCEPT REQTAXCODTVQ OF ARREQUISITION
+    ACCEPT REQTERESCACH OF ARREQUISITION
+  END
+END
+
+;----------------------------------------------------------------------------
+;
+;
+;
+PROCEDURE DESIGNER 70
+BEGIN
+  IF REQSTUAPP OF ARREQUISITION = "P" OR &
+     REQSTUAPP OF ARREQUISITION = "R"
+  THEN ACCEPT REQPRIUNI OF ARREQUISITION
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du sous-écran de réquisition par fournisseur.
+;
+PROCEDURE DESIGNER D001
+BEGIN
+  IF ALTEREDRECORD OF ARREQUISITION
+  THEN ERROR 1390 ; Vous devez faire une mise à jour avant d'accéder le sous-écran.
+
+  RUN SCREEN ar006b PASSING T_CIECLEMNU  , &
+                            T_CIENOM     , &
+                            T_PECCLEMNU  , &
+                            T_FOUCIECLE  , &
+                            ARREQUISITION  MODE F
+END
+;-------------------------------------------------------------------------------
+;
+; Procédure d'appel du sous-écran de la piste de vérification.
+;
+PROCEDURE DESIGNER D002
+BEGIN
+  RUN SCREEN ar006f &
+             PASSING ARREQUISITION  &
+             MODE F
+END
+
+;-------------------------------------------------------------------------------
+;
+; Procédure d'appel du sous-écran des mémos.
+;
+PROCEDURE DESIGNER D003
+BEGIN
+  IF FOUCLE OF ARREQUISITION = " "
+  THEN ERROR 1500 ; Le fournisseur doit être saisi.
+
+  LET T_NUMREFFND = REQCLE OF ARREQUISITION
+  LET T_FOUCLE    = FOUCLE OF ARREQUISITION
+  RUN SCREEN ar012 MODE F &
+                  PASSING T_CIECLEMNU, &
+                          T_CIENOM   , &
+                          T_ARMTYPFND, &
+                          T_NUMREFFND, &
+                          T_FOUCIECLE, &
+                          T_FOUCLE
+END
+
+;-------------------------------------------------------------------------------
+;
+; Procédure d'appel du sous-écran des commandes d'achat.
+;
+PROCEDURE DESIGNER D004
+BEGIN
+  IF ALTEREDRECORD OF ARREQUISITION
+  THEN ERROR 1390 ; Vous devez faire une mise à jour avant d'accéder le sous-écran.
+
+  IF REQSTUAPP OF ARREQUISITION = "C"
+  THEN BEGIN
+    LET T_CMDCLEFND = CMDCLE OF ARREQUISITION
+    RUN SCREEN ar007 MODE F &
+                     PASSING T_CIECLEMNU, &
+                             T_CIENOM   , &
+                             T_PECCLEMNU, &
+                             T_FOUCIECLE, &
+                             T_CMDCLEFND, &
+                             T_CMDAJTFND
+  END
+  ELSE WARNING 1493 ;Le statut de l'item doit être complètée.
+END
+
+;-------------------------------------------------------------------------------
+;
+; Procédure d'appel du sous-écran des notes descriptives.
+;
+PROCEDURE DESIGNER D005
+BEGIN
+  RUN SCREEN ar006g MODE F PASSING  T_CIECLEMNU  , &
+                                    T_CIENOM     , &
+                                    T_PECCLEMNU  , &
+                                    MCREF_ADRESSE, &
+                                    ARREQUISITION
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+PROCEDURE DESIGNER D006
+BEGIN
+  LET T_PRIX_FOU = 0
+  LET T_TAX_TPS  = " "
+  LET T_TAX_TVQ  = " "
+  IF "1" = REQFLGSOU OF ARREQUISITION
+  THEN BEGIN
+    LET T_SELFOU = "0"
+    RUN SCREEN ar006h MODE SAME PASSING   T_CIECLEMNU  , &
+                                          T_CIENOM     , &
+                                          T_PECCLEMNU  , &
+                                          T_SELFOU  , &
+                                          ARREQUISITION
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+PROCEDURE PATH
+BEGIN
+  IF 0 <> SIZE(TRUNCATE(T_REQCLEFND)) AND &
+     0 <> T_REQCLENUMFND
+  THEN LET PATH = 98
+  ELSE BEGIN
+    IF 0 <> SIZE(TRUNCATE(T_REQCLEFND))
+    THEN LET PATH = 99
+  END
+
+  IF PATH = 0
+  THEN BEGIN
+    REQUEST REQCLE OF ARREQUISITION
+    IF PROMPTOK
+    THEN REQUEST FOUCLE OF ARREQUISITION
+    IF PROMPTOK
+    THEN LET PATH = 1
+  END
+
+  IF PATH = 0
+  THEN BEGIN
+    REQUEST REQCLE OF ARREQUISITION
+    IF PROMPTOK
+    THEN REQUEST REQCLENUM OF ARREQUISITION
+    IF PROMPTOK
+    THEN LET PATH = 2
+  END
+
+  IF PATH = 0
+  THEN BEGIN
+    REQUEST REQCLE OF ARREQUISITION
+    IF PROMPTOK
+    THEN LET PATH = 3
+  END
+
+  IF PATH = 0
+  THEN BEGIN
+    LET PATH = 4
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+PROCEDURE FIND
+BEGIN
+  IF PATH = 1
+  THEN GET ARREQUISITION &
+         VIA    CIECLE    , &
+                REQCLE    , &
+                FOUCIECLE , &
+                FOUCLE &
+        ORDERBY CIECLE , &
+                REQCLE , &
+                REQCLENUM &
+        USING   T_CIECLEMNU , &
+                REQCLE OF ARREQUISITION , &
+                T_FOUCIECLE , &
+                FOUCLE OF ARREQUISITION
+  IF PATH = 2
+  THEN GET ARREQUISITION &
+         VIA    CIECLE , &
+                REQCLE , &
+                FOUCIECLE , &
+                REQCLENUM &
+        ORDERBY CIECLE , &
+                REQCLE , &
+                REQCLENUM &
+        USING   T_CIECLEMNU , &
+                REQCLE OF ARREQUISITION , &
+                T_FOUCIECLE , &
+                REQCLENUM OF ARREQUISITION
+  IF PATH = 3
+  THEN GET ARREQUISITION &
+         VIA    CIECLE , &
+                REQCLE , &
+                FOUCIECLE &
+        ORDERBY CIECLE , &
+                REQCLE , &
+                REQCLENUM &
+        USING   T_CIECLEMNU , &
+                REQCLE OF ARREQUISITION , &
+                T_FOUCIECLE
+  IF PATH = 4
+  THEN GET ARREQUISITION &
+         VIA    CIECLE , &
+                FOUCIECLE &
+        ORDERBY CIECLE , &
+                REQCLE , &
+                REQCLENUM &
+        USING   T_CIECLEMNU , &
+                T_FOUCIECLE
+  IF PATH = 98
+  THEN GET ARREQUISITION &
+         VIA    CIECLE , &
+                REQCLE , &
+                REQCLENUM &
+        ORDERBY CIECLE , &
+                REQCLENUM , &
+                REQCLENUM &
+         USING  T_CIECLEMNU , &
+                T_REQCLEFND , &
+                T_REQCLENUMFND
+  IF PATH = 99
+  THEN GET ARREQUISITION &
+         VIA    CIECLE , &
+                REQCLE   &
+        ORDERBY CIECLE , &
+                REQCLENUM , &
+                REQCLENUM   &
+         USING  T_CIECLEMNU , &
+                T_REQCLEFND
+  GET MCREF_ADRESSE OPTIONAL
+END
+
+
+;------------------------------------------------------------------------------
+;
+; Mise à jour de la variable temporaire de l'écran, et présentation du flag
+; pour indiquer la notes.
+;
+PROCEDURE POSTFIND
+BEGIN
+  LET T_CMDCLEECR = CMDCLE OF ARREQUISITION
+
+  LET T_REQSTUOLD = REQSTUAPP OF ARREQUISITION
+
+  LET T_REQSTUOLD = REQCLE OF ARREQUISITION
+
+  IF 0 <> SIZE(TRUNCATE(FOUCLE OF ARREQUISITION))
+  THEN GET MCDEVISE VIA DEVCLE USING DEVCLE OF VFOC_FOU
+  ELSE GET MCDEVISE VIA DEVCLE USING DEVCLE OF MCHOLDING
+
+  DISPLAY REQCLENUM OF ARREQUISITION
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF ARREQUISITION &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF ARREQUISITION &
+     AND NOT NEWRECORD     OF ARREQUISITION &
+     AND NOT DELETEDRECORD OF ARREQUISITION &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  IF (HLDNTNPRO OF MCHOLDING = "1" AND (NACCLE OF MCNATURE_CTB = 4  OR &
+                                        NACCLE OF MCNATURE_CTB = 5) AND &
+      PRJCLE OF ARREQUISITION = "")
+  THEN ERROR 889
+
+  ;
+  ; Pas de modification si la réquisition n'est plus préliminaire.
+  ;
+  IF    (ALTEREDRECORD OF ARREQUISITION AND &
+        (T_REQSTUOLD  <> "P" AND &
+        (T_REQSTUOLD  =  "A" AND REQSTUAPP OF ARREQUISITION <> "X" ))) OR &
+        (ALTEREDRECORD OF ARREQUISITION AND &
+        (T_REQSTUOLD = "X" OR T_REQSTUOLD = "C"))
+  THEN ERROR 1439 ; Seule la modification d'une réquisition préliminaire est
+                  ; permise.
+
+  ;
+  ; Affectation du statut si modification.
+  ;
+  LET CMDCLE OF ARREQUISITION = T_CMDCLEECR
+  ;
+  ; On incrémente le numéro d'adresse pour les clients divers.
+  ;
+  IF     FOUTYP OF VFOC_FOU = "D" &
+     AND RADCLE OF ARREQUISITION = 0
+  THEN BEGIN
+    START TRANSACTION GEN_RAD_SEQ
+    GET MCRAD_SEQ VIA REFCIECLE, &
+                      REFCLETYP, &
+                      REFCLENUM  &
+                  USING FOUCIECLE OF ARREQUISITION, &
+                        REFCLETYP OF ARREQUISITION, &
+                        FOUCLE    OF ARREQUISITION  &
+                  OPTIONAL
+    LET REFCIECLE OF MCRAD_SEQ = FOUCIECLE OF ARREQUISITION
+    LET REFCLETYP OF MCRAD_SEQ = REFCLETYP OF ARREQUISITION
+    LET REFCLENUM OF MCRAD_SEQ = FOUCLE    OF ARREQUISITION
+    LET RASNUMSEQ OF MCRAD_SEQ = RASNUMSEQ OF MCRAD_SEQ + 1
+    LET RADCLE    OF ARREQUISITION = RASNUMSEQ OF MCRAD_SEQ
+    PUT MCRAD_SEQ
+    COMMIT TRANSACTION GEN_RAD_SEQ
+  END
+
+  IF "0" = REQFLGSOU OF ARREQUISITION AND &
+     NOT DELETEDRECORD OF ARREQUISITION
+  THEN BEGIN
+    DELETE A_RSO_DELETE
+  END
+END
+
+;------------------------------------------------------------------------------
+;
+; Mise à jour de la variable temporaire de l'écran.
+;
+PROCEDURE POSTUPDATE
+BEGIN
+  LET T_CMDCLEECR = CMDCLE OF ARREQUISITION
+  LET T_STATUT    = T_REQSTUOLD
+  LET T_REQSTUOLD = REQSTUAPP OF ARREQUISITION
+
+;
+;  Rajout de la modification décrite à l'entête du programme
+;
+  LET T_PREQTEDEM = 0
+  WHILE RETRIEVING A_ARREQUISITION
+  BEGIN
+    IF REQSTUAPP OF A_ARREQUISITION = "A" AND T_REQSTUOLD <> "X" AND &
+       CIECLE OF ARREQUISITION = CIECLE OF A_ARREQUISITION AND &
+       PRDCLE OF ARREQUISITION = PRDCLE OF A_ARREQUISITION AND &
+       ENTCLE OF ARREQUISITION = ENTCLE OF A_ARREQUISITION
+    THEN BEGIN
+      GET ARPRODUIT &
+        VIA   CIECLE, &
+              PRDCLE &
+        USING CIECLE OF ARREQUISITION, &
+              PRDCLE OF ARREQUISITION &
+                            OPTIONAL
+      IF ACCESSOK
+      THEN BEGIN
+        GET ARPRD_ENT &
+          VIA   CIECLE, &
+                PRDCLE, &
+                ENTCLE &
+          USING CIECLE OF ARREQUISITION, &
+                PRDCLE OF ARREQUISITION, &
+                ENTCLE OF ARREQUISITION &
+                               OPTIONAL
+        IF ACCESSOK
+        THEN BEGIN
+          LET T_PREQTEDEM = T_PREQTEDEM + REQQTEREQ OF A_ARREQUISITION
+        END
+      END
+    END
+  END
+  LET PREQTEDEM OF ARPRD_ENT = T_PREQTEDEM
+  PUT ARPRD_ENT
+
+  WHILE RETRIEVING A_ARREQUISITION
+  BEGIN
+    IF REQSTUAPP OF A_ARREQUISITION = "X" AND &
+       T_STATUT    = "A" AND &
+       T_REQCLEOLD = REQCLE OF A_ARREQUISITION AND &
+       CIECLE OF ARREQUISITION = CIECLE OF A_ARREQUISITION AND &
+       PRDCLE OF ARREQUISITION = PRDCLE OF A_ARREQUISITION AND &
+       ENTCLE OF ARREQUISITION = ENTCLE OF A_ARREQUISITION
+    THEN BEGIN
+      GET ARPRODUIT &
+        VIA   CIECLE, &
+              PRDCLE &
+        USING CIECLE OF ARREQUISITION, &
+              PRDCLE OF ARREQUISITION &
+                              OPTIONAL
+      IF ACCESSOK
+      THEN BEGIN
+        GET ARPRD_ENT &
+          VIA   CIECLE, &
+                PRDCLE, &
+                ENTCLE &
+          USING CIECLE OF ARREQUISITION, &
+                PRDCLE OF ARREQUISITION, &
+                ENTCLE OF ARREQUISITION &
+                                OPTIONAL
+        IF ACCESSOK
+        THEN BEGIN
+          LET PREQTEDEM OF ARPRD_ENT = &
+                          PREQTEDEM OF ARPRD_ENT - REQQTEREQ OF A_ARREQUISITION
+          PUT ARPRD_ENT
+        END
+      END
+    END
+  END
+END
+
+
+BUILD
+@IF FORMAT
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+***************************** Réquisition d'achat ******************************
+* Entrepôt......: xxxx                    Statut (Item).: x xxxxxxxxxxxxxxx    *
+* Réquisition...: xxxxxxxxx               Date approb...: xxxxxxxx             *
+*                                                                              *
+* Fournisseur...: xxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            *
+* Adresse d'exp.: xxxxx    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            *
+* Requérant.....: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+* Mode de transp: xxxx xxxxxxxxxxxxxxx                                         *
+* Terme de comm.: xxxx xxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxx               *
+* Commande......: xxxxxxxxx                                                    *
+* Item..........: xxxxxxx                 Soumission....: Xxx                  *
+* Code produit..: xxxxxxxxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx       *
+* Date requise..: xxxxxxxx                                                     *
+* Compte........: xxxxxx xxxxxxxxxxxxxx Unité adm.....: xxxxxxxx xxxxxxxxxxxxxx*
+* Projet........: xxxxx  xxxxxxxxxxxxxx Activité......: xxxxxx   xxxxxxxxxxxxxx*
+* Qté requise...: xxxxxxxxxx              Code taxe F/P.: xx xx   Esc.: xxxx   *
+* Prix unitaire.: xxxxxxxxxxxxxxx         Montant TPS...: xxxxxxxxxxxxxxx      *
+* Montant net...: xxxxxxxxxxxxxxx         Montant TVQ...: xxxxxxxxxxxxxxx      *
+*                                         Montant esc...: xxxxxxxxxxxxxxx      *
+* Nouveau taux..: xxxxxxxxx               Total.:         xxxxxxxxxxxxxxx xxxx *
+********************************************************************************
+@ENDIF

@@ -1,0 +1,314 @@
+;/T/ Validation des paiements
+;
+;/P/ Programmeur...:  Nancy Marceau
+;    Date création.:  7 février 1994
+;
+;
+;    Description...:  Liste de validation des lots de paiements
+;
+;    Paramètres....:  Compagnie
+;                     Periode CTB (Une).
+;                     No Lot (Un, Plusieurs ou tous).
+;
+;    Particularités:
+;
+;/M/ Marie-Josée Hamel, 96.03.14, ne pas sélectionner le paiement qui sont
+;                                 annulés avant l'impression et la journal.
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST   ; permet de faire les SET REPORT NOLIMIT....
+
+RUN cp309t
+
+;--------------------------------------------------------------------------------
+;
+; Lecture des paiements à imprimer et recherche de leur ventilation
+; et de l'imputation comptable.
+;
+;
+REQUEST RECHERCHE_PAIEMENT
+
+;
+; Lecture des lots de paiements
+;
+
+ACCESS                        CPLOT &
+
+;
+; On retrouve les paiements par le lot.
+;
+
+  LINK  CIECLE    OF CPLOT     , &
+        PECCLE    OF CPLOT     , &
+        LCPCLE    OF CPLOT       &
+    TO  CIECLE                 , &
+        PECCLE                 , &
+        LCPCLE                  OF CPPAIEMENT &
+
+;
+; On va lire la ventilation comptable du paiement si elle existe
+;
+
+  LINK  CIECLE    OF CPPAIEMENT, &
+        LBQCPTENC OF CPPAIEMENT, &
+        PAMCLE    OF CPPAIEMENT  &
+    TO  CPHCLE1                , &
+        CPHCLE2                , &
+        CPHCLE3                OF CPCAP_HISTO &
+  OPTIONAL &
+
+; On va lire la facture pour avoir le montant de la facture
+;
+  LINK FOUCIECLE OF CPCAP_HISTO, &
+       FOUCLE    OF CPCAP_HISTO, &
+       CAPCLE    OF CPCAP_HISTO  &
+    TO FOUCIECLE               , &
+       FOUCLE                  , &
+       CAPCLE                  OF CPCPT_A_PAYER OPTIONAL &
+
+
+;
+; Ainsi que l'imputation comptable pour les dépenses directs et les paiements
+; automatiques.
+;
+
+  LINK  CIECLE    OF CPPAIEMENT, &
+        LBQCPTENC OF CPPAIEMENT, &
+        PAMCLE    OF CPPAIEMENT  &
+    TO  CIECLE                 , &
+        LBQCPTENC              , &
+        PAMCLE                OF CPPAM_IMPUTATION &
+  OPTIONAL
+
+
+CHOOSE CIECLE    PARM, &  ; Compagnie
+       PECCLE    PARM, &  ; Période
+       LCPCLE    PARM, &  ; Lot
+       LCPTYPECR "CH"     ; Type de lot "Paiement"
+
+SELECT CPPAIEMENT IF NOT (   PAMCODANN OF CPPAIEMENT = "1" &
+                          AND 0 = SIZE( TRUNCATE( PAMPAMCLEANN OF CPPAIEMENT )) )
+
+SORTED ON CIECLE OF CPLOT, &
+          LCPCLE OF CPLOT
+
+;
+; Type d'enregistrement
+;
+;   1 = ventilation par facture
+;   2 = imputation comptable
+;   3 = paiement sans ventilation ni imputation
+;
+
+TEMPORARY T_TYPDET CHARACTER SIZE 1
+ITEM      T_TYPDET RESET AT INITIAL TO "1"
+
+;
+; Temporaires permettants de réserver de la place dans le subfile
+; pour pouvoir rajouter l'imputation.
+;
+
+TEMPORARY T_CPTCLE      CHARACTER SIZE 6
+TEMPORARY T_UNACLE      CHARACTER SIZE 8
+TEMPORARY T_PRJCLE      CHARACTER SIZE 8
+TEMPORARY T_PRACLE      CHARACTER SIZE 3
+TEMPORARY T_IMMCLE      CHARACTER SIZE 12
+TEMPORARY T_CPITAXCODTPS CHARACTER SIZE 2
+TEMPORARY T_CPITAXCODTVQ CHARACTER SIZE 2
+TEMPORARY T_CPIMNT      FLOAT     SIZE 8
+TEMPORARY T_CPIMNTTPS   FLOAT     SIZE 8
+TEMPORARY T_CPIMNTTVQ   FLOAT     SIZE 8
+TEMPORARY T_CLICIECLE   CHARACTER SIZE 4
+TEMPORARY T_CLICLE      CHARACTER SIZE 6
+TEMPORARY T_CPIFLGFAC   CHARACTER SIZE 1
+TEMPORARY T_CPITIMSTP   FLOAT     SIZE 8
+;
+; Ecriture des enregistrements avec une ventilation
+;
+
+SUBFILE WCP309A &
+    KEEP &
+    IF RECORD CPCAP_HISTO EXISTS &
+    INCLUDE CIECLE       OF CPLOT                       , &
+            PECCLE       OF CPLOT                       , &
+            LCPCLE       OF CPLOT                       , &
+            LCPDATJOU    OF CPLOT                       , &
+            LCPDSC       OF CPLOT                       , &
+            LCPNBRTRS    OF CPLOT                       , &
+            LCPNBRTRSVER OF CPLOT                       , &
+            LCPCUMMNT    OF CPLOT                       , &
+            LCPNBRTRSERR OF CPLOT                       , &
+            LCPCUMMNTVER OF CPLOT                       , &
+            PAMCLE       OF CPPAIEMENT                  , &
+            REFCIECLE    OF CPPAIEMENT                  , &
+            REFCLETYP    OF CPPAIEMENT                  , &
+            REFCLENUM    OF CPPAIEMENT                  , &
+            RADCLE       OF CPPAIEMENT                  , &
+            PAMNUMPIM    OF CPPAIEMENT                  , &
+            PAMDEPDIR    OF CPPAIEMENT                  , &
+            LBQCPTENC    OF CPPAIEMENT                  , &
+            PAMFLGIMP    OF CPPAIEMENT                  , &
+            PAMCODANN    OF CPPAIEMENT                  , &
+            PAMDAT       OF CPPAIEMENT                  , &
+            PAMCCLDAT    OF CPPAIEMENT                  , &
+            PAMDSC1      OF CPPAIEMENT                  , &
+            PAMDSC2      OF CPPAIEMENT                  , &
+            PAMMNT       OF CPPAIEMENT                  , &
+            PAMMNTTPS    OF CPPAIEMENT                  , &
+            PAMMNTTVQ    OF CPPAIEMENT                  , &
+            PAMMNTCTI    OF CPPAIEMENT                  , &
+            PAMMNTRTI    OF CPPAIEMENT                  , &
+            PAMMNTESC    OF CPPAIEMENT                  , &
+            PAMCUMMNT    OF CPPAIEMENT                  , &
+            CAPCLE       OF CPCAP_HISTO                 , &
+            CPCCLELIG    OF CPCAP_HISTO                 , &
+            CPHMNTCAP    OF CPCAP_HISTO                 , &
+            CPHMNTPYE    OF CPCAP_HISTO                 , &
+            CPHMNTESC    OF CPCAP_HISTO                 , &
+            CAPMNT       OF CPCPT_A_PAYER               , &
+            T_TYPDET                                    , &
+            T_CPTCLE                    ALIAS CPTCLE    , &
+            T_UNACLE                    ALIAS UNACLE    , &
+            T_PRJCLE                    ALIAS PRJCLE    , &
+            T_PRACLE                    ALIAS PRACLE    , &
+            T_IMMCLE                    ALIAS IMMCLE    , &
+            T_CPIMNT                    ALIAS CPIMNT    , &
+            T_CPITAXCODTPS              ALIAS CPITAXCODTPS, &
+            T_CPITAXCODTVQ              ALIAS CPITAXCODTVQ, &
+            T_CPIMNTTPS                 ALIAS CPIMNTTPS , &
+            T_CPIMNTTVQ                 ALIAS CPIMNTTVQ , &
+            T_CLICIECLE                 ALIAS CLICIECLE, &
+            T_CLICLE                    ALIAS CLICLE, &
+            T_CPIFLGFAC                 ALIAS CPIFLGFAC, &
+            T_CPITIMSTP                 ALIAS CPITIMSTP
+
+;
+; Ecriture des enregistrements avec une imputation comptable
+;
+OUTPUT *WCP309A ALIAS A_WCP309A_A &
+                ADD &
+                NOITEM &
+                IF RECORD CPPAM_IMPUTATION EXISTS
+
+  ITEM  CIECLE        OF A_WCP309A_A FINAL CIECLE       OF CPLOT
+  ITEM  PECCLE        OF A_WCP309A_A FINAL PECCLE       OF CPLOT
+  ITEM  LCPCLE        OF A_WCP309A_A FINAL LCPCLE       OF CPLOT
+  ITEM  LCPDATJOU     OF A_WCP309A_A FINAL LCPDATJOU    OF CPLOT
+  ITEM  LCPDSC        OF A_WCP309A_A FINAL LCPDSC       OF CPLOT
+  ITEM  LCPNBRTRS     OF A_WCP309A_A FINAL LCPNBRTRS    OF CPLOT
+  ITEM  LCPNBRTRSVER  OF A_WCP309A_A FINAL LCPNBRTRSVER OF CPLOT
+  ITEM  LCPCUMMNT     OF A_WCP309A_A FINAL LCPCUMMNT    OF CPLOT
+  ITEM  LCPNBRTRSERR  OF A_WCP309A_A FINAL LCPNBRTRSERR OF CPLOT
+  ITEM  LCPCUMMNTVER  OF A_WCP309A_A FINAL LCPCUMMNTVER OF CPLOT
+  ITEM  PAMCLE        OF A_WCP309A_A FINAL PAMCLE       OF CPPAIEMENT
+  ITEM  REFCIECLE     OF A_WCP309A_A FINAL REFCIECLE    OF CPPAIEMENT
+  ITEM  REFCLETYP     OF A_WCP309A_A FINAL REFCLETYP    OF CPPAIEMENT
+  ITEM  REFCLENUM     OF A_WCP309A_A FINAL REFCLENUM    OF CPPAIEMENT
+  ITEM  RADCLE        OF A_WCP309A_A FINAL RADCLE       OF CPPAIEMENT
+  ITEM  PAMNUMPIM     OF A_WCP309A_A FINAL PAMNUMPIM    OF CPPAIEMENT
+  ITEM  PAMDEPDIR     OF A_WCP309A_A FINAL PAMDEPDIR    OF CPPAIEMENT
+  ITEM  LBQCPTENC     OF A_WCP309A_A FINAL LBQCPTENC    OF CPPAIEMENT
+  ITEM  PAMFLGIMP     OF A_WCP309A_A FINAL PAMFLGIMP    OF CPPAIEMENT
+  ITEM  PAMCODANN     OF A_WCP309A_A FINAL PAMCODANN    OF CPPAIEMENT
+  ITEM  PAMDAT        OF A_WCP309A_A FINAL PAMDAT       OF CPPAIEMENT
+  ITEM  PAMCCLDAT     OF A_WCP309A_A FINAL PAMCCLDAT    OF CPPAIEMENT
+  ITEM  PAMDSC1       OF A_WCP309A_A FINAL PAMDSC1      OF CPPAIEMENT
+  ITEM  PAMDSC2       OF A_WCP309A_A FINAL PAMDSC2      OF CPPAIEMENT
+  ITEM  PAMMNT        OF A_WCP309A_A FINAL PAMMNT       OF CPPAIEMENT
+  ITEM  PAMMNTTPS     OF A_WCP309A_A FINAL PAMMNTTPS    OF CPPAIEMENT
+  ITEM  PAMMNTTVQ     OF A_WCP309A_A FINAL PAMMNTTVQ    OF CPPAIEMENT
+  ITEM  PAMMNTCTI     OF A_WCP309A_A FINAL PAMMNTCTI    OF CPPAIEMENT
+  ITEM  PAMMNTRTI     OF A_WCP309A_A FINAL PAMMNTRTI    OF CPPAIEMENT
+  ITEM  PAMMNTESC     OF A_WCP309A_A FINAL PAMMNTESC    OF CPPAIEMENT
+  ITEM  PAMCUMMNT     OF A_WCP309A_A FINAL PAMCUMMNT    OF CPPAIEMENT
+  ITEM  CAPCLE        OF A_WCP309A_A FINAL CAPCLE       OF CPCAP_HISTO
+  ITEM  CPCCLELIG     OF A_WCP309A_A FINAL CPCCLELIG    OF CPCAP_HISTO
+  ITEM  CPHMNTCAP     OF A_WCP309A_A FINAL CPHMNTCAP    OF CPCAP_HISTO
+  ITEM  CPHMNTPYE     OF A_WCP309A_A FINAL CPHMNTPYE    OF CPCAP_HISTO
+  ITEM  CPHMNTESC     OF A_WCP309A_A FINAL CPHMNTESC    OF CPCAP_HISTO
+  ITEM  CAPMNT        OF A_WCP309A_A FINAL CAPMNT       OF CPCPT_A_PAYER
+  ITEM  T_TYPDET      OF A_WCP309A_A FINAL "2"
+  ITEM  CPTCLE        OF A_WCP309A_A FINAL CPTCLE       OF CPPAM_IMPUTATION
+  ITEM  UNACLE        OF A_WCP309A_A FINAL UNACLE       OF CPPAM_IMPUTATION
+  ITEM  PRJCLE        OF A_WCP309A_A FINAL PRJCLE       OF CPPAM_IMPUTATION
+  ITEM  PRACLE        OF A_WCP309A_A FINAL PRACLE       OF CPPAM_IMPUTATION
+  ITEM  IMMCLE        OF A_WCP309A_A FINAL IMMCLE       OF CPPAM_IMPUTATION
+  ITEM  CPIMNT        OF A_WCP309A_A FINAL CPIMNT       OF CPPAM_IMPUTATION
+  ITEM  CPITAXCODTPS  OF A_WCP309A_A FINAL CPITAXCODTPS OF CPPAM_IMPUTATION
+  ITEM  CPITAXCODTVQ  OF A_WCP309A_A FINAL CPITAXCODTVQ OF CPPAM_IMPUTATION
+  ITEM  CPIMNTTPS     OF A_WCP309A_A FINAL CPIMNTTPS    OF CPPAM_IMPUTATION
+  ITEM  CPIMNTTVQ     OF A_WCP309A_A FINAL CPIMNTTVQ    OF CPPAM_IMPUTATION
+  ITEM  CLICIECLE     OF A_WCP309A_A FINAL CLICIECLE    OF CPPAM_IMPUTATION
+  ITEM  CLICLE        OF A_WCP309A_A FINAL CLICLE       OF CPPAM_IMPUTATION
+  ITEM  CPIFLGFAC     OF A_WCP309A_A FINAL CPIFLGFAC    OF CPPAM_IMPUTATION
+  ITEM  CPITIMSTP     OF A_WCP309A_A FINAL CPITIMSTP    OF CPPAM_IMPUTATION
+
+
+;
+; Ecriture des enregistrements qui n'ont ni ventilation, ni imputation
+;
+OUTPUT *WCP309A ALIAS A_WCP309A_B &
+                ADD &
+                NOITEM &
+                IF    NOT RECORD CPCAP_HISTO      EXISTS &
+                  AND NOT RECORD CPPAM_IMPUTATION EXISTS
+
+  ITEM  CIECLE        OF A_WCP309A_B FINAL CIECLE       OF CPLOT
+  ITEM  PECCLE        OF A_WCP309A_B FINAL PECCLE       OF CPLOT
+  ITEM  LCPCLE        OF A_WCP309A_B FINAL LCPCLE       OF CPLOT
+  ITEM  LCPDATJOU     OF A_WCP309A_B FINAL LCPDATJOU    OF CPLOT
+  ITEM  LCPDSC        OF A_WCP309A_B FINAL LCPDSC       OF CPLOT
+  ITEM  LCPNBRTRS     OF A_WCP309A_B FINAL LCPNBRTRS    OF CPLOT
+  ITEM  LCPNBRTRSVER  OF A_WCP309A_B FINAL LCPNBRTRSVER OF CPLOT
+  ITEM  LCPCUMMNT     OF A_WCP309A_B FINAL LCPCUMMNT    OF CPLOT
+  ITEM  LCPNBRTRSERR  OF A_WCP309A_B FINAL LCPNBRTRSERR OF CPLOT
+  ITEM  LCPCUMMNTVER  OF A_WCP309A_B FINAL LCPCUMMNTVER OF CPLOT
+  ITEM  PAMCLE        OF A_WCP309A_B FINAL PAMCLE       OF CPPAIEMENT
+  ITEM  REFCIECLE     OF A_WCP309A_B FINAL REFCIECLE    OF CPPAIEMENT
+  ITEM  REFCLETYP     OF A_WCP309A_B FINAL REFCLETYP    OF CPPAIEMENT
+  ITEM  REFCLENUM     OF A_WCP309A_B FINAL REFCLENUM    OF CPPAIEMENT
+  ITEM  RADCLE        OF A_WCP309A_B FINAL RADCLE       OF CPPAIEMENT
+  ITEM  PAMNUMPIM     OF A_WCP309A_B FINAL PAMNUMPIM    OF CPPAIEMENT
+  ITEM  PAMDEPDIR     OF A_WCP309A_B FINAL PAMDEPDIR    OF CPPAIEMENT
+  ITEM  LBQCPTENC     OF A_WCP309A_B FINAL LBQCPTENC    OF CPPAIEMENT
+  ITEM  PAMFLGIMP     OF A_WCP309A_B FINAL PAMFLGIMP    OF CPPAIEMENT
+  ITEM  PAMCODANN     OF A_WCP309A_B FINAL PAMCODANN    OF CPPAIEMENT
+  ITEM  PAMDAT        OF A_WCP309A_B FINAL PAMDAT       OF CPPAIEMENT
+  ITEM  PAMCCLDAT     OF A_WCP309A_B FINAL PAMCCLDAT    OF CPPAIEMENT
+  ITEM  PAMDSC1       OF A_WCP309A_B FINAL PAMDSC1      OF CPPAIEMENT
+  ITEM  PAMDSC2       OF A_WCP309A_B FINAL PAMDSC2      OF CPPAIEMENT
+  ITEM  PAMMNT        OF A_WCP309A_B FINAL PAMMNT       OF CPPAIEMENT
+  ITEM  PAMMNTTPS     OF A_WCP309A_B FINAL PAMMNTTPS    OF CPPAIEMENT
+  ITEM  PAMMNTTVQ     OF A_WCP309A_B FINAL PAMMNTTVQ    OF CPPAIEMENT
+  ITEM  PAMMNTCTI     OF A_WCP309A_B FINAL PAMMNTCTI    OF CPPAIEMENT
+  ITEM  PAMMNTRTI     OF A_WCP309A_B FINAL PAMMNTRTI    OF CPPAIEMENT
+  ITEM  PAMMNTESC     OF A_WCP309A_B FINAL PAMMNTESC    OF CPPAIEMENT
+  ITEM  PAMCUMMNT     OF A_WCP309A_B FINAL PAMCUMMNT    OF CPPAIEMENT
+  ITEM  T_TYPDET      OF A_WCP309A_B FINAL "3"
+  ITEM  CPTCLE        OF A_WCP309A_B FINAL CPTCLE       OF CPPAM_IMPUTATION
+  ITEM  UNACLE        OF A_WCP309A_B FINAL UNACLE       OF CPPAM_IMPUTATION
+  ITEM  PRJCLE        OF A_WCP309A_B FINAL PRJCLE       OF CPPAM_IMPUTATION
+  ITEM  PRACLE        OF A_WCP309A_B FINAL PRACLE       OF CPPAM_IMPUTATION
+  ITEM  IMMCLE        OF A_WCP309A_B FINAL IMMCLE       OF CPPAM_IMPUTATION
+  ITEM  CPIMNT        OF A_WCP309A_B FINAL CPIMNT       OF CPPAM_IMPUTATION
+  ITEM  CPITAXCODTPS  OF A_WCP309A_B FINAL CPITAXCODTPS OF CPPAM_IMPUTATION
+  ITEM  CPITAXCODTVQ  OF A_WCP309A_B FINAL CPITAXCODTPS OF CPPAM_IMPUTATION
+  ITEM  CPIMNTTPS     OF A_WCP309A_B FINAL CPIMNTTPS    OF CPPAM_IMPUTATION
+  ITEM  CPIMNTTVQ     OF A_WCP309A_B FINAL CPIMNTTVQ    OF CPPAM_IMPUTATION
+  ITEM  CLICIECLE     OF A_WCP309A_B FINAL CLICIECLE    OF CPPAM_IMPUTATION
+  ITEM  CLICLE        OF A_WCP309A_B FINAL CLICLE       OF CPPAM_IMPUTATION
+  ITEM  CPIFLGFAC     OF A_WCP309A_B FINAL CPIFLGFAC    OF CPPAM_IMPUTATION
+  ITEM  CPITIMSTP     OF A_WCP309A_B FINAL CPITIMSTP    OF CPPAM_IMPUTATION
+;
+; Mise à jour de la date de vérification dans le lot s'il n'est pas
+; journalisé.
+;
+OUTPUT  CPLOT &
+        UPDATE AT LCPCLE &
+        IF LCPDATJOU OF CPLOT = 0
+
+  ITEM LCPDATVAL OF CPLOT FINAL SYSDATE
+  ITEM LCPUSRVAL OF CPLOT FINAL LOGONID
+
+
+BUILD cp309t

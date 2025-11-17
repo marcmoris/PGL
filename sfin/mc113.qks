@@ -1,0 +1,764 @@
+;/T/ Fermeture de périodes
+;
+;//M/GRA01/Francois Richard/1999-06-18
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur..: Guy Chabot
+;    Date Création: 7 mai 1992
+;
+;    Description..: Permet de définir les périodes comptables au niveau
+;                   des compagnies.
+;
+;                   Seul la période courante est modifiable, on peut soit
+;                   fermer la période ou soit réouvrir la période.
+;
+;                   Si la période est fermé au niveau du holding on ne peut
+;                   pas la réouvrir.
+;
+;                   Si l'usager met la periode C à S alors la période
+;                   précedent devient C.
+;
+;                   Si l'usager met la période C à F alors la période
+;                   suivante devient C.
+;
+;-------------------------------------------------------------------------------
+; /A/ Nancy Marceau, 94/02/25  Adaptation module Achats et Réceptions
+;
+;/M/ Modifié par...:    Guy Chabot 16 novembre 1994
+;            but...:    Ajout du flag pour les immobilisations.
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+;
+;/M/ Programmeur.......: Patrick Langlois
+;    Date modification.: 09 Juin 1999
+;    Description.......: Migration Achat/Réception/Inventaire de l'environnement (BOC)
+;
+
+
+SCREEN mc113 ACTIVITIES FIND, CHANGE &
+             ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU, &
+                       T_CIENOM   , &
+                       T_MODCLE
+
+USE ussectmp  NOLIST
+    "MC113"
+
+USE mc113.hlp NOLIST
+
+USE usactecr  NOLIST
+
+;-------------------------------------------------------------------------------
+;
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4 ; Compagnie de recherche
+TEMPORARY T_CIENOM    CHARACTER SIZE 40; Nom de la compagnie
+TEMPORARY T_MODCLE    CHARACTER SIZE 2 ; Module GL,CP,CR,IN,AR
+
+TEMPORARY T_ANNCLE    CHARACTER SIZE 2 ; Année de recherche
+
+
+;-------------------------------------------------------------------------------
+;
+
+FILE MCPERIODE_CIE    PRIMARY &
+                      OCCURS 14
+ ACCESS VIA     CIECLE &
+        REQUEST T_ANNCLE &
+        USING   T_CIECLEMNU &
+        ORDERBY PECCLE
+
+ SELECT IF T_ANNCLE = PECCLE OF MCPERIODE_CIE[1:2]
+
+;-------------------------------------------------------------------------------
+;
+; Pour avoir la date de début et de fin.
+;
+FILE MCPERIODE_CTB    REFERENCE &
+                      OCCURS WITH MCPERIODE_CIE
+ ACCESS VIA   PECCLE &
+        USING PECCLE OF MCPERIODE_CIE
+
+;-------------------------------------------------------------------------------
+;
+; Va chercher la période courante selon le module à traiter.
+;
+FILE MCPERIODE_CTB    DESIGNER &
+                      OPEN READ &
+                      ALIAS A_PEC_COURANTE
+
+;-------------------------------------------------------------------------------
+;
+; Pour avoir le nombre de période du holding afin de valider le changement
+; d'année.
+;
+FILE MCHOLDING        REFERENCE
+  ACCESS VIA CIENMC USING "1"
+
+;-------------------------------------------------------------------------------
+;
+; Pour valider la présence de la période précédente.
+;
+FILE MCPERIODE_CIE    DESIGNER &
+                      ALIAS A_PCC_01 &
+                      OPEN 1
+
+;-------------------------------------------------------------------------------
+;
+; Lookup pour le statut de période.
+;
+FILE VCBI_DSC         REFERENCE
+
+;-------------------------------------------------------------------------------
+;
+; Permet de valider si tout les lots des comptes payables sont journalisé.
+;
+FILE CPLOT            DESIGNER &
+                      OPEN READ
+
+;-------------------------------------------------------------------------------
+;
+; Permet de valider si tout les lots du grand livre sont journalisé.
+;
+FILE GLLOT            DESIGNER &
+                      OPEN READ
+
+;-------------------------------------------------------------------------------
+;
+; Permet de valider si tout les lots des comptes recevables sont journalisé.
+;
+FILE CRLOT            DESIGNER &
+                      OPEN READ
+
+
+;-------------------------------------------------------------------------------
+;
+; Permet de valider que toutes les pièces ont été approuvées.
+;
+FILE ARRECEPTION      DESIGNER &
+                      OPEN READ
+
+
+FILE ARMOUVEMENT      DESIGNER &
+                      OPEN READ
+
+;-------------------------------------------------------------------------------
+;
+;
+TEMPORARY T_STUMOD    CHARACTER SIZE 1 &
+          OCCURS WITH MCPERIODE_CIE ; Temporaire qui permet de ferme le bon
+                                    ; module
+TEMPORARY T_DATFERMOD DATE &
+          OCCURS WITH MCPERIODE_CIE ; Date de fermeture du bon module
+
+TEMPORARY T_STUOLD    CHARACTER SIZE 1 &
+          OCCURS WITH MCPERIODE_CIE ; Ancienne valeur du statut de la periode
+
+TEMPORARY T_PECCOU    CHARACTER SIZE 4 RESET AT STARTUP ; Période Courante
+TEMPORARY T_PECCLE    CHARACTER SIZE 4                  ; Période suivante ou
+                                                        ; précédente qui doit
+                                                        ; devenir courante
+
+;
+; Code bilingue du statut de période.
+;
+DEFINE D_PCCSTULNG CHARACTER SIZE 16 = "PCCSTUCP" IF T_MODCLE = "CP" &
+                             ELSE      "PCCSTUGL" IF T_MODCLE = "GL" &
+                             ELSE      "PCCSTUCR" IF T_MODCLE = "CR" &
+                             ELSE      "PCCSTUIM" IF T_MODCLE = "IM" &
+                             ELSE      "PCCSTUAR" IF T_MODCLE = "AR" &
+                             ELSE      "*"
+;
+
+;
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE CHAR SIZE 3         &
+       = "1" + PECCLE OF MCPERIODE_CTB[1:2] &
+       IF PECCLE OF MCPERIODE_CTB[1:1] < "8"  &
+       ELSE "0" + PECCLE OF MCPERIODE_CTB[1:2]
+
+ DEFINE D_PECCLE CHAR SIZE 2 &
+       = ASCII(NCONVERT(D_PECCLE_SIE) -1,3)[2:2]
+
+TEMPORARY T_PCCSTU    CHARACTER SIZE 4
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4  = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+;
+;
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+DRAW 7,1 TO 7,80
+
+SKIP
+TITLE &
+@IF FRANCAIS
+      " Fermeture de périodes " &
+@ELSE
+      " Closing period "  &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST
+
+SKIP 1
+
+ALIGN (,3,19) (,,25)
+
+FIELD T_ANNCLE HIDDEN ID 05 &
+        DISPLAY &
+@IF FRANCAIS
+        LABEL "Année.........:"
+@ELSE
+        LABEL "Year..........:"
+@ENDIF
+
+
+@IF FRANCAIS
+ TITLE "Période"        AT 8,5
+ TITLE "Date Début"     AT 8,16
+ TITLE "Date Fin"       AT 8,31
+ TITLE "Statut"         AT 8,42
+ TITLE "Cie fermé"      AT 8,52
+ TITLE "Date Fermeture" AT 8,63
+@ELSE
+ TITLE "Period"         AT 8,5
+ TITLE "Start Date"     AT 8,16
+ TITLE "End Date"       AT 8,31
+ TITLE "Status"         AT 8,42
+ TITLE "Co. closed"     AT 8,51
+ TITLE "Closing Date"   AT 8,63
+@ENDIF
+
+SKIP TO 9
+
+ALIGN(7,6,7) (,,17) (,,31) (,,45) (,,55) (,,65)
+
+CLUSTER OCCURS WITH MCPERIODE_CIE ID BASE 10
+
+FIELD PECCLE    OF MCPERIODE_CIE HIDDEN LABEL " " &
+        NOCHANGE &
+        PICTURE "^^" &
+        HILITE DISPLAY INVERSE &
+          IF T_STUMOD = "C"
+HILITE DISPLAY UNDERLINE
+
+FIELD PECDATDEB OF MCPERIODE_CTB  FORMAT YYYYMMDD PATTERN "####/##/##" DISPLAY &
+        HILITE DISPLAY INVERSE &
+          IF T_STUMOD = "C"
+HILITE DISPLAY UNDERLINE
+
+FIELD PECDATFIN OF MCPERIODE_CTB  FORMAT YYYYMMDD PATTERN "####/##/##" DISPLAY &
+        HILITE DISPLAY INVERSE &
+          IF T_STUMOD = "C"
+HILITE DISPLAY UNDERLINE
+
+FIELD T_STUMOD                   UPSHIFT &
+        LOOKUP ON VCBI_DSC &
+          VIA XELNOM, &
+              CBICLE &
+          USING D_PCCSTULNG, &
+                T_STUMOD &
+          MESSAGE 112 & ; "PAS TROUVER"
+        HILITE DISPLAY INVERSE &
+        IF T_STUMOD = "C"
+HILITE DISPLAY UNDERLINE
+
+FIELD PCCSTUHLD OF MCPERIODE_CIE DISPLAY &
+        SIZE 3 &
+        HILITE DISPLAY INVERSE &
+          IF T_STUMOD = "C"
+HILITE DISPLAY UNDERLINE
+
+FIELD T_DATFERMOD                DISPLAY  FORMAT YYYYMMDD PATTERN "####/##/##" &
+        HILITE DISPLAY INVERSE &
+          IF T_STUMOD = "C"
+HILITE DISPLAY UNDERLINE
+
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  ;
+  ; Valide la sécurité d'accès de l'écran.
+  ;
+  USE ussececr NOLIST
+  ;
+  ; Va chercher la période courante de holding selon le module.
+  ;
+  IF T_MODCLE = "CP"
+  THEN GET A_PEC_COURANTE VIA PECSTUCP USING "C" OPTIONAL
+
+  IF T_MODCLE = "CR"
+  THEN GET A_PEC_COURANTE VIA PECSTUCR USING "C" OPTIONAL
+
+  IF T_MODCLE = "GL"
+  THEN GET A_PEC_COURANTE VIA PECSTUGL USING "C" OPTIONAL
+
+  IF T_MODCLE = "IM"
+  THEN GET A_PEC_COURANTE VIA PECSTUIM USING "C" OPTIONAL
+
+  IF T_MODCLE = "AR"
+  THEN GET A_PEC_COURANTE VIA PECSTUAR USING "C" OPTIONAL
+
+  IF NOT ACCESSOK
+  THEN ERROR 151 ; il n'y a pas de période courante
+
+  LET T_PECCOU = PECCLE OF A_PEC_COURANTE
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Pour afficher le numéro de période sans l'année financière.
+;
+;
+PROCEDURE OUTPUT PECCLE
+BEGIN
+  LET FIELDTEXT = PECCLE OF MCPERIODE_CIE[3:2]
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Pour le choix des statuts de période.
+;
+;
+PROCEDURE INPUT T_STUMOD
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PCCSTU = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_PCCSTULNG, T_PCCSTU
+    LET FIELDTEXT = TRUNC(T_PCCSTU)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation des périodes avoisinantes.
+;
+;
+PROCEDURE EDIT T_STUMOD
+BEGIN
+
+  ;
+  ; Réouverture de période.
+  ;
+  IF FIELDTEXT = "S"
+  THEN BEGIN
+    ;
+    ; On ne peut pas réouvrir une période si celle-ci est fermée dans le holding
+    ;
+    IF PECCLE OF MCPERIODE_CIE = T_PECCOU
+    THEN ERROR 152 ; On ne peut ré-ouvrir une période si ele est fermé dans
+                   ; le holding
+    ;
+    ; Calcul pour avoir la période précédente si la séquence de la période
+    ; est plus grand que 1, alors cela indique qu'on reste dans la même
+    ; année, sinon c'est un changement d'année et il faut tenir
+    ; compte du nombre de période défini dans le holding.
+    ;
+    ; Ex si nombre de période = 12
+    ;    si 9201 la précédente est 9112
+    ;    si 9202 la précédente est 9201
+    ;
+
+
+
+    IF "01" = PECCLE OF MCPERIODE_CTB[3:2]
+    THEN &
+
+    LET T_PECCLE = D_PECCLE & ;ASCII(NCONVERT( PECCLE OF MCPERIODE_CTB[1:2] ) -1 ,2) &
+                        + ASCII( HLDNBRPERCTB OF MCHOLDING, 2)
+
+    ELSE LET T_PECCLE = ASCII(NCONVERT( PECCLE OF MCPERIODE_CTB ) -1 ,4)
+    ;
+    ; La période précédente doit exister.
+    ;
+    GET A_PCC_01 VIA CIECLE, &
+                     PECCLE  &
+                 USING T_CIECLEMNU, &
+                       T_PECCLE     &
+                 OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 153 ; La période précédente doit exister
+    ;
+    ; On vérifie si le HOLDING a bloqué la réouverture d'une période.
+    ; Si le flag PCCSTUHLD = 1 la période est bloquée.
+    ; Si le flag PCCSTUHLD = 0 la période n'est pas bloquée.
+    ; La gestion de ce statut ce fait par le menu Grand Livre - HOLDING.
+    ;
+    IF PCCSTUHLD OF A_PCC_01 = "1"
+    THEN ERROR 154 ; On ne peut pas réouvrir la période.
+    ;
+    ; On ne peut pas réouvrir la période si le Grand Livre est fermé.
+    ;
+    IF ( T_MODCLE = "CP" OR &
+         T_MODCLE = "CR" OR &
+         T_MODCLE = "AR" OR &
+         T_MODCLE = "IM" ) AND &
+       PCCSTUGL OF A_PCC_01 = "F"
+    THEN ERROR 145 ; Le grand livre est fermé.
+  END
+  ;
+  ; Fermeture de période.
+  ;
+  IF FIELDTEXT = "F"
+  THEN BEGIN
+    ;
+    ; Calcul pour avoir la prochain numéro de période, si la séquence de la
+    ; période est inférieur au nombre de période défini dans le holding,
+    ; alors cela indique qu'on reste dans la même année, sinon c'est un
+    ; changement d'année.
+    ;
+    IF HLDNBRPERCTB OF MCHOLDING > NCONVERT( PECCLE OF MCPERIODE_CTB[3:2])
+    THEN LET T_PECCLE = ASCII( NCONVERT( PECCLE OF MCPERIODE_CTB ) +1 , 4)
+                       ; Ajustement pour le changement de siècle
+    ELSE LET T_PECCLE = ASCII( NCONVERT( PECCLE OF MCPERIODE_CTB[1:2] ) + 1,3)[2:2] &
+                        + "01"
+    ;
+    ; La période suivante doit exister.
+    ;
+    GET A_PCC_01 VIA CIECLE, PECCLE USING T_CIECLEMNU, T_PECCLE OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 140 ; La période suivante doit exister.
+    ;
+    ; Validation si les lots sont tous journalisés lors d'une fermeture.
+    ;
+    IF T_MODCLE = "CR"
+    THEN GET CRLOT VIA CIECLE    , &
+                       PECCLE    , &
+                       LCRDATJOU   &
+                   USING T_CIECLEMNU            , &
+                         PECCLE OF MCPERIODE_CIE, &
+                         0                        &
+                   OPTIONAL
+
+    IF T_MODCLE = "CP"
+    THEN GET CPLOT VIA   CIECLE    , &
+                      PECCLE    , &
+                      LCPDATJOU   &
+                USING T_CIECLEMNU            , &
+                      PECCLE OF MCPERIODE_CIE, &
+                      0                        &
+                 OPTIONAL
+
+
+
+    IF T_MODCLE = "GL"
+    THEN GET GLLOT VIA LGLCIECLE , &
+                       PECCLE    , &
+                       LGLDATJOU   &
+                   USING T_CIECLEMNU            , &
+                         PECCLE OF MCPERIODE_CIE, &
+                         0                        &
+                   OPTIONAL
+
+    ;
+    ; Pour le Grand Livre:
+    ;  1) Le Grand Livre doit être fermé après les C/P, le C/R, le AR et le IN.
+    ;  2) il faut valider qu'il ne reste pas d'écriture de
+    ;    journal inter-cie relié à la compagnie/centre que l'on veut fermer.
+    ;
+    IF T_MODCLE = "GL"
+    THEN BEGIN
+      ;
+      ;
+      IF PCCSTUCP OF MCPERIODE_CIE <> "F" OR &
+         PCCSTUCR OF MCPERIODE_CIE <> "F" OR &
+         PCCSTUAR OF MCPERIODE_CIE <> "F" OR &
+         PCCSTUIN OF MCPERIODE_CIE <> "F"
+      THEN ERROR 142 ; Le Grand Livre doit être fermé le dernier.
+      ;
+    END
+    ;
+    ; Pour les comptes à payer:
+    ;  1) Les payables doivent être fermés après Achats/Réceptions.
+    ;
+    IF T_MODCLE = "CP"
+    THEN BEGIN
+      ;
+      ;
+      IF PCCSTUAR OF MCPERIODE_CIE <> "F"
+      THEN ERROR 190 ; Les périodes d'Achats/Réceptions doivent être fermées.
+      ;
+    END
+
+    ; Pour Achats/Réceptions:
+    ;  1) il faut valider qu'il ne reste pas de commandes, de réceptions ou de
+    ;     retours préliminaires.
+    IF T_MODCLE = "AR"
+    THEN BEGIN
+      ;
+      ; Il ne doit pas avoir de réception non-journalisée et on ne peut
+      ; le valider par le lot car celui-ci n'est attribué car la journalisation.
+      ;
+      GET ARRECEPTION  &
+        VIA   CIECLE  , &
+              PECCLE  , &
+              RECDATJOU &
+        USING T_CIECLEMNU, &
+              PECCLE OF MCPERIODE_CIE, &
+              0 OPTIONAL
+      IF ACCESSOK
+      THEN ERROR 191 ; Il reste des pièces préliminaires.
+
+    ; Pour Inventaire
+    ;  1) il faut valider qu'il ne reste pas de ??????????commandes, de réceptions ou de
+    ;     retours préliminaires.
+
+      GET ARMOUVEMENT &
+        VIA   CIECLE  , &
+              PECCLE  , &
+              MOUDATJOU &
+        USING T_CIECLEMNU, &
+              PECCLE OF MCPERIODE_CIE, &
+              0 OPTIONAL
+      IF ACCESSOK
+      THEN ERROR 191 ; Il reste des pièces préliminaires.
+      END
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; On transpose les valeurs 1 et 0 en Oui/Non.
+;
+;
+PROCEDURE OUTPUT PCCSTUHLD
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Permet de modifier le statut que pour la période courante
+;
+;
+PROCEDURE DESIGNER 10
+BEGIN
+  FOR MCPERIODE_CIE
+  BEGIN
+    IF T_STUOLD = "C"
+    THEN ACCEPT T_STUMOD
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Procédure pour affecter le statut et la date de fermeture selon le
+; module à traiter.
+;
+;
+PROCEDURE POSTFIND
+BEGIN
+  FOR MCPERIODE_CIE
+  BEGIN
+    IF T_MODCLE = "GL"
+    THEN BEGIN
+      LET T_STUOLD    = PCCSTUGL    OF MCPERIODE_CIE
+      LET T_STUMOD    = PCCSTUGL    OF MCPERIODE_CIE
+      LET T_DATFERMOD = PCCDATFERGL OF MCPERIODE_CIE
+    END
+    IF T_MODCLE = "CR"
+    THEN BEGIN
+      LET T_STUOLD    = PCCSTUCR    OF MCPERIODE_CIE
+      LET T_STUMOD    = PCCSTUCR    OF MCPERIODE_CIE
+      LET T_DATFERMOD = PCCDATFERCR OF MCPERIODE_CIE
+    END
+    IF T_MODCLE = "CP"
+    THEN BEGIN
+      LET T_STUOLD    = PCCSTUCP    OF MCPERIODE_CIE
+      LET T_STUMOD    = PCCSTUCP    OF MCPERIODE_CIE
+      LET T_DATFERMOD = PCCDATFERCP OF MCPERIODE_CIE
+    END
+    IF T_MODCLE = "AR"
+    THEN BEGIN
+      LET T_STUOLD    = PCCSTUAR    OF MCPERIODE_CIE
+      LET T_STUMOD    = PCCSTUAR    OF MCPERIODE_CIE
+      LET T_DATFERMOD = PCCDATFERAR OF MCPERIODE_CIE
+    END
+    IF T_MODCLE = "IM"
+    THEN BEGIN
+      LET T_STUOLD    = PCCSTUIM    OF MCPERIODE_CIE
+      LET T_STUMOD    = PCCSTUIM    OF MCPERIODE_CIE
+      LET T_DATFERMOD = PCCDATFERIM OF MCPERIODE_CIE
+    END
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR MCPERIODE_CIE
+  BEGIN
+    IF T_STUOLD <> T_STUMOD
+    THEN BEGIN
+      ;
+      ; Validation de la mise à jour(Entrée, Modification)
+      ;
+      IF "0" = TZ_SECMOD
+      THEN ERROR 2
+      ;
+      ;  Misa à jour de la période suivante ou précédente.
+      ;
+      GET A_PCC_01 VIA CIECLE, &
+                       PECCLE &
+                   USING T_CIECLEMNU, &
+                         T_PECCLE
+      IF T_MODCLE = "GL"
+      THEN BEGIN
+        LET PCCSTUGL OF MCPERIODE_CIE = T_STUMOD
+
+        IF PCCSTUGL OF MCPERIODE_CIE = "F"
+        THEN LET PCCDATFERGL OF MCPERIODE_CIE = SYSDATE
+
+        LET PCCSTUGL OF A_PCC_01 = "C"
+      END
+
+      IF T_MODCLE = "CR"
+      THEN BEGIN
+        LET PCCSTUCR OF MCPERIODE_CIE = T_STUMOD
+
+        IF PCCSTUCR OF MCPERIODE_CIE = "F"
+        THEN LET PCCDATFERCR OF MCPERIODE_CIE = SYSDATE
+
+        LET PCCSTUCR OF A_PCC_01 = "C"
+      END
+
+      IF T_MODCLE = "CP"
+      THEN BEGIN
+        LET PCCSTUCP OF MCPERIODE_CIE = T_STUMOD
+
+        IF PCCSTUCP OF MCPERIODE_CIE = "F"
+        THEN LET PCCDATFERCP OF MCPERIODE_CIE = SYSDATE
+
+        LET PCCSTUCP OF A_PCC_01 = "C"
+      END
+
+      IF T_MODCLE = "AR"
+      THEN BEGIN
+        LET PCCSTUAR OF MCPERIODE_CIE = T_STUMOD
+
+        IF PCCSTUAR OF MCPERIODE_CIE = "F"
+        THEN LET PCCDATFERAR OF MCPERIODE_CIE = SYSDATE
+
+        LET PCCSTUAR OF A_PCC_01 = "C"
+        LET PCCSTUIN OF MCPERIODE_CIE = T_STUMOD
+
+        IF PCCSTUIN OF MCPERIODE_CIE = "F"
+        THEN LET PCCDATFERIN OF MCPERIODE_CIE = SYSDATE
+
+        LET PCCSTUIN OF A_PCC_01 = "C"
+      END
+
+      IF T_MODCLE = "IM"
+      THEN BEGIN
+        LET PCCSTUIM OF MCPERIODE_CIE = T_STUMOD
+
+        IF PCCSTUIM OF MCPERIODE_CIE = "F"
+        THEN LET PCCDATFERIM OF MCPERIODE_CIE = SYSDATE
+
+        LET PCCSTUIM OF A_PCC_01 = "C"
+      END
+
+      PUT A_PCC_01
+    END
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Initialisation des variables temporaire.
+;
+;
+PROCEDURE POSTUPDATE
+BEGIN
+  FOR MCPERIODE_CIE
+  BEGIN
+    IF T_MODCLE = "GL"
+    THEN BEGIN
+      LET T_STUOLD    = PCCSTUGL    OF MCPERIODE_CIE
+      LET T_STUMOD    = PCCSTUGL    OF MCPERIODE_CIE
+      LET T_DATFERMOD = PCCDATFERGL OF MCPERIODE_CIE
+    END
+    IF T_MODCLE = "CR"
+    THEN BEGIN
+      LET T_STUOLD    = PCCSTUCR    OF MCPERIODE_CIE
+      LET T_STUMOD    = PCCSTUCR    OF MCPERIODE_CIE
+      LET T_DATFERMOD = PCCDATFERCR OF MCPERIODE_CIE
+    END
+    IF T_MODCLE = "CP"
+    THEN BEGIN
+      LET T_STUOLD    = PCCSTUCP    OF MCPERIODE_CIE
+      LET T_STUMOD    = PCCSTUCP    OF MCPERIODE_CIE
+      LET T_DATFERMOD = PCCDATFERCP OF MCPERIODE_CIE
+    END
+    IF T_MODCLE = "AR"
+    THEN BEGIN
+      LET T_STUOLD    = PCCSTUAR    OF MCPERIODE_CIE
+      LET T_STUMOD    = PCCSTUAR    OF MCPERIODE_CIE
+      LET T_DATFERMOD = PCCDATFERAR OF MCPERIODE_CIE
+    END
+    IF T_MODCLE = "IM"
+    THEN BEGIN
+      LET T_STUOLD    = PCCSTUIM    OF MCPERIODE_CIE
+      LET T_STUMOD    = PCCSTUIM    OF MCPERIODE_CIE
+      LET T_DATFERMOD = PCCDATFERIM OF MCPERIODE_CIE
+    END
+    DISPLAY T_STUMOD
+    DISPLAY T_DATFERMOD
+  END
+END
+
+BUILD
+@IF FORMAT
+
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+**************************** Fermeture de périodes *****************************
+*                                                                              *
+* Année.........: xx                                                           *
+*                                                                              *
+********************************************************************************
+*   Période    Date Début     Date Fin   Statut    Cie fermé  Date Fermeture   *
+*     xx        xxxxxxxx      xxxxxxxx      x         xxx       xxxxxxxx       *
+*     xx        xxxxxxxx      xxxxxxxx      x         xxx       xxxxxxxx       *
+*     xx        xxxxxxxx      xxxxxxxx      x         xxx       xxxxxxxx       *
+*     xx        xxxxxxxx      xxxxxxxx      x         xxx       xxxxxxxx       *
+*     xx        xxxxxxxx      xxxxxxxx      x         xxx       xxxxxxxx       *
+*     xx        xxxxxxxx      xxxxxxxx      x         xxx       xxxxxxxx       *
+*     xx        xxxxxxxx      xxxxxxxx      x         xxx       xxxxxxxx       *
+*     xx        xxxxxxxx      xxxxxxxx      x         xxx       xxxxxxxx       *
+*     xx        xxxxxxxx      xxxxxxxx      x         xxx       xxxxxxxx       *
+*     xx        xxxxxxxx      xxxxxxxx      x         xxx       xxxxxxxx       *
+*     xx        xxxxxxxx      xxxxxxxx      x         xxx       xxxxxxxx       *
+*     xx        xxxxxxxx      xxxxxxxx      x         xxx       xxxxxxxx       *
+*     xx        xxxxxxxx      xxxxxxxx      x         xxx       xxxxxxxx       *
+*     xx        xxxxxxxx      xxxxxxxx      x         xxx       xxxxxxxx       *
+********************************************************************************
+@ENDIF

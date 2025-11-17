@@ -1,0 +1,922 @@
+;/T/ Paiements automatiques
+;
+;/P/ Programmeur..: Alain Côté
+;    Date Création: 30 avril 1992
+;
+;    Description..: Saisie des paiements automatiques.
+;
+;    Modification.: Le 17 Juin 1993 par Thomas BRENNEUR
+;                   Adaptation pour PGL version 3
+;
+;/M/ François Déry, 30 avril 1999
+;       Modifier l'accèss au fichier de séquence des paiements auto. car il a
+;       été converti en format interbase au lieu d'indexé.
+;
+;/M/ Adatation....: Marc Morissette 22 Octobre 1993
+;
+;    Description..: Label Reste à payer -> Solde à vent.
+;
+;/M/ Modifié par Nancy Marceau 27 avril 1994
+;       - Ajouter l'initialisation de CAPCPTCAP avec le compte du fournisseur
+;         comme dans les factures afin de pouvoir le sélectionner dans le
+;         rapport des pièces à payer (CP305).
+;
+;-------------------------------------------------------------------------------
+;/V/ 3.00.02    Guy Chabot 12-mai-1994 (197).
+;
+;/M/ Marie-Josée Hamel, 96.03.21, le noitem sur le detail avec un reference
+;                                 qui occurs avec et qui est référé dans une
+;                                 define qui est affichée cause une mauvaise
+;                                 initialisation des valeurs de clé, j'ai enlevé
+;                                 le noitem pour contourner le bug.
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cp006 ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING  T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        T_FOUCIECLE
+
+
+USE ussectmp NOLIST
+    "CP006"
+
+USE cp006.hlp NOLIST
+
+USE usactecr NOLIST
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-Ecrans"
+  MENUITEM LABEL "Imputation                      " ACTION DESIGNER D001
+  MENUITEM LABEL "Talon du paiement               " ACTION DESIGNER D002
+  MENUITEM LABEL "Historique des transactions     " ACTION DESIGNER D003
+  MENUITEM LABEL "Vérifications                   " ACTION DESIGNER D004
+@ELSE
+ACTIONMENU LABEL "Subscreens"
+  MENUITEM LABEL "Imputation                   %%%" ACTION DESIGNER D001
+  MENUITEM LABEL "Talon du paiement            %%%" ACTION DESIGNER D002
+  MENUITEM LABEL "Historique des transactions  %%%" ACTION DESIGNER D003
+  MENUITEM LABEL "Vérifications                %%%" ACTION DESIGNER D004
+@ENDIF
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE CPPAIE_AUTO_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE  4 ; Cie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie.
+TEMPORARY T_FOUCIECLE CHARACTER SIZE  4 ; Cie du fournisseur.
+
+;-------------------------------------------------------------------------------
+;
+; PAIEMENTS AUTOMATIQUES
+;
+;
+
+FILE CPCPT_A_PAYER    PRIMARY
+
+  ACCESS  VIA     FOUCIECLE, &
+                  FOUCLE   , &
+                  CAPCLE   , &
+                  CAPCIECLE, &
+                  CAPTYPECR, &
+                  PECCLE   , &
+                  LCPCLE     &
+          USING   T_FOUCIECLE, &
+                  FOUCLE OF CPCPT_A_PAYER, &
+                  CAPCLE OF CPCPT_A_PAYER, &
+                  T_CIECLEMNU            , &
+                  "PA"                   , &
+                  ""                     , &
+                  ""                       &
+          REQUEST FOUCLE, &
+                  CAPCLE  &
+          ORDERBY FOUCIECLE, &
+                  FOUCLE   , &
+                  CAPCLE
+
+  ACCESS  VIA     FOUCIECLE, &
+                  FOUCLE   , &
+                  CAPCIECLE, &
+                  CAPTYPECR  &
+          USING   T_FOUCIECLE, &
+                  FOUCLE OF CPCPT_A_PAYER, &
+                  T_CIECLEMNU            , &
+                  "PA"                     &
+          REQUEST FOUCLE &
+          ORDERBY FOUCIECLE, &
+                  FOUCLE   , &
+                  CAPCLE
+
+  ACCESS  VIA     FOUCIECLE, &
+                  CAPCIECLE, &
+                  CAPTYPECR  &
+          USING   T_FOUCIECLE, &
+                  T_CIECLEMNU, &
+                  "PA"       &
+          ORDERBY FOUCIECLE, &
+                  FOUCLE   , &
+                  CAPCLE
+
+  ITEM FOUCIECLE    OF CPCPT_A_PAYER INITIAL T_FOUCIECLE
+  ITEM CAPCIECLE    OF CPCPT_A_PAYER INITIAL T_CIECLEMNU
+  ITEM REFCIECLE    OF CPCPT_A_PAYER INITIAL T_FOUCIECLE
+  ITEM REFCLETYP    OF CPCPT_A_PAYER INITIAL "F"
+  ITEM CAPTYPECR    OF CPCPT_A_PAYER INITIAL "PA"
+  ITEM CAPDAT       OF CPCPT_A_PAYER INITIAL SYSDATE
+  ITEM CAPDATJOU    OF CPCPT_A_PAYER INITIAL SYSDATE
+  ITEM CAPHREJOU    OF CPCPT_A_PAYER INITIAL SYSTIME / 10000
+  ITEM CAPRTU       OF CPCPT_A_PAYER INITIAL "0"
+  ITEM CAPFLGCED    OF CPCPT_A_PAYER INITIAL "1"
+  ITEM CAPCUMCED    OF CPCPT_A_PAYER FINAL   CAPMNT OF CPCPT_A_PAYER
+  ITEM CAPDATCRE    OF CPCPT_A_PAYER INITIAL SYSDATE
+  ITEM CAPHRECRE    OF CPCPT_A_PAYER INITIAL SYSTIME / 10000
+  ITEM CAPUSRCRE    OF CPCPT_A_PAYER INITIAL LOGONID
+
+;-------------------------------------------------------------------------------
+;
+; Cédule de paiement.
+;
+FILE CPCAP_CEDULE     DETAIL &
+;                      NOITEM &  ;;;BUG POWERHOUSE
+                      OCCURS 10
+
+  ACCESS  VIA     FOUCIECLE, &
+                  FOUCLE   , &
+                  CAPCLE     &
+          USING   FOUCIECLE OF CPCPT_A_PAYER, &
+                  FOUCLE    OF CPCPT_A_PAYER, &
+                  CAPCLE    OF CPCPT_A_PAYER  &
+          ORDERBY FOUCIECLE, &
+                  FOUCLE   , &
+                  CAPCLE   , &
+                  CPCCLELIG
+
+  ITEM FOUCIECLE    OF CPCAP_CEDULE INITIAL FOUCIECLE OF CPCPT_A_PAYER
+  ITEM FOUCLE       OF CPCAP_CEDULE INITIAL FOUCLE    OF CPCPT_A_PAYER
+  ITEM CAPCLE       OF CPCAP_CEDULE FINAL   CAPCLE    OF CPCPT_A_PAYER
+
+
+;
+; Destruction des lignes de cédule.
+;
+FILE CPCAP_CEDULE     DELETE &
+                      ALIAS A_CPC_DELETE &
+                      NOITEM
+
+  ACCESS  VIA     FOUCIECLE, &
+                  FOUCLE   , &
+                  CAPCLE     &
+          USING   FOUCIECLE OF CPCPT_A_PAYER, &
+                  FOUCLE    OF CPCPT_A_PAYER, &
+                  CAPCLE    OF CPCPT_A_PAYER
+
+
+;
+; Destruction du talon du paiement automatique.
+;
+FILE CPCAP_TALON      DELETE &
+                      NOITEM
+
+  ACCESS  VIA     FOUCIECLE, &
+                  FOUCLE   , &
+                  CAPCLE     &
+          USING   FOUCIECLE OF CPCPT_A_PAYER, &
+                  FOUCLE    OF CPCPT_A_PAYER, &
+                  CAPCLE    OF CPCPT_A_PAYER
+
+
+;
+; Destruction de l'imputation.
+;
+FILE CPCAP_IMPUTATION DELETE &
+                      NOITEM
+
+  ACCESS  VIA     FOUCIECLE, &
+                  FOUCLE   , &
+                  CAPCLE     &
+          USING   FOUCIECLE OF CPCPT_A_PAYER, &
+                  FOUCLE    OF CPCPT_A_PAYER, &
+                  CAPCLE    OF CPCPT_A_PAYER
+
+;
+; Solde du paiement automatique
+;
+FILE VCAP_SLD REFERENCE
+
+  ACCESS  VIA   FOUCIECLE, &
+                FOUCLE   , &
+                CAPCLE     &
+          USING FOUCIECLE OF CPCPT_A_PAYER, &
+                FOUCLE    OF CPCPT_A_PAYER, &
+                CAPCLE    OF CPCPT_A_PAYER
+
+;-------------------------------------------------------------------------------
+;
+; Solde des cédules
+;
+FILE VCPC_SLD REFERENCE &
+              OCCURS WITH CPCAP_CEDULE
+
+  ACCESS  VIA   FOUCIECLE, &
+                FOUCLE   , &
+                CAPCLE   , &
+                CPCCLELIG  &
+          USING FOUCIECLE OF CPCAP_CEDULE, &
+                FOUCLE    OF CPCAP_CEDULE, &
+                CAPCLE    OF CPCAP_CEDULE, &
+                CPCCLELIG OF CPCAP_CEDULE
+
+;-------------------------------------------------------------------------------
+;
+; Numérotation du numéro de paiement
+;
+FILE CPPAIE_AUTO_SEQ DESIGNER &
+                     TRANSACTION GEN_NUM_SEQ
+
+  ACCESS VIA    CIECLE &
+         USING  T_CIECLEMNU
+
+  ITEM CIECLE OF CPPAIE_AUTO_SEQ INITIAL T_CIECLEMNU
+
+;-------------------------------------------------------------------------------
+;
+; Validation du fournisseur et pour afficher son nom.
+;
+FILE VFOC_FOU REFERENCE
+
+  ACCESS  VIA   FOUCIECLE, &
+                FOUCLE,    &
+                FOCCIECLE  &
+          USING FOUCIECLE OF CPCPT_A_PAYER, &
+                FOUCLE    OF CPCPT_A_PAYER, &
+                CAPCIECLE OF CPCPT_A_PAYER
+
+  ITEM CAPCPTCAP  OF CPCPT_A_PAYER FINAL   FOCCPTCAP OF VFOC_FOU
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation du numéro d'adresse.
+;
+FILE MCREF_ADRESSE    REFERENCE
+
+;-------------------------------------------------------------------------------
+;
+; Paramètres des comptes à payer permettant de retrouver l'identifiant des
+; paiements automatiques
+;
+FILE CPPARAMETRE REFERENCE
+
+  ACCESS  VIA   CIENMC &
+          USING "1"
+
+;-------------------------------------------------------------------------------
+;
+; Lecture de la devise du holding
+;
+FILE MCHOLDING REFERENCE
+
+  ACCESS  VIA   CIENMC &
+          USING "1"
+
+
+;
+; Cédule de paiement, sert lors de la destruction.
+;
+FILE CPCAP_CEDULE     DESIGNER &
+                      ALIAS A_CPC_EXISTE
+
+  ACCESS  VIA     FOUCIECLE, &
+                  FOUCLE   , &
+                  CAPCLE     &
+          USING   FOUCIECLE OF CPCPT_A_PAYER, &
+                  FOUCLE    OF CPCPT_A_PAYER, &
+                  CAPCLE    OF CPCPT_A_PAYER
+
+;-------------------------------------------------------------------------------
+;
+; Sert à valider les codes bilingue et pour les sous-écrans de consultation
+;
+;
+TEMPORARY T_CIECLE    CHARACTER SIZE  4
+TEMPORARY T_FOCCIECLE CHARACTER SIZE  4
+TEMPORARY T_CAPCLE    CHARACTER SIZE 15
+TEMPORARY T_FOUCLE    CHARACTER SIZE  6
+TEMPORARY T_MCMCLE    INTEGER UNSIGNED SIZE 4
+TEMPORARY T_REFCLETYP CHARACTER SIZE  1
+TEMPORARY T_RADCLE    INTEGER UNSIGNED SIZE  2
+TEMPORARY T_TYPADR    CHARACTER SIZE  3
+TEMPORARY T_TYPECRPAT CHARACTER SIZE  30
+
+
+DEFINE    D_DEVCLE CHARACTER SIZE 4 &
+                = " " IF DEVCLE OF VFOC_FOU = DEVCLE OF MCHOLDING ELSE &
+                  "/" + DEVCLE OF VFOC_FOU
+
+DEFINE    D_SLD_A_PYE FLOAT SIZE 8 &
+          = CAPMNT      OF CPCPT_A_PAYER &
+          - V_CAPMNTPYE OF VCAP_SLD      &
+          - V_CAPMNTESC OF VCAP_SLD
+
+DEFINE    D_CPCMNTPYE FLOAT SIZE 8 &
+          = V_CPCMNTPYE OF VCPC_SLD &
+          + V_CPCMNTESC OF VCPC_SLD
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_FLGDEL CHARACTER SIZE 1 ; Flag pour le sous-écran de destruction
+
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+
+USE usdrwecr NOLIST     ; Draw pour les écrans pleine page
+USE ustitstd NOLIST     ; Définition du titre standard
+USE ushilite NOLIST     ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Paiements automatiques " &
+@ELSE
+      " Automatic Payments " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+ALIGN (3,3,19) (,,26) (,49,65)
+
+FIELD FOUCLE OF CPCPT_A_PAYER &
+LABEL "Fournisseur...:"&
+      ID 05 HIDDEN &
+      REQUIRED &
+      NOCHANGE &
+      LOOKUP ON VFOC_FOU &
+          MESSAGE 437 ; Ce numéro de fournisseur n'existe pas.
+
+FIELD FOUNOMABR OF VFOC_FOU &
+      DISPLAY
+
+FIELD RADCLE OF CPCPT_A_PAYER &
+@IF FRANCAIS
+      LABEL "Adr. paiement.:" &
+@ELSE
+      LABEL "Adr. Payment..:" &
+@ENDIF
+      LOOKUP ON MCREF_ADRESSE &
+        VIA   REFCIECLE, &
+              REFCLETYP, &
+              REFCLENUM, &
+              RADCLE &
+        USING FOUCIECLE OF CPCPT_A_PAYER, &
+              FOUREFTYP OF VFOC_FOU     , &
+              FOUCLE    OF CPCPT_A_PAYER, &
+              RADCLE    OF CPCPT_A_PAYER &
+        MESSAGE 415 ; Ce numéro d'adresse n'existe pas.
+
+ALIGN (3,3,19) (,49,65)
+
+FIELD CAPCLE OF CPCPT_A_PAYER &
+      ID 10 HIDDEN &
+@IF FRANCAIS
+      LABEL "Paiement......:" &
+@ELSE
+      LABEL "Payment.......:" &
+@ENDIF
+      DISPLAY &
+      REFRESH
+
+FIELD CAPRTU OF CPCPT_A_PAYER &
+LABEL "Retenu........:"&
+      SIZE 3
+
+SKIP
+
+FIELD CAPDSC1 OF CPCPT_A_PAYER &
+LABEL "Description...:"&
+      ID 15 HIDDEN &
+      REQUIRED
+
+SKIP
+
+FIELD CAPDSC2 OF CPCPT_A_PAYER &
+      ID SAME &
+      NOLABEL
+
+ALIGN (3,3,19) (,,33) (,49,65)
+
+FIELD CAPMNT OF CPCPT_A_PAYER &
+      ID 20 HIDDEN &
+@IF FRANCAIS
+      LABEL "Total cédule..:" &
+@ELSE
+      LABEL "Schedule Total:" &
+@ENDIF
+      DISPLAY
+
+FIELD D_DEVCLE &
+      DISPLAY
+
+FIELD V_CAPMNTPYE OF VCAP_SLD&
+      DISPLAY &
+@IF FRANCAIS
+      LABEL "Montant payé..:" &
+@ELSE
+      LABEL "Amount paid...:" &
+@ENDIF
+      PICTURE "^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIF 5
+
+SKIP TO GROUP 3
+
+FIELD D_SLD_A_PYE &
+      ID SAME &
+@IF FRANCAIS
+      LABEL "Solde à vent..:" &
+@ELSE
+      LABEL "Left to Pay...:" &
+@ENDIF
+      PICTURE "^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIF 5 &
+      DISPLAY
+
+;
+; - Imputation
+;
+SUBSCREEN cp006a &
+          AUTO &
+          HIDDEN &
+          NOLABEL &
+          MODE SAME &
+          PASSING CPCPT_A_PAYER
+
+;
+; - Talon du paiement.
+;
+SUBSCREEN cp006b &
+          AUTO &
+          HIDDEN &
+          NOLABEL &
+          MODE SAME &
+          PASSING CPCPT_A_PAYER
+
+SKIP
+DRAW ,1 TO ,80
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+      "     No de                          Montant du             Montant           " &
+@ELSE
+      "     %%%%%                          %%%%%%%%%%             %%%%%%%           " &
+@ENDIF
+      AT ,2
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      "    Cédule      Date due              paiement                payé           " &
+@ELSE
+      "    %%%%%%      %%%%%%%%              %%%%%%%%                %%%%           " &
+@ENDIF
+      AT ,2
+SKIP
+
+ALIGN(8,7,8) (,,18) (,,35) (,,55)
+
+CLUSTER OCCURS WITH CPCAP_CEDULE ID BASE 25
+
+FIELD CPCCLELIG OF CPCAP_CEDULE &
+      HIDDEN &
+      LABEL " " &
+      DISPLAY
+
+FIELD CPCDATDUE OF CPCAP_CEDULE  FORMAT YYYYMMDD PATTERN "####/##/##"&
+      REQUIRED
+
+FIELD CPCMNT OF CPCAP_CEDULE &
+      REQUIRED
+
+FIELD D_CPCMNTPYE &
+      PICTURE "^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIF 5 &
+      DISPLAY
+
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès pour l'écran par son code.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION & VALIDATION DU FOURNISSEUR
+;
+;
+PROCEDURE INPUT FOUCLE
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = FOUCIECLE OF CPCPT_A_PAYER
+    LET T_FOUCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_FOCCIECLE = T_CIECLEMNU
+    RUN SCREEN cp104 MODE F PASSING T_CIECLE, T_FOUCLE, T_FOCCIECLE
+    LET FIELDTEXT = TRUNCATE(T_FOUCLE)
+  END
+END
+
+;
+; Validation du fournisseur.
+;
+PROCEDURE EDIT FOUCLE
+BEGIN
+  IF FOUSTU OF VFOC_FOU = "I"
+  THEN ERROR 446 ; Le fournisseur est inactif.
+
+  IF FOURTU OF VFOC_FOU = "1"
+  THEN WARNING 447 ; Le fournisseur est présentement retenu.
+
+  IF FOUTYP OF VFOC_FOU = "D"
+  THEN ERROR 492 ; On ne peut pas utiliser un fourniseur divers.
+END
+
+;
+; Assignation de l'adresse de paiement.
+;
+PROCEDURE PROCESS FOUCLE
+BEGIN
+  LET     RADCLE OF CPCPT_A_PAYER = FOCADRPAM OF VFOC_FOU
+  DISPLAY RADCLE OF CPCPT_A_PAYER
+  LET     REFCLENUM OF CPCPT_A_PAYER = FOUCLE OF CPCPT_A_PAYER
+END
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION & VALIDATION DE L'ADRESSE DE PAIEMENT
+;
+;
+PROCEDURE INPUT RADCLE
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE    = REFCIECLE OF CPCPT_A_PAYER
+    LET T_REFCLETYP = REFCLETYP OF CPCPT_A_PAYER
+    LET T_FOUCLE    = FOUCLE    OF CPCPT_A_PAYER
+    LET T_TYPADR    = "PAM"
+    LET T_RADCLE    = 0
+    RUN SCREEN mc108 MODE F PASSING T_CIECLE, T_REFCLETYP, T_FOUCLE, &
+                                    T_TYPADR, T_RADCLE
+    IF T_RADCLE <> 0
+    THEN LET FIELDTEXT = ASCII(T_RADCLE)
+    ELSE LET FIELDTEXT = ""
+  END
+END
+
+;
+; Validation de l'adresse.
+;
+PROCEDURE EDIT RADCLE
+BEGIN
+  IF RADPAMCP OF MCREF_ADRESSE <> "1"
+  THEN ERROR 423 ; Ce n'est pas une adresse de paiement.
+END
+
+;-------------------------------------------------------------------------------
+;
+; FLAG OUI/NON SUR LE CODE DE RETENUE DU PAIEMENT
+;
+PROCEDURE INPUT CAPRTU
+BEGIN
+  USE usflginp NOLIST
+END
+
+PROCEDURE OUTPUT CAPRTU
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION DES PAIEMENTS DE CE PAIEMENT AUTOMATIQUE
+;
+;
+PROCEDURE INPUT V_CAPMNTPYE
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE    = FOUCIECLE OF CPCPT_A_PAYER
+    LET T_FOUCLE    = FOUCLE    OF CPCPT_A_PAYER
+    LET T_CAPCLE    = CAPCLE    OF CPCPT_A_PAYER
+    LET T_TYPECRPAT = "PA"
+    RUN SCREEN cp106 MODE F PASSING T_CIECLE, T_FOUCLE, T_CAPCLE, T_TYPECRPAT
+  END
+  LET FIELDTEXT = ""
+END
+
+;-------------------------------------------------------------------------------
+;
+; VALIDATION DE LA SÉCURITÉE SUR L'ENTRÉE DES DONNÉES
+;
+;
+PROCEDURE INPUT CPCDATDUE
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; TRAITEMENT DE CHAQUE LIGNE DE CÉDULE
+;
+;   - Validation du montant du paiement
+;   - Numérotation des lignes de cédules
+;   - Affichage du total de la cédule.
+;
+;
+PROCEDURE EDIT CPCMNT
+BEGIN
+  ;
+  ; Valide la partie décimale.
+  ;
+  USE usvaldec NOLIST
+  ;
+  ; On vérifie que le montant du paiement ne soit pas inférieure au montant
+  ; payé.
+  ;
+  IF CPCMNT OF CPCAP_CEDULE < D_CPCMNTPYE
+  THEN ERROR 548 ; Le montant du paiement ne peut pas être inférieure au
+                 ; montant payé.
+  ;
+  ; Maintenance du montant total de la cédule.
+  ;
+  LET CAPMNT OF CPCPT_A_PAYER = CAPMNT OF CPCPT_A_PAYER - &
+                                OLDVALUE(CPCMNT OF CPCAP_CEDULE) + &
+                                FIELDVALUE
+END
+
+PROCEDURE PROCESS CPCMNT
+BEGIN
+  IF CPCCLELIG OF CPCAP_CEDULE = 0 AND &
+     NEWRECORD OF CPCAP_CEDULE
+  THEN BEGIN
+    LET CAPNUMLIGCED OF CPCPT_A_PAYER = CAPNUMLIGCED OF CPCPT_A_PAYER + 1
+    LET CPCCLELIG    OF CPCAP_CEDULE  = CAPNUMLIGCED OF CPCPT_A_PAYER
+    DISPLAY CPCCLELIG OF CPCAP_CEDULE
+  END
+  DISPLAY CAPMNT OF CPCPT_A_PAYER
+END
+
+;-------------------------------------------------------------------------------
+;
+; VALIDATION DE LA SÉCURITÉE SUR L'ENTRÉE DES DONNÉES
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE DESIGNER 25
+BEGIN
+  ;
+  ; La date due n'est pas modifiable s'il y a un montant payé.
+  ;
+  IF D_CPCMNTPYE = 0
+  THEN ACCEPT CPCDATDUE OF CPCAP_CEDULE
+  ;
+  ; Le montant du paiement est modifiable si ce montant est supérieure au
+  ; montant payé.
+  ;
+  IF CPCMNT OF CPCAP_CEDULE > D_CPCMNTPYE
+  THEN ACCEPT CPCMNT OF CPCAP_CEDULE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; PREPARATION DE LA MISE-A-JOUR.
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF    DELETEDRECORD OF CPCPT_A_PAYER &
+    AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la mise à jour(Entrée, Modification)
+  ;
+  IF (   ALTEREDRECORD     OF CPCPT_A_PAYER &
+      OR ALTEREDRECORD     OF CPCAP_CEDULE  &
+     ) &
+     AND NOT NEWRECORD     OF CPCPT_A_PAYER &
+     AND NOT DELETEDRECORD OF CPCPT_A_PAYER &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  ;
+  ; La somme de l'imputation doit être de 10000. C'est à dire 100.00 %
+  ;
+
+  IF 10000 <> CAPCUMMNT OF CPCPT_A_PAYER
+  THEN WARNING 493 ; L'imputation doit être répartie sur 100%.
+
+  ;
+  ; Numérotation du numéro de paiement.
+  ;
+  IF 0 = SIZE(TRUNC(CAPCLE OF CPCPT_A_PAYER))
+  THEN BEGIN
+    GET CPPARAMETRE OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 541 ; Mise à jour impossible, les paramètres des C.A.P. n'ont pas étés définis.
+    IF 0 = SIZE(TRUNCATE(CPPCODPAU OF CPPARAMETRE))
+    THEN ERROR 539 ; Mise à jour impossible, le code de paiement automatique n'est pas défini.
+
+    START TRANSACTION GEN_NUM_SEQ
+    GET CPPAIE_AUTO_SEQ OPTIONAL
+    LET CPANUMSEQ OF CPPAIE_AUTO_SEQ  = CPANUMSEQ OF CPPAIE_AUTO_SEQ + 1
+    LET CAPCLE    OF CPCPT_A_PAYER    = CPPCODPAU OF CPPARAMETRE &
+                                      + ASCII(CPANUMSEQ OF CPPAIE_AUTO_SEQ,6)
+    PUT CPPAIE_AUTO_SEQ
+    COMMIT TRANSACTION GEN_NUM_SEQ
+  END
+
+  ;
+  ; Destruction d'un ligne de cédule.
+  ;
+  FOR CPCAP_CEDULE
+  BEGIN
+    IF DELETEDRECORD OF CPCAP_CEDULE
+    THEN BEGIN
+
+      IF CPCFLGSEL OF CPCAP_CEDULE = "1"
+      THEN ERROR 561 ; Cette ligne est sélectionnée.
+      ;
+      ; On initialise le flag de retour pour savoir si le sous-écran a
+      ; bien fonctionné.
+      ;
+      LET T_FLGDEL = ""
+      ;
+      ; Appel du sous-écran qui valide si la cédule est référée.
+      ;
+      RUN SCREEN cp006x MODE SAME &
+                        PASSING CPCAP_CEDULE , &
+                               T_FLGDEL
+      ;
+      ; Si la valeur de retour égale 1, cela indique que le sous-écran
+      ; n'a trouvé aucune référence pour l'identifiant demandé.
+      ;
+      IF T_FLGDEL = ""
+      THEN ERROR " "
+    END
+  END
+
+  ;
+  ; Destruction du paiement automatique.
+  ; Il faut vérifier pour toutes les lignes de cédule du paiement automatique,
+  ; même ceux qui n'apparaisse pas à l'écran, si une cédule est référée.
+  ;
+  IF DELETEDRECORD OF CPCPT_A_PAYER
+  THEN BEGIN
+    WHILE RETRIEVING A_CPC_EXISTE
+    BEGIN
+      IF CPCFLGSEL OF A_CPC_EXISTE = "1"
+      THEN ERROR 561 ; Cette ligne est sélectionnée.
+      ;
+      ; On initialise le flag de retour pour savoir si le sous-écran a
+      ; bien fonctionné.
+      ;
+      LET T_FLGDEL = ""
+      ;
+      ; Appel du sous-écran qui valide si la cédule est référée.
+      ;
+      RUN SCREEN cp006x MODE SAME &
+                        PASSING A_CPC_EXISTE , &
+                                T_FLGDEL
+      ;
+      ; Si la valeur de retour égale 1, cela indique que le sous-écran
+      ; n'a trouvé aucune référence pour l'identifiant demandé.
+      ;
+      IF T_FLGDEL = ""
+      THEN ERROR " "
+    END
+  END
+
+END
+
+;-------------------------------------------------------------------------------
+;
+; SOUS-ECRAN D'IMPUTATION
+;
+PROCEDURE DESIGNER D001
+BEGIN
+  IF ALTEREDRECORD OF CPCPT_A_PAYER
+  THEN ERROR 483 ; Faire une m.a.j. avant d'accèder ce sous-écran.
+
+  RUN SCREEN cp006a MODE SAME &
+                    PASSING CPCPT_A_PAYER
+END
+
+;-------------------------------------------------------------------------------
+;
+; SOUS-ECRAN DU TALON DU PAIEMENT
+;
+PROCEDURE DESIGNER D002
+BEGIN
+  IF ALTEREDRECORD OF CPCPT_A_PAYER
+  THEN ERROR 483 ; Faire une m.a.j. avant d'accèder ce sous-écran.
+
+  RUN SCREEN cp006b MODE SAME &
+                    PASSING CPCPT_A_PAYER
+END
+
+;-------------------------------------------------------------------------------
+;
+; SOUS-ECRAN DE L'HISTORIQUE DES TRANSACTIONS
+;
+PROCEDURE DESIGNER D003
+BEGIN
+  IF ALTEREDRECORD OF CPCPT_A_PAYER
+  THEN ERROR 483 ; Faire une m.a.j. avant d'accèder ce sous-écran.
+
+  RUN SCREEN cp006d MODE F &
+                    PASSING CPCPT_A_PAYER
+END
+
+;-------------------------------------------------------------------------------
+;
+; SOUS-ECRAN DE VÉRIFICATION
+;
+PROCEDURE DESIGNER D004
+BEGIN
+  IF ALTEREDRECORD OF CPCPT_A_PAYER
+  THEN ERROR 483 ; Faire une m.a.j. avant d'accèder ce sous-écran.
+
+  RUN SCREEN cp006e MODE SAME &
+                    PASSING CPCPT_A_PAYER
+END
+
+;-------------------------------------------------------------------------------
+;
+; Mise à jour du total de la cédule.
+;
+;
+;
+PROCEDURE DETAIL DELETE
+BEGIN
+  IF NOT DELETEDRECORD OF CPCPT_A_PAYER
+  THEN BEGIN
+    LET CAPMNT OF CPCPT_A_PAYER = CAPMNT OF CPCPT_A_PAYER - &
+                                  CPCMNT OF CPCAP_CEDULE
+
+    DELETE CPCAP_CEDULE
+  END
+END
+
+BUILD
+@IF FORMAT
+
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+**************************** Paiements automatiques ****************************
+* Fournisseur...: xxxxxx xxxxxxxxxxxxxxxxxxxx   Adr. paiement.: xxxx           *
+* Paiement......: xxxxxxxxxxxxxxx               Retenu........: xxx            *
+* Description...: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+* Total cédule..: xxxxxxxxxxxxxxxxxx            Montant payé..: xxxxxxxxxxxxxx *
+*                                               Reste à payer.: xxxxxxxxxxxxxx *
+********************************************************************************
+*     No de                          Montant du             Montant            *
+*    Cédule      Date due              paiement                payé            *
+*      xx        xxxxxxxx         xxxxxxxxxxxxxx      xxxxxxxxxxxxxx           *
+*      xx        xxxxxxxx         xxxxxxxxxxxxxx      xxxxxxxxxxxxxx           *
+*      xx        xxxxxxxx         xxxxxxxxxxxxxx      xxxxxxxxxxxxxx           *
+*      xx        xxxxxxxx         xxxxxxxxxxxxxx      xxxxxxxxxxxxxx           *
+*      xx        xxxxxxxx         xxxxxxxxxxxxxx      xxxxxxxxxxxxxx           *
+*      xx        xxxxxxxx         xxxxxxxxxxxxxx      xxxxxxxxxxxxxx           *
+*      xx        xxxxxxxx         xxxxxxxxxxxxxx      xxxxxxxxxxxxxx           *
+*      xx        xxxxxxxx         xxxxxxxxxxxxxx      xxxxxxxxxxxxxx           *
+*      xx        xxxxxxxx         xxxxxxxxxxxxxx      xxxxxxxxxxxxxx           *
+*      xx        xxxxxxxx         xxxxxxxxxxxxxx      xxxxxxxxxxxxxx           *
+********************************************************************************
+@ENDIF

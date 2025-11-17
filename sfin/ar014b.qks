@@ -1,0 +1,897 @@
+;/T/ Mouvements de marchandises - Imputation
+;
+;/P/ Programmeur..: Nancy Marceau
+;    Date Création: 17 mai 1994
+;
+;    Description..: Cet écran permet de consulter l'imputation du mouvement
+;                   d'inventaire. Il est à noter que l'imputation est
+;                   initialement générée par un "Ghost screen"  (AR014D) lors
+;                   de l'approbation du mouvement d'inventaire.
+;
+;/M/ Modification.: Pierre Routhier
+;                   02 Mai 1997
+;
+;                   Si notion de projet (HLDNTNPRO OF MCHOLDING) = Oui et 
+;                   que le compte (CPTCLE) inscrit est un compte de nature
+;                   revenu (NACCLE = 4) ou dépense (NACCLE = 5) de la table
+;                   mcnature_ctb :
+;                      - On demande les projets et ce, de façon obligatoire.
+;
+;                   Si notion de projet (HLDNTNPRO OF MCHOLDING) = Non ou
+;                   que le compte (CPTCLE) inscrit est un compte de bilan
+;                   (actif, passif ou capital - NACCLE = 1 ou 2 ou 3) de la
+;                   table mcnature_ctb:
+;                      - On ne les demande pas du tout.
+;
+;-------------------------------------------------------------------------------
+;/M/ Pascal Tremblay, 98-01-26
+;
+;    Ajustement pour le changement de siècle
+;
+;/V/ Écran vérifier pour le passage à l'an 2000
+;
+;-------------------------------------------------------------------------------
+;/M/ Programmeur.......: Sylvie Chouinard
+;    Debut modification: 26 mai 1998
+;    Fin   modification: 26 mai 1998
+;    Etat..............: Termine
+;    Description.......: Changer le OR pour un AND dans la condition de 
+;                        reinitialisation du projet/sous-projet de la 
+;                        procdure process cptcle.
+;                        (SOS 159)
+;
+;-------------------------------------------------------------------------------
+
+
+SCREEN ar014b ACTIONBAR &
+              MODE LABEL "" AT 2,80 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU, &
+                        T_CIENOM,    &
+                        T_MOUSTUOLD, & 
+                        D_LARATRJOU, &
+                        ARMOUVEMENT 
+
+TEMPORARY T_CCUPECDEBI_MCCHARTE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CCUPECDEBA_MCCHARTE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_PECCLE_ARM CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CPTPECDEBI_VCPT CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CPTPECDEBA_VCPT CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_PECCLE_ARMOUVEMENT CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+USE ustrasse NOLIST ; Transaction QUERY pour les sous-écrans
+
+USE ussectmp NOLIST     ; Variable pour la sécurité
+    "AR014B"            ; Nom de l'écran
+
+USE ar014b.hlp NOLIST ; Use servant à la documentation de l'écran
+
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-écrans
+
+;-------------------------------------------------------------------------------
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de compagnie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie du menu.
+TEMPORARY T_MOUSTUOLD CHARACTER SIZE 1  ; Ancien statut du mouvement.
+
+DEFINE D_LARATRJOU    CHARACTER SIZE 1  ; Si le lot est autorisé.  
+;-------------------------------------------------------------------------------
+
+FILE ARMOUVEMENT  MASTER
+
+FILE ARMOU_IMPUTATION   PRIMARY OCCUR 14 NOITEM 
+  ACCESS VIA   CIECLE, &
+               MOUCLE  &
+         USING CIECLE OF ARMOUVEMENT, &
+               MOUCLE OF ARMOUVEMENT  &
+         ORDERBY CIECLE, &
+                 MOUCLE, &
+                 MIMTIMSTP  
+
+  ITEM CIECLE    OF ARMOU_IMPUTATION INITIAL CIECLE OF ARMOUVEMENT
+  ITEM MOUCLE    OF ARMOU_IMPUTATION INITIAL MOUCLE OF ARMOUVEMENT
+  ITEM MIMTIMSTP OF ARMOU_IMPUTATION INITIAL SYSDATE * 1000000 + &
+                                             ROUND(SYSTIME / 100)
+
+
+;
+; Paramètres pour la compagnie consolidée(holding)
+;
+FILE MCHOLDING  REFERENCE
+  ACCESS VIA CIENMC USING "1"
+
+
+;
+; Validation de la charte de compte.
+;
+FILE MCCHARTE_UNA      REFERENCE
+  ACCESS VIA   CPTCLE, &
+               CIECLE, &
+               UNACLE &
+         USING CPTCLE OF ARMOU_IMPUTATION, &
+               CIECLE OF ARMOU_IMPUTATION, &
+               UNACLE OF ARMOU_IMPUTATION
+
+
+;
+; Validation du compte.
+;
+FILE VCPT_DSC          REFERENCE
+  ACCESS VIA   CPTCLE &
+         USING CPTCLE OF ARMOU_IMPUTATION
+
+
+;
+; Validation de l'unité adm.
+;
+FILE MCUNITE_ADM       REFERENCE
+  ACCESS VIA CIECLE, &
+             UNACLE &
+         USING CIECLE OF ARMOU_IMPUTATION, &
+               UNACLE OF ARMOU_IMPUTATION
+
+
+;
+; Validation du projet.
+;
+FILE GPPROJETS          REFERENCE
+  ACCESS VIA CIECLE, &
+              PRJCLE  &
+         USING CIECLE OF ARMOU_IMPUTATION, &
+                PRJCLE OF ARMOU_IMPUTATION
+
+;
+; Validation de l'activité.
+;
+FILE GPPRO_ACTIVITE        REFERENCE
+  ACCESS VIA CIECLE, &
+              PRJCLE, &
+             PRACLE  &
+         USING CIECLE OF ARMOU_IMPUTATION, &
+                PRJCLE OF ARMOU_IMPUTATION, &
+               PRACLE OF ARMOU_IMPUTATION
+
+FILE MCCOMPTE            REFERENCE OCCURS WITH ARMOU_IMPUTATION
+  ACCESS VIA   CPTCLE &
+         USING CPTCLE OF ARMOU_IMPUTATION
+
+FILE MCNATURE_CTB        REFERENCE OCCURS WITH ARMOU_IMPUTATION
+  ACCESS VIA   NACCLE &
+         USING NACCLE OF MCCOMPTE
+
+;-------------------------------------------------------------------------------
+;
+; Sert aux sous-écrans de consultation.
+;
+TEMPORARY T_CPTCLE    CHARACTER SIZE 6 ; Popup sur les comptes
+TEMPORARY T_PECCLE    CHARACTER SIZE 4 ; Popup sur les comptes et unité adm.
+TEMPORARY T_CPTTYPPAT CHARACTER SIZE 1 ; Popup sur les comptes
+TEMPORARY T_CPTCATPAT CHARACTER SIZE 8 ; Popup sur les comptes
+TEMPORARY T_UNACLE    CHARACTER SIZE 8 ; Popup sur les unités adm.
+TEMPORARY T_PRJCLE    CHARACTER SIZE 8 ; Popup sur les projets.
+TEMPORARY T_PRJSTUPAT CHARACTER SIZE 8 ; Popup sur les projets.
+TEMPORARY T_PRACLE    CHARACTER SIZE 3 ; Popup sur les activités.
+TEMPORARY T_PRASTUPAT CHARACTER SIZE 5 ; Popup sur les activités.
+
+;-------------------------------------------------------------------------------
+;
+; Calcul de l'écart entre le montant brut et la sommation de l'imputation.
+;
+DEFINE D_ECART FLOAT SIZE 8 = MOUMNTDBT OF ARMOUVEMENT - &
+                              MOUMNTCRT OF ARMOUVEMENT
+
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4  = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST     ; Draw pour les écrans pleine page
+USE ustitstd NOLIST     ; En-tête pour les écrans pleine page
+USE ushilite NOLIST     ; Hilite pour tous les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Imputation " &
+@ELSE
+      " Charge " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+ALIGN (,3,19) (,47,63)
+
+FIELD MOUCLE    OF ARMOUVEMENT &
+        FIXED
+
+FIELD MOUMNTDBT OF ARMOUVEMENT &
+        DISPLAY
+
+FIELD MOUMNTNET OF ARMOUVEMENT &
+        FIXED
+
+FIELD MOUMNTCRT OF ARMOUVEMENT &
+        DISPLAY
+
+SKIP TO GROUP 2
+
+FIELD D_ECART &
+        DISPLAY &
+        PREDISPLAY &
+@IF FRANCAIS
+        LABEL "Solde à vent..:" &
+@ELSE
+        LABEL "Balance.......:" &
+@ENDIF
+        PICTURE "^^,^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5
+
+SKIP
+
+DRAW ,1 TO ,80
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+"Compte    Unité   D/C         Montant   Projet   Sous-projet" &
+@ELSE
+"%%%pte    Unité     Projet   S-proj.   Immobilis.   D/C         Montant" &
+@ENDIF
+  AT ,4
+
+ALIGN (3,3,4) (,,12) (,,23) (,,28) (,,44) (,,57) 
+
+CLUSTER OCCURS WITH ARMOU_IMPUTATION ID BASE 05
+
+FIELD CPTCLE       OF ARMOU_IMPUTATION  &
+        HIDDEN LABEL " " &
+        REQUIRED &
+        LOOKUP ON VCPT_DSC &
+          MESSAGE 249 ; Ce numéro de compte n'existe pas.
+
+FIELD UNACLE       OF ARMOU_IMPUTATION &
+        REQUIRED &
+        DUPLICATE &
+        LOOKUP ON MCUNITE_ADM &
+          MESSAGE 220 ; Ce numéro d'unité adm. n'existe pas.
+
+
+FIELD MIMCODDC     OF ARMOU_IMPUTATION &
+        REQUIRED
+
+FIELD MIMMNT       OF ARMOU_IMPUTATION  &
+        DEFAULT D_ECART &
+        PICTURE "^^,^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5
+
+FIELD PRJCLE OF ARMOU_IMPUTATION 
+
+FIELD PRACLE OF ARMOU_IMPUTATION 
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Popup sur les comptes.
+;
+PROCEDURE INPUT CPTCLE
+BEGIN
+
+  USE ussecent NOLIST
+
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_CPTTYPPAT = "R"
+    LET T_CPTCATPAT = "@"
+    LET T_PECCLE = PECCLE OF ARMOUVEMENT
+    RUN SCREEN mc103 MODE F PASSING T_CPTCLE, &
+                                    T_CPTTYPPAT, &
+                                    T_CPTCATPAT, &
+                                    T_PECCLE
+    LET FIELDTEXT = TRUNCATE(T_CPTCLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation si le compte est actif.
+;
+PROCEDURE EDIT CPTCLE
+BEGIN
+  ;
+  ; Note: La période de fin, est la première période d'inactivité.
+  ;
+  ; Ajustement pour le changement de siècle
+  IF PECCLE OF ARMOUVEMENT[1:1] < "8"
+  THEN LET T_PECCLE_ARMOUVEMENT = "1" + PECCLE OF ARMOUVEMENT
+  ELSE LET T_PECCLE_ARMOUVEMENT = "0" + PECCLE OF ARMOUVEMENT
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBA OF VCPT_DSC[1:1] < "8"
+  THEN LET T_CPTPECDEBA_VCPT = "1" + CPTPECDEBA OF VCPT_DSC
+  ELSE LET T_CPTPECDEBA_VCPT = "0" + CPTPECDEBA OF VCPT_DSC
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBI OF VCPT_DSC[1:1] < "8"
+  THEN LET T_CPTPECDEBI_VCPT = "1" + CPTPECDEBI OF VCPT_DSC
+  ELSE LET T_CPTPECDEBI_VCPT = "0" + CPTPECDEBI OF VCPT_DSC
+
+  IF T_PECCLE_ARMOUVEMENT >= T_CPTPECDEBA_VCPT AND &
+     ( &
+       T_PECCLE_ARMOUVEMENT < T_CPTPECDEBI_VCPT OR &
+       CPTPECDEBI OF VCPT_DSC = "" &
+     )
+  THEN NULL
+  ELSE ERROR 251; Ce compte est inactif.
+
+  IF CPTTYP OF VCPT_DSC <> "R"
+  THEN ERROR 255; On ne peut pas utliser ce compte dans une imputation.
+
+  IF DEVCLE OF VCPT_DSC <> DEVCLE OF MCHOLDING
+  THEN ERROR 304 ; Compte interdit due à la devise du comtpe.
+
+END
+
+PROCEDURE PROCESS CPTCLE
+BEGIN
+  IF NACCLE OF MCNATURE_CTB <> 4 AND &
+     NACCLE OF MCNATURE_CTB <> 5
+  THEN BEGIN
+    LET PRJCLE OF ARMOU_IMPUTATION = ""
+    LET PRACLE OF ARMOU_IMPUTATION = ""
+    DISPLAY PRJCLE  OF ARMOU_IMPUTATION
+    DISPLAY PRACLE  OF ARMOU_IMPUTATION
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT UNACLE
+BEGIN
+  ;
+  ; Popup sur les unités administrative.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE = CPTCLE OF ARMOU_IMPUTATION
+    LET T_PECCLE = PECCLE OF ARMOUVEMENT
+    LET T_UNACLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    ;
+    ; Il y a trois popup possible:
+    ;  1) sur les unités administrative par compagnie(MCUNITE_ADM).
+    ;  2) sur les unités administrative d'une charte de compte(MCCHARTE_UNA).
+    ;  3) sur les unités administrative qui ne sont pas définis dans la charte
+    ;     de compte(MCUNITE_ADM, MCCHARTE_UNA).
+    ;
+    IF HLDCHTCPT OF MCHOLDING = "0"
+    THEN RUN SCREEN mc104 MODE F PASSING T_CIECLEMNU, T_UNACLE
+    ELSE BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN RUN SCREEN mc115 MODE F PASSING T_CIECLEMNU, T_CPTCLE, T_UNACLE, &
+                                           T_PECCLE
+      ELSE RUN SCREEN mc116 MODE F PASSING T_CIECLEMNU, T_CPTCLE, T_UNACLE, &
+                                           T_PECCLE
+    END
+    LET FIELDTEXT = TRUNCATE(T_UNACLE)
+  END
+  ;
+  ; Force l'éxécution du LOOKUP.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(UNACLE OF ARMOU_IMPUTATION))
+  THEN LET FIELDTEXT = UNACLE OF ARMOU_IMPUTATION
+END
+
+PROCEDURE EDIT UNACLE
+BEGIN
+  IF HLDCHTCPT OF MCHOLDING = "1"
+  THEN BEGIN
+    GET MCCHARTE_UNA OPTIONAL
+    ;
+    ; Si la charte est incluse, le lien est obligatoire.
+    ;
+    IF NOT ACCESSOK
+    THEN BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN ERROR 256 ; La combinaison compte/unité adm n'existe pas.
+    END
+    ELSE BEGIN
+      ;
+      ; Si la charte est Exclusive et que la période fait partie de
+      ; l'intervalle de période de la charte alors c'est une erreur.
+      ;
+      ; Si la charte est inclusive et que la période ne fait pas partie de
+      ; l'intervalle de période de la charte alors c'est une erreur.
+      ;
+      ; Ajustement pour le changement de siècle
+      IF PECCLE OF ARMOUVEMENT[1:1] < "8"
+      THEN LET T_PECCLE_ARM = "1" + PECCLE OF ARMOUVEMENT
+      ELSE LET T_PECCLE_ARM = "0" + PECCLE OF ARMOUVEMENT
+
+      ; Ajustement pour le changement de siècle
+      IF CCUPECDEBA OF MCCHARTE_UNA[1:1] < "8"
+      THEN LET T_CCUPECDEBA_MCCHARTE = "1" + CCUPECDEBA OF MCCHARTE_UNA
+      ELSE LET T_CCUPECDEBA_MCCHARTE = "0" + CCUPECDEBA OF MCCHARTE_UNA
+
+      ; Ajustement pour le changement de siècle
+      IF CCUPECDEBI OF MCCHARTE_UNA[1:1] < "8"
+      THEN LET T_CCUPECDEBI_MCCHARTE = "1" + CCUPECDEBI OF MCCHARTE_UNA
+      ELSE LET T_CCUPECDEBI_MCCHARTE = "0" + CCUPECDEBI OF MCCHARTE_UNA
+
+      IF ( &
+           T_PECCLE_ARM >= T_CCUPECDEBA_MCCHARTE AND &
+           ( &
+             T_PECCLE_ARM < T_CCUPECDEBI_MCCHARTE OR &
+             CCUPECDEBI OF MCCHARTE_UNA = " " &
+           ) &
+         )
+      THEN BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "E"
+        THEN ERROR 250 ; La combinaison compte/unité adm. est inactif.
+      END
+      ELSE BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "I"
+        THEN ERROR 250; La combinaison compte/unité adm. est inactif.
+      END
+    END
+  END
+END
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT PRJCLE
+BEGIN
+  ;
+  ; Popup sur les projets.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PRJSTUPAT = "A"
+    LET T_PRJCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gp104 MODE F PASSING T_CIECLEMNU, T_PRJCLE, T_PRJSTUPAT
+    LET FIELDTEXT = TRUNCATE(T_PRJCLE)
+  END
+  ;
+  ; Force la validation du projet, car l'usager peut modifier le numéro de
+  ; compagnie sur le ligne.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE( PRJCLE OF ARMOU_IMPUTATION))
+  THEN LET FIELDTEXT =  PRJCLE OF ARMOU_IMPUTATION
+
+  IF (HLDNTNPRO OF MCHOLDING    = "1" AND &
+      NACCLE    OF MCNATURE_CTB = 4   AND &
+      FIELDTEXT                 = "" ) OR &
+     (HLDNTNPRO OF MCHOLDING    = "1" AND &
+      NACCLE    OF MCNATURE_CTB = 5   AND &
+      FIELDTEXT                 = "" )
+  THEN ERROR 889 
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation du projet, le projet est optionel dans l'imputation.
+;
+PROCEDURE EDIT  PRJCLE
+BEGIN
+  ;
+  ; Si notion de projet.
+  ;
+  IF (HLDNTNPRO OF MCHOLDING = "1" AND NACCLE OF MCNATURE_CTB = 4) OR &
+     (HLDNTNPRO OF MCHOLDING = "1" AND NACCLE OF MCNATURE_CTB = 5)
+  THEN BEGIN
+    IF 0 = SIZE(TRUNCATE(FIELDTEXT))
+    THEN ERROR 889
+  END
+
+  IF "" <> TRUNCATE(FIELDTEXT)
+  THEN BEGIN
+    GET GPPROJETS OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 334 ; Ce projet n'existe pas.
+
+    IF PRJSTU OF GPPROJETS <> "A"
+    THEN ERROR 335 ; Ce projet n'est pas actif.
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Si le projet est absent, l'activité doit être à blanc.
+;
+;
+PROCEDURE PROCESS  PRJCLE
+BEGIN
+  IF 0 = SIZE(TRUNCATE( PRJCLE OF ARMOU_IMPUTATION))
+  THEN BEGIN
+    LET PRACLE OF ARMOU_IMPUTATION = " "
+    DISPLAY PRACLE OF ARMOU_IMPUTATION
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT PRACLE
+BEGIN
+  IF PRJCLE OF ARMOU_IMPUTATION = ""
+  THEN ERROR 889 
+  ;
+  ; Popup sur les activités.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PRJCLE    =  PRJCLE OF ARMOU_IMPUTATION
+    LET T_PRASTUPAT = "A"
+    LET T_PRACLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gp108 MODE F PASSING T_CIECLEMNU, T_PRJCLE, T_PRACLE, T_PRASTUPAT
+    LET FIELDTEXT = TRUNCATE(T_PRACLE)
+  END
+  ;
+  ; Force la validation de l'activité, car l'usager peut modifier le numéro de
+  ; compagnie ou le numéro de projet sur le ligne.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(PRJCLE OF ARMOU_IMPUTATION))
+  THEN LET FIELDTEXT = PRACLE OF ARMOU_IMPUTATION
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation de l'activité, l'activité est optionel dans l'imputation.
+;
+;
+PROCEDURE EDIT PRACLE
+BEGIN
+  GET GPPRO_ACTIVITE OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 336 ; Cette activité n'existe pas.
+
+  IF "" <> TRUNCATE(  PRJCLE OF ARMOU_IMPUTATION )
+  THEN BEGIN
+    IF PRASTU OF GPPRO_ACTIVITE <> "A"
+    THEN ERROR 337 ; Cette activité n'est pas active.
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Saisie rapide des codes débit/crédit par le clavier numérique.
+;
+PROCEDURE INPUT MIMCODDC
+BEGIN
+  IF FIELDTEXT = ","
+  THEN LET FIELDTEXT = "D"
+
+  IF FIELDTEXT = "-"
+  THEN LET FIELDTEXT = "C"
+END
+
+;-------------------------------------------------------------------------------
+;
+; Transfert le montant de débit à crédit, vise-versa si l'usager change
+; le code DEBIT/CREDIT
+;
+PROCEDURE EDIT MIMCODDC
+BEGIN
+  IF OLDVALUE(MIMCODDC OF ARMOU_IMPUTATION) <> FIELDTEXT
+  THEN BEGIN
+    IF OLDVALUE(MIMCODDC OF ARMOU_IMPUTATION) = "D"
+    THEN BEGIN
+      LET MOUMNTDBT OF ARMOUVEMENT = MOUMNTDBT OF ARMOUVEMENT - &
+                                     MIMMNT    OF ARMOU_IMPUTATION
+      LET MOUMNTCRT OF ARMOUVEMENT = MOUMNTCRT OF ARMOUVEMENT + &
+                                     MIMMNT    OF ARMOU_IMPUTATION
+    END
+    ELSE BEGIN
+      LET MOUMNTDBT OF ARMOUVEMENT = MOUMNTDBT OF ARMOUVEMENT + &
+                                     MIMMNT    OF ARMOU_IMPUTATION
+      LET MOUMNTCRT OF ARMOUVEMENT = MOUMNTCRT OF ARMOUVEMENT - &
+                                     MIMMNT    OF ARMOU_IMPUTATION
+    END
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Mise à jour des variables DEBIT et CREDIT à chaque fois que l'usager entre
+; ou modifie le montant.
+;
+PROCEDURE EDIT MIMMNT
+BEGIN
+  ;
+  ; Valide la partie décimale.
+  ;
+  USE usvaldec NOLIST
+
+  IF MIMCODDC OF ARMOU_IMPUTATION = "D"
+  THEN LET MOUMNTDBT OF ARMOUVEMENT = MOUMNTDBT OF ARMOUVEMENT - &
+                                      OLDVALUE(MIMMNT OF ARMOU_IMPUTATION) + &
+                                      FIELDVALUE
+  ELSE LET MOUMNTCRT OF ARMOUVEMENT = MOUMNTCRT OF ARMOUVEMENT - &
+                                      OLDVALUE(MIMMNT OF ARMOU_IMPUTATION) + &
+                                      FIELDVALUE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Affiche les sommations débit/crédit les plus à jour.
+;
+PROCEDURE PROCESS MIMMNT
+BEGIN
+  DISPLAY MOUMNTDBT OF ARMOUVEMENT
+  DISPLAY MOUMNTCRT OF ARMOUVEMENT
+  DISPLAY D_ECART
+END
+
+;-------------------------------------------------------------------------------
+;
+; Affiche les sommations débit/crédit les plus à jour.
+;
+PROCEDURE PROCESS MIMCODDC
+BEGIN
+  DISPLAY MOUMNTDBT OF ARMOUVEMENT 
+  DISPLAY MOUMNTCRT OF ARMOUVEMENT 
+  DISPLAY D_ECART
+END
+
+;
+;
+;
+PROCEDURE APPEND
+BEGIN
+  ACCEPT CPTCLE OF ARMOU_IMPUTATION
+  INFORMATION = CPTDSC OF VCPT_DSC
+
+  ACCEPT UNACLE OF ARMOU_IMPUTATION
+  INFORMATION = UNANOM OF MCUNITE_ADM
+
+  ACCEPT MIMCODDC OF ARMOU_IMPUTATION
+  ACCEPT MIMMNT OF ARMOU_IMPUTATION
+
+  ;
+  ; Si notion de projet.
+  ;
+  IF (HLDNTNPRO OF MCHOLDING = "1" AND NACCLE OF MCNATURE_CTB = 4) OR &
+     (HLDNTNPRO OF MCHOLDING = "1" AND NACCLE OF MCNATURE_CTB = 5)
+  THEN BEGIN
+    ACCEPT  PRJCLE OF ARMOU_IMPUTATION
+    IF 0 <> SIZE(TRUNCATE(PRJCLE OF ARMOU_IMPUTATION))
+    THEN BEGIN
+      INFORMATION = PRJDSC1 OF GPPROJETS
+      ACCEPT  PRACLE OF ARMOU_IMPUTATION
+      INFORMATION = PRADSC1 OF GPPRO_ACTIVITE
+    END
+  END
+  ELSE BEGIN
+    LET PRJCLE OF ARMOU_IMPUTATION = " "
+    LET PRACLE OF ARMOU_IMPUTATION = " "
+  END
+END
+
+;
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  DISPLAY MOUMNTDBT OF ARMOUVEMENT
+  DISPLAY MOUMNTCRT OF ARMOUVEMENT
+  DISPLAY D_ECART
+  FOR ARMOU_IMPUTATION
+  BEGIN
+    PERFORM APPEND
+  END
+END
+
+
+;
+;
+;
+PROCEDURE DESIGNER 05
+BEGIN
+  ACCEPT CPTCLE OF ARMOU_IMPUTATION
+  INFORMATION = CPTDSC OF VCPT_DSC
+
+  ACCEPT UNACLE OF ARMOU_IMPUTATION
+  INFORMATION = UNANOM OF MCUNITE_ADM
+
+  ACCEPT MIMCODDC OF ARMOU_IMPUTATION
+  ACCEPT MIMMNT OF ARMOU_IMPUTATION
+
+  ;
+  ; Si notion de projet.
+  ;
+  IF (HLDNTNPRO OF MCHOLDING = "1" AND NACCLE OF MCNATURE_CTB = 4) OR &
+     (HLDNTNPRO OF MCHOLDING = "1" AND NACCLE OF MCNATURE_CTB = 5)
+  THEN BEGIN
+    ACCEPT  PRJCLE OF ARMOU_IMPUTATION
+    IF 0 <> SIZE(TRUNCATE(PRJCLE OF ARMOU_IMPUTATION))
+    THEN BEGIN
+      INFORMATION = PRJDSC1 OF GPPROJETS
+      ACCEPT  PRACLE OF ARMOU_IMPUTATION
+      INFORMATION = PRADSC1 OF GPPRO_ACTIVITE
+    END
+  END
+  ELSE BEGIN
+    LET PRJCLE OF ARMOU_IMPUTATION = " "
+    LET PRACLE OF ARMOU_IMPUTATION = " "
+  END
+END
+
+;
+; Procédure servant à modifier la première occurrence d'un cluster
+; avec Powerhouse Client.
+;
+PROCEDURE DESIGNER PH01
+BEGIN
+  ACCEPT CPTCLE OF ARMOU_IMPUTATION
+  INFORMATION = CPTDSC OF VCPT_DSC
+
+  ACCEPT UNACLE OF ARMOU_IMPUTATION
+  INFORMATION = UNANOM OF MCUNITE_ADM
+
+  ACCEPT MIMCODDC OF ARMOU_IMPUTATION
+  ACCEPT MIMMNT OF ARMOU_IMPUTATION
+
+  ;
+  ; Si notion de projet.
+  ;
+  IF (HLDNTNPRO OF MCHOLDING = "1" AND NACCLE OF MCNATURE_CTB = 4) OR &
+     (HLDNTNPRO OF MCHOLDING = "1" AND NACCLE OF MCNATURE_CTB = 5)
+  THEN BEGIN
+    ACCEPT  PRJCLE OF ARMOU_IMPUTATION
+    IF 0 <> SIZE(TRUNCATE(PRJCLE OF ARMOU_IMPUTATION))
+    THEN BEGIN
+      INFORMATION = PRJDSC1 OF GPPROJETS
+      ACCEPT  PRACLE OF ARMOU_IMPUTATION
+      INFORMATION = PRADSC1 OF GPPRO_ACTIVITE
+    END
+  END
+  ELSE BEGIN
+    LET PRJCLE OF ARMOU_IMPUTATION = " "
+    LET PRACLE OF ARMOU_IMPUTATION = " "
+  END
+END
+
+
+;
+; Procédure servant à détruire la première occurrence d'un cluster
+; avec Powerhouse Client.
+;
+PROCEDURE DESIGNER PH02
+BEGIN
+  DELETE ARMOU_IMPUTATION
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+
+  IF MOUDATJOU OF ARMOUVEMENT <> 0
+  THEN ERROR 236 ; Impossible de mettre à jour, l'écriture est journalisée
+
+  FOR ARMOU_IMPUTATION
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF ARMOU_IMPUTATION&
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF ARMOU_IMPUTATION &
+       AND NOT NEWRECORD     OF ARMOU_IMPUTATION &
+       AND NOT DELETEDRECORD OF ARMOU_IMPUTATION &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+
+  IF (HLDNTNPRO OF MCHOLDING = "1" AND (NACCLE OF MCNATURE_CTB = 4  OR &
+                                        NACCLE OF MCNATURE_CTB = 5) AND &
+      PRJCLE OF ARMOU_IMPUTATION = "")
+  THEN ERROR 889 
+
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Met à jour les variales de DEBIT et CREDIT
+;
+PROCEDURE DELETE
+BEGIN
+  IF NOT DELETEDRECORD OF ARMOU_IMPUTATION
+  THEN BEGIN
+    IF MIMCODDC OF ARMOU_IMPUTATION = "D"
+    THEN LET MOUMNTDBT OF ARMOUVEMENT = MOUMNTDBT OF ARMOUVEMENT - &
+                                        MIMMNT    OF ARMOU_IMPUTATION
+    ELSE LET MOUMNTCRT OF ARMOUVEMENT = MOUMNTCRT OF ARMOUVEMENT - &
+                                        MIMMNT    OF ARMOU_IMPUTATION
+  END
+  DELETE ARMOU_IMPUTATION
+
+  DISPLAY MOUMNTDBT OF ARMOUVEMENT 
+  DISPLAY MOUMNTCRT OF ARMOUVEMENT
+  DISPLAY D_ECART
+END
+
+;-------------------------------------------------------------------------------
+;
+; Averti l'usager si l'écriture ne balance pas.
+;
+PROCEDURE EXIT
+BEGIN
+  IF MOUMNTNET OF ARMOUVEMENT <> MOUMNTDBT OF ARMOUVEMENT OR &
+     MOUMNTNET OF ARMOUVEMENT <> MOUMNTCRT OF ARMOUVEMENT OR &
+     D_ECART <> 0
+  THEN WARNING 1421 ; L'imputation ne balance pas.
+END
+
+
+BUILD
+@IF FORMAT
+ 
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+********************************** Imputation **********************************
+* # Mouvement...: xxxxxxxxx                   Total débit...: xxxxxxxxxxxxxx   *
+* Montant net...: xxxxxxxxxxxxxxx             Total crédit..: xxxxxxxxxxxxxx   *
+*                                             Solde à vent..: xxxxxxxxxxxxxx   *
+********************************************************************************
+*  Compte    Unité   D/C         Montant    Pro.  Act.                       *
+*  xxxxxx  xxxxxxxx   x    xxxxxxxxxxxxxx  xxxxx xxxxxx                      *
+*  xxxxxx  xxxxxxxx   x    xxxxxxxxxxxxxx  xxxxx xxxxxx                      *
+*  xxxxxx  xxxxxxxx   x    xxxxxxxxxxxxxx  xxxxx xxxxxx                      *
+*  xxxxxx  xxxxxxxx   x    xxxxxxxxxxxxxx  xxxxx xxxxxx                      *
+*  xxxxxx  xxxxxxxx   x    xxxxxxxxxxxxxx  xxxxx xxxxxx                      *
+*  xxxxxx  xxxxxxxx   x    xxxxxxxxxxxxxx  xxxxx xxxxxx                      *
+*  xxxxxx  xxxxxxxx   x    xxxxxxxxxxxxxx  xxxxx xxxxxx                      *
+*  xxxxxx  xxxxxxxx   x    xxxxxxxxxxxxxx  xxxxx xxxxxx                      *
+*  xxxxxx  xxxxxxxx   x    xxxxxxxxxxxxxx  xxxxx xxxxxx                      *
+*  xxxxxx  xxxxxxxx   x    xxxxxxxxxxxxxx  xxxxx xxxxxx                      *
+*  xxxxxx  xxxxxxxx   x    xxxxxxxxxxxxxx  xxxxx xxxxxx                      *
+*  xxxxxx  xxxxxxxx   x    xxxxxxxxxxxxxx  xxxxx xxxxxx                      *
+*  xxxxxx  xxxxxxxx   x    xxxxxxxxxxxxxx  xxxxx xxxxxx                      *
+*  xxxxxx  xxxxxxxx   x    xxxxxxxxxxxxxx  xxxxx xxxxxx                      *
+********************************************************************************
+@ENDIF

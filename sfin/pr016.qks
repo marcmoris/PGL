@@ -1,0 +1,297 @@
+;/T/ Sommaire Équipement
+;
+;/P/ Programmeur..: Marc Morissette
+;    Date Création: 13 Oct 1993
+;
+;    Description..: Sommaire Équipement
+;
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pr016 ACTIONBAR &
+             MODE LABEL "" AT 2,132 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             FROM 1,1 TO 23,132 &
+             ACTIVITIES FIND &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU, &
+                       T_CIENOM   , &
+                       T_UNICATFND   , &
+                       T_UNICLEFND
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie du menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; Compagnie du menu
+TEMPORARY T_UNICATFND CHARACTER SIZE 2  RESET AT STARTUP
+TEMPORARY T_UNICLEFND CHARACTER SIZE 8  RESET AT STARTUP
+
+USE ussectmp NOLIST     ; Variable pour la securite
+    "PR016"             ; Nom de l'écran
+
+USE pr016.hlp nolist ; Use servant à la documentation de l'écran
+
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-ecran
+
+FILE GPUNI_TRANS  PRIMARY OCCURS 15 TIMES
+; Attention la procédure path et find sont écrite
+
+;-------------------------------------------------------------------------------
+;
+; Validation du compte comptable.
+;
+FILE VCPT_DSC         REFERENCE &
+                      OCCURS WITH GPUNI_TRANS
+
+  ACCESS  VIA   CPTCLE &
+          USING CPTCLE OF GPUNI_TRANS
+
+;-------------------------------------------------------------------------------
+;
+; Validation de l'unité administrative.
+;
+FILE MCUNITE_ADM      REFERENCE &
+                      OCCURS WITH GPUNI_TRANS
+
+  ACCESS  VIA   CIECLE, &
+                UNACLE &
+          USING T_CIECLEMNU, &
+                UNACLE OF GPUNI_TRANS
+
+;-------------------------------------------------------------------------------
+;
+; Validation du gpunité
+;
+FILE GPUNITE         REFERENCE
+
+  ACCESS VIA CIECLE, &
+             UNICAT, &
+             UNICLE  &
+         USING T_CIECLEMNU, &
+               UNICAT OF GPUNI_TRANS, &
+               UNICLE OF GPUNI_TRANS
+
+;
+;
+DEFINE    D_UNICAT CHARACTER SIZE 16 = "UNICAT"
+TEMPORARY T_UNICAT CHARACTER SIZE 4
+
+FILE VCBI_DSC         REFERENCE &
+                      ALIAS VCBI_DSC_UNICAT
+
+  ACCESS  VIA   XELNOM, &
+                CBICLE &
+          USING D_UNICAT, &
+                UNICAT OF GPUNITE
+
+
+
+;-------------------------------------------------------------------------------
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+TEMPORARY T_UNICAT2 CHARACTER SIZE 2
+TEMPORARY T_UNICLE CHARACTER SIZE 8
+TEMPORARY T_UNISTUPAT CHARACTER SIZE 5 ; Popup sur les équipements.
+TEMPORARY T_CPTCLE CHARACTER SIZE 6
+TEMPORARY T_UNACLE CHARACTER SIZE 8
+TEMPORARY T_MNT    INTEGER   SIZE 4   ; Temporaire en attend des achats.
+
+;-------------------------------------------------------------------------------
+;
+DRAW 3,01 TO 23,132
+USE ustitstd NOLIST     ; En-tête pour les écrans pleine page
+USE ushilite NOLIST     ; Hilite pour tout les écrans
+
+SKIP
+TITLE &
+@IF FRANCAIS
+      " Sommaire des transactions à l'équipement"&
+@ELSE
+      " %%% " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+
+ALIGN (,2,14)(,,17)
+SKIP
+FIELD UNICAT  OF GPUNI_TRANS LABEL "Catégorie.:" DISPLAY &
+      LOOKUP ON VCBI_DSC_UNICAT &
+      MESSAGE 804  ;  "*EE* Cette catégorie existe déjà"
+
+FIELD CBIDSC OF VCBI_DSC_UNICAT DISPLAY
+
+ALIGN (,2,14)(,,23)
+FIELD UNICLE  OF GPUNI_TRANS LABEL "Équipement:" DISPLAY &
+   LOOKUP ON GPUNITE &
+   MESSAGE 2513 ; Ce projet n'existe pas
+FIELD UNIDSC1 OF GPUNITE DISPLAY  NOLABEL
+SKIP
+
+TITLE "Unité" AT ,2
+SKIP
+TITLE "Adm.     Desc.                Compte Desc.                       Budget      Engagement           Réel          Total     Écart" AT ,2
+SKIP
+ALIGN (2,2,2)(,,11)(,,32)(,,39) (,,60) (,,75) (,,90)(,,105)(,,120)
+;xxxxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxx Xxxxxxxxxxxxxx Xxxxxxxxxxxxxx Xxxxxxxxxxxxxx Xxxxxxxxxxxxxx xxxxxxxxx
+CLUSTER OCCURS WITH GPUNI_TRANS
+  FIELD UNACLE OF GPUNI_TRANS DISPLAY LABEL " "
+  FIELD UNANOM OF MCUNITE_ADM DISPLAY SIZE 20
+  FIELD CPTCLE OF GPUNI_TRANS DISPLAY
+  FIELD CPTDSC OF VCPT_DSC    DISPLAY SIZE 20
+  FIELD T_MNT DISPLAY SIGNIF 4         PICTURE "^^,^^^,^^^.^^ "
+  FIELD T_MNT DISPLAY SIGNIF 4         PICTURE "^^,^^^,^^^.^^ "
+  FIELD TRDMNT OF GPUNI_TRANS DISPLAY  PICTURE "^^,^^^,^^^.^^ " SIGNIF 4
+  FIELD TRDMNT OF GPUNI_TRANS DISPLAY  PICTURE "^^,^^^,^^^.^^ " SIGNIF 4
+  FIELD T_MNT DISPLAY SIGNIF 4         PICTURE "^,^^^.^^ "
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour les codes bilingues.
+;
+;
+PROCEDURE INPUT UNICAT
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_UNICAT = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_UNICAT, T_UNICAT &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNCATE(T_UNICAT)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT UNICLE
+BEGIN
+  ;
+  ; Popup sur les activités.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_UNICAT2    = UNICAT OF GPUNI_TRANS
+    LET T_UNISTUPAT = "A"
+    LET T_UNICLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pr103 MODE F PASSING T_CIECLEMNU, T_UNICAT2, T_UNICLE, T_UNISTUPAT &
+                          WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_UNICLE)
+  END
+END
+
+
+
+PROCEDURE DESIGNER 1
+BEGIN
+  LET T_UNICAT2 = UNICAT OF GPUNI_TRANS
+  LET T_UNICLE = UNICLE OF GPUNI_TRANS
+  LET T_CPTCLE = CPTCLE OF GPUNI_TRANS
+  LET T_UNACLE = UNACLE OF GPUNI_TRANS
+  RUN SCREEN pr010c PASSING T_CIECLEMNU, T_CIENOM, T_UNICAT2, T_UNICLE, &
+                            T_UNACLE, T_CPTCLE MODE F &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+END
+
+PROCEDURE PATH
+BEGIN
+  IF T_UNICATFND = ""
+  THEN BEGIN
+    REQUEST UNICAT OF GPUNI_TRANS
+    IF PROMPTOK
+    THEN REQUEST UNICLE OF GPUNI_TRANS
+    IF PROMPTOK
+    THEN REQUEST UNACLE OF GPUNI_TRANS
+    IF PROMPTOK
+    THEN REQUEST CPTCLE OF GPUNI_TRANS
+    IF PROMPTOK
+    THEN LET PATH = 1
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST UNICAT OF GPUNI_TRANS
+      IF PROMPTOK
+      THEN REQUEST UNICLE OF GPUNI_TRANS
+      IF PROMPTOK
+      THEN REQUEST UNACLE OF GPUNI_TRANS
+      IF PROMPTOK
+      THEN LET PATH = 2
+    END
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST UNICAT OF GPUNI_TRANS
+      IF PROMPTOK
+      THEN REQUEST UNICLE OF GPUNI_TRANS
+      IF PROMPTOK
+      THEN REQUEST CPTCLE OF GPUNI_TRANS
+      IF PROMPTOK
+      THEN LET PATH = 3
+    END
+    IF PATH = 0
+    THEN BEGIN
+           REQUEST UNICAT OF GPUNI_TRANS
+           IF PROMPTOK
+             THEN REQUEST UNICLE OF GPUNI_TRANS
+           IF PROMPTOK
+             THEN LET PATH = 4
+    END
+    IF PATH = 0
+    THEN ERROR = "Key required."
+  END
+  ELSE LET PATH = 99
+END
+
+PROCEDURE FIND
+BEGIN
+  FOR GPUNI_TRANS
+  BEGIN
+    IF PATH = 1
+    THEN GET GPUNI_TRANS VIA CIECLE , UNICAT , UNICLE , UNACLE &
+               , CPTCLE ORDERBY CIECLE , UNICAT , UNICLE , UNACLE , &
+               CPTCLE USING T_CIECLEMNU , UNICAT OF GPUNI_TRANS , &
+               UNICLE OF GPUNI_TRANS , UNACLE OF GPUNI_TRANS , CPTCLE &
+               OF GPUNI_TRANS
+    IF PATH = 2
+    THEN GET GPUNI_TRANS VIA CIECLE , UNICAT , UNICLE , UNACLE &
+               ORDERBY CIECLE , UNICAT , UNICLE , UNACLE , CPTCLE &
+               USING T_CIECLEMNU , UNICAT OF GPUNI_TRANS , UNICLE OF &
+               GPUNI_TRANS , UNACLE OF GPUNI_TRANS
+    IF PATH = 3
+    THEN GET GPUNI_TRANS VIA CIECLE , UNICAT , UNICLE , CPTCLE &
+               ORDERBY CIECLE , UNICAT , UNICLE , UNACLE , CPTCLE &
+               USING T_CIECLEMNU , UNICAT OF GPUNI_TRANS , UNICLE OF &
+               GPUNI_TRANS , CPTCLE OF GPUNI_TRANS
+    IF PATH = 4
+    THEN GET GPUNI_TRANS VIA CIECLE , UNICAT , UNICLE ORDERBY &
+               CIECLE , UNICAT , UNICLE , UNACLE , CPTCLE USING &
+               T_CIECLEMNU , UNICAT OF GPUNI_TRANS , UNICLE OF &
+               GPUNI_TRANS
+    IF PATH = 99
+    THEN GET GPUNI_TRANS VIA CIECLE , UNICAT , UNICLE &
+           ORDERBY CIECLE , UNICAT , UNICLE , UNACLE , CPTCLE &
+           USING T_CIECLEMNU , T_UNICATFND, T_UNICLEFND
+  END
+END
+
+
+BUILD

@@ -1,0 +1,450 @@
+;/T/ Consultation des projet, sous-projets par format d'opération
+;
+;/P/ Programmeur..: Steeve Duguay
+;    Date Création: 03 mars 1995
+;
+;/M/ François Déry, 7 mai 1999
+;       Ajout du code d'usager dans la table temporaire d'affichage.
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN gp004 ACTIONBAR &
+             MODE LABEL "" AT 2,132 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             FROM 1,1 TO 23,132 &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU, &
+                       T_CIENOM
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie du menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; Compagnie du menu
+
+USE ussectmp NOLIST     ; Variable pour la securite
+    "GP004"             ; Nom de l'écran
+
+USE gp004.hlp nolist ; Use servant à la documentation de l'écran
+
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-ecran
+
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Impression du format       "  ACTION DESIGNER D001
+
+
+FILE GPFRM_AFFICHE  PRIMARY &
+                    OCCURS 14
+
+   ACCESS VIA   USRCLE &
+          USING LOGONID
+   SELECT IF PRJCLE OF GPFRM_AFFICHE <> " "
+
+
+FILE GPFORMATS      SECONDARY &
+                    OCCURS WITH GPFRM_AFFICHE &
+                    NOITEMS &
+                    ALIAS GPFORMATS_2
+
+  ACCESS VIA   FRMCLE  &
+         USING FRMCLE OF GPFRM_AFFICHE
+
+  SELECT IF FRMTYP OF GPFORMATS_2 = "O"
+
+
+FILE GPPROJETS      REFERENCE
+  ACCESS VIA   CIECLE, &
+               PRJCLE  &
+         USING CIECLE OF GPFRM_AFFICHE, &
+               PRJCLE OF GPFRM_AFFICHE
+
+
+FILE GPPRO_ACTIVITE REFERENCE
+  ACCESS VIA   CIECLE, &
+               PRJCLE, &
+               PRACLE  &
+         USING CIECLE OF GPFRM_AFFICHE, &
+               PRJCLE OF GPFRM_AFFICHE, &
+               PRACLE OF GPFRM_AFFICHE OPTIONAL
+
+
+
+FILE GPFORMATS      REFERENCE
+  ACCESS VIA   FRMCLE  &
+         USING FRMCLE OF GPFRM_AFFICHE
+  SELECT IF FRMTYP OF GPFORMATS = "O"
+
+FILE GPFOR_DETAILS  REFERENCE
+  ACCESS VIA   FRMCLE, &
+               FRDCLE  &
+         USING FRMCLE OF GPFRM_AFFICHE, &
+               FRDCLE OF GPFRM_AFFICHE
+
+
+FILE GPUNITE_MESURE REFERENCE
+  ACCESS VIA   UNMCLE &
+         USING UNMCLE OF GPFOR_DETAILS
+
+;-------------------------------------------------------------------------------
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4  = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+DEFINE D_XPRNOM CHAR SIZE 7 = "GP306"
+DEFINE D_LISPAR CHAR SIZE 204 = "F_CIECLE        |F_PRJCLE        |F_FRMCLE        |F_CIENOM        "
+DEFINE D_INDLON CHAR SIZE 112 = "001004|005008|013005|018040"
+DEFINE D_LISVAL CHAR SIZE 300 = CIECLE + PRJCLE + FRMCLE + T_CIENOM
+
+
+DEFINE D_PRJDSC  CHARACTER SIZE 100= PACK(TRUNCATE(PRJDSC1 OF GPPROJETS)+" "+&
+                                          TRUNCATE(PRJDSC2 OF GPPROJETS))
+
+DEFINE D_PRADSC  CHARACTER SIZE 100= PACK(TRUNCATE(PRADSC1 OF GPPRO_ACTIVITE)+" "+ &
+                                          TRUNCATE(PRADSC2 OF GPPRO_ACTIVITE))
+
+DEFINE D_TITRE1  CHARACTER SIZE 70 = CENTER(FRMTIT1 OF GPFORMATS)
+DEFINE D_TITRE2  CHARACTER SIZE 70 = CENTER(FRMTIT2 OF GPFORMATS)
+
+DEFINE D_MNTDIS2     FLOAT SIZE 08 = FRABDG OF GPFRM_AFFICHE - &
+                                     FRAREE OF GPFRM_AFFICHE
+
+DEFINE D_FRDDSC  CHARACTER SIZE 45 = FRDDSC[1:45]                   &
+                                  IF FRDTYP OF GPFRM_AFFICHE <> "S" &
+                                ELSE " "
+
+;---------------------
+; Montant réel
+;---------------------
+DEF D_REE1A CHARACTER SIZE 3 = &
+                      ASC(NCON(ASC(ABS(FRAREE OF GPFRM_AFFICHE),13)[1:3]))
+
+DEF D_REE1B CHARACTER SIZE 3 = RJ(D_REE1A)
+
+DEF D_REE2A CHARACTER SIZE 3 = ASC(ABSOLUTE(FRAREE OF GPFRM_AFFICHE),13)[4:3] &
+                         IF D_REE1B <> "  0"                                  &
+                       ELSE ASC(NCON(ASC(ABS(FRAREE OF GPFRM_AFFICHE),13)[4:3]))
+
+DEF D_REE2B CHARACTER SIZE 3 = RJ(D_REE2A)
+
+DEF D_REE3A CHARACTER SIZE 3 = ASC(ABSOLUTE(FRAREE OF GPFRM_AFFICHE),13)[7:3] &
+                         IF D_REE2B <> "  0"                                  &
+                       ELSE ASC(NCON(ASC(ABS(FRAREE OF GPFRM_AFFICHE),13)[7:3]))
+
+DEF D_REE3B CHARACTER SIZE 3 = RJ(D_REE3A)
+
+DEF D_REE4A CHARACTER SIZE 1= " " IF FRAREE OF GPFRM_AFFICHE >= 0 ELSE "-"
+DEF D_REE4B CHARACTER SIZE 6= "." +                                        &
+                              ASC(ABS(FRAREE OF GPFRM_AFFICHE),13)[10:4] + &
+                              D_REE4A
+
+DEF D_MNTREE CHARACTER SIZE 17 = &
+                       "       "                     + D_REE3B + D_REE4B &
+                    IF D_REE2B = "  0"                              AND  &
+                      (FRDTYP OF GPFOR_DETAILS = "C" OR                  &
+                       FRDTYP OF GPFOR_DETAILS = "F")                    &
+                  ELSE "   "         + D_REE2B + "," + D_REE3B + D_REE4B &
+                    IF D_REE1B = "  0"                              AND  &
+                      (FRDTYP OF GPFOR_DETAILS = "C" OR                  &
+                       FRDTYP OF GPFOR_DETAILS = "F")                    &
+                  ELSE D_REE1B + "," + D_REE2B + "," + D_REE3B + D_REE4B &
+                   IF (FRDTYP OF GPFOR_DETAILS = "C" OR                  &
+                       FRDTYP OF GPFOR_DETAILS = "F")                    &
+                  ELSE FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1]                      &
+                    IF FRDTYP OF GPFOR_DETAILS = "S"                     &
+                  ELSE " "
+
+
+
+;---------------------
+; Montant budget
+;---------------------
+DEF D_BDG1A CHARACTER SIZE 3 = &
+                      ASC(NCON(ASC(ABS(FRABDG OF GPFRM_AFFICHE),13)[1:3]))
+
+DEF D_BDG1B CHARACTER SIZE 3 = RJ(D_BDG1A)
+
+DEF D_BDG2A CHARACTER SIZE 3 = ASC(ABSOLUTE(FRABDG OF GPFRM_AFFICHE),13)[4:3] &
+                         IF D_BDG1B <> "  0"                                  &
+                       ELSE ASC(NCON(ASC(ABS(FRABDG OF GPFRM_AFFICHE),13)[4:3]))
+
+DEF D_BDG2B CHARACTER SIZE 3 = RJ(D_BDG2A)
+
+DEF D_BDG3A CHARACTER SIZE 3 = ASC(ABSOLUTE(FRABDG OF GPFRM_AFFICHE),13)[7:3] &
+                         IF D_BDG2B <> "  0"                                  &
+                       ELSE ASC(NCON(ASC(ABS(FRABDG OF GPFRM_AFFICHE),13)[7:3]))
+
+DEF D_BDG3B CHARACTER SIZE 3 = RJ(D_BDG3A)
+
+DEF D_BDG4A CHARACTER SIZE 1= " " IF FRABDG OF GPFRM_AFFICHE >= 0 ELSE "-"
+DEF D_BDG4B CHARACTER SIZE 6= "." +                                        &
+                              ASC(ABS(FRABDG OF GPFRM_AFFICHE),13)[10:4] + &
+                              D_BDG4A
+
+DEF D_MNTBDG CHARACTER SIZE 17 = &
+                       "       "                     + D_BDG3B + D_BDG4B &
+                    IF D_BDG2B = "  0"                              AND  &
+                      (FRDTYP OF GPFOR_DETAILS = "C" OR                  &
+                       FRDTYP OF GPFOR_DETAILS = "F")                    &
+                  ELSE "   "         + D_BDG2B + "," + D_BDG3B + D_BDG4B &
+                    IF D_BDG1B = "  0"                              AND  &
+                      (FRDTYP OF GPFOR_DETAILS = "C" OR                  &
+                       FRDTYP OF GPFOR_DETAILS = "F")                    &
+                  ELSE D_BDG1B + "," + D_BDG2B + "," + D_BDG3B + D_BDG4B &
+                   IF (FRDTYP OF GPFOR_DETAILS = "C" OR                  &
+                       FRDTYP OF GPFOR_DETAILS = "F")                    &
+                  ELSE FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1]                      &
+                    IF FRDTYP OF GPFOR_DETAILS = "S"                     &
+                  ELSE " "
+
+
+
+;----------------------
+; Montant disponibilité
+;----------------------
+DEF D_DIS1A CHARACTER SIZE 3 = ASC(NCON(ASC(ABS(D_MNTDIS2),13)[1:3]))
+DEF D_DIS1B CHARACTER SIZE 3 = RJ(D_DIS1A)
+
+DEF D_DIS2A CHARACTER SIZE 3 = ASC(ABSOLUTE(D_MNTDIS2),13)[4:3] &
+                            IF D_DIS1B <> "  0"                 &
+                          ELSE ASC(NCON(ASC(ABS(D_MNTDIS2),13)[4:3]))
+
+DEF D_DIS2B CHARACTER SIZE 3 = RJ(D_DIS2A)
+
+DEF D_DIS3A CHARACTER SIZE 3 = ASC(ABSOLUTE(D_MNTDIS2),13)[7:3] &
+                            IF D_DIS2B <> "  0"                 &
+                          ELSE ASC(NCON(ASC(ABS(D_MNTDIS2),13)[7:3]))
+
+DEF D_DIS3B CHARACTER SIZE 3 = RJ(D_DIS3A)
+
+DEF D_DIS4A CHARACTER SIZE 1= " " IF D_MNTDIS2 >= 0 ELSE "-"
+DEF D_DIS4B CHARACTER SIZE 6= "." +                          &
+                              ASC(ABS(D_MNTDIS2),13)[10:4] + &
+                              D_DIS4A
+
+DEF D_MNTDIS CHARACTER SIZE 17 = &
+                       "       "                     + D_DIS3B + D_DIS4B &
+                    IF D_DIS2B = "  0"                              AND  &
+                      (FRDTYP OF GPFOR_DETAILS = "C" OR                  &
+                       FRDTYP OF GPFOR_DETAILS = "F")                    &
+                  ELSE "   "         + D_DIS2B + "," + D_DIS3B + D_DIS4B &
+                    IF D_DIS1B = "  0"                              AND  &
+                      (FRDTYP OF GPFOR_DETAILS = "C" OR                  &
+                       FRDTYP OF GPFOR_DETAILS = "F")                    &
+                  ELSE D_DIS1B + "," + D_DIS2B + "," + D_DIS3B + D_DIS4B &
+                   IF (FRDTYP OF GPFOR_DETAILS = "C" OR                  &
+                       FRDTYP OF GPFOR_DETAILS = "F")                    &
+                  ELSE FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1] +                    &
+                       FRDDSC OF GPFOR_DETAILS[1:1]                      &
+                    IF FRDTYP OF GPFOR_DETAILS = "S"                     &
+                  ELSE " "
+
+
+DEFINE D_UNMABR       CHARACTER SIZE 3 = "/" + UNMABR OF GPUNITE_MESURE   &
+                                      IF FRDTYP OF GPFOR_DETAILS = "C" OR &
+                                         FRDTYP OF GPFOR_DETAILS = "F"    &
+                                    ELSE " "
+
+TEMPORARY T_PROCLEPOP CHARACTER SIZE 8
+TEMPORARY T_PROSTUPAT CHARACTER SIZE 8 ; Popup sur les projets.
+TEMPORARY T_MNTREE    CHARACTER SIZE 17
+TEMPORARY T_MNTBDG    CHARACTER SIZE 17
+TEMPORARY T_MNTDIS    CHARACTER SIZE 17
+TEMPORARY T_FRDDSC    CHARACTER SIZE 45
+TEMPORARY T_UNMABR    CHARACTER SIZE 3
+
+;-------------------------------------------------------------------------------
+;
+USE usdrw132 NOLIST
+USE ustit132 NOLIST
+USE ushilite NOLIST     ; Hilite pour tout les écrans
+
+HILITE DISPLAY       HALFTONE
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Consultation par format d'opération " &
+@ELSE
+      " %%% " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP
+
+ALIGN (,,31)
+FIELD D_TITRE1               DISPLAY
+FIELD D_TITRE2               DISPLAY
+
+SKIP
+
+ALIGN (,3,19) (,,28)
+FIELD PRJCLE  OF GPFRM_AFFICHE  DISPLAY
+FIELD D_PRJDSC                  DISPLAY
+
+FIELD PRACLE  OF GPFRM_AFFICHE  DISPLAY
+FIELD D_PRADSC                  DISPLAY
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      "Titre"  &
+@ELSE
+      " %%% " &
+@ENDIF
+      AT ,3
+
+
+TITLE &
+@IF FRANCAIS
+      "Budget" &
+@ELSE
+      " %%% " &
+@ENDIF
+      AT ,65
+
+TITLE &
+@IF FRANCAIS
+      "Réel" &
+@ELSE
+      " %%% " &
+@ENDIF
+      AT ,90
+
+TITLE &
+@IF FRANCAIS
+      "Disponibilité" &
+@ELSE
+      " %%% " &
+@ENDIF
+      AT ,106
+
+
+SKIP
+
+ALIGN (2,2,2) (,,3) (,,57) (,,75) (,,80) (,,98) (,,105) (,,123)
+CLUSTER OCCURS WITH GPFRM_AFFICHE
+
+FIELD IMMCLE OF GPFRM_AFFICHE LABEL " " HIDDEN SIZE 1 NOENTRY
+FIELD D_FRDDSC                      DISPLAY
+FIELD D_MNTBDG                      DISPLAY
+FIELD D_UNMABR                      DISPLAY
+FIELD D_MNTREE                      DISPLAY
+FIELD D_UNMABR                      DISPLAY
+FIELD D_MNTDIS                      DISPLAY
+FIELD D_UNMABR                      DISPLAY
+
+CLUSTER
+
+
+PROCEDURE INPUT IMMCLE
+BEGIN
+   IF 0 <> SIZE(FIELDTEXT)
+   THEN LET FIELDTEXT = OLDVALUE(IMMCLE OF GPFRM_AFFICHE)
+END
+
+PROCEDURE DESIGNER 1
+BEGIN
+   LET T_FRDDSC = D_FRDDSC
+   LET T_MNTREE = D_MNTREE
+   LET T_MNTBDG = D_MNTBDG
+   LET T_MNTDIS = D_MNTDIS
+   LET T_UNMABR = D_UNMABR
+
+   RUN SCREEN gp004b MODE F PASSING T_CIECLEMNU, &
+                                    T_CIENOM   , &
+                                    GPFRM_AFFICHE, &
+                                    GPPROJETS, &
+                                    T_FRDDSC, &
+                                    T_MNTREE, &
+                                    T_MNTBDG, &
+                                    T_MNTDIS, &
+                                    T_UNMABR
+
+END
+
+
+PROCEDURE DESIGNER D001
+BEGIN
+  RUN SCREEN gs090 MODE E PASSING D_XPRNOM,D_LISPAR,D_INDLON,D_LISVAL
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+PROCEDURE PREENTRY
+BEGIN
+  RUN SCREEN gp004a MODE E PASSING T_CIECLEMNU &
+                           WINDOW WIDTH CONSTANT WHEN CALLING
+  REFRESH ALL
+  PUSH FIND
+END
+
+PROCEDURE FIND
+BEGIN
+   FOR GPFRM_AFFICHE
+   BEGIN
+      GET GPFRM_AFFICHE VIA   USRCLE &
+                        USING LOGONID
+      GET GPFORMATS_2
+   END
+END
+
+PROCEDURE DELETE
+  DISABLE
+
+PROCEDURE UPDATE
+  DISABLE
+
+BUILD LIST DETAIL

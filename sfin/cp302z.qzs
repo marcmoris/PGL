@@ -1,0 +1,456 @@
+;/T/ Vérification des factures / Notes de crédit / Ajustement
+;
+;/P/ Programmeur...: Chantal Martineau
+;    Date Création.: 14-juin-1993
+;
+;    Description...: Pour faire la vérification des lots de factures, Note de crédit,
+;                    et ajustement non journalisées au grand-livre. Remarqué que ce
+;                    rapport peut-être exécuté même si le lot à déjà été journalisé.
+;
+;    Particularités:
+;
+;/M/ Programmeur...: Chantal Martineau
+;    Date modif....: 1996-07-15
+;    Description...: Enlever projet,sous-projet et immobilisation.
+;                    Demande SOS: GRA01 - 9311 - 290
+;
+;
+;/M/ Programmeur..: Remy Demers
+;    Date modifi..: 14 oct 1999
+;    Description..: cumuler en une ligne les enregistrements de meme 
+;                   unacle,cptcle,tps,tvq
+;-------------------------------------------------------------------------------
+
+ USE ussetqzs NOLIST   ; permet de faire les SET REPORT DEV....
+ SET NOBLANK           ; Empêche l'impression de ligne blanche
+
+
+;===============================================================================
+;  Rapport Vérification des factures / Notes de crédit /ajustement
+;===============================================================================
+
+ACCESS *WCP302 &
+  LINK REFCIECLE OF WCP302, &
+       REFCLETYP OF WCP302, &
+       REFCLENUM OF WCP302, &
+       RADCLE    OF WCP302  &
+    TO REFCIECLE          , &
+       REFCLETYP          , &
+       REFCLENUM          , &
+       RADCLE             OF MCREF_ADRESSE OPTIONAL &
+  LINK REFCIECLE OF WCP302, &
+       REFCLETYP OF WCP302, &
+       REFCLENUM OF WCP302  &
+    TO REFCIECLE          , &
+       REFCLETYP          , &
+       REFCLENUM          OF MCREFERENCE OPTIONAL &
+  LINK CPTCLE   OF WCP302   &
+    TO CPTCLE             OF VCPT_DSC    OPTIONAL &
+  LINK CIECLE   OF WCP302 , &
+       UNACLE   OF WCP302   &
+    TO CIECLE             , &
+       UNACLE             OF MCUNITE_ADM OPTIONAL &
+  LINK CIECLE OF WCP302   , &
+       PRJCLE OF WCP302     &
+    TO CIECLE             , &
+       PRJCLE             OF GPPROJETS    OPTIONAL &
+  LINK CIECLE OF WCP302   , &
+       PRJCLE OF WCP302   , &
+       PRACLE OF WCP302     &
+    TO CIECLE             , &
+       PRJCLE             , &
+       PRACLE             OF GPPRO_ACTIVITE  OPTIONAL &
+  LINK CIECLE OF WCP302  , &
+       IMMCLE OF WCP302    &
+    TO CIECLE             , &
+       IMMCLE             OF IMIMMOBILISATION OPTIONAL &
+  LINK CLICIECLE OF WCP302  , &
+       CLICLE    OF WCP302  &
+    TO CLICIECLE , &
+       CLICLE OF CRCLIENT OPTIONAL
+
+
+
+ DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = & ; titre1  du rapport
+@IF FRANCAIS
+                   "Vérification des factures / Notes de crédit / Ajustement"
+@ELSE
+                   "%%%Vérification des factures / Notes de crédit / Ajustement"
+@ENDIF
+ DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = " " ; titre2  du rapport
+
+ DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "CP302ZA"       ; numéro du rapport
+ DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM            ; nom de la compagnie
+
+
+USE usflgdet NOLIST                    ;Flag Bilingue (O/N)
+DEFINE D_HRSBLC    CHARACTER SIZE 3 =  DZ_FLGAFFO IF 0 <> LCPNBRTRSERR OF WCP302 &
+                                       ELSE DZ_FLGAFFN IF LCPNBRTRSERR OF WCP302 = 0
+
+DEFINE D_CAPRTU    CHARACTER SIZE 3 =  DZ_FLGAFFO      IF CAPRTU OF WCP302 = "1" &
+                                       ELSE DZ_FLGAFFN IF CAPRTU OF WCP302 = "0"
+
+DEFINE D_JOURNALISE CHAR SIZE 12 = &                                    ;Indique si Journalisé
+@IF FRANCAIS
+                            "Journalisé" &
+@ELSE
+                            "Posted" &
+@ENDIF
+                            IF LCPDATJOU OF WCP302 <> 0 ELSE " "
+;***********************
+; Pour le rendre à 20 caractères.
+;
+DEFINE D_PRJTIT    CHARACTER SIZE 20 = PRJDSC1  OF GPPROJETS
+
+DEFINE D_PRATIT    CHARACTER SIZE 20 = PRADSC1 OF GPPRO_ACTIVITE
+
+DEFINE D_IMMTIT    CHARACTER SIZE 18 = IMMDSC  OF IMIMMOBILISATION
+;***********************
+
+DEFINE D_LCPNBRTRSDIF INTEGER SIZE 4 = LCPNBRTRSVER - LCPNBRTRS         ;Différence nbre transactions réel et nbre transactions évalué
+DEFINE D_LCPCUMMNTDIF FLOAT SIZE 8 = LCPCUMMNTVER - LCPCUMMNT           ;Différence Montant transaction réel et Montant transaction évalué
+;
+; Vérification si montant entré par l'usager balance avec le total imputation si
+; ne balance imprimer un "*"
+;
+DEFINE D_BALANCE  CHARACTER SIZE 1 = "*" IF CAPMNT    OF WCP302 <> &
+                                            CAPCUMMNT OF WCP302 ELSE " "
+
+DEFINE D_TRI CHARACTER SIZE 18 = UNACLE OF WCP302 + &
+                                 CPTCLE OF WCP302 + &
+                                 CCITAXCODTPS OF WCP302 + &
+                                 CCITAXCODTVQ OF WCP302
+
+SORT ON LCPCLE    OF WCP302, &          ; No lot
+        REFCLENUM OF WCP302, &          ; No Client
+        CAPCLE    OF WCP302, &          ; No Facture
+        D_TRI
+
+
+ USE ustit180 NOLIST  ; Titre standard pour l'application a 180
+SKIP 2&
+@IF FRANCAIS
+ TAB 001 "Lot....: "   &
+@ELSE
+ TAB 001 "Batch..: "   &
+@ENDIF
+ TAB 011 LCPCLE OF WCP302 &
+ TAB 016 LCPDSC OF WCP302 &
+ TAB 060 D_JOURNALISE &
+ SKIP &
+@IF FRANCAIS
+ TAB 001 "Période: " &
+@ELSE
+ TAB 001 "Period.: " &
+@ENDIF
+ TAB 010 PECCLE OF WCP302 &
+SKIP 2 &
+  TAB 001 "                                                  Facture   " &
+  TAB 062 "                          Net                             " &
+ SKIP &
+  TAB 001 "*         Fournisseur         Type  Facture       référé     " &
+  TAB 062 "Cédule Ret.   date      Escompte   Dev.      Brut          TPS         TVQ         CTI          RTI      Escomptable" &
+ SKIP &
+  TAB 001 "- --------------------------- ---- ------------ ------------ " &
+  TAB 062 "------ ---- -------- ------------- ---- -------------- ----------- ----------- ----------- ----------- --------------" &
+ SKIP
+
+
+HEADING AT CAPCLE &
+  TAB 001  D_BALANCE &
+  TAB 003  REFCLENUM OF WCP302 &
+  TAB 010  RADNOMABR OF MCREF_ADRESSE &
+  TAB 032  CAPTYPECR OF WCP302 &
+  TAB 036  CAPCLE    OF WCP302 &
+  TAB 049  T_CAPCLEREF OF WCP302 PICTURE "^^^^^^^^^^^^" &
+  TAB 064  T_CPCCLELIG OF WCP302 PICTURE "^^" BWZ &
+  TAB 069  D_CAPRTU              &
+  TAB 074  CAPDAT      OF WCP302 &
+  TAB 083  CAPTERNET   OF WCP302 &
+  TAB 088  CAPDATNET   OF WCP302 &
+  TAB 097  DEVCLE      OF MCREFERENCE &
+  TAB 102  CAPMNT      OF WCP302 &
+  TAB 117  CAPMNTTPS   OF WCP302 &
+  TAB 129  CAPMNTTVQ   OF WCP302 &
+  TAB 141  CAPMNTCTI   OF WCP302 &
+  TAB 153  CAPMNTRTI   OF WCP302 &
+  TAB 165  CAPMNTNET   OF WCP302 &
+ SKIP &
+@IF FRANCAIS
+  TAB  003 "Description : " &
+@ELSE
+  TAB  003 "%%%cription : " &
+@ENDIF
+  TAB 017 CAPDSC1 OF WCP302 &
+  TAB 083  CAPTERESC1  OF WCP302 &
+  TAB 088  CAPDATESC1  OF WCP302 &
+SKIP &
+  TAB  017 CAPDSC2 OF WCP302 &
+ SKIP 2
+
+FOOTING AT D_TRI  &
+@IF FRANCAIS
+  TAB 003 "----Unité administrative----- ----------Compte----------- -------Montant  TF TP -----------TPS  -----------TVQ  Fac. ---------- Client ---------" PRINT AT CAPCLE &
+@ELSE
+  TAB 003 "%%%-Unité administrative----- ----------Compte----------- -------Montant  TF TP -----------TPS  -----------TVQ  Fac. ---------- Client ---------" PRINT AT CAPCLE &
+@ENDIF
+ SKIP &
+  TAB 003 UNACLE     OF WCP302      &
+  TAB 012 UNANOMABR  OF MCUNITE_ADM &
+  TAB 033 CPTCLE     OF WCP302      &
+  TAB 040 CPTDSCABR  OF VCPT_DSC    &
+  TAB 061 CCIMNT     OF WCP302 SUBTOTAL RESET AT D_TRI SIGN 4      PICTURE "^^^,^^^,^^^.^^ " &
+  TAB 077 CCITAXCODTPS OF WCP302    &
+  TAB 080 CCITAXCODTVQ OF WCP302    &
+  TAB 083 CCIMNTTPS  OF WCP302   SUBTOTAL RESET AT D_TRI &
+                         PICTURE "^^^,^^^,^^^.^^ " SIGN 4 &
+  TAB 099 CCIMNTTVQ  OF WCP302   SUBTOTAL RESET AT D_TRI &
+                          PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 115 CCIFLGFAC  OF WCP302      &
+  TAB 120 CLICLE     OF WCP302      &
+  TAB 127 CLINOMABR  OF CRCLIENT
+
+
+FOOTING AT CAPCLE &
+  TAB 061 "---------------" &
+  TAB 083 "---------------" &
+  TAB 099 "---------------" &
+  SKIP &
+  TAB 061 CCIMNT     OF WCP302       SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 083 CCIMNTTPS  OF WCP302       SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 099 CCIMNTTVQ  OF WCP302       SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+ SKIP &
+  TAB 001  "------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------"
+
+
+FOOTING AT LCPCLE &
+  TAB 061 "---------------" &
+  TAB 083 "---------------" &
+  TAB 099 "---------------" &
+ SKIP &
+@IF FRANCAIS
+  TAB 046 "Total du Lot:" &
+@ELSE
+  TAB 046 "Batch Total :" &
+@ENDIF
+  TAB 061 CCIMNT     OF WCP302       SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 083 CCIMNTTPS  OF WCP302       SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 099 CCIMNTTVQ  OF WCP302       SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+ SKIP &
+  TAB 061 "===============" &
+  TAB 083 "===============" &
+  TAB 099 "===============" &
+ SKIP &
+   TAB 001  "------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------" &
+ SKIP 1 &
+@IF FRANCAIS
+  TAB 050   "    Vérifiés         Cumulés             ECART        Hors balance(*)" &
+@ELSE
+  TAB 050   "%%% Vérifiés         Cumulés             ECART        Hors balance(*)" &
+@ENDIF
+ SKIP 1 &
+  TAB 050   "--------------    --------------    --------------    --------------- "&
+ SKIP &
+@IF FRANCAIS
+  TAB 023   "Montant total.........:" &
+@ELSE
+  TAB 023   "%%%tant total.........:" &
+@ENDIF
+  TAB 050 LCPCUMMNTVER OF WCP302   PICTURE "^^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5 &
+  TAB 068 LCPCUMMNT    OF WCP302   PICTURE "^^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5 &
+  TAB 087 D_LCPCUMMNTDIF           PICTURE "^^,^^^,^^^.^^ "  TRAILING SIGN "-" SIGNIFICANCE 5 &
+  TAB 109 D_HRSBLC &
+SKIP &
+@IF FRANCAIS
+  TAB 023   "Nombre de transactions:" &
+@ELSE
+  TAB 023   "%%%bre de transactions:" &
+@ENDIF
+  TAB 056 LCPNBRTRSVER   OF WCP302 PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+  TAB 074 LCPNBRTRS      OF WCP302 PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+  TAB 092 D_LCPNBRTRSDIF           PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+ SKIP 1 &
+    TAB 001  "------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------" &
+  SKIP PAGE
+
+BUILD cp302za
+
+
+
+
+
+;===============================================================================
+; Rapport sommaire à la fin du rapport
+;===============================================================================
+
+
+ACCESS *WCP302 &
+  LINK CPTCLE   OF WCP302   &
+    TO CPTCLE             OF VCPT_DSC OPTIONAL &
+  LINK CIECLE   OF WCP302 , &
+       UNACLE   OF WCP302   &
+    TO CIECLE             , &
+       UNACLE             OF MCUNITE_ADM OPTIONAL
+
+
+
+ DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &  ; titre1  du rapport
+@IF FRANCAIS
+        "Vérification des factures / Notes de crédit / Ajustement"
+@ELSE
+        "%%%Vérification des factures / Notes de crédit / Ajustement"
+@ENDIF
+ DEFINE DZ_NOMRAP2 CHARACTER SIZE 60  =  &            ; titre2  du rapport
+@IF FRANCAIS
+        "Sommaire"
+@ELSE
+        "Summary"
+@ENDIF
+ DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "CP302B"         ; numéro du rapport
+ DEFINE DZ_CIENOM  CHARACTER SIZE 40  = PARM            ; Nom de la compagnie
+
+DEFINE D_JOURN     CHARACTER SIZE 12 = &                   ;Indique si le lot est journalisé
+@IF FRANCAIS
+    "Journalisé" &
+@ELSE
+    "Posted" &
+@ENDIF
+    IF LCPDATJOU OF WCP302 <> 0 ELSE " "
+
+
+SORT   ON  LCPCLE    OF WCP302, &    ;Lot
+           UNACLE    OF WCP302, &    ;Unité
+           CPTCLE    OF WCP302       ;Compte
+
+
+ USE ustit180 NOLIST  ; Titre standard pour l'application a 180
+@IF FRANCAIS
+SKIP 2 &
+@IF FRANCAIS
+ TAB 001 "Lot.....: "   &
+@ELSE
+ TAB 001 "Batch...: "   &
+@ENDIF
+ TAB 010 LCPCLE  OF WCP302      &
+ TAB 016 LCPDSC  OF WCP302      &
+ TAB 060 D_JOURN                 &
+SKIP &
+@IF FRANCAIS
+ TAB 001 "Periode.: " &
+@ELSE
+ TAB 001 "Period..: " &
+@ENDIF
+ TAB 010 PECCLE  OF WCP302      &
+SKIP 2 &
+@IF FRANCAIS
+ TAB 018 "----Unité administrative-----  ----------Compte-----------  -------Montant  -----------TPS  -----------TVQ "
+@ELSE
+ TAB 018 "----Unité administrative-----  %%%-------Compte-----------  -------Montant  -----------TPS  -----------TVQ "
+@ENDIF
+
+
+FOOTING AT CPTCLE &
+  TAB 018 UNACLE     OF WCP302      &
+  TAB 027 UNANOMABR  OF MCUNITE_ADM &
+  TAB 049 CPTCLE     OF WCP302      &
+  TAB 056 CPTDSCABR  OF VCPT_DSC    &
+  TAB 078 CCIMNT     OF WCP302       SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 094 CCIMNTTPS  OF WCP302       SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 110 CCIMNTTVQ  OF WCP302       SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4
+
+
+FOOTING AT LCPCLE &
+  TAB 078 "--------------- --------------- ---------------" &
+ SKIP &
+@IF FRANCAIS
+       TAB 061 "Total Lot :" &
+@ELSE
+       TAB 061 "Batch Total:" &
+@ENDIF
+  TAB 078 CCIMNT     OF WCP302       SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 093 CCIMNTTPS  OF WCP302       SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+  TAB 110 CCIMNTTVQ  OF WCP302       SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 4 &
+ SKIP &
+  TAB 078 "=============== =============== ===============" &
+ SKIP PAGE
+
+BUILD cp302zb
+@IF FORMAT
+
+                                                                                                   1         1         1         1         1         1         1         1         1
+         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8
+123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+CP302A                                                                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                             Page:9999
+99/99/99 HH:MM xxxxxxxxxxxx                                   Vérification des factures / Notes de crédit / Ajustement
+                                                            xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+Lot....:  xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    Journalisé
+Période: 99-99
+
+                                                  Facture                              Net
+*         Fournisseur         Type  Facture       référé     Cédule Ret.   date      Escompte   Dev.      Brut          TPS         TVQ         CTI          RTI      Escomptable
+- --------------------------- ---- ------------ ------------ ------ ---- -------- ------------- ---- -------------- ----------- ----------- ----------- ----------- --------------
+x xxxxxx xxxxxxxxxxxxxxxxxxxx  xx  123456789012 123456789012   99   xxx  xx/xx/xx xxxx xx/xx/xx xxx  ^^,^^^,^^^.^^- ^^^,^^^.^^- ^^^,^^^.^^- ^^^,^^^.^^- ^^^,^^^.^^- ^^,^^^,^^^.^^-
+  Description : xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                           xxxx xx/xx/xx
+                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+  ----Unité administrative----- ----------Compte----------- -------Montant  TF TP -----------TPS  -----------TVQ  Fac. ---------- Client ---------
+  12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx xx 999,999,999.99- 999,999,999.99- xxx  123456 xxxxxxxxxxxxxxxxxxxx
+  12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx xx 999,999,999.99- 999,999,999.99- xxx  123456 xxxxxxxxxxxxxxxxxxxx
+  12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx xx 999,999,999.99- 999,999,999.99- xxx  123456 xxxxxxxxxxxxxxxxxxxx
+                                                            ---------------       --------------- ---------------
+                                                            999,999,999.99-       999,999,999.99- 999,999,999.99-
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+x xxxxxx xxxxxxxxxxxxxxxxxxxx  xx  123456789012 123456789012   xx   xxx  xx/xx/xx xxxx xx/xx/xx xxx  ^^,^^^,^^^.^^- ^^^,^^^.^^- ^^^,^^^.^^- ^^^,^^^.^^- ^^^,^^^.^^- ^^,^^^,^^^.^^-
+  Description : xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                           xxxx xx/xx/xx
+                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+  ----Unité administrative----- ----------Compte----------- -------Montant  TF TP -----------TPS  -----------TVQ  Fac. ---------- Client ---------
+  12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx xx 999,999,999.99- 999,999,999.99- xxx  123456 xxxxxxxxxxxxxxxxxxxx
+  12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx xx 999,999,999.99- 999,999,999.99- xxx  123456 xxxxxxxxxxxxxxxxxxxx
+  12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx xx 999,999,999.99- 999,999,999.99- xxx  123456 xxxxxxxxxxxxxxxxxxxx
+                                                            ---------------       --------------- ---------------
+                                                            999,999,999.99-       999,999,999.99- 999,999,999.99-
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+x xxxxxx xxxxxxxxxxxxxxxxxxxx  xx  123456789012 123456789012   xx   xxx  xx/xx/xx xxxx xx/xx/xx xxx  ^^,^^^,^^^.^^- ^^^,^^^.^^- ^^^,^^^.^^- ^^^,^^^.^^- ^^^,^^^.^^- ^^,^^^,^^^.^^-
+  Description : xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                           xxxx xx/xx/xx
+                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+  ----Unité administrative----- ----------Compte----------- -------Montant  TF TP -----------TPS  -----------TVQ  Fac. ---------- Client ---------
+  12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx xx 999,999,999.99- 999,999,999.99- xxx  123456 xxxxxxxxxxxxxxxxxxxx
+  12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx xx 999,999,999.99- 999,999,999.99- xxx  123456 xxxxxxxxxxxxxxxxxxxx
+  12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx xx 999,999,999.99- 999,999,999.99- xxx  123456 xxxxxxxxxxxxxxxxxxxx
+                                                            ---------------       --------------- ---------------
+                                                            999,999,999.99-       999,999,999.99- 999,999,999.99-
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                            ---------------       --------------- ---------------
+                                             Total du lot:  999,999,999.99        999,999,999.99- 999,999,999.99-
+                                                            ==============        ==============  ===============
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                    Vérifiés         Cumulés             Ecart        Hors balance(*)
+                                                --------------    --------------    --------------    ---------------
+                      Montant total.........:   999,999,999.99    999,999,999.99    999,999,999.99-         xxx
+                      Nombre de transactions:         9,999             9,999             9,999-
+
+
+                                                                                                   1         1         1         1         1         1         1         1         1
+         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8
+123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+CP302B                                                                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                             Page:9999
+99/99/99 HH:MM xxxxxxxxxxxx                                   Vérification des factures / Notes de crédit / Ajustement
+                                                                                      Sommaire
+
+Lot....:  xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    Journalisé
+Période: 99-99
+
+                 ----Unité administrative-----  ----------Compte-----------  -------Montant  -----------TPS  -----------TVQ
+                 12345678 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx  999,999,999.99- 999,999,999.99- 999,999,999.99-
+                 12345678 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx  999,999,999.99- 999,999,999.99- 999,999,999.99-
+                 12345678 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx  999,999,999.99- 999,999,999.99- 999,999,999.99-
+                                                                             --------------- --------------- ---------------
+                                                            Total Lot :      999,999,999.99- 999,999,999.99- 999,999,999.99-
+                                                                             =============== =============== ===============
+
+@ENDIF

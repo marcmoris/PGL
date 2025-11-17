@@ -1,0 +1,417 @@
+;/T/ Transfert des écriture - Passerelle PRH
+;
+;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur...: Marc Morissette
+;    Date Création.: 16-DEC-1994
+;
+;/V3.05.00/ Marc Morissette, 16 décembre 1994, 319
+;
+;    Description...: Génération d'un écriture au GL à partire du fichier.
+;                    - Présentement j'utilise un subfile.
+;
+;    Particularités: Le premier build sert uniquement à la compilation.
+;                    car normalement le subfile vient du répertoire PG_PASS:
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST
+
+;
+; Ce run sert uniquement à la compilation du programme
+;
+RUN gl803ta
+
+ACCESS MCHOLDING
+
+TEMPORARY   CIECLE     CHARACTER SIZE 4
+TEMPORARY   ECTCLE     CHARACTER SIZE 7
+TEMPORARY   PECCLE     CHARACTER SIZE 4
+TEMPORARY   CPTCLE     CHARACTER SIZE 6
+TEMPORARY   UNACLE     CHARACTER SIZE 8
+TEMPORARY   PROCLE     CHARACTER SIZE 8
+TEMPORARY   ACTCLE     CHARACTER SIZE 6
+TEMPORARY   IMMCLE     CHARACTER SIZE 12
+TEMPORARY   EDECODDC   CHARACTER SIZE 1
+DEFINE      D_EDEMNT   CHARACTER SIZE 20 = "0"
+
+SUBFILE WGL803 KEEP PORTABLE IF 1 = 2 &
+  INCLUDE CIECLE  , &
+          ECTCLE  , &
+          PECCLE  , &
+          CPTCLE  , &
+          UNACLE  , &
+          PROCLE  , &
+          ACTCLE  , &
+          IMMCLE  , &
+          D_EDEMNT  , &
+          EDECODDC
+
+BUILD
+;-------------------------------------------------------------------------------
+;
+;
+;
+RUN gl803tb
+
+GLOBAL TEMPORARY G_ERREUR       CHARACTER SIZE 5 ; Pour arrêter la procédure en cas d'erreur
+
+;---------------------------------------------------------
+;
+;
+; Validation du fichier de passerelle
+;
+;
+REQUEST  VALIDATION_PASIMPUTATION TERMINATE IF G_ERREUR = "ARRET"
+
+ACCESS *WGL803 &
+  ;
+  ; Valide la compagnie
+  ;
+  LINK  CIECLE  OF WGL803 &
+    TO  CIECLE            OF MCCOMPAGNIE   OPTIONAL &
+  ;
+  ; Valide que l'usager est accès à la compagnie
+  ;
+  LINK  CIECLE  OF WGL803 &
+    TO  CIECLE            OF VSEC_USR      OPTIONAL &
+  ;
+  ; Valide le compte ctb.
+  ;
+  LINK  CPTCLE  OF WGL803 &
+    TO  CPTCLE            OF MCCOMPTE      OPTIONAL &
+  ;
+  ; Valide la période comptable
+  ;
+  LINK  CIECLE  OF WGL803 , &
+        PECCLE  OF WGL803   &
+    TO  CIECLE, &
+        PECCLE            OF MCPERIODE_CIE OPTIONAL &
+  ;
+  ; Valide Unité administrative
+  ;
+  LINK  CIECLE  OF WGL803 , &
+        UNACLE  OF WGL803   &
+    TO  CIECLE, &
+        UNACLE            OF MCUNITE_ADM   OPTIONAL &
+  ;
+  ; Valide la charte comptable
+  ;
+  LINK  CPTCLE  OF WGL803 , &
+        CIECLE  OF WGL803 , &
+        UNACLE  OF WGL803   &
+    TO  CPTCLE, &
+        CIECLE, &
+        UNACLE            OF MCCHARTE_UNA OPTIONAL &
+  ;
+  ; Valide le projet
+  ;
+  LINK  CIECLE  OF WGL803 , &
+        PROCLE  OF WGL803   &
+    TO  CIECLE, &
+        PRJCLE            OF GPPROJETS OPTIONAL &
+  ;
+  ; Valide le sous-projet
+  ;
+  LINK  CIECLE  OF WGL803 , &
+        PROCLE  OF WGL803 , &
+        ACTCLE  OF WGL803   &
+    TO  CIECLE, &
+        PRJCLE, &
+        PRACLE            OF GPPRO_ACTIVITE OPTIONAL &
+  ;
+  ; Valide l'immobilisation
+  ;
+  LINK  CIECLE  OF WGL803 , &
+        IMMCLE  OF WGL803   &
+    TO  CIECLE, &
+        IMMCLE            OF IMIMMOBILISATION OPTIONAL &
+  ;
+  ; Le Holdind pour connaitre les paramètre
+  ;
+  LINK "1" TO CIENMC OF MCHOLDING
+
+
+TEMPORARY T_MESERR CHARACTER SIZE 80 ; Pour les erreurs.
+
+; Ajustement pour le changement de siècle
+DEFINE D_CCUPECDEBA_SIE CHARACTER SIZE 5 = "1" + CCUPECDEBA OF MCCHARTE_UNA &
+         IF CCUPECDEBA OF MCCHARTE_UNA[1:1] < "8" &
+         ELSE "0" + CCUPECDEBA OF MCCHARTE_UNA
+
+; Ajustement pour le changement de siècle
+DEFINE D_CCUPECDEBI_SIE CHARACTER SIZE 5 = "1" + CCUPECDEBI OF MCCHARTE_UNA &
+         IF CCUPECDEBI OF MCCHARTE_UNA[1:1] < "8" &
+         ELSE "0" + CCUPECDEBI OF MCCHARTE_UNA
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE CHARACTER SIZE 5 = "1" + PECCLE OF WGL803 &
+         IF PECCLE OF WGL803[1:1] < "8" &
+         ELSE "0" + PECCLE OF WGL803
+
+; Ajustement pour le changement de siècle
+DEFINE D_CPTPECDEBA_SIE CHARACTER SIZE 5 = "1" + CPTPECDEBA OF MCCOMPTE &
+         IF CPTPECDEBA OF MCCOMPTE[1:1] < "8" &
+         ELSE "0" + CPTPECDEBA OF MCCOMPTE
+
+; Ajustement pour le changement de siècle
+DEFINE D_CPTPECDEBI_SIE CHARACTER SIZE 5 = "1" + CPTPECDEBI OF MCCOMPTE &
+         IF CPTPECDEBI OF MCCOMPTE[1:1] < "8" &
+         ELSE "0" + CPTPECDEBI OF MCCOMPTE
+
+@IF FRANCAIS
+ITEM T_MESERR = CIECLE OF WGL803   + " Cette compagnie n'existe pas                            " IF NOT RECORD MCCOMPAGNIE   EXIST &
+         ELSE   CIECLE OF WGL803   + " Vous n'avez pas access a cette compagnie                " IF NOT RECORD VSEC_USR      EXIST &
+         ELSE   PECCLE OF WGL803   + " Cette période n'existe pas                              " IF NOT RECORD MCPERIODE_CIE EXIST &
+         ELSE   PECCLE OF WGL803   + " Cette période est fermée                                " IF PCCSTUGL OF MCPERIODE_CIE = "F" &
+         ELSE   CPTCLE OF WGL803   + " Ce compte n'existe pas                                  " IF NOT RECORD MCCOMPTE      EXIST &
+         ELSE   CPTCLE OF WGL803   + " Ce compte est inactif                                   " IF NOT (D_PECCLE_SIE >= D_CPTPECDEBA_SIE AND &
+                                                                                               (D_PECCLE_SIE < D_CPTPECDEBI_SIE OR &
+                                                                                                CPTPECDEBI OF MCCOMPTE = "")) &
+         ELSE   UNACLE OF WGL803   + " " + CPTCLE OF WGL803 + " Cette charte de compte n'existe pas      " IF NOT RECORD MCCHARTE_UNA  EXIST &
+         ELSE   UNACLE OF WGL803   + " " + CPTCLE OF WGL803 + " La combinaison compte/unité adm. est inactif. " &
+                                                                                        IF ((D_PECCLE_SIE >= D_CCUPECDEBA_SIE AND &
+                                                                                            (D_PECCLE_SIE <  D_CCUPECDEBI_SIE OR &
+                                                                                            CCUPECDEBI OF MCCHARTE_UNA = " ")) AND &
+                                                                                           (HLDCHTCPTRLT OF MCHOLDING = "E") AND &
+                                                                                            RECORD MCCHARTE_UNA EXIST) &
+         ELSE   UNACLE OF WGL803   + " " + CPTCLE OF WGL803 + " La combinaison compte/unité adm. est inactif." &
+                                                                                      IF ((D_PECCLE_SIE < D_CCUPECDEBA_SIE OR &
+                                                                                          (D_PECCLE_SIE >= D_CCUPECDEBI_SIE AND &
+                                                                                           CCUPECDEBI OF MCCHARTE_UNA <> " "))  AND &
+                                                                                          (HLDCHTCPTRLT OF MCHOLDING = "I")     AND &
+                                                                                           RECORD MCCHARTE_UNA EXIST)   &
+         ELSE   CPTCLE OF WGL803   + " On ne peut pas utiliser ce compte dans une imputation." IF CPTTYP OF MCCOMPTE <> "R" &
+         ELSE   PROCLE OF WGL803   + " Ce projet n'existe pas                                " IF NOT RECORD GPPROJETS EXIST   AND &
+                                                                                                  PROCLE OF WGL803 <> "" &
+         ELSE   PROCLE OF WGL803   + " Ce projet n'est pas actif                             " IF PRJSTU OF GPPROJETS <> "A"   AND &
+                                                                                                  PROCLE OF WGL803 <> "" &
+         ELSE   IMMCLE OF WGL803   + " Cette immobilisation est inexistante                  " IF NOT RECORD IMIMMOBILISATION EXIST AND &
+                                                                                                  IMMCLE OF WGL803  <> "" &
+         ELSE   ACTCLE OF WGL803   + " Ce sous-projet n'existant                             " IF NOT RECORD GPPRO_ACTIVITE EXIST AND &
+                                                                                                  ACTCLE OF WGL803  <> "" &
+         ELSE   ACTCLE OF WGL803   + " Ce sous-projet n'est pas active                       " IF PRASTU OF GPPRO_ACTIVITE <> "A" AND &
+                                                                                                  ACTCLE OF WGL803 <> "" &
+         ELSE   EDECODDC OF WGL803    + " Ce code débit/crédit doit être C ou D              " IF EDECODDC OF WGL803 <> "C"   AND &
+                                                                                                  EDECODDC OF WGL803  <> "D" &
+         ELSE   " Les montant doivent être plus grand que 0          " IF 0 > NCONVERT( D_EDEMNT OF WGL803 ) &
+         ELSE ""
+@ELSE
+  %%%%%%
+@ENDIF
+
+; affectation d'erreurs
+ITEM G_ERREUR = "ARRET" IF T_MESERR <> ""
+
+SUBFILE WGL803E KEEP APPEND IF G_ERREUR = "ARRET" &
+INCLUDE T_MESERR
+
+
+;-----------------------------------------------------------------
+;
+; Création des écritures comptables.
+;   - Il est possible que deux écriture soit créer pour 2 période différente
+;
+REQUEST CREATION_ECRITURE TERMINATE IF G_ERREUR = "ARRET"
+
+ACCESS *WGL803 &
+  ;
+  ; Numéro de séquence des lots.
+  ;
+  LINK CIECLE  OF WGL803, &
+       PECCLE  OF WGL803  &
+    TO LGSCIECLE, &
+       PECCLE             OF GLLGL_SEQ OPTIONAL &
+  ;
+  ; Numéro de séquence de l'écriture
+  ;
+  LINK CIECLE OF WGL803 , &
+       PECCLE OF WGL803[1:2] &
+    TO ECSCIECLE, &
+       ECSANN                 OF GLECJ_SEQ OPTIONAL
+
+TEMPORARY T_ANN       CHARACTER SIZE 2  ; Pour l'année de la nouvelles transaction
+
+ITEM T_ANN = PECCLE OF WGL803[1:2]
+
+; Ajustement pour le changement de siècle
+DEFINE D_T_ANN CHARACTER SIZE 3 = "1" + T_ANN[1:2] &
+         IF T_ANN[1:1] < "8" &
+         ELSE "0" + T_ANN[1:2]
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE2 CHARACTER SIZE 5 = "1" + PECCLE OF WGL803 &
+         IF PECCLE OF WGL803[1:1] < "8" &
+         ELSE "0" + PECCLE OF WGL803
+
+SORT ON CIECLE OF WGL803 &
+     ON ECTCLE OF WGL803 &
+     ON D_T_ANN          &
+     ON D_PECCLE_SIE2    &
+     ON CPTCLE OF WGL803 &
+     ON UNACLE OF WGL803 &
+     ON PROCLE OF WGL803 &
+     ON ACTCLE OF WGL803 &
+     ON IMMCLE OF WGL803
+
+
+
+TEMPORARY T_ECSNUMSEQ INTEGER          SIZE 4
+TEMPORARY T_NUMSEQ    INTEGER UNSIGNED SIZE 4
+TEMPORARY T_LGLCLE    INTEGER          SIZE 4
+TEMPORARY T_MNTCRT    FLOAT     SIZE 8 ; Montant Crédit
+TEMPORARY T_MNTDBT    FLOAT     SIZE 8 ; Montant Débit
+
+TEMPORARY T_ECINUMLIG INTEGER UNSIGNED SIZE 4
+
+
+ITEM T_MNTDBT = NCONVERT( D_EDEMNT OF WGL803 ) IF EDECODDC OF WGL803 = "D" &
+           ELSE 0
+
+ITEM T_MNTCRT = NCONVERT( D_EDEMNT OF WGL803 ) IF EDECODDC OF WGL803 = "C" &
+           ELSE 0
+
+
+
+; Génération des numéros d'écriture :
+;   composé de la facon suivante :
+;   . Position 1 a 2 ; Deux dernier caractere de l'année (ex: 1992 -> 92)
+;   . Postions 3 a 8 : Séquence de 1 a 9999 generer a partir du fichier
+;                      de sequence.
+;
+
+;ITEM T_NUMSEQ INITIAL NCONVERT(T_ANN) * &
+;                      (10 ^ (ECSLONNUM OF GLECJ_SEQ - 3) ) &
+;                         IF NOT RECORD GLECJ_SEQ EXIST &
+;                 ELSE ECSNUMSEQ OF GLECJ_SEQ
+; Ajustement pour le changement de siècle
+ITEM T_NUMSEQ INITIAL 0 IF NOT RECORD GLECJ_SEQ EXIST &
+                        ELSE ECSNUMSEQ OF GLECJ_SEQ
+
+;ITEM T_ECSNUMSEQ COUNT AT D_PECCLE_SIE2 &
+;                 RESET AT D_T_ANN TO T_NUMSEQ + 1
+; Ajustement pour le changement de siècle
+ITEM T_ECSNUMSEQ = T_NUMSEQ + 1 RESET AT D_T_ANN
+
+ITEM T_LGLCLE   =  LGSSEQ OF GLLGL_SEQ + 1 RESET AT D_PECCLE_SIE2
+
+ITEM T_ECINUMLIG  COUNT RESET AT D_PECCLE_SIE2
+
+
+OUTPUT GLECRITURE_JG ADD &
+                     AT D_PECCLE_SIE2 &
+                     NOITEM
+  ITEM ECJCIECLE        OF GLECRITURE_JG INITIAL CIECLE OF WGL803
+  ; Ajustement pour le changement de siècle
+  ITEM ECJCLENUM        OF GLECRITURE_JG    =   T_ANN +  ASCII(T_ECSNUMSEQ ,ECSLONNUM OF GLECJ_SEQ - 2)
+  ITEM ECJCLESEQ        OF GLECRITURE_JG    =    ""
+  ITEM PECCLE           OF GLECRITURE_JG    =    PECCLE OF WGL803
+  ITEM LGLCLE           OF GLECRITURE_JG    =    ASCII(T_LGLCLE,4)
+  ITEM ECJFLGINTCIE     OF GLECRITURE_JG    =    "0"
+  ITEM ECJTYPECR        OF GLECRITURE_JG    =    "RG"
+  ITEM ECJFLGANN        OF GLECRITURE_JG    =    "0"
+  ITEM ECJDAT           OF GLECRITURE_JG    =    SYSDATE
+  ITEM ECJDATSTP        OF GLECRITURE_JG    =    SYSDATE
+  ITEM ECJDATJOU        OF GLECRITURE_JG    =    0
+  ITEM ECJHREJOU        OF GLECRITURE_JG    =    0
+  ITEM ECJDSC1          OF GLECRITURE_JG INITIAL ""
+  ITEM ECJDSC2          OF GLECRITURE_JG INITIAL ""
+  ITEM ECJDSC3          OF GLECRITURE_JG INITIAL ""
+  ITEM ECJCIEINT        OF GLECRITURE_JG INITIAL CIECLE       OF WGL803
+  ITEM ECJTRFUNA        OF GLECRITURE_JG INITIAL "0"
+  ITEM ECJNBRPERINI     OF GLECRITURE_JG INITIAL 0
+  ITEM ECJNBRPERRES     OF GLECRITURE_JG INITIAL 0
+  ITEM ECJPECDES        OF GLECRITURE_JG    =    ""
+  ITEM ECJMNTDBT        OF GLECRITURE_JG SUBTOTAL T_MNTDBT
+  ITEM ECJMNTCRT        OF GLECRITURE_JG SUBTOTAL T_MNTCRT
+  ITEM ECJNUMLIG        OF GLECRITURE_JG FINAL    T_ECINUMLIG
+  ITEM HISCLE           OF GLECRITURE_JG    =    0
+  ITEM ECJUSRCRE        OF GLECRITURE_JG INITIAL LOGONID
+  ITEM ECJUNAINT1       OF GLECRITURE_JG INITIAL ""
+  ITEM ECJUNAINT2       OF GLECRITURE_JG INITIAL ""
+  ITEM ECJUNANBR1       OF GLECRITURE_JG INITIAL 0
+  ITEM ECJUNANBR2       OF GLECRITURE_JG INITIAL 0
+
+
+OUTPUT GLIMPUTATION ADD &
+                    NOITEM
+  ITEM ECJCIECLE        OF GLIMPUTATION INITIAL CIECLE  OF WGL803
+  ; Ajustement pour le changement de siècle
+  ITEM ECJCLENUM        OF GLIMPUTATION    =   T_ANN +  ASCII(T_ECSNUMSEQ ,ECSLONNUM OF GLECJ_SEQ - 2)
+  ITEM ECJCLESEQ        OF GLIMPUTATION    =    " "
+  ITEM ECINUMLIG        OF GLIMPUTATION INITIAL T_ECINUMLIG
+  ITEM PRJCLE           OF GLIMPUTATION INITIAL PROCLE     OF WGL803
+  ITEM PROCLE           OF GLIMPUTATION INITIAL ACTCLE     OF WGL803
+  ITEM IMMCLE           OF GLIMPUTATION INITIAL IMMCLE     OF WGL803
+  ITEM CPTCLE           OF GLIMPUTATION INITIAL CPTCLE     OF WGL803
+  ITEM CIECLE           OF GLIMPUTATION INITIAL CIECLE     OF WGL803
+  ITEM UNACLE           OF GLIMPUTATION INITIAL UNACLE     OF WGL803
+  ITEM ECICODDC         OF GLIMPUTATION    =    EDECODDC   OF WGL803
+  ITEM ECIMNT           OF GLIMPUTATION    =    NCONVERT( D_EDEMNT     OF WGL803 )
+
+
+; NOTE : Nous devons gerer les cumulatifs du lot ici, car le trigger T_ECJ
+;        ne fonctionnera pas dans ce cas-ci.
+;        Raison : Le lot sera créer une fois que toutes les écritures de
+;                 journal se référant a ce lot seront créées.
+;                 Donc, dans le 'store' du trigger, on ne trouvera pas le lot.
+;
+OUTPUT GLLOT ADD &
+             AT D_PECCLE_SIE2 &
+             NOITEM
+  ITEM LGLCIECLE    OF GLLOT    =    CIECLE OF WGL803
+  ITEM LGLCLE       OF GLLOT    =    ASCII(T_LGLCLE,4)
+  ITEM PECCLE       OF GLLOT    =    PECCLE OF WGL803
+  ITEM LGLTYPECR    OF GLLOT    =    "RG"
+  ITEM LGLUSR       OF GLLOT INITIAL LOGONID
+  ITEM LGLDSC       OF GLLOT INITIAL ""
+  ITEM LGLDATVAL    OF GLLOT INITIAL 0
+  ITEM LGLUSRVAL    OF GLLOT INITIAL ""
+  ITEM LGLDATJOU    OF GLLOT INITIAL 0
+  ITEM LGLHREJOU    OF GLLOT INITIAL 0
+  ITEM LGLUSRJOU    OF GLLOT INITIAL ""
+  ITEM LGLUSRATR    OF GLLOT INITIAL ""
+  ITEM LGLATRJOU    OF GLLOT INITIAL "0"
+  ITEM LGLNBRTRS    OF GLLOT INITIAL 1
+  ITEM LGLCUMMNT    OF GLLOT SUBTOTAL T_MNTDBT
+  ITEM LGLCUMMNTVER OF GLLOT SUBTOTAL T_MNTDBT
+  ITEM LGLNBRTRSVER OF GLLOT FINAL    0
+  ITEM LGLNBRTRSERR OF GLLOT INITIAL  0
+  ITEM LGLDATCRE    OF GLLOT INITIAL SYSDATE
+  ITEM LGLUSRCRE    OF GLLOT INITIAL LOGONID
+  ITEM LGLHRECRE    OF GLLOT INITIAL SYSTIME / 10000
+  ITEM LGLDATMOD    OF GLLOT INITIAL 0
+  ITEM LGLHREMOD    OF GLLOT INITIAL 0
+  ITEM LGLUSRMOD    OF GLLOT INITIAL ""
+  ITEM LGLUSRVAL    OF GLLOT INITIAL ""
+
+
+OUTPUT GLLGL_SEQ ADD UPDATE &
+                 AT D_PECCLE_SIE2 &
+                 NOITEM
+  ITEM LGSCIECLE OF GLLGL_SEQ INITIAL CIECLE OF WGL803
+  ITEM PECCLE    OF GLLGL_SEQ INITIAL PECCLE OF WGL803
+  ITEM LGSSEQ    OF GLLGL_SEQ    =    T_LGLCLE
+
+
+OUTPUT GLECJ_SEQ ADD UPDATE &
+                 AT D_T_ANN &
+                 NOITEM
+  ITEM ECSCIECLE OF GLECJ_SEQ INITIAL CIECLE  OF WGL803
+  ITEM ECSANN    OF GLECJ_SEQ    =    T_ANN
+  ITEM ECSNUMSEQ OF GLECJ_SEQ    =    T_ECSNUMSEQ
+
+SUBFILE WGL803R KEEP &
+INCLUDE ECJCIECLE        OF GLECRITURE_JG , &
+        ECJCLENUM        OF GLECRITURE_JG , &
+        ECJCLESEQ        OF GLECRITURE_JG , &
+        PECCLE           OF GLECRITURE_JG , &
+        LGLCLE           OF GLECRITURE_JG , &
+        ECICODDC         OF GLIMPUTATION  , &
+        ECIMNT           OF GLIMPUTATION
+BUILD

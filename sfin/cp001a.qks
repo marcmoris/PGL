@@ -1,0 +1,1323 @@
+;/T/ Informations par compagnies
+;
+;/P/ Programmeur..: Thomas BRENNEUR
+;    Date Création: 20-Mai-1993
+;
+;    Description..: Saisie des informations complémentaires du fournisseur
+;                   pour chaque compagnie dans lequel il à acces. Si la charte
+;                   fournisseur est par compagnie, alors il ne peut pas
+;                   saisir d'autres compagnies que celle du fournisseur
+;
+;                   Note : On peut avoir des adresses différentes suivant les
+;                          compagnies, mais elles appartiennent toutes au
+;                          fournisseur. Et elles sont uniques par fournisseur.
+;
+;/M/ Modifié par Nancy Marceau, 21 avril 1994
+;      - Ajout du mode de transport et du terme de commerce pour le module
+;        Achats/Réceptions.
+;
+;/M/ Modification par Remy Demers, 13 oct 1999
+;      - ne plus permettre un code de tax tps et tvq null
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+;-------------------------------------------------------------------------------
+SCREEN cp001a ACTIONBAR &
+              MODE LABEL "" AT 2,80 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING CPFOURNISSEUR , &
+                        CPFOU_CONTACT , &
+                        MCREF_ADRESSE , &
+                        T_CIECLEMNU   , &
+                        T_CIENOM      , &
+                        T_HLDCHTFOU
+
+
+USE ustrasse   NOLIST
+
+USE ussectmp   NOLIST
+    "CP001A"
+
+USE cp001a.hlp NOLIST
+
+USE usactecr NOLIST
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE  4 ; Compagnie du menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie du menu
+TEMPORARY T_HLDCHTFOU CHARACTER SIZE  1 ; Type de charte de fournisseur
+
+;-------------------------------------------------------------------------------
+;
+; Fournisseur provenant de l'écran principal. (avec les fichiers secondaires)
+;
+FILE CPFOURNISSEUR MASTER
+FILE CPFOU_CONTACT MASTER
+FILE MCREF_ADRESSE MASTER
+
+;-------------------------------------------------------------------------------
+;
+; Compagnies accessibles et informations complémentaires
+;
+; *** ATTENTION LES PROCÉDURES PATH & FIND ONT ÉTÉ RÉÉCRITES !!! ***
+;
+;
+FILE CPFOU_CIE  PRIMARY &
+                NOITEM
+
+  ITEM FOUCIECLE  OF CPFOU_CIE  INITIAL FOUCIECLE OF CPFOURNISSEUR
+  ITEM FOUCLE     OF CPFOU_CIE  INITIAL FOUCLE    OF CPFOURNISSEUR
+
+  ;
+  ; Dans le cas d'une charte par compagnie, on ne donne pas la possibilité
+  ; de saisir la compagnie à l'usager.
+  ;
+  ITEM FOCCIECLE  OF CPFOU_CIE  INITIAL FOUCIECLE OF CPFOURNISSEUR &
+                                IF T_HLDCHTFOU = "1"
+  ;
+  ; Initialisation des types de taxes et du type de référence (il ne sont là
+  ; que pour faciliter le traitement).
+  ;
+  ITEM FOCTAXTYPTPS OF CPFOU_CIE INITIAL "F"
+  ITEM FOCTAXTYPTVQ OF CPFOU_CIE INITIAL "P"
+  ;
+  ; Lors de la création d'un fournisseur, le numéro d'adresse est toujours
+  ; à 1 = La première adresse. Sauf pour les fournisseurs divers, qui n'ont
+  ; pas d'adresse permanente.
+  ;
+  ITEM FOCADRPAM OF CPFOU_CIE INITIAL 1 &
+                              IF FOUTYP OF CPFOURNISSEUR <> "D"
+  ITEM FOCADRACH OF CPFOU_CIE INITIAL 1 &
+                              IF FOUTYP OF CPFOURNISSEUR <> "D"
+  ITEM FOCADRRET OF CPFOU_CIE INITIAL 1 &
+                              IF FOUTYP OF CPFOURNISSEUR <> "D"
+  ITEM FOCADRACH OF CPFOU_CIE FINAL   0 IF FOUTYP OF CPFOURNISSEUR  = "D"
+  ITEM FOCADRPAM OF CPFOU_CIE FINAL   0 IF FOUTYP OF CPFOURNISSEUR  = "D"
+  ITEM FOCADRRET OF CPFOU_CIE FINAL   0 IF FOUTYP OF CPFOURNISSEUR  = "D"
+
+;-------------------------------------------------------------------------------
+;
+; Alias de la relation CPFOU_CIE permettant de  recopier la première
+; compagnie définie si l'usager entre une autre compagnie. Ceci permet de
+; faciliter la saisie lors de la création d'un fournisseur sur plusieurs
+; compagnies.
+;
+FILE CPFOU_CIE  DESIGNER &
+                OPEN READ &
+                ALIAS A_FOC_DEFAUT
+
+;-------------------------------------------------------------------------------
+;
+; Validation et lecture du nom de la compagnie
+;
+FILE MCCOMPAGNIE  REFERENCE
+
+  ACCESS  VIA   CIECLE &
+          USING FOCCIECLE OF CPFOU_CIE
+
+;-------------------------------------------------------------------------------
+;
+; Validation et recherche de la description du compte de CAP du fournisseur
+;
+FILE VCPT_DSC REFERENCE &
+              ALIAS A_VCPT_DSC_FOCCPTCAP
+
+  ACCESS  VIA   CPTCLE &
+          USING FOCCPTCAP OF CPFOU_CIE
+
+;-------------------------------------------------------------------------------
+;
+; Validation et recherche de la description du compte d'encaisse du fournisseur
+;
+FILE MCLIVRET_BQ REFERENCE
+
+  ACCESS  VIA   CIECLE, &
+                LBQCPTENC &
+          USING FOCCIECLE OF CPFOU_CIE, &
+                LBQCPTENC OF CPFOU_CIE
+
+FILE VCPT_DSC REFERENCE &
+              ALIAS A_VCPT_DSC_LBQCPTENC
+
+  ACCESS  VIA   CPTCLE &
+          USING LBQCPTENC OF MCLIVRET_BQ
+
+;-------------------------------------------------------------------------------
+;
+; Validation et recherche de la description du compte d'escompte du fournisseur
+;
+FILE VCPT_DSC REFERENCE &
+              ALIAS A_VCPT_DSC_FOCCPTESC
+
+  ACCESS  VIA   CPTCLE &
+          USING FOCCPTESC OF CPFOU_CIE
+
+;-------------------------------------------------------------------------------
+;
+; Validation du code de taxe fédérale
+;
+FILE VTAX_DSC REFERENCE &
+              ALIAS A_VTAX_DSC_FOCTAXCODTPS
+
+  ACCESS  VIA   TAXCLETYP, &
+                TAXCLECOD &
+          USING FOCTAXTYPTPS OF CPFOU_CIE, &
+                FOCTAXCODTPS OF CPFOU_CIE
+
+;-------------------------------------------------------------------------------
+;
+; Validation du code de taxe provinciale
+;
+FILE VTAX_DSC REFERENCE &
+              ALIAS A_VTAX_DSC_FOCTAXCODTVQ
+
+  ACCESS  VIA   TAXCLETYP, &
+                TAXCLECOD  &
+          USING FOCTAXTYPTVQ OF CPFOU_CIE, &
+                FOCTAXCODTVQ OF CPFOU_CIE
+
+;-------------------------------------------------------------------------------
+;
+; Validation du terme net
+;
+FILE VTER_DSC REFERENCE &
+              ALIAS A_VTER_DSC_FOCTERNET
+
+  ACCESS  VIA   TERCLE &
+          USING FOCTERNET OF CPFOU_CIE
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation du terme du premier escompte
+;
+FILE VTER_DSC REFERENCE &
+              ALIAS A_VTER_DSC_FOCTERESC1
+
+  ACCESS  VIA   TERCLE &
+          USING FOCTERESC1 OF CPFOU_CIE
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation du terme du deuxiemme escompte
+;
+FILE VTER_DSC REFERENCE &
+              ALIAS A_VTER_DSC_FOCTERESC2
+
+  ACCESS  VIA   TERCLE &
+          USING FOCTERESC2 OF CPFOU_CIE
+
+
+;-------------------------------------------------------------------------------
+;
+; Vérification de l'éxistance de l'adresse de paiement du fournisseur
+;
+FILE MCREF_ADRESSE    REFERENCE &
+                      ALIAS A_RAD_PAM
+
+  ACCESS  VIA   REFCIECLE, &
+                REFCLETYP, &
+                REFCLENUM, &
+                RADCLE     &
+          USING FOUCIECLE OF CPFOURNISSEUR, &
+                FOUREFTYP OF CPFOURNISSEUR, &
+                FOUCLE    OF CPFOURNISSEUR, &
+                FOCADRPAM OF CPFOU_CIE
+
+;-------------------------------------------------------------------------------
+;
+; Vérification de l'éxistance de l'adresse d'achat du fournisseur
+;
+FILE MCREF_ADRESSE    REFERENCE &
+                      ALIAS A_RAD_ACH
+
+  ACCESS  VIA   REFCIECLE, &
+                REFCLETYP, &
+                REFCLENUM, &
+                RADCLE     &
+          USING FOUCIECLE OF CPFOURNISSEUR, &
+                FOUREFTYP OF CPFOURNISSEUR, &
+                FOUCLE    OF CPFOURNISSEUR, &
+                FOCADRACH OF CPFOU_CIE
+
+;-------------------------------------------------------------------------------
+;
+; Vérification de l'éxistance de l'adresse de retour du fournisseur
+;
+FILE MCREF_ADRESSE    REFERENCE &
+                      ALIAS A_RAD_RET
+
+  ACCESS  VIA   REFCIECLE, &
+                REFCLETYP, &
+                REFCLENUM, &
+                RADCLE     &
+          USING FOUCIECLE OF CPFOURNISSEUR, &
+                FOUREFTYP OF CPFOURNISSEUR, &
+                FOUCLE    OF CPFOURNISSEUR, &
+                FOCADRRET OF CPFOU_CIE
+
+;-------------------------------------------------------------------------------
+;
+; Suppression des statistiques du fournisseur pour cette compagnie si on
+; supprime l'acces du fournisseur à cette compagnie.
+;
+FILE CPFOU_STAT DELETE &
+                NOITEM
+
+  ACCESS  VIA   FOUCIECLE, &
+                FOUCLE   , &
+                FOCCIECLE  &
+          USING FOUCIECLE OF CPFOU_CIE, &
+                FOUCLE    OF CPFOU_CIE, &
+                FOCCIECLE OF CPFOU_CIE
+
+;
+; Holding, pour connaitre la devise du G/L pour valider les comptes.
+;
+FILE MCHOLDING        REFERENCE
+  ACCESS VIA CIENMC &
+         USING "1"
+
+; Codes bilingues du mode de transport.
+;
+DEFINE    D_CMDTRP CHARACTER SIZE 16 = "CMDTRP"
+TEMPORARY T_CMDTRP CHARACTER SIZE 4
+
+FILE VCBI_DSC REFERENCE ALIAS A_CBI_CMDTRP
+  ACCESS  VIA XELNOM, &
+              CBICLE  &
+          USING D_CMDTRP, &
+                CMDTRP OF CPFOU_CIE
+
+
+; Codes bilingues du code de terme de commerce
+;
+DEFINE    D_CMDFAB CHARACTER SIZE 16 = "CMDFAB"
+TEMPORARY T_CMDFAB CHARACTER SIZE 4
+
+FILE VCBI_DSC REFERENCE ALIAS A_CBI_CMDFAB
+  ACCESS  VIA XELNOM, &
+              CBICLE  &
+          USING D_CMDFAB, &
+                CMDFAB OF CPFOU_CIE
+
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Temporaires permettants l'acces aux popup de consultation
+;
+TEMPORARY T_CIECLE    CHARACTER         SIZE 4 ; Compagnie
+TEMPORARY T_CPTCLE    CHARACTER         SIZE 6 ; Compte
+TEMPORARY T_LBQCPTENC CHARACTER         SIZE 6 ; Compte d'encaisse
+TEMPORARY T_CPTTYPPAT CHARACTER         SIZE 1 ; Pattern type de compte
+TEMPORARY T_CPTCATPAT CHARACTER         SIZE 8 ; Pattern catégorie du compte
+TEMPORARY T_PECCLE    CHARACTER         SIZE 4 ; Période
+TEMPORARY T_TAXCLETYP CHARACTER         SIZE 1 ; Type de taxe
+TEMPORARY T_TAXCLECOD CHARACTER         SIZE 2 ; Code de taxe
+TEMPORARY T_TAXMODPAT CHARACTER         SIZE 5 ; Pattern mode de taxe
+TEMPORARY T_TERCLE    CHARACTER         SIZE 4 ; Terme
+TEMPORARY T_TERCAT    CHARACTER         SIZE 4 ; Catégorie du terme
+TEMPORARY T_REFCIECLE CHARACTER         SIZE 4 ; Compagnie de la référence
+TEMPORARY T_REFCLETYP CHARACTER         SIZE 1 ; Type de la référence
+TEMPORARY T_REFCLENUM CHARACTER         SIZE 6 ; Numéro de la référence
+TEMPORARY T_TYPADR    CHARACTER         SIZE 3 ; Type d'adresse
+TEMPORARY T_RADCLE    INTEGER UNSIGNED  SIZE 2 ; Numéro d'adresse
+
+TEMPORARY T_FLGDEL    CHARACTER        SIZE 1 ; Flag pour le sous-écran de
+                                              ; destruction
+
+DEFINE    DZ_CIECLE   CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE    DZ_CIENOM   CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Informations par compagnies " &
+@ELSE
+      " %%% " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST
+
+SKIP
+
+ALIGN(3,3,19) (,,26)
+
+FIELD FOUCLE OF CPFOURNISSEUR &
+      DISPLAY PREDISPLAY
+
+FIELD FOUNOM OF CPFOURNISSEUR &
+      DISPLAY PREDISPLAY
+
+ALIGN(3,3,19) (,,26) (67,67,78)
+
+FIELD FOCCIECLE OF CPFOU_CIE &
+      REQUIRED &
+      NOCHANGE &
+      IF T_HLDCHTFOU = "0" &
+      HIDDEN ID 05 &
+      LOOKUP &
+        ON MCCOMPAGNIE &
+          VIA   CIECLE &
+          USING FOCCIECLE OF CPFOU_CIE &
+          MESSAGE 402, & ; cette compagnie n'existe pas
+        NOTON CPFOU_CIE &
+          VIA   FOUCIECLE, &
+                FOUCLE   , &
+                FOCCIECLE  &
+          USING FOUCIECLE OF CPFOURNISSEUR, &
+                FOUCLE    OF CPFOURNISSEUR, &
+                FOCCIECLE OF CPFOU_CIE      &
+          MESSAGE 425 ; Cette compagnie est deja referé
+
+FIELD CIENOM OF MCCOMPAGNIE &
+      DISPLAY
+
+FIELD FOCUSISEC OF CPFOU_CIE &
+      REQUIRED &
+      LABEL "Usine sec:" &
+      HIDDEN ID 07
+
+SKIP
+
+DRAW FROM ,1 TO ,80
+
+TITLE &
+@IF FRANCAIS
+      " Comptes & taxes " &
+@ELSE
+      " %%% " &
+@ENDIF
+      CENTERED AT ,1
+
+SKIP
+
+ALIGN(3,3,19) (,,26)
+
+FIELD FOCCPTCAP OF CPFOU_CIE &
+      HIDDEN ID 10 &
+      REQUIRED &
+      LOOKUP ON A_VCPT_DSC_FOCCPTCAP &
+        VIA   CPTCLE &
+        USING FOCCPTCAP OF CPFOU_CIE &
+        MESSAGE 411 ; Compte inexistant
+
+FIELD CPTDSC OF A_VCPT_DSC_FOCCPTCAP DISPLAY
+
+FIELD LBQCPTENC OF CPFOU_CIE &
+      HIDDEN ID 15 &
+      REQUIRED &
+      LOOKUP &
+        ON A_VCPT_DSC_LBQCPTENC &
+          VIA   CPTCLE &
+          USING LBQCPTENC OF CPFOU_CIE &
+          MESSAGE 411, & ; Ce compte est inexistant
+        ON MCLIVRET_BQ &
+          VIA   CIECLE, &
+                LBQCPTENC &
+          USING FOCCIECLE OF CPFOU_CIE, &
+                LBQCPTENC OF CPFOU_CIE  &
+          MESSAGE 569 ; Ce compte n'est pas un compte d'encaisse
+
+FIELD CPTDSC OF A_VCPT_DSC_LBQCPTENC DISPLAY
+
+FIELD FOCCPTESC OF CPFOU_CIE &
+      HIDDEN ID 20 &
+      REQUIRED &
+      LOOKUP ON A_VCPT_DSC_FOCCPTESC &
+        VIA   CPTCLE &
+        USING FOCCPTESC OF CPFOU_CIE &
+        MESSAGE 411 ; Compte inexistant
+
+FIELD CPTDSC OF A_VCPT_DSC_FOCCPTESC DISPLAY
+
+SKIP
+
+ALIGN(3,3,19) (,,22) (,43,59)
+
+FIELD FOCTAXCODTPS OF CPFOU_CIE &
+      HIDDEN ID 25 &
+      IF FOUTYP OF CPFOURNISSEUR <> "D"
+
+FIELD TAXDSC OF A_VTAX_DSC_FOCTAXCODTPS &
+      DISPLAY
+
+FIELD FOCENRTPS OF CPFOU_CIE &
+      IF     FOUTYP OF CPFOURNISSEUR <> "D" &
+         AND FOCTAXCODTPS OF CPFOU_CIE <> ""
+
+FIELD FOCTAXCODTVQ OF CPFOU_CIE &
+      HIDDEN ID 30 &
+      IF FOUTYP OF CPFOURNISSEUR <> "D"
+
+FIELD TAXDSC OF A_VTAX_DSC_FOCTAXCODTVQ &
+      DISPLAY
+
+FIELD FOCENRTVQ OF CPFOU_CIE &
+      IF     FOUTYP OF CPFOURNISSEUR <> "D" &
+         AND FOCTAXCODTVQ OF CPFOU_CIE <> ""
+
+SKIP
+
+DRAW FROM ,1 TO ,80
+
+TITLE &
+@IF FRANCAIS
+      " Termes " &
+@ELSE
+      " %%%Termes " &
+@ENDIF
+      CENTERED AT ,1
+
+SKIP
+
+ALIGN (3,3,19) (,,24)
+
+FIELD FOCTERNET OF CPFOU_CIE &
+      HIDDEN ID 35
+
+FIELD TERDSC OF A_VTER_DSC_FOCTERNET &
+      DISPLAY
+
+FIELD FOCTERESC1 OF CPFOU_CIE &
+      HIDDEN ID 40
+
+FIELD TERDSC OF A_VTER_DSC_FOCTERESC1 &
+      DISPLAY
+
+FIELD FOCTERESC2 OF CPFOU_CIE &
+      HIDDEN ID 45 &
+      IF FOCTERESC1 OF CPFOU_CIE <> ""
+
+FIELD TERDSC OF A_VTER_DSC_FOCTERESC2 &
+      DISPLAY
+
+SKIP
+
+DRAW FROM ,1 TO ,80
+
+TITLE &
+@IF FRANCAIS
+      " Adresses " &
+@ELSE
+      " %%% " &
+@ENDIF
+      CENTERED AT ,1
+
+SKIP
+
+ALIGN (3,3,19) (,,24)
+
+FIELD FOCADRPAM OF CPFOU_CIE &
+      HIDDEN ID 50 &
+      NOENTRY &
+      LOOKUP  ON A_RAD_PAM &
+              MESSAGE 415 ; Ce code d'adresse est inexistant.
+
+FIELD RADNOM OF A_RAD_PAM &
+      DISPLAY
+
+FIELD FOCADRACH OF CPFOU_CIE &
+      HIDDEN ID 55 &
+      NOENTRY &
+      LOOKUP  ON A_RAD_ACH &
+              MESSAGE 415 ; Ce code d'adresse est inexistant.
+
+FIELD RADNOM OF A_RAD_ACH &
+      DISPLAY
+
+FIELD FOCADRRET OF CPFOU_CIE &
+      HIDDEN ID 60 &
+      NOENTRY &
+      LOOKUP  ON A_RAD_RET &
+              MESSAGE 415 ; Ce code d'adresse est inexistant.
+
+FIELD RADNOM OF A_RAD_RET &
+      DISPLAY
+
+SKIP
+
+DRAW FROM ,1 TO ,80
+
+TITLE &
+@IF FRANCAIS
+      " Achats " &
+@ELSE
+      " %%% " &
+@ENDIF
+      CENTERED AT ,1
+
+SKIP
+ALIGN (3,3,19) (,,24)
+
+FIELD CMDTRP OF CPFOU_CIE &
+        HIDDEN ID 65 &
+        LOOKUP ON A_CBI_CMDTRP &
+          MESSAGE 1364 ; Ce mode de transport n'existe pas.
+
+
+FIELD CBIDSC OF A_CBI_CMDTRP DISPLAY
+
+SKIP
+ALIGN (3,3,19) (,,24)
+FIELD CMDFAB OF CPFOU_CIE &
+        HIDDEN ID 70 &
+        LOOKUP ON A_CBI_CMDFAB &
+          MESSAGE 1365 ; Ce code de terme de commerce n'existe pas.
+
+FIELD CBIDSC OF A_CBI_CMDFAB DISPLAY
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès pour l'écran par son code.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Popup de consultation des compagnies disponible pour l'usager
+;
+PROCEDURE INPUT FOCCIECLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc106 MODE F PASSING T_CIECLE
+    LET FIELDTEXT = TRUNCATE(T_CIECLE)
+  END
+END
+
+;
+; Recopie de la première compagnie qui à été définie par l'usager.
+; Cette copie ne fonctionne que si le fournisseur est universel.
+;
+PROCEDURE PROCESS FOCCIECLE
+BEGIN
+  GET A_FOC_DEFAUT &
+        VIA     FOUCIECLE, &
+                FOUCLE &
+        USING   FOUCIECLE OF CPFOURNISSEUR, &
+                FOUCLE OF CPFOURNISSEUR &
+        ORDERBY FOUCIECLE, &
+                FOUCLE, &
+                FOCCIECLE &
+        OPTIONAL
+
+  IF ACCESSOK
+  THEN BEGIN
+
+    LET FOCCPTCAP     OF CPFOU_CIE  = FOCCPTCAP     OF A_FOC_DEFAUT
+    LET LBQCPTENC     OF CPFOU_CIE  = LBQCPTENC     OF A_FOC_DEFAUT
+    LET FOCCPTESC     OF CPFOU_CIE  = FOCCPTESC     OF A_FOC_DEFAUT
+    LET FOCTAXCODTPS  OF CPFOU_CIE  = FOCTAXCODTPS  OF A_FOC_DEFAUT
+    LET FOCENRTPS     OF CPFOU_CIE  = FOCENRTPS     OF A_FOC_DEFAUT
+    LET FOCTAXCODTVQ  OF CPFOU_CIE  = FOCTAXCODTVQ  OF A_FOC_DEFAUT
+    LET FOCENRTVQ     OF CPFOU_CIE  = FOCENRTVQ     OF A_FOC_DEFAUT
+    LET FOCTERNET     OF CPFOU_CIE  = FOCTERNET     OF A_FOC_DEFAUT
+    LET FOCTERESC1    OF CPFOU_CIE  = FOCTERESC1    OF A_FOC_DEFAUT
+    LET FOCTERESC2    OF CPFOU_CIE  = FOCTERESC2    OF A_FOC_DEFAUT
+    LET FOCADRPAM     OF CPFOU_CIE  = FOCADRPAM     OF A_FOC_DEFAUT
+    LET FOCADRACH     OF CPFOU_CIE  = FOCADRACH     OF A_FOC_DEFAUT
+    LET FOCADRRET     OF CPFOU_CIE  = FOCADRRET     OF A_FOC_DEFAUT
+
+    DISPLAY FOCCPTCAP     OF CPFOU_CIE
+    DISPLAY LBQCPTENC     OF CPFOU_CIE
+    DISPLAY FOCCPTESC     OF CPFOU_CIE
+    DISPLAY FOCTAXCODTPS  OF CPFOU_CIE
+    DISPLAY FOCENRTPS     OF CPFOU_CIE
+    DISPLAY FOCTAXCODTVQ  OF CPFOU_CIE
+    DISPLAY FOCENRTVQ     OF CPFOU_CIE
+    DISPLAY FOCTERNET     OF CPFOU_CIE
+    DISPLAY FOCTERESC1    OF CPFOU_CIE
+    DISPLAY FOCTERESC2    OF CPFOU_CIE
+    DISPLAY FOCADRPAM     OF CPFOU_CIE
+    DISPLAY FOCADRACH     OF CPFOU_CIE
+    DISPLAY FOCADRRET     OF CPFOU_CIE
+
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Flag OUI/NON
+;
+
+PROCEDURE INPUT FOCUSISEC
+BEGIN
+  USE usflginp NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Flag OUI/NON
+;
+
+PROCEDURE OUTPUT FOCUSISEC
+BEGIN
+  USE usflgout NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Validation du compte de CAP et lecture de sa description
+;
+PROCEDURE INPUT FOCCPTCAP
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE    = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    LET T_CPTTYPPAT = "@"
+    LET T_CPTCATPAT = "CP"
+    LET T_PECCLE    = ""
+    RUN SCREEN mc103 MODE F &
+                      PASSING T_CPTCLE, &
+                              T_CPTTYPPAT, &
+                              T_CPTCATPAT, &
+                              T_PECCLE
+    LET FIELDTEXT = TRUNCATE(T_CPTCLE)
+  END
+
+  IF    ENTRYMODE &
+    AND 0 = SIZE (TRUNCATE(FIELDTEXT)) &
+    AND FOCCPTCAP OF CPFOU_CIE <> ""
+  THEN LET FIELDTEXT = FOCCPTCAP OF CPFOU_CIE
+
+END
+
+PROCEDURE EDIT FOCCPTCAP
+BEGIN
+  IF DEVCLE OF CPFOURNISSEUR <> DEVCLE OF A_VCPT_DSC_FOCCPTCAP
+  THEN ERROR 570 ; Le compte doit être dans la devise du fournisseur.
+
+  IF CPTCAT OF A_VCPT_DSC_FOCCPTCAP <> "CP"
+  THEN ERROR 571 ; Ce compte doit être un compte-à-payer.
+END
+
+;-------------------------------------------------------------------------------
+;
+; Popup sur les comptes d'encaisse disponibles
+;
+PROCEDURE INPUT LBQCPTENC
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE    = FOCCIECLE OF CPFOU_CIE
+    LET T_LBQCPTENC = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc110 PASSING T_CIECLE, T_LBQCPTENC MODE F
+    LET FIELDTEXT = TRUNCATE(T_LBQCPTENC)
+  END
+
+  IF    ENTRYMODE &
+    AND 0 = SIZE (TRUNCATE(FIELDTEXT)) &
+    AND LBQCPTENC OF CPFOU_CIE <> ""
+  THEN LET FIELDTEXT = LBQCPTENC OF CPFOU_CIE
+
+END
+
+PROCEDURE EDIT LBQCPTENC
+BEGIN
+  IF CPTCAT OF A_VCPT_DSC_LBQCPTENC <> "EN"
+  THEN ERROR 569 ; Ce compte n'est pas un compte d'encaisse.
+
+  IF     DEVCLE OF A_VCPT_DSC_LBQCPTENC <> DEVCLE OF MCHOLDING     &
+     AND DEVCLE OF A_VCPT_DSC_LBQCPTENC <> DEVCLE OF CPFOURNISSEUR
+  THEN ERROR 578 ; Compte interdit due à la devise du compte.
+END
+
+;-------------------------------------------------------------------------------
+;
+; Validation du compte d'escompte et lecture de sa description
+;
+PROCEDURE INPUT FOCCPTESC
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE    = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    LET T_CPTTYPPAT = "@"
+    LET T_CPTCATPAT = "ES"
+    LET T_PECCLE    = ""
+    RUN SCREEN mc103 MODE F &
+                      PASSING T_CPTCLE, &
+                              T_CPTTYPPAT, &
+                              T_CPTCATPAT, &
+                              T_PECCLE
+    LET FIELDTEXT = TRUNCATE(T_CPTCLE)
+  END
+
+  IF    ENTRYMODE &
+    AND 0 = SIZE (TRUNCATE(FIELDTEXT)) &
+    AND FOCCPTESC OF CPFOU_CIE <> ""
+  THEN LET FIELDTEXT = FOCCPTESC OF CPFOU_CIE
+
+END
+
+PROCEDURE EDIT FOCCPTESC
+BEGIN
+  IF     DEVCLE OF A_VCPT_DSC_FOCCPTESC <> DEVCLE OF MCHOLDING     &
+     AND DEVCLE OF A_VCPT_DSC_FOCCPTESC <> DEVCLE OF CPFOURNISSEUR
+  THEN ERROR 578 ; Compte interdit due à la devise du compte.
+
+  IF CPTCAT OF A_VCPT_DSC_FOCCPTESC <> "ES"
+  THEN ERROR 499 ; Ce compte n'est pas un compte d'escompte.
+END
+
+;-------------------------------------------------------------------------------
+;
+; Recherche, validation et traitement du code de taxe fédérale
+;
+PROCEDURE INPUT FOCTAXCODTPS
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TAXCLETYP = FOCTAXTYPTPS OF CPFOU_CIE
+    LET T_TAXCLECOD = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_TAXMODPAT = "@"
+    RUN SCREEN mc111 MODE F PASSING T_TAXCLETYP, T_TAXCLECOD, T_TAXMODPAT
+    LET FIELDTEXT = TRUNCATE(T_TAXCLECOD)
+  END
+;obliger un code de tax
+  IF 0 = SIZE(TRUNCATE(FOCTAXCODTPS OF CPFOU_CIE)) AND 0 = SIZE(TRUNCATE(FIELDTEXT))
+    THEN ERROR 421 ; Ce code de taxe est inexistant
+END
+
+;
+; La taxe est optionnelle mais elle doit exister si l'usager rentre un code
+;
+PROCEDURE EDIT FOCTAXCODTPS
+BEGIN
+  IF 0 <> SIZE (TRUNCATE(FOCTAXCODTPS OF CPFOU_CIE)) OR 0 = SIZE(TRUNCATE(FOCTAXCODTPS OF CPFOU_CIE))
+  THEN BEGIN
+    GET A_VTAX_DSC_FOCTAXCODTPS OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 421 ; Ce code de taxe est inexistant
+  END
+END
+
+;
+; Il n'y à pas d'enregistrement de TPS sans TPS
+;
+PROCEDURE PROCESS FOCTAXCODTPS
+BEGIN
+  IF FOCTAXCODTPS OF CPFOU_CIE = ""
+  THEN BEGIN
+    LET FOCENRTPS OF CPFOU_CIE = ""
+    DISPLAY FOCENRTPS OF CPFOU_CIE
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Popup sur les taxes provinciales
+;
+PROCEDURE INPUT FOCTAXCODTVQ
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TAXCLETYP = FOCTAXTYPTVQ OF CPFOU_CIE
+    LET T_TAXCLECOD = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_TAXMODPAT = "@"
+    RUN SCREEN mc111 MODE F PASSING T_TAXCLETYP, T_TAXCLECOD, T_TAXMODPAT
+    LET FIELDTEXT = TRUNCATE(T_TAXCLECOD)
+  END
+;obliger un code de tax
+  IF 0 = SIZE(TRUNCATE(FOCTAXCODTVQ OF CPFOU_CIE)) AND 0 = SIZE(TRUNCATE(FIELDTEXT))
+    THEN ERROR 421 ; Ce code de taxe est inexistant
+END
+
+;
+; La taxe est optionnelle mais elle doit exister si l'usager rentre un code
+;
+PROCEDURE EDIT FOCTAXCODTVQ
+BEGIN
+  IF 0 <> SIZE (TRUNCATE(FOCTAXCODTVQ OF CPFOU_CIE)) OR 0 = SIZE (TRUNCATE(FOCTAXCODTVQ OF CPFOU_CIE))
+  THEN BEGIN
+    GET A_VTAX_DSC_FOCTAXCODTVQ OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 421 ; Ce code de taxe est inexistant
+  END
+END
+
+;
+; Il n'y à pas d'enregistrement de TVQ sans TVQ
+;
+PROCEDURE PROCESS FOCTAXCODTVQ
+BEGIN
+  IF FOCTAXCODTVQ OF CPFOU_CIE = ""
+  THEN BEGIN
+    LET FOCENRTVQ OF CPFOU_CIE = ""
+    DISPLAY FOCENRTVQ OF CPFOU_CIE
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Recherche et validation du terme NET
+;
+PROCEDURE INPUT FOCTERNET
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TERCAT = "NET"
+    LET T_TERCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cp102 MODE F PASSING T_TERCLE, T_TERCAT
+    LET FIELDTEXT = TRUNCATE(T_TERCLE)
+  END
+END
+
+;
+; Le terme est optionnel mais il doit exister si l'usager rentre un code
+;
+PROCEDURE EDIT FOCTERNET
+BEGIN
+  IF 0 <> SIZE (TRUNCATE(FOCTERNET OF CPFOU_CIE))
+  THEN BEGIN
+    GET A_VTER_DSC_FOCTERNET OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 419 ; Ce terme est inexistant
+    IF TERCAT OF A_VTER_DSC_FOCTERNET <> "NET"
+    THEN ERROR 454 ; Ce n'est pas un code de terme pour le NET.
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Recherche et validation du premier terme d'escompte
+;
+PROCEDURE INPUT FOCTERESC1
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TERCAT = "ESC"
+    LET T_TERCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cp102 MODE F PASSING T_TERCLE, T_TERCAT
+    LET FIELDTEXT = TRUNCATE(T_TERCLE)
+  END
+END
+
+;
+; Le terme est optionnel mais il doit exister si l'usager rentre un code
+;
+PROCEDURE EDIT FOCTERESC1
+BEGIN
+  IF 0 <> SIZE (TRUNCATE(FOCTERESC1 OF CPFOU_CIE))
+  THEN BEGIN
+    GET A_VTER_DSC_FOCTERESC1 OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 419 ; Ce terme est inexistant
+    IF TERCAT OF A_VTER_DSC_FOCTERESC1 <> "ESC"
+    THEN ERROR 455 ; Ce n'est pas un code de terme pour l'escompte
+  END
+END
+
+;
+; Le deuxiemme escompte ne doit pas exister si le premier n'existe pas
+;
+PROCEDURE PROCESS FOCTERESC1
+BEGIN
+  IF 0 = SIZE(TRUNCATE(FOCTERESC1 OF CPFOU_CIE))
+  THEN BEGIN
+    LET FOCTERESC2 OF CPFOU_CIE = ""
+    DISPLAY FOCTERESC2 OF CPFOU_CIE
+    DISPLAY TERDSC OF A_VTER_DSC_FOCTERESC2
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Recherche et validation du deuxiemme terme d'escompte
+;
+PROCEDURE INPUT FOCTERESC2
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TERCAT = "ESC"
+    LET T_TERCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cp102 MODE F PASSING T_TERCLE, T_TERCAT
+    LET FIELDTEXT = TRUNCATE(T_TERCLE)
+  END
+END
+
+;
+; Le terme est optionnel mais il doit exister si l'usager rentre un code
+;
+PROCEDURE EDIT FOCTERESC2
+BEGIN
+  IF 0 <> SIZE (TRUNCATE(FOCTERESC2 OF CPFOU_CIE))
+  THEN BEGIN
+    GET A_VTER_DSC_FOCTERESC2 OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 419 ; Ce terme est inexistant
+    IF TERCAT OF A_VTER_DSC_FOCTERESC2 <> "ESC"
+    THEN ERROR 455 ; Ce n'est pas un code de terme pour l'escompte.
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Consultation et validation de l'adresse de paiement du fournisseur
+;
+PROCEDURE INPUT FOCADRPAM
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_REFCIECLE = FOUCIECLE OF CPFOURNISSEUR
+    LET T_REFCLETYP = FOUREFTYP OF CPFOURNISSEUR
+    LET T_REFCLENUM = FOUCLE    OF CPFOURNISSEUR
+    LET T_TYPADR    = "PAM"
+    LET T_RADCLE    = FOCADRPAM OF CPFOU_CIE
+    RUN SCREEN mc108  MODE F &
+                      PASSING T_REFCIECLE, &
+                              T_REFCLETYP, &
+                              T_REFCLENUM, &
+                              T_TYPADR, &
+                              T_RADCLE
+    LET FIELDTEXT = ASCII(T_RADCLE)
+  END
+END
+
+PROCEDURE EDIT FOCADRPAM
+BEGIN
+  IF RADPAMCP OF A_RAD_PAM <> "1"
+  THEN ERROR 423 ; Le type d'adresse ne s'applique pas ici.
+END
+
+PROCEDURE PROCESS FOCADRPAM
+BEGIN
+  DISPLAY RADNOM OF A_RAD_PAM
+END
+
+;-------------------------------------------------------------------------------
+;
+; Consultation et validation de l'adresse d'achat du fournisseur
+;
+PROCEDURE INPUT FOCADRACH
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_REFCIECLE = FOUCIECLE OF CPFOURNISSEUR
+    LET T_REFCLETYP = FOUREFTYP OF CPFOURNISSEUR
+    LET T_REFCLENUM = FOUCLE    OF CPFOURNISSEUR
+    LET T_TYPADR    = "ACH"
+    LET T_RADCLE    = FOCADRACH OF CPFOU_CIE
+    RUN SCREEN mc108  MODE F &
+                      PASSING T_REFCIECLE, &
+                              T_REFCLETYP, &
+                              T_REFCLENUM, &
+                              T_TYPADR   , &
+                              T_RADCLE
+    LET FIELDTEXT = ASCII(T_RADCLE)
+  END
+END
+
+PROCEDURE EDIT FOCADRACH
+BEGIN
+  IF RADACHCP OF A_RAD_ACH <> "1"
+  THEN ERROR 423 ; Le type d'adresse ne s'applique pas ici.
+END
+
+PROCEDURE PROCESS FOCADRACH
+BEGIN
+  DISPLAY RADNOM OF A_RAD_ACH
+END
+
+;-------------------------------------------------------------------------------
+;
+; Consultation et validation de l'adresse de retour du fournisseur
+;
+PROCEDURE INPUT FOCADRRET
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_REFCIECLE = FOUCIECLE OF CPFOURNISSEUR
+    LET T_REFCLETYP = FOUREFTYP OF CPFOURNISSEUR
+    LET T_REFCLENUM = FOUCLE    OF CPFOURNISSEUR
+    LET T_TYPADR    = "RET"
+    LET T_RADCLE    = FOCADRRET OF CPFOU_CIE
+    RUN SCREEN mc108  MODE F &
+                      PASSING T_REFCIECLE, &
+                              T_REFCLETYP, &
+                              T_REFCLENUM, &
+                              T_TYPADR   , &
+                              T_RADCLE
+    LET FIELDTEXT = ASCII(T_RADCLE)
+  END
+END
+
+PROCEDURE EDIT FOCADRRET
+BEGIN
+  IF RADRETCP OF A_RAD_RET <> "1"
+  THEN ERROR 423 ; Le type d'adresse ne s'applique pas ici.
+END
+
+PROCEDURE PROCESS FOCADRRET
+BEGIN
+  DISPLAY RADNOM OF A_RAD_RET
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour le code bilingue mode de transport.
+;
+;
+PROCEDURE INPUT CMDTRP
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CMDTRP = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_CMDTRP, T_CMDTRP
+    LET FIELDTEXT = TRUNCATE(T_CMDTRP)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour le code bilingue code de terme de commerce
+;
+;
+PROCEDURE INPUT CMDFAB
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CMDFAB = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_CMDFAB, T_CMDFAB
+    LET FIELDTEXT = TRUNCATE(T_CMDFAB)
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation de la sécurité sur l'entrée des données
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; RECHERCHE DE LA COMPAGNIE EN FONCTION DU TYPE DE CHARTE FOURNISSEUR
+;
+;   Si la charte du fournisseur est universelle, alors on demande à
+;   l'usager d'entrer un numéro de compagnie pour retrouver l'information
+;   de CPFOU_CIE. Mais si la charte est ppar compagnie, alors on va
+;   automatiquement chercher l'enregistrement de CPFOU_CIE correspondant
+;   à la compagnie du menu.
+;
+;
+PROCEDURE PATH
+BEGIN
+  IF T_HLDCHTFOU = "0"
+  THEN
+    BEGIN
+      REQUEST FOCCIECLE OF CPFOU_CIE
+        IF PROMPTOK
+        THEN LET PATH = 1
+        IF PATH = 0
+        THEN LET PATH = 2
+    END
+  ELSE
+    LET PATH = 99
+END
+
+PROCEDURE FIND
+BEGIN
+  IF PATH = 1
+  THEN
+    GET CPFOU_CIE VIA     FOUCIECLE , &
+                          FOUCLE    , &
+                          FOCCIECLE   &
+                  USING   FOUCIECLE OF CPFOURNISSEUR , &
+                          FOUCLE OF CPFOURNISSEUR    , &
+                          FOCCIECLE OF CPFOU_CIE
+  IF PATH = 2
+  THEN
+    GET CPFOU_CIE VIA     FOUCIECLE , &
+                          FOUCLE      &
+                  ORDERBY FOUCIECLE , &
+                          FOUCLE    , &
+                          FOCCIECLE   &
+                  USING   FOUCIECLE OF CPFOURNISSEUR , &
+                          FOUCLE OF CPFOURNISSEUR
+
+  IF PATH = 99
+  THEN
+    GET CPFOU_CIE VIA     FOUCIECLE , &
+                          FOUCLE    , &
+                          FOCCIECLE   &
+                  USING   FOUCIECLE OF CPFOURNISSEUR , &
+                          FOUCLE OF CPFOURNISSEUR    , &
+                          T_CIECLEMNU
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF    DELETEDRECORD OF CPFOU_CIE &
+    AND TZ_SECDEL = "0"
+  THEN ERROR 1
+
+  ;
+  ; Validation de la modification
+  ;
+  IF     ALTEREDRECORD     OF CPFOU_CIE &
+     AND NOT NEWRECORD     OF CPFOU_CIE &
+     AND NOT DELETEDRECORD OF CPFOU_CIE &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  IF    NOT NEWRECORD OF CPFOURNISSEUR &
+    AND ALTEREDRECORD OF CPFOU_CIE
+  THEN BEGIN
+    LET FOUDATMOD OF CPFOURNISSEUR = SYSDATE
+    LET FOUHREMOD OF CPFOURNISSEUR = SYSTIME / 10000
+    LET FOUUSRMOD OF CPFOURNISSEUR = LOGONID
+  END
+
+  ;
+  ; Destruction du fournisseur-compagnie.
+  ;
+  IF DELETEDRECORD OF CPFOU_CIE
+  THEN BEGIN
+    ;
+    ; On initialise le flag de retour pour savoir si le sous-écran a
+    ; bien fonctionné.
+    ;
+    LET T_FLGDEL = ""
+    ;
+    ; Appel du sous-écran qui valide si le fournisseur-compagnie est référé.
+    ;
+    RUN SCREEN cp001ax MODE SAME &
+                       PASSING CPFOU_CIE , &
+                               T_FLGDEL
+    ;
+    ; Si la valeur de retour égale 1, cela indique que le sous-écran
+    ; n'a trouvé aucune référence pour l'identifiant demandé.
+    ;
+    IF T_FLGDEL = ""
+    THEN ERROR " "
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; MODIFICATION DES CODES DE TAXES :
+;
+;   Ils ne sont pas accessibles pour un fournisseur divers
+;
+PROCEDURE DESIGNER 25
+BEGIN
+  IF FOUTYP OF CPFOURNISSEUR <> "D"
+  THEN BEGIN
+    ACCEPT FOCTAXCODTPS OF CPFOU_CIE
+    DISPLAY TAXDSC OF A_VTAX_DSC_FOCTAXCODTPS
+    IF FOCTAXCODTPS OF CPFOU_CIE <> ""
+    THEN ACCEPT FOCENRTPS OF CPFOU_CIE
+  END
+END
+
+PROCEDURE DESIGNER 30
+BEGIN
+  IF FOUTYP OF CPFOURNISSEUR <> "D"
+  THEN BEGIN
+    ACCEPT FOCTAXCODTVQ OF CPFOU_CIE
+    DISPLAY TAXDSC OF A_VTAX_DSC_FOCTAXCODTVQ
+    IF FOCTAXCODTVQ OF CPFOU_CIE <> ""
+    THEN ACCEPT FOCENRTVQ OF CPFOU_CIE
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; MODIFICATION DES TERMES :
+;
+;   Le deuxieme escompte n'est pas accessible s'il n'y a pas de premier
+;   escompte.
+;
+PROCEDURE DESIGNER 45
+BEGIN
+  IF FOCTERESC1 OF CPFOU_CIE <> ""
+  THEN BEGIN
+    ACCEPT FOCTERESC2 OF CPFOU_CIE
+    DISPLAY TERDSC OF A_VTER_DSC_FOCTERESC2
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; MODIFICATION DES ADRESSE
+;
+;   Elles ne sont pas modifiables si le fournisseur est de type DIVERS
+;
+PROCEDURE DESIGNER 50
+BEGIN
+  IF FOUTYP OF CPFOURNISSEUR <> "D"
+  THEN ACCEPT FOCADRPAM OF CPFOU_CIE
+END
+
+PROCEDURE DESIGNER 55
+BEGIN
+  IF FOUTYP OF CPFOURNISSEUR <> "D"
+  THEN ACCEPT FOCADRACH OF CPFOU_CIE
+END
+
+PROCEDURE DESIGNER 60
+BEGIN
+  IF FOUTYP OF CPFOURNISSEUR <> "D"
+  THEN ACCEPT FOCADRRET OF CPFOU_CIE
+END
+
+BUILD
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+************************* Informations par compagnies **************************
+* Fournisseur...: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx Usine sec: X *
+* Compagnie.....: xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              *
+******************************* Comptes & taxes ********************************
+* Compte CAP....: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   *
+* Cpt encaisse..: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   *
+* Cpt escompte..: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   *
+* Taxe TPS......: xx xxxxxxxxxxxxxxxxxxxx Enreg. TPS....: xxxxxxxxxxx          *
+* Taxe TVP......: xx xxxxxxxxxxxxxxxxxxxx Enreg. TVP....: xxxxxxxxxxxxxxxx     *
+************************************ Termes ************************************
+* Net...........: xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                *
+* Terme esc.(1).: xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                *
+* Terme esc.(2).: xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                *
+*********************************** Adresses ***********************************
+* Paiement......: xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                *
+* Achat.........: xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                *
+* Retour........: xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                *
+************************************ Achats ************************************
+* Mode de transp: xxxx                                                         *
+* Terme de comm.: xxxx                                                         *
+********************************************************************************
+@ENDIF

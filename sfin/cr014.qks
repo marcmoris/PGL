@@ -1,0 +1,450 @@
+;/T/ Gestion des mémos.
+;
+;/P/ Programmeur..: Alain Côté
+;    Date Création: 25 mai 1993
+;
+;    Description..: Saisie des mémos. Un mémo peut être spécifique à un
+;                   client, ou sur la compagnie du menu. S'il y a un
+;                   numéro de client dans le mémo, il appartient à ce client.
+;
+;-------------------------------------------------------------------------------
+;/V/ 3.00.02    Guy Chabot 12-mai-1994 (197).
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cr014 ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CLICIECLE, &
+                       T_CLICLEFND, &
+                       T_CIECLEMNU, &
+                       T_CIENOM
+
+USE ussectmp NOLIST
+    "CR014"
+
+USE cr014.hlp
+
+USE usactecr NOLIST
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-Ecrans"
+  MENUITEM LABEL "Vérification                    " ACTION DESIGNER D001
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "Verification                    " ACTION DESIGNER D001
+@ENDIF
+
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_CLICIECLE CHARACTER SIZE 4  ; Compagnie du client.
+TEMPORARY T_CLICLEFND CHARACTER SIZE 6  ; Numéro de client.
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de compagnie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie du menu.
+
+
+;-------------------------------------------------------------------------------
+;
+
+FILE CRMEMO           PRIMARY
+  ITEM CIECLE    OF CRMEMO INITIAL T_CIECLEMNU
+  ITEM CLICIECLE OF CRMEMO INITIAL T_CLICIECLE
+  ITEM CLICLE    OF CRMEMO INITIAL T_CLICLEFND
+  ITEM CRMTIMSTP OF CRMEMO INITIAL SYSDATE * 1000000 + ROUND(SYSTIME / 100)
+  ITEM CRMDATCRE OF CRMEMO INITIAL SYSDATE
+  ITEM CRMHRECRE OF CRMEMO INITIAL SYSTIME / 10000
+  ITEM CRMUSRCRE OF CRMEMO INITIAL LOGONID
+  ITEM CRMDATMOD OF CRMEMO FINAL   SYSDATE        &
+                                        IF NOT NEWRECORD OF CRMEMO AND &
+                                           ALTEREDRECORD OF CRMEMO
+  ITEM CRMHREMOD OF CRMEMO FINAL   SYSTIME / 10000 &
+                                        IF NOT NEWRECORD OF CRMEMO AND &
+                                           ALTEREDRECORD OF CRMEMO
+  ITEM CRMUSRMOD OF CRMEMO FINAL   LOGONID         &
+                                        IF NOT NEWRECORD OF CRMEMO AND &
+                                           ALTEREDRECORD OF CRMEMO
+
+
+;
+; Détail du mémo.
+;
+FILE CRCRM_LIGNE      DETAIL &
+                      OCCURS 15 &
+                      NOITEM
+  ITEM CIECLE    OF CRCRM_LIGNE INITIAL CIECLE    OF CRMEMO
+  ITEM CRMTIMSTP OF CRCRM_LIGNE INITIAL CRMTIMSTP OF CRMEMO
+
+;
+; On détruit toutes les lignes si le maitre est détruit.
+;
+FILE CRCRM_LIGNE      DELETE &
+                      NOITEM &
+                      ALIAS A_CRL_DELETE
+  ACCESS VIA CIECLE   , &
+             CRMTIMSTP  &
+         USING CIECLE    OF CRMEMO, &
+               CRMTIMSTP OF CRMEMO
+
+;
+; Pour valider et afficher le nom du client.
+;
+FILE CRCLIENT         REFERENCE
+  ACCESS VIA CLICIECLE, &
+             CLICLE     &
+         USING CLICIECLE OF CRMEMO, &
+               CLICLE    OF CRMEMO
+
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_CLICLE CHARACTER SIZE 6  ; Popup sur les clients.
+
+TEMPORARY T_NUMLIG INTEGER UNSIGNED SIZE 2 & ; Numérotation auto. des lignes.
+                   OCCURS WITH CRMEMO
+
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Gestion des mémos " &
+@ELSE
+      " %%% " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST
+
+SKIP
+
+ALIGN(3,3,19) (,,27)
+FIELD CLICLE OF CRMEMO HIDDEN ID 05 &
+label "Client........:" &
+        NOCHANGE &
+        IF T_CLICLEFND = ""
+
+FIELD CLINOM OF CRCLIENT &
+        DISPLAY
+
+ALIGN(3,3,19)
+
+FIELD CRMDAT OF CRMEMO  FORMAT YYYYMMDD PATTERN "####/##/##" HIDDEN ID 10 &
+label "Date..........:" &
+        REQUIRED
+
+SKIP
+DRAW ,1 TO ,80
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+      "Texte                                                         Ligne" &
+@ELSE
+      "Text                                                          Line " &
+@ENDIF
+      AT ,3
+
+SKIP
+
+ALIGN (3,2,3) (,,65)
+
+CLUSTER OCCURS WITH CRCRM_LIGNE ID BASE 15
+
+FIELD CRLTXT    OF CRCRM_LIGNE HIDDEN LABEL " "
+
+FIELD CRLCLELIG OF CRCRM_LIGNE
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les client.
+;
+;
+PROCEDURE INPUT CLICLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CLICLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cr102 MODE F PASSING T_CLICIECLE, &
+                                    T_CIECLEMNU, &
+                                    T_CLICLE
+    LET FIELDTEXT = TRUNCATE( T_CLICLE )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du numéro de client, ce champ est optionel.
+;
+;
+PROCEDURE EDIT CLICLE
+BEGIN
+  GET CRCLIENT OPTIONAL
+  IF     0 <> SIZE( TRUNCATE( FIELDTEXT ) ) &
+     AND NOT ACCESSOK
+  THEN ERROR 624 ; Ce numéro de client n'existe pas.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE INPUT CRLTXT
+BEGIN
+  USE ussecent NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Assigne un numéro de ligne automatiquement.
+;
+;
+PROCEDURE INPUT CRLCLELIG
+BEGIN
+  IF     0 = SIZE( FIELDTEXT ) &
+     AND 0 = CRLCLELIG OF CRCRM_LIGNE &
+     AND NOT FINDMODE
+  THEN LET FIELDTEXT = ASCII( ( T_NUMLIG + 100 ) / 100 )
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Incrémente le numéro de ligne.
+;
+;
+PROCEDURE PROCESS CRLCLELIG
+BEGIN
+  IF T_NUMLIG < CRLCLELIG OF CRCRM_LIGNE
+  THEN LET T_NUMLIG = CRLCLELIG OF CRCRM_LIGNE + 100
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Vérification.
+;
+;
+PROCEDURE DESIGNER D001
+BEGIN
+  RUN SCREEN cr014a PASSING CRMEMO
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Recherche par client ou globale.
+;
+;
+PROCEDURE PATH
+BEGIN
+  IF T_CLICLEFND <> ""
+  THEN LET PATH = 99
+  ELSE BEGIN
+    REQUEST CLICLE OF CRMEMO
+    IF PROMPTOK
+    THEN BEGIN
+      REQUEST CRMDAT OF CRMEMO
+      IF PROMPTOK
+      THEN LET PATH = 1
+      ELSE LET PATH = 2
+    END
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST CRMDAT OF CRMEMO
+      IF PROMPTOK
+      THEN LET PATH = 3
+    END
+  END
+END
+;
+PROCEDURE FIND
+BEGIN
+  ;
+  ; Recherche sur le client reçu en paramètre.
+  ;
+  IF PATH = 99
+  THEN GET CRMEMO VIA CIECLE   , &
+                      CLICIECLE, &
+                      CLICLE     &
+                  USING T_CIECLEMNU, &
+                        T_CLICIECLE, &
+                        T_CLICLEFND  &
+                  ORDERBY CIECLE   , &
+                          CRMTIMSTP
+  ;
+  ; Recherche par client et date
+  ;
+  IF PATH = 1
+  THEN GET CRMEMO VIA CIECLE   , &
+                      CLICIECLE, &
+                      CLICLE   , &
+                      CRMDAT     &
+                  USING T_CIECLEMNU, &
+                        T_CLICIECLE, &
+                        CLICLE OF CRMEMO, &
+                        CRMDAT OF CRMEMO
+
+  ;
+  ; Recherche par client.
+  ;
+  IF PATH = 2
+  THEN GET CRMEMO VIA CIECLE   , &
+                      CLICIECLE, &
+                      CLICLE     &
+                  USING T_CIECLEMNU, &
+                        T_CLICIECLE, &
+                        CLICLE OF CRMEMO &
+                  ORDERBY CIECLE   , &
+                          CRMTIMSTP
+  ;
+  ; Recherche par date.
+  ;
+  IF PATH = 3
+  THEN GET CRMEMO VIA CIECLE   , &
+                      CRMDAT     &
+                  USING T_CIECLEMNU, &
+                        CRMDAT OF CRMEMO &
+                  ORDERBY CIECLE   , &
+                          CRMTIMSTP
+
+  ;
+  ; Recherche par compagnie du menu.
+  ;
+  IF PATH = 0
+  THEN GET CRMEMO VIA CIECLE &
+                  USING T_CIECLEMNU &
+                  ORDERBY CIECLE   , &
+                          CRMTIMSTP
+END
+;
+PROCEDURE DETAIL FIND
+BEGIN
+  FOR CRCRM_LIGNE
+  BEGIN
+    GET CRCRM_LIGNE VIA CIECLE   , &
+                        CRMTIMSTP  &
+                    USING CIECLE    OF CRMEMO, &
+                          CRMTIMSTP OF CRMEMO  &
+                    ORDERBY CIECLE   , &
+                            CRMTIMSTP, &
+                            CRLCLELIG
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF CRMEMO &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF CRMEMO &
+     AND NOT NEWRECORD     OF CRMEMO &
+     AND NOT DELETEDRECORD OF CRMEMO &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+  ;
+  ; Le timbre de modification du mémo est mis à jour si l'usager modifie
+  ; le détail.
+  ;
+  IF NOT NEWRECORD OF CRMEMO
+  THEN BEGIN
+    FOR CRCRM_LIGNE
+    BEGIN
+      IF   NEWRECORD     OF CRCRM_LIGNE &
+        OR ALTEREDRECORD OF CRCRM_LIGNE &
+        OR DELETEDRECORD OF CRCRM_LIGNE
+      THEN BEGIN
+        LET CRMDATMOD OF CRMEMO = SYSDATE
+        LET CRMHREMOD OF CRMEMO = SYSTIME / 10000
+        LET CRMUSRMOD OF CRMEMO = LOGONID
+      END
+    END
+  END
+END
+
+BUILD
+@IF FORMAT
+
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+****************************** Gestion des mémos *******************************
+* Client........: xxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx             *
+* Date..........: xxxxxxxx                                                     *
+********************************************************************************
+* Texte                                                         Ligne          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxx          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxx          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxx          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxx          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxx          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxx          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxx          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxx          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxx          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxx          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxx          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxx          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxx          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxx          *
+* xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  xxxxx          *
+********************************************************************************
+@ENDIF

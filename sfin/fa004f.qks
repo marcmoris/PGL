@@ -1,0 +1,980 @@
+;/T/ Copie de facture
+;
+;//M/GRA01/Francois Richard/1999-06-18
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur: Marie-Josée Hamel
+;    Date.......: 96.02.06
+;    Description:
+;
+;/M/ François Déry, 30 avril 1999
+;       Modifier l'accèss au fichier de séquence car il a
+;       été converti en format interbase au lieu d'indexé.
+;
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+;---------------------------------------------------------------------------
+SCREEN fa004f NOMODE NOACTION FIELDMARK STARTUP &
+              FROM 8,1 TO 17,80 &
+              MESSAGE ON 24 &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              ACTIVITIES ENTRY &
+              RECEIVING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        T_CLICIECLE, &
+                        T_PECCLEMNU, &
+                        T_PECCLECOU, &
+                        FACPT_A_REC
+
+TEMPORARY T_PECCLECOU_SIE2 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_FIELDTEXT_SIE2 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CCUPECDEBI_SIE1 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CCUPECDEBA_SIE1 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_PECCLEMNU_SIE1 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie du menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; Compagnie du menu
+TEMPORARY T_CLICIECLE CHARACTER SIZE 4  ; Compagnie du client.
+TEMPORARY T_PECCLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Période courante
+TEMPORARY T_PECCLECOU CHARACTER SIZE 4  RESET AT STARTUP ; Période courante
+
+
+USE ustrasse NOLIST ; Transaction QUERY pour les sous-écrans
+
+USE ussectmp NOLIST     ; Variable pour la securite
+    "FA004F"            ; Nom de l'écran
+
+USE fa004f.hlp NOLIST   ; Use servant à la documentation de l'écran
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE FAFAR_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_RAD_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE MCRAD_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+
+
+; Variables paramètre
+;
+TEMPORARY T_LCRCLE    CHARACTER SIZE  4 RESET AT STARTUP
+TEMPORARY T_PECCLE    CHARACTER SIZE  4 RESET AT STARTUP
+TEMPORARY T_TYPECR    CHARACTER SIZE  2
+TEMPORARY T_REFCLENUM CHARACTER SIZE  6
+TEMPORARY T_FARCLEREF CHARACTER SIZE 12
+TEMPORARY T_FARDAT    DATE
+
+
+;------------------------------------
+; Facture à copier
+;
+FILE FACPT_A_REC      MASTER NOITEM NODELETE
+
+
+;------------------------------------
+; facture à créer
+;
+FILE FACPT_A_REC      DESIGNER ALIAS A_FAR_NEW
+
+
+;------------------------------------
+; Détail de la facture à copier
+;
+FILE FAFAR_DETAIL     DESIGNER OPEN READ
+  ACCESS VIA   CIECLE , &
+               FARCLE   &
+         USING CIECLE OF FACPT_A_REC , &
+               FARCLE OF FACPT_A_REC
+
+
+;------------------------------------
+; Détail de la facture à créer
+;
+FILE FAFAR_DETAIL     DESIGNER ALIAS A_FFD_NEW
+
+
+;
+; Notion de charte de compte et pour avoir la devise du G/L.
+;
+FILE MCHOLDING        REFERENCE
+  ACCESS VIA CIENMC &
+         USING "1"
+
+
+;
+; Validation de la charte de compte.
+;
+FILE MCCHARTE_UNA     REFERENCE
+  ACCESS VIA CPTCLE, &
+             CIECLE, &
+             UNACLE &
+         USING CPTCLE OF FAFAR_DETAIL, &
+               CIECLE OF FAFAR_DETAIL, &
+               UNACLE OF FAFAR_DETAIL
+
+
+;------------------------------------
+; En-tete de la facture à copier
+;
+FILE FAFAR_ENTETE     DESIGNER OPEN READ
+  ACCESS VIA   CIECLE , &
+               FARCLE   &
+         USING CIECLE OF FACPT_A_REC , &
+               FARCLE OF FACPT_A_REC
+
+
+;------------------------------------
+; En-tete de la facture à créer
+;
+FILE FAFAR_ENTETE     DESIGNER ALIAS A_FFE_NEW
+
+
+;------------------------------------
+; Notes de la facture à copier
+;
+FILE FAFAR_NOTE       DESIGNER OPEN READ
+  ACCESS VIA   CIECLE , &
+               FARCLE   &
+         USING CIECLE OF FACPT_A_REC , &
+               FARCLE OF FACPT_A_REC
+
+
+;------------------------------------
+; Notes de la facture à créer
+;
+FILE FAFAR_NOTE       DESIGNER ALIAS A_FFN_NEW
+
+
+;------------------------------------
+;
+; Validation du type de facture(bilingue).
+;
+DEFINE    D_FARTYPECR CHARACTER SIZE 16 = "FARTYPECR"
+;
+FILE VCBI_DSC         REFERENCE
+  ACCESS VIA XELNOM, &
+             CBICLE  &
+         USING D_FARTYPECR, &
+               T_TYPECR
+
+
+;------------------------------------
+;
+; on a besoin de certaines informations sur le client , comme le flag divers
+;
+FILE VCLC_CLI         REFERENCE
+  ACCESS VIA CLICIECLE, &
+             CLICLE   , &
+             CIECLE     &
+         USING REFCIECLE OF FACPT_A_REC, &
+               T_REFCLENUM             , &
+               CIECLE    OF FACPT_A_REC
+
+
+;------------------------------------
+; adresse du fournisseur divers à copier
+;
+FILE MCREF_ADRESSE    DESIGNER OPEN READ
+  ACCESS VIA REFCIECLE, &
+             REFCLETYP, &
+             REFCLENUM, &
+             RADCLE     &
+        USING REFCIECLE OF FACPT_A_REC, &
+              REFCLETYP OF FACPT_A_REC, &
+              REFCLENUM OF FACPT_A_REC, &
+              RADCLE    OF FACPT_A_REC
+
+
+;------------------------------------
+; adresse du fournisseur divers à créer
+;
+FILE MCREF_ADRESSE    DESIGNER ALIAS A_RAD_NEW
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation de l'existence de la facture référée
+;
+FILE FACPT_A_REC      REFERENCE &
+                      ALIAS A_FAR_REFEREE
+  ACCESS VIA   CIECLE , &
+               FARCLE   &
+         USING CIECLE    OF FACPT_A_REC , &
+               T_FARCLEREF
+
+
+;-------------------------------------------------------------------------------
+;
+; Pour trouver le prochain numéro d'ajustement
+;
+FILE FACPT_A_REC      DESIGNER &
+                      ALIAS A_FAR_AJ OPEN READ
+
+
+;-------------------------------------------------------------------------------
+; Numéro de séquence des adresses pour les clients divers.
+;
+FILE MCRAD_SEQ        DESIGNER &
+                      TRANSACTION GEN_RAD_SEQ
+
+
+;------------------------------------------------------------------------------
+; Fichier pour les numéros séquentiels des factures
+;
+FILE FAFAR_SEQ DESIGNER &
+               TRANSACTION GEN_NUM_SEQ
+
+
+;-------------------------------------------------------------------------------
+; Validation de la période comptable.
+;
+FILE MCPERIODE_CTB    REFERENCE
+  ACCESS VIA   PECCLE &
+         USING T_PECCLE
+
+
+;-------------------------------------------------------------------------------
+; Validation du lot.
+;
+FILE CRLOT            REFERENCE
+  ACCESS VIA   CIECLE, &
+               PECCLE, &
+               LCRCLE &
+         USING CIECLE OF FACPT_A_REC, &
+               T_PECCLE , &
+               T_LCRCLE
+
+
+;-------------------------------------------------------------------------------
+; Valiation des termes et calcul des dates due.
+;
+FILE CRTERME          DESIGNER &
+                      OPEN READ
+
+;-------------------------------------------------------------------------------
+;
+; Variables temporaire pour le calcul des dates due.
+;
+USE ustertmp NOLIST
+
+; Pour les dépisteurs
+;
+TEMPORARY T_LCRCLE2    CHARACTER SIZE  4 ; lots
+TEMPORARY T_CODMOD     CHARACTER SIZE  2 ; périodes
+TEMPORARY T_PECCLE2    CHARACTER SIZE  4 ; périodes et lots
+TEMPORARY T_LCRTYPECR  CHARACTER SIZE  2 ; lots
+TEMPORARY T_FARTYPECR  CHARACTER SIZE  4 ; Type fact.
+TEMPORARY T_CLICLE     CHARACTER SIZE  6 ; clients
+TEMPORARY T_FARCLE     CHARACTER SIZE 12 ; Popup sur les documents référés
+TEMPORARY T_FLGSLD     CHARACTER SIZE  1 ; Popup sur les documents référés.??
+TEMPORARY T_TYPECRPAT  CHARACTER SIZE 11 ; Popup sur les documents référés.
+
+TEMPORARY T_NUMAJT     CHARACTER SIZE  2 ; Pour le traitement des ajustements.
+
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+SKIP
+USE ushilite NOLIST     ; Hilite pour tout les écrans
+
+DRAW FROM  1,1 TO 10,80
+
+TITLE &
+@IF FRANCAIS
+      " Copie de facture " &
+@ELSE
+      " %%% " &
+@ENDIF
+      CENTERED AT 1,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP 1
+
+
+ALIGN (3,3,19)
+FIELD T_PECCLE &
+        LABEL "Période.......:" &
+        HIDDEN                  &
+        PICTURE "^^-^^"         &
+        DEFAULT T_PECCLEMNU     &
+        NOCHANGE &
+        LOOKUP ON MCPERIODE_CTB &
+          MESSAGE 606 ; Cette periode est inexistante
+
+FIELD T_LCRCLE     &
+        LABEL "Lot...........:" &
+        HIDDEN                  &
+        PICTURE "^^^^"          &
+        REQUIRED                &
+        NOCHANGE &
+        NUMERIC                 &
+        SIGNIFICANCE 4  &
+        LOOKUP ON CRLOT &
+          MESSAGE 622 ; Ce lot est inexistant
+
+FIELD T_TYPECR        LABEL "Type facture..:" &
+        DEFAULT FARTYPECR OF FACPT_A_REC &
+        NOCHANGE     &
+        NOCORRECT    &
+        LOOKUP ON VCBI_DSC &
+          MESSAGE 609 ; Ce type d'écriture est invalide
+
+FIELD T_REFCLENUM     LABEL "No client.....:" &
+        UPSHIFT  &
+        REQUIRED &
+        NOCHANGE &
+        NOCORRECT    &
+        LOOKUP ON VCLC_CLI &
+          MESSAGE 624  ; Ce client n'existe pas.
+
+
+FIELD T_FARCLEREF     LABEL "Fact. référée.:" &
+        REQUIRED &
+        NOCHANGE &
+        IF   T_TYPECR = "NC" &
+          OR T_TYPECR = "AJ" &
+        LOOKUP ON A_FAR_REFEREE &
+        MESSAGE 2754 ; Cette facture n'existe pas
+
+
+FIELD T_FARDAT        FORMAT YYYYMMDD PATTERN "####/##/##"&
+                      LABEL "Date facture..:" &
+                      HIDDEN                             &
+                      DEFAULT SYSDATE
+
+FIELD FARCLE OF A_FAR_NEW &
+label "Facture.......:"&
+        DISPLAY
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Popup sur les périodes.
+;
+PROCEDURE INPUT T_PECCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CODMOD = "CR"
+    LET T_PECCLE2 = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc109 MODE F PASSING T_CIECLEMNU, &
+                                    T_PECCLE2  , &
+                                    T_CODMOD
+    LET FIELDTEXT = TRUNC(T_PECCLE2)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation de la période.
+;
+PROCEDURE EDIT T_PECCLE
+BEGIN
+
+  ; Ajustement pour le changement de siècle
+  IF FIELDTEXT[1:1] < "8"
+  THEN LET T_FIELDTEXT_SIE2 = "1" + FIELDTEXT
+  ELSE LET T_FIELDTEXT_SIE2 = "0" + FIELDTEXT
+
+  ; Ajustement pour le changement de siècle
+  IF T_PECCLECOU[1:1] < "8"
+  THEN LET T_PECCLECOU_SIE2 = "1" + T_PECCLECOU
+  ELSE LET T_PECCLECOU_SIE2 = "0" + T_PECCLECOU
+
+  IF T_FIELDTEXT_SIE2 < T_PECCLECOU_SIE2
+  THEN ERROR 607 ; Cette période est fermée.
+  ;
+  IF FIELDTEXT <> T_PECCLECOU
+  THEN WARNING 608 ; La période indiquée est différente de la période courante.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Popup sur les lots.
+;
+PROCEDURE INPUT T_LCRCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_LCRTYPECR = "FA"
+    LET T_PECCLE2 = T_PECCLE
+    LET T_LCRCLE2 = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cr101 MODE F PASSING T_CIECLEMNU, &
+                                    T_LCRTYPECR , &
+                                    T_PECCLE2, &
+                                    T_LCRCLE2
+    LET FIELDTEXT = TRUNC(T_LCRCLE2)
+  END
+  ;
+  ; Force l'éxécution du LOOKUP sur le lot et de la procédure EDIT.
+  ;
+  IF 0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE( TRUNC( T_LCRCLE ) )
+  THEN LET FIELDTEXT = T_LCRCLE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation du lot.
+;
+PROCEDURE EDIT T_LCRCLE
+BEGIN
+  IF LCRTYPECR OF CRLOT <> "FA"
+  THEN ERROR 627 ; Ce lot n'est pas du bon type.
+  ;
+  IF LCRDATJOU OF CRLOT <> 0
+  THEN ERROR 628 ; Le lot est déjà journalisé.
+  ;
+  IF LCRATRJOU OF CRLOT = "1"
+  THEN ERROR 629 ; On ne peut pas utiliser un lot autorisé à la journalisation.
+  ;
+  IF LCRUSR OF CRLOT <> LOGONID
+  THEN ERROR 630 ; Ce lot ne vous est pas destiné.
+  ;
+  IF LCRNBRTRSVER OF CRLOT = 0
+  THEN ERROR 719 ; Saisie interdite, entrez d'abord vos montants vérifiés dans le lot.
+  ;
+  IF LCRDATVAL OF CRLOT <> 0
+  THEN WARNING 631 ; Une liste de vérification a déjà été demandé pour ce lot.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les types de factures(bilingue).
+;
+;
+PROCEDURE INPUT T_TYPECR
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_FARTYPECR = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_FARTYPECR, T_FARTYPECR
+    LET FIELDTEXT = TRUNC(T_FARTYPECR)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; On ne peut pas saisir un paiement non-appliqué par cet écran.
+;
+;
+PROCEDURE EDIT T_TYPECR
+BEGIN
+  IF FIELDTEXT = "NA"
+  THEN ERROR 623 ; Ce type de facture n'est pas permis.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les client.
+;
+;
+PROCEDURE INPUT T_REFCLENUM
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CLICLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cr102 MODE F PASSING T_CLICIECLE, T_CIECLEMNU, T_CLICLE
+    LET FIELDTEXT = TRUNC(T_CLICLE)
+  END
+  ;
+  ; Met une valeur par defaut , et force le lookup
+  ;
+  IF 0 = SIZE(FIELDTEXT)
+  THEN LET FIELDTEXT = REFCLENUM OF FACPT_A_REC
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du client.
+;
+;
+PROCEDURE EDIT T_REFCLENUM
+BEGIN
+  IF CLISTU OF VCLC_CLI = "I"
+  THEN ERROR 632 ; Le client est inactif.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Numéro de facture en référence pour les notes de crédit.
+;
+;
+PROCEDURE INPUT T_FARCLEREF
+BEGIN
+  ;
+  ; Sous-écran de consultation des factures pour les notes de crédit.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CLICLE    = T_REFCLENUM
+    IF T_TYPECR = "NC"
+    THEN LET T_TYPECRPAT = "FA"
+    ELSE LET T_TYPECRPAT = "FA|CR|NC"
+    LET T_FLGSLD    = "0"
+    LET T_FARCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN fa105 MODE F PASSING T_CLICIECLE, &
+                                    T_CLICLE   , &
+                                    T_TYPECRPAT, &
+                                    T_FLGSLD   , &
+                                    T_CIECLEMNU, &
+                                    T_FARCLE
+    LET FIELDTEXT = TRUNC(T_FARCLE)
+  END
+  ;
+  ; Met une valeur par defaut , et force le lookup
+  ;
+  IF 0 = SIZE(FIELDTEXT)
+  THEN LET FIELDTEXT = FARCLEREF OF FACPT_A_REC
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du numéro de document référé.
+;
+;
+PROCEDURE EDIT T_FARCLEREF
+BEGIN
+  IF T_TYPECR                    = "NC" AND &
+     FARTYPECR OF A_FAR_REFEREE <> "FA"
+  THEN ERROR 2750 ; Une note de crédit doit s'appliquer qu'à une facture.
+
+  IF T_TYPECR                   = "AJ" AND &
+     FARTYPECR OF A_FAR_REFEREE = "AJ"
+  THEN ERROR 2752 ; On ne peut pas appliquer un ajustement sur un ajustement.
+
+  IF FARDATJOU OF A_FAR_REFEREE = 0
+  THEN ERROR 2751 ; La facture doit être journalisée pour la référer.
+
+  IF REFCLENUM OF A_FAR_REFEREE <> T_REFCLENUM
+  THEN ERROR 2753 ; Cette facture n'appartient pas à ce client.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la date de facture selon l'intervalle de date de la période.
+;
+PROCEDURE EDIT T_FARDAT
+BEGIN
+  IF FIELDVALUE < PECDATDEB OF MCPERIODE_CTB
+  THEN WARNING 637 ; La date est inférieure à la date de début de la période
+
+  IF FIELDVALUE > PECDATFIN OF MCPERIODE_CTB
+  THEN WARNING 638 ; La date est supérieure à la date de fin de la période.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul des dates due.
+;
+USE ustmecal NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ; On valide premièrement que les comptes unité sont encore valide selon la
+  ; charte
+  ;
+  ;******
+  IF HLDCHTCPT OF MCHOLDING = "1"
+  THEN BEGIN
+    WHILE RETRIEVING FAFAR_DETAIL
+    BEGIN
+      GET MCCHARTE_UNA OPTIONAL
+      ;
+      ; Si la charte est incluse, le lien est obligatoire.
+      ;
+      IF NOT ACCESSOK
+      THEN BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "I"
+        THEN ERROR 1314 ; La combinaison compte/unité administrative n'existe pas.
+      END
+      ELSE BEGIN
+        ;
+        ; Si la charte est Exclusive et que la période fait partie de
+        ; l'intervalle de périodes de la charte alors c'est une erreur.
+        ;
+        ; Si la charte est inclusive et que la période ne fait pas partie de
+        ; l'intervalle de périodes de la charte alors c'est une erreur.
+        ;
+
+        ; Ajustement pour le changement de siècle
+        IF T_PECCLEMNU[1:1] < "8"
+        THEN LET T_PECCLEMNU_SIE1 = "1" + T_PECCLEMNU
+        ELSE LET T_PECCLEMNU_SIE1 = "0" + T_PECCLEMNU
+
+        ; Ajustement pour le changement de siècle
+        IF CCUPECDEBA OF MCCHARTE_UNA[1:1] < "8"
+        THEN LET T_CCUPECDEBA_SIE1 = "1" + CCUPECDEBA OF MCCHARTE_UNA
+        ELSE LET T_CCUPECDEBA_SIE1 = "0" + CCUPECDEBA OF MCCHARTE_UNA
+
+        ; Ajustement pour le changement de siècle
+        IF CCUPECDEBI OF MCCHARTE_UNA[1:1] < "8"
+        THEN LET T_CCUPECDEBI_SIE1 = "1" + CCUPECDEBI OF MCCHARTE_UNA
+        ELSE LET T_CCUPECDEBI_SIE1 = "0" + CCUPECDEBI OF MCCHARTE_UNA
+
+        IF ( &
+             T_PECCLEMNU_SIE1 >= T_CCUPECDEBA_SIE1 AND &
+             ( &
+               T_PECCLEMNU_SIE1 < T_CCUPECDEBI_SIE1 OR &
+               CCUPECDEBI OF MCCHARTE_UNA = " " &
+             ) &
+           )
+        THEN BEGIN
+          IF HLDCHTCPTRLT OF MCHOLDING = "E"
+          THEN ERROR 1384 ; La combinaison compte/unité administrative est inactive.
+        END
+        ELSE BEGIN
+          IF HLDCHTCPTRLT OF MCHOLDING = "I"
+          THEN ERROR 1384 ; La combinaison compte/unité administrative est inactive.
+        END
+      END
+    END
+  END
+  ;*****
+
+
+  ; Création de la facture
+  ;
+  IF T_TYPECR = "AJ"
+  THEN BEGIN
+    ;
+    ; Le numéro d'ajustement est composé du numéro de document plus
+    ; un numéro de séquence. Le numéro de séquence est séparé du numéro
+    ; du document par un #.
+    ;
+    ; Exemple: Facture    ==> A1234
+    ;          Ajustement ==> A1234#01
+    ;
+    LET T_NUMAJT = "00"
+    GET A_FAR_AJ VIA   CIECLE   , &
+                       FARCLEREF, &
+                       FARTYPECR  &
+                 USING CIECLE    OF FACPT_A_REC, &
+                       T_FARCLEREF             , &
+                       T_TYPECR                  &
+                 ORDERBY CIECLE , &
+                         FARCLEREF DESCENDING    &
+                 OPTIONAL
+    IF ACCESSOK
+    THEN LET T_NUMAJT = &
+           FARCLE OF A_FAR_AJ[SIZE(TRUNCATE(FARCLE OF A_FAR_AJ)) - 1 : 2]
+    LET FARCLE OF A_FAR_NEW = TRUNCATE( T_FARCLEREF ) + "#" + &
+                                  ASCII( NCONVERT(T_NUMAJT) + 1 ,2 )
+  END
+  ELSE BEGIN
+    START TRANSACTION GEN_NUM_SEQ
+    GET FAFAR_SEQ VIA   CIECLE, &
+                        FSEANNCLE  &
+                  USING T_CIECLEMNU,&
+                        T_PECCLEMNU[1:2] &
+                 OPTIONAL
+    LET CIECLE    OF FAFAR_SEQ = T_CIECLEMNU
+    LET FSEANNCLE OF FAFAR_SEQ = T_PECCLEMNU[1:2]
+    ;LET FSENUMSEQ OF FAFAR_SEQ = FSENUMSEQ OF FAFAR_SEQ + 1
+;an 2000
+    IF NEWRECORD OF FAFAR_SEQ
+    THEN LET FSENUMSEQ OF FAFAR_SEQ = 0
+    LET FSENUMSEQ OF FAFAR_SEQ = FSENUMSEQ OF FAFAR_SEQ + 1
+
+    LET FARCLE OF A_FAR_NEW = FSEANNCLE + &
+                           ASCII(FSENUMSEQ OF FAFAR_SEQ, FSELONNUM OF FAFAR_SEQ -2)
+    PUT FAFAR_SEQ
+    COMMIT TRANSACTION GEN_NUM_SEQ
+  END
+  LET CIECLE     OF A_FAR_NEW = CIECLE     OF FACPT_A_REC
+  LET REFCIECLE  OF A_FAR_NEW = REFCIECLE  OF FACPT_A_REC
+  LET REFCLETYP  OF A_FAR_NEW = REFCLETYP  OF FACPT_A_REC
+  LET REFCLENUM  OF A_FAR_NEW = T_REFCLENUM
+  LET FARTYPECR  OF A_FAR_NEW = T_TYPECR
+  LET FARCLEREF  OF A_FAR_NEW = T_FARCLEREF
+
+  IF T_REFCLENUM = REFCLENUM OF FACPT_A_REC
+  THEN BEGIN
+    LET RADCLE     OF A_FAR_NEW = RADCLE     OF FACPT_A_REC
+    LET FARTERNET  OF A_FAR_NEW = FARTERNET  OF FACPT_A_REC
+    LET FARTERESC1 OF A_FAR_NEW = FARTERESC1 OF FACPT_A_REC
+    LET FARTERESC2 OF A_FAR_NEW = FARTERESC2 OF FACPT_A_REC
+    LET FARTERFRS  OF A_FAR_NEW = FARTERFRS  OF FACPT_A_REC
+  END
+  ELSE BEGIN
+    IF CLITYP OF VCLC_CLI <> "D"
+    THEN BEGIN
+      LET     RADCLE  OF A_FAR_NEW = CLCADRETACPT OF VCLC_CLI
+    END
+    LET FARTERNET  OF A_FAR_NEW = CLCTERNET  OF VCLC_CLI
+    LET FARTERESC1 OF A_FAR_NEW = CLCTERESC1 OF VCLC_CLI
+    LET FARTERESC2 OF A_FAR_NEW = CLCTERESC2 OF VCLC_CLI
+    LET FARTERFRS  OF A_FAR_NEW = CLCTERFRS  OF VCLC_CLI
+  END
+
+  LET FARMNT     OF A_FAR_NEW = FARMNT     OF FACPT_A_REC
+  LET FARMNTNET  OF A_FAR_NEW = FARMNTNET  OF FACPT_A_REC
+  LET FARMNTTVQ  OF A_FAR_NEW = FARMNTTVQ  OF FACPT_A_REC
+  LET FARMNTTPS  OF A_FAR_NEW = FARMNTTPS  OF FACPT_A_REC
+  LET FARCMDCLI  OF A_FAR_NEW = FARCMDCLI  OF FACPT_A_REC
+  LET FARMNTREC  OF A_FAR_NEW = FARMNTREC  OF FACPT_A_REC
+  LET FARMNTTOT  OF A_FAR_NEW = FARMNTTOT  OF FACPT_A_REC
+  LET FARCUMMNT  OF A_FAR_NEW = FARCUMMNT  OF FACPT_A_REC
+  LET FARDSC1    OF A_FAR_NEW = FARDSC1    OF FACPT_A_REC
+  LET FARDSC2    OF A_FAR_NEW = FARDSC2    OF FACPT_A_REC
+  LET FARCODPOS  OF A_FAR_NEW = FARCODPOS  OF FACPT_A_REC
+  LET FARMNTESC  OF A_FAR_NEW = FARMNTESC  OF FACPT_A_REC
+  LET FARDERLIG  OF A_FAR_NEW = FARDERLIG  OF FACPT_A_REC
+  LET PECCLE     OF A_FAR_NEW = T_PECCLE
+  LET LCRCLE     OF A_FAR_NEW = T_LCRCLE
+  LET FARDAT     OF A_FAR_NEW = T_FARDAT
+  LET FARDATJOU  OF A_FAR_NEW = 0
+  LET FARHREJOU  OF A_FAR_NEW = 0
+  LET FARIMP     OF A_FAR_NEW = "0"
+  LET FARDATCRE  OF A_FAR_NEW = SYSDATE
+  LET FARHRECRE  OF A_FAR_NEW = SYSTIME / 10000
+  LET FARUSRCRE  OF A_FAR_NEW = LOGONID
+  LET FARDATMOD  OF A_FAR_NEW = SYSDATE
+  LET FARHREMOD  OF A_FAR_NEW = SYSTIME / 10000
+  LET FARUSRMOD  OF A_FAR_NEW = LOGONID
+  LET FARNBRIMP  OF A_FAR_NEW = 0
+  LET FARNBRDUP  OF A_FAR_NEW = 0
+
+  ;
+  ; Calcul des dates due
+  ;
+  IF 0 <> SIZE( TRUNCATE( FARTERNET OF FACPT_A_REC ) )
+  THEN BEGIN
+    GET CRTERME VIA TMECLE &
+                USING FARTERNET OF FACPT_A_REC  &
+                OPTIONAL
+    LET TZ_DATCAL = T_FARDAT
+    DO INTERNAL TER_DATE_DUE
+    LET FARDATNET OF A_FAR_NEW = TZ_DATRES
+  END
+
+  IF 0 <> SIZE( TRUNCATE( FARTERESC1 OF FACPT_A_REC ) )
+  THEN BEGIN
+    GET CRTERME VIA TMECLE &
+                USING FARTERESC1 OF FACPT_A_REC  &
+                OPTIONAL
+    LET TZ_DATCAL = T_FARDAT
+    DO INTERNAL TER_DATE_DUE
+    LET FARDATESC1 OF A_FAR_NEW = TZ_DATRES
+  END
+
+  IF 0 <> SIZE( TRUNCATE( FARTERESC2 OF FACPT_A_REC ) )
+  THEN BEGIN
+    GET CRTERME VIA TMECLE &
+                USING FARTERESC2 OF FACPT_A_REC  &
+                OPTIONAL
+    LET TZ_DATCAL = T_FARDAT
+    DO INTERNAL TER_DATE_DUE
+    LET FARDATESC2 OF A_FAR_NEW = TZ_DATRES
+  END
+
+  IF 0 <> SIZE( TRUNCATE( FARTERFRS OF FACPT_A_REC ) )
+  THEN BEGIN
+    GET CRTERME VIA TMECLE &
+                USING FARTERFRS OF FACPT_A_REC  &
+                OPTIONAL
+    LET TZ_DATCAL = T_FARDAT
+    DO INTERNAL TER_DATE_DUE
+    LET FARDATFRS OF A_FAR_NEW = TZ_DATRES
+  END
+
+  ;
+  ; On incrémente le numéro d'adresse pour les clients divers.
+  ;
+  IF     CLITYP OF VCLC_CLI = "D"
+  THEN BEGIN
+    GET MCREF_ADRESSE OPTIONAL
+    IF ACCESSOK
+    THEN BEGIN
+      LET REFCIECLE   OF A_RAD_NEW = REFCIECLE   OF MCREF_ADRESSE
+      LET REFCLETYP   OF A_RAD_NEW = REFCLETYP   OF MCREF_ADRESSE
+      LET REFCLENUM   OF A_RAD_NEW = REFCLENUM   OF MCREF_ADRESSE
+      LET RADNOM      OF A_RAD_NEW = RADNOM      OF MCREF_ADRESSE
+      LET RADNOMABR   OF A_RAD_NEW = RADNOMABR   OF MCREF_ADRESSE
+      LET RADADR1     OF A_RAD_NEW = RADADR1     OF MCREF_ADRESSE
+      LET RADADR2     OF A_RAD_NEW = RADADR2     OF MCREF_ADRESSE
+      LET RADADR3     OF A_RAD_NEW = RADADR3     OF MCREF_ADRESSE
+      LET RADADR4     OF A_RAD_NEW = RADADR4     OF MCREF_ADRESSE
+      LET RADCP       OF A_RAD_NEW = RADCP       OF MCREF_ADRESSE
+      LET RADTEL      OF A_RAD_NEW = RADTEL      OF MCREF_ADRESSE
+      LET RADFAX      OF A_RAD_NEW = RADFAX      OF MCREF_ADRESSE
+      LET RADPAMCP    OF A_RAD_NEW = RADPAMCP    OF MCREF_ADRESSE
+      LET RADACHCP    OF A_RAD_NEW = RADACHCP    OF MCREF_ADRESSE
+      LET RADRETCP    OF A_RAD_NEW = RADRETCP    OF MCREF_ADRESSE
+      LET RADLIVCR    OF A_RAD_NEW = RADLIVCR    OF MCREF_ADRESSE
+      LET RADFACCR    OF A_RAD_NEW = RADFACCR    OF MCREF_ADRESSE
+      LET RADETACPTCR OF A_RAD_NEW = RADETACPTCR OF MCREF_ADRESSE
+      LET RADENRTPS   OF A_RAD_NEW = RADENRTPS   OF MCREF_ADRESSE
+      LET RADENRTVQ   OF A_RAD_NEW = RADENRTVQ   OF MCREF_ADRESSE
+      LET RADREG      OF A_RAD_NEW = RADREG      OF MCREF_ADRESSE
+      LET RADPRV      OF A_RAD_NEW = RADPRV      OF MCREF_ADRESSE
+      LET RADPYS      OF A_RAD_NEW = RADPYS      OF MCREF_ADRESSE
+      LET RADVIL      OF A_RAD_NEW = RADVIL      OF MCREF_ADRESSE
+
+      START TRANSACTION GEN_RAD_SEQ
+      GET MCRAD_SEQ VIA REFCIECLE, &
+                        REFCLETYP, &
+                        REFCLENUM  &
+                    USING REFCIECLE OF FACPT_A_REC, &
+                          REFCLETYP OF FACPT_A_REC, &
+                          REFCLENUM OF FACPT_A_REC  &
+                    OPTIONAL
+      LET RASNUMSEQ OF MCRAD_SEQ = RASNUMSEQ OF MCRAD_SEQ + 1
+
+      LET REFCIECLE OF MCRAD_SEQ = REFCIECLE OF FACPT_A_REC
+      LET REFCLETYP OF MCRAD_SEQ = REFCLETYP OF FACPT_A_REC
+      LET REFCLENUM OF MCRAD_SEQ = REFCLENUM OF FACPT_A_REC
+
+      LET RADCLE    OF A_FAR_NEW = RASNUMSEQ OF MCRAD_SEQ
+      LET RADCLE    OF A_RAD_NEW = RASNUMSEQ OF MCRAD_SEQ
+
+      PUT MCRAD_SEQ
+      COMMIT TRANSACTION GEN_RAD_SEQ
+
+      PUT A_RAD_NEW RESET
+    END
+  END
+
+  ;
+  ; Création de l'en-tête
+  ;
+  GET FAFAR_ENTETE OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    LET CIECLE    OF A_FFE_NEW = CIECLE    OF FAFAR_ENTETE
+    LET FARCLE    OF A_FFE_NEW = FARCLE    OF A_FAR_NEW
+    LET FFEDES    OF A_FFE_NEW = FFEDES    OF FAFAR_ENTETE
+    LET FFEPORORI OF A_FFE_NEW = FFEPORORI OF FAFAR_ENTETE
+    LET FFEPORDES OF A_FFE_NEW = FFEPORDES OF FAFAR_ENTETE
+    LET FFELIUTRV OF A_FFE_NEW = FFELIUTRV OF FAFAR_ENTETE
+    LET FFECNS1   OF A_FFE_NEW = FFECNS1   OF FAFAR_ENTETE
+    LET FFECNS2   OF A_FFE_NEW = FFECNS2   OF FAFAR_ENTETE
+    LET FFECNS3   OF A_FFE_NEW = FFECNS3   OF FAFAR_ENTETE
+    LET FFECNS4   OF A_FFE_NEW = FFECNS4   OF FAFAR_ENTETE
+    LET FFECNS5   OF A_FFE_NEW = FFECNS5   OF FAFAR_ENTETE
+    LET FFECNS6   OF A_FFE_NEW = FFECNS6   OF FAFAR_ENTETE
+    LET FFECNS7   OF A_FFE_NEW = FFECNS7   OF FAFAR_ENTETE
+
+    PUT A_FFE_NEW RESET
+  END
+
+  WHILE RETRIEVING FAFAR_DETAIL
+  BEGIN
+    LET CIECLE       OF A_FFD_NEW = CIECLE       OF FAFAR_DETAIL
+    LET FARCLE       OF A_FFD_NEW = FARCLE       OF A_FAR_NEW
+    LET FFDCLELIG    OF A_FFD_NEW = FFDCLELIG    OF FAFAR_DETAIL
+    LET FFDTYP       OF A_FFD_NEW = FFDTYP       OF FAFAR_DETAIL
+    LET TRPCLE       OF A_FFD_NEW = TRPCLE       OF FAFAR_DETAIL
+    LET ETACLE       OF A_FFD_NEW = ETACLE       OF FAFAR_DETAIL
+    LET FFDPRI       OF A_FFD_NEW = FFDPRI       OF FAFAR_DETAIL
+    LET FFDQTEFAC    OF A_FFD_NEW = FFDQTEFAC    OF FAFAR_DETAIL
+    LET FFDTAXTYPTPS OF A_FFD_NEW = FFDTAXTYPTPS OF FAFAR_DETAIL
+    LET FFDTAXCODTPS OF A_FFD_NEW = FFDTAXCODTPS OF FAFAR_DETAIL
+    LET FFDTAXTYPTVQ OF A_FFD_NEW = FFDTAXTYPTVQ OF FAFAR_DETAIL
+    LET FFDTAXCODTVQ OF A_FFD_NEW = FFDTAXCODTVQ OF FAFAR_DETAIL
+    LET FFDMNTTOT    OF A_FFD_NEW = FFDMNTTOT    OF FAFAR_DETAIL
+    LET FFDMNTTPS    OF A_FFD_NEW = FFDMNTTPS    OF FAFAR_DETAIL
+    LET FFDMNTTVQ    OF A_FFD_NEW = FFDMNTTVQ    OF FAFAR_DETAIL
+    LET FFDMNTNET    OF A_FFD_NEW = FFDMNTNET    OF FAFAR_DETAIL
+    LET FFDPRIUNI    OF A_FFD_NEW = FFDPRIUNI    OF FAFAR_DETAIL
+    LET PRJCLE       OF A_FFD_NEW = PRJCLE       OF FAFAR_DETAIL
+    LET PRACLE       OF A_FFD_NEW = PRACLE       OF FAFAR_DETAIL
+    LET CPTCLE       OF A_FFD_NEW = CPTCLE       OF FAFAR_DETAIL
+    LET UNACLE       OF A_FFD_NEW = UNACLE       OF FAFAR_DETAIL
+    LET IMMCLE       OF A_FFD_NEW = IMMCLE       OF FAFAR_DETAIL
+    LET FFDDSC       OF A_FFD_NEW = FFDDSC       OF FAFAR_DETAIL
+    LET FFDTIMSTP    OF A_FFD_NEW = SYSDATE * 1000000 + ROUND(SYSTIME / 100)
+    LET FFDTERESC    OF A_FFD_NEW = FFDTERESC    OF FAFAR_DETAIL
+    LET FFDMNTESC    OF A_FFD_NEW = FFDMNTESC    OF FAFAR_DETAIL
+
+    PUT A_FFD_NEW RESET
+  END
+
+  WHILE RETRIEVING FAFAR_NOTE
+  BEGIN
+    LET CIECLE    OF A_FFN_NEW = CIECLE    OF A_FAR_NEW
+    LET FARCLE    OF A_FFN_NEW = FARCLE    OF A_FAR_NEW
+    LET FFDCLELIG OF A_FFN_NEW = FFDCLELIG OF FAFAR_NOTE
+    LET FFNSEQ    OF A_FFN_NEW = FFNSEQ    OF FAFAR_NOTE
+    LET FFNDSC    OF A_FFN_NEW = FFNDSC    OF FAFAR_NOTE
+    LET FFNIMP    OF A_FFN_NEW = FFNIMP    OF FAFAR_NOTE
+
+    PUT A_FFN_NEW RESET
+  END
+
+  PUT A_FAR_NEW
+END
+
+PROCEDURE POSTUPDATE
+BEGIN
+  DISPLAY FARCLE OF A_FAR_NEW
+  INFORMATION MESSAGE = "" NOW RESP
+
+  RETURN
+END
+
+BUILD
+
+@IF FORMAT
+@ENDIF

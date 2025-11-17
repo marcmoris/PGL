@@ -1,0 +1,260 @@
+;/T/ Validation des réceptions non-facturées au...
+;
+;/P/ Programmeur...: Guy Chabot
+;    Date Création.: 26 septembre 1994
+;
+;    Description...: Permet de faire une liste de validation des réceptions
+;                    non-facturées à une période donnée.
+; 
+;    Paramètres....: Période comptable 
+;                    Compagnie
+;                    Entrepôt
+;
+;/M/ Pascal Tremblay, 98-01-19
+;
+;    Ajustement pour le changement de siècle
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST   ; permet de faire les SET REPORT NOLIMIT....
+
+RUN ar303t
+
+GLOBAL TEMPORARY G_PECCLE CHARACTER SIZE 4 PARM ; Période comptable.
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+REQUEST SELECTION_RECEPTION
+
+ACCESS ARRECEPTION   &
+
+   LINK CIECLE OF ARRECEPTION, &
+        CMDCLE OF ARRECEPTION  &
+     TO CIECLE, &
+        CMDCLE OF ARCOMMANDE  
+
+CHOOSE  CIECLE PARM, &
+        RECSTU "A", "S", "C"
+
+; Ajustement pour le changement de siècle
+DEFINE T_PECCLE_REC CHARACTER SIZE 5 = "1" + PECCLE OF ARRECEPTION &
+         IF PECCLE OF ARRECEPTION[1:1] < "8" &
+         ELSE "0" + PECCLE OF ARRECEPTION
+
+; Ajustement pour le changement de siècle
+DEFINE DG_PECCLE CHARACTER SIZE 5 = "1" + G_PECCLE &
+         IF G_PECCLE[1:1] < "8" &
+         ELSE "0" + G_PECCLE
+
+SELECT ARRECEPTION IF 0        <> RECDATJOU OF ARRECEPTION AND &
+                      DG_PECCLE >= T_PECCLE_REC
+
+TEMPORARY T_MNTJOU FLOAT     SIZE 8  ; Montant de courus journalisé
+TEMPORARY T_MNTNJO FLOAT     SIZE 8  ; Montant de courus non-journalisé
+TEMPORARY T_PECCLE CHARACTER SIZE 4  ; Période des C.A.P.
+TEMPORARY T_LOTCLE CHARACTER SIZE 4  ; Lot des C.A.P.
+TEMPORARY T_CAPCLE CHARACTER SIZE 12 ; Numéro de la facture au payable
+TEMPORARY T_CAPDAT DATE              ; Date de la facture CAP
+
+TEMPORARY T_MNTTOTJOU FLOAT  SIZE 8  ; Total par réception
+
+SORT ON CIECLE OF ARRECEPTION &
+     ON RECCLE OF ARRECEPTION
+
+SUBFILE WAR303A KEEP AT RECCLE &
+        INCLUDE CIECLE    OF ARRECEPTION, &
+                ENTCLE    OF ARRECEPTION, &
+                CMDCLE    OF ARRECEPTION, &
+                RECCLE    OF ARRECEPTION, &
+                RECSTU    OF ARRECEPTION, &
+                RECDAT    OF ARRECEPTION, &
+                FOUCIECLE OF ARRECEPTION, &
+                REFCLETYP OF ARRECEPTION, &
+                FOUCLE    OF ARRECEPTION, &
+                RADCLE    OF ARRECEPTION, &
+                RECMNTCOU OF ARRECEPTION, &
+                RECMNTTOT OF ARRECEPTION, &
+                CMDDAT    OF ARCOMMANDE , &
+                PECCLE OF ARRECEPTION ALIAS PECCLEACH, &
+                LARCLE OF ARRECEPTION ALIAS LOTCLEACH, &
+                T_PECCLE              ALIAS PECCLECAP, &
+                T_LOTCLE              ALIAS LOTCLECAP, &
+                T_MNTJOU              ALIAS RECMNTFACJOU, &
+                T_MNTNJO              ALIAS RECMNTFACNJO, &
+                T_CAPCLE              ALIAS CAPCLE, &
+                T_CAPDAT              ALIAS CAPDAT, &
+                T_MNTTOTJOU           ALIAS RECMNTTOTJOU
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+REQUEST SELECTION_FACTURE
+
+ACCESS ARFACTURE_REC   &
+    
+  LINK  FOUCIECLE OF ARFACTURE_REC, &
+        FOUCLE    OF ARFACTURE_REC, &
+        FACCLE    OF ARFACTURE_REC, &
+        FACCIECLE OF ARFACTURE_REC  &
+    TO  FOUCIECLE, &
+        FOUCLE   , &
+        CAPCLE   , &
+        CAPCIECLE  OF CPCPT_A_PAYER   &
+
+  LINK  FOUCIECLE OF ARFACTURE_REC, &
+        FOUCLE    OF ARFACTURE_REC, &
+        FACCLE    OF ARFACTURE_REC, &
+        FACCIECLE OF ARFACTURE_REC  &
+    TO  FOUCIECLE, &
+        FOUCLE   , &
+        FACCLE   , &
+        FACCIECLE  OF ARFAC_DETAIL    &
+
+  LINK  FACCIECLE OF ARFAC_DETAIL, &
+        RECCLE    OF ARFAC_DETAIL  &
+    TO  CIECLE, &
+        RECCLE    OF ARRECEPTION   &
+
+  LINK  CIECLE OF ARRECEPTION, &
+        CMDCLE OF ARRECEPTION, &
+        "000" &
+    TO  CIECLE, &
+        CMDCLE, &
+        CMDAJT OF ARCOMMANDE   &
+
+  LINK  FOUCIECLE OF ARCOMMANDE, &
+        FOUCLE    OF ARCOMMANDE, &
+        CIECLE    OF ARCOMMANDE  &
+    TO  FOUCIECLE, &
+        FOUCLE,    &
+        FOCCIECLE OF VFOC_FOU    &
+
+  LINK  DEVCLE OF VFOC_FOU &
+    TO  DEVCLE OF MCDEVISE  
+
+CHOOSE  FACCIECLE PARM
+
+; Ajustement pour le changement de siècle
+DEFINE T_PECCLE_ARFAC CHARACTER SIZE 5 = "1" + PECCLE OF ARFACTURE_REC &
+         IF PECCLE OF ARFACTURE_REC[1:1] < "8" &
+         ELSE "0" + PECCLE OF ARFACTURE_REC
+
+; Ajustement pour le changement de siècle
+DEFINE DG_PECCLE CHARACTER SIZE 5 = "1" + G_PECCLE &
+         IF G_PECCLE[1:1] < "8" &
+         ELSE "0" + G_PECCLE
+
+SELECT ARFACTURE_REC IF DG_PECCLE >= T_PECCLE_ARFAC
+
+TEMPORARY T_MNTJOU    FLOAT SIZE 8
+TEMPORARY T_MNTDEVHLD FLOAT SIZE 8
+
+SORT ON FACCIECLE OF ARFACTURE_REC &
+     ON RECCLE    OF ARRECEPTION   &
+     ON FACCLE    OF ARFACTURE_REC
+
+ITEM T_MNTJOU SUBTOTAL FADMNTCOU OF ARFAC_DETAIL &
+                   IF 0 <> CAPDATJOU OF CPCPT_A_PAYER RESET AT RECCLE
+
+OUTPUT *WAR303A ADD 
+
+ ITEM CIECLE       OF WAR303A FINAL CIECLE    OF ARRECEPTION
+ ITEM ENTCLE       OF WAR303A FINAL ENTCLE    OF ARRECEPTION
+ ITEM CMDCLE       OF WAR303A FINAL CMDCLE    OF ARRECEPTION
+ ITEM RECCLE       OF WAR303A FINAL RECCLE    OF ARRECEPTION
+ ITEM RECSTU       OF WAR303A FINAL RECSTU    OF ARRECEPTION
+ ITEM RECDAT       OF WAR303A FINAL RECDAT    OF ARRECEPTION
+ ITEM FOUCIECLE    OF WAR303A FINAL FOUCIECLE OF ARRECEPTION
+ ITEM REFCLETYP    OF WAR303A FINAL REFCLETYP OF ARRECEPTION
+ ITEM FOUCLE       OF WAR303A FINAL FOUCLE    OF ARRECEPTION
+ ITEM RADCLE       OF WAR303A FINAL RADCLE    OF ARRECEPTION
+ ITEM CMDDAT       OF WAR303A FINAL CMDDAT    OF ARCOMMANDE
+ ITEM RECMNTCOU    OF WAR303A FINAL RECMNTCOU OF ARRECEPTION
+ ITEM RECMNTTOT    OF WAR303A FINAL RECMNTTOT OF ARRECEPTION
+ ITEM PECCLEACH    OF WAR303A FINAL PECCLE    OF ARRECEPTION
+ ITEM LOTCLEACH    OF WAR303A FINAL LARCLE    OF ARRECEPTION
+ ITEM PECCLECAP    OF WAR303A FINAL PECCLE    OF ARFACTURE_REC
+ ITEM LOTCLECAP    OF WAR303A FINAL LCPCLE    OF ARFACTURE_REC
+ ITEM CAPCLE       OF WAR303A FINAL FACCLE    OF ARFACTURE_REC
+ ITEM CAPDAT       OF WAR303A FINAL FACDAT    OF ARFACTURE_REC
+
+ ITEM RECMNTFACJOU OF WAR303A FINAL FADMNTCOU OF ARFAC_DETAIL &
+        IF 0 <> CAPDATJOU OF CPCPT_A_PAYER ELSE 0
+
+ ITEM RECMNTFACNJO OF WAR303A FINAL FADMNTCOU OF ARFAC_DETAIL &
+        IF 0 =  CAPDATJOU OF CPCPT_A_PAYER ELSE 0
+
+ ITEM RECMNTTOTJOU OF WAR303A FINAL T_MNTJOU
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+REQUEST SOMMATION_ET_MAJ
+
+ACCESS *WAR303A
+
+TEMPORARY T_MAXJOU FLOAT SIZE 8
+
+SORT ON CIECLE       OF WAR303A &
+     ON RECCLE       OF WAR303A &
+     ON RECMNTTOTJOU OF WAR303A D
+
+ITEM T_MAXJOU MAX RECMNTTOTJOU OF WAR303A RESET AT RECCLE
+
+OUTPUT WAR303A UPDATE
+
+  ITEM RECMNTTOTJOU OF WAR303A FINAL T_MAXJOU
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+REQUEST SELECTION_FINAL
+
+ACCESS *WAR303A
+
+SORT ON CIECLE       OF WAR303A &
+     ON RECCLE       OF WAR303A &
+     ON CAPCLE       OF WAR303A
+
+SELECT IF RECMNTCOU <> RECMNTTOTJOU
+
+TEMPORARY T_RECFACJOU     FLOAT SIZE 8
+TEMPORARY T_COMPTEUR    INTEGER SIZE 4
+
+ITEM T_RECFACJOU = T_RECFACJOU + RECMNTFACJOU OF WAR303A &
+                   RESET AT RECCLE TO 0
+
+ITEM T_COMPTEUR  = T_COMPTEUR + 1 RESET AT RECCLE TO 0
+
+SUBFILE WAR303B KEEP AT CAPCLE  &
+        INCLUDE CIECLE       OF WAR303A, &
+                ENTCLE       OF WAR303A, &
+                CMDCLE       OF WAR303A, &
+                RECCLE       OF WAR303A, &
+                RECSTU       OF WAR303A, &
+                RECDAT       OF WAR303A, &
+                FOUCIECLE    OF WAR303A, &
+                REFCLETYP    OF WAR303A, &
+                FOUCLE       OF WAR303A, &
+                RADCLE       OF WAR303A, &
+                CAPCLE       OF WAR303A, &
+                CAPDAT       OF WAR303A, &
+                PECCLEACH    OF WAR303A, &
+                PECCLECAP    OF WAR303A, &
+                LOTCLEACH    OF WAR303A, &
+                LOTCLECAP    OF WAR303A, &
+                RECMNTCOU    OF WAR303A, &
+                RECMNTTOT    OF WAR303A, &
+                RECMNTFACJOU OF WAR303A, &
+                RECMNTFACNJO OF WAR303A, &
+                CMDDAT       OF WAR303A, &
+                T_COMPTEUR
+
+
+BUILD

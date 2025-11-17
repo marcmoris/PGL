@@ -1,0 +1,164 @@
+;/T/ Vérification des écritures
+;
+;;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur...: Chantal Martineau
+;    Date Création.: 03-05-1993
+;
+;    Description...: La Liste de Vérification des écritures de Journal
+;                    donne les éléments de vérifications détallées et
+;                    sommaire pour les écritures au journal général.
+;
+;    Paramètres....: Compagnie
+;                    Periode CTB
+;                    No Lot
+;
+;    Particularités: Mise à jour de la date de validation du lot
+;
+;-------------------------------------------------------------------------------
+
+ USE ussetqts NOLIST   ; permet de faire set process nolimit
+
+RUN gl300t
+
+REQUEST VERIFICATION_JOURNAL
+
+ACCESS GLECRITURE_JG &
+  LINK ECJCIECLE OF GLECRITURE_JG                        , &
+       LGLCLE    OF GLECRITURE_JG                        , &
+       PECCLE    OF GLECRITURE_JG                          &
+    TO LGLCIECLE                                         , &
+       LGLCLE                                            , &
+       PECCLE    OF GLLOT                                  &
+  LINK ECJCIECLE OF GLECRITURE_JG                        , &
+       ECJCLENUM OF GLECRITURE_JG                        , &
+       ECJCLESEQ OF GLECRITURE_JG                          &
+    TO ECJCIECLE                                         , &
+       ECJCLENUM                                         , &
+       ECJCLESEQ OF GLIMPUTATION  OPTIONAL                 &
+  LINK CPTCLE OF GLIMPUTATION                              &
+    TO CPTCLE OF VCPT_DSC     OPTIONAL                     &
+  LINK CIECLE OF GLIMPUTATION                            , &
+       UNACLE OF GLIMPUTATION                              &
+    TO CIECLE                                            , &
+       UNACLE OF MCUNITE_ADM  OPTIONAL                     &
+  LINK CIECLE OF GLIMPUTATION                            , &
+       PRJCLE OF GLIMPUTATION                              &
+    TO CIECLE                                            , &
+       PRJCLE OF GPPROJETS     OPTIONAL                     &
+  LINK CIECLE OF GLIMPUTATION                            , &
+       PRJCLE OF GLIMPUTATION                            , &
+       PRACLE OF GLIMPUTATION                              &
+    TO CIECLE                                            , &
+       PRJCLE                                            , &
+       PRACLE OF GPPRO_ACTIVITE   OPTIONAL                     &
+  LINK CIECLE OF GLIMPUTATION                            , &
+       IMMCLE OF GLIMPUTATION                              &
+    TO CIECLE                                            , &
+       IMMCLE OF IMIMMOBILISATION OPTIONAL
+
+
+
+
+CHOOSE ECJCIECLE PARM , &       ;No compagnie
+       PECCLE PARM    ,  &      ;No période
+       LGLCLE PARM              ;No lot
+
+
+
+TEMPORARY T_BALANCE    CHARACTER SIZE 1  ;Indique si l'ecriture balance
+TEMPORARY T_MNT_DEBIT    FLOAT   SIZE 8  ;Montant débit
+TEMPORARY T_MNT_CREDIT   FLOAT   SIZE 8  ;Montant crédit
+
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE CHARACTER SIZE 5 = "1" + PECCLE OF GLECRITURE_JG &
+         IF PECCLE OF GLECRITURE_JG[1:1] < "8" &
+         ELSE "0" + PECCLE OF GLECRITURE_JG
+
+SORT ON    ECJCIECLE OF GLECRITURE_JG, &    ;Compangie
+           D_PECCLE_SIE, &    ;Lot
+           LGLCLE    OF GLECRITURE_JG       ;Période
+
+
+;
+; Vérification si le montant débit est différent du montant crédit
+; si oui alors il y a Hors balance.
+;
+  ITEM T_BALANCE      = "*" IF ECJMNTDBT OF GLECRITURE_JG <> &
+                        ECJMNTCRT OF GLECRITURE_JG ELSE " "
+;
+; Cummulatif du montant crédit
+;
+  ITEM T_MNT_CREDIT   = ECIMNT OF GLIMPUTATION &
+                        IF ECICODDC OF GLIMPUTATION = "C" ELSE 0
+;
+; Cummulatif du montant débit
+;
+  ITEM T_MNT_DEBIT    = ECIMNT OF GLIMPUTATION &
+                        IF ECICODDC OF GLIMPUTATION = "D" ELSE 0
+
+
+
+SUBFILE WGL300A KEEP INCLUDE &
+ ECJCIECLE OF GLECRITURE_JG, &
+ LGLCLE  OF GLECRITURE_JG  , &
+ LGLDATJOU OF GLLOT        , &
+ LGLDSC  OF GLLOT          , &
+ PECCLE  OF GLECRITURE_JG  , &
+ T_BALANCE                 , &
+ ECJCLENUM OF GLECRITURE_JG, &
+ ECJCLESEQ OF GLECRITURE_JG, &
+ ECJDSC1   OF GLECRITURE_JG, &
+ ECJDAT    OF GLECRITURE_JG, &
+ ECJTYPECR OF GLECRITURE_JG, &
+ ECJFLGANN OF GLECRITURE_JG, &
+ ECJCIEINT OF GLECRITURE_JG, &
+ ECJTRFUNA OF GLECRITURE_JG, &
+ ECJNBRPERINI OF GLECRITURE_JG, &
+ ECJNBRPERRES OF GLECRITURE_JG, &
+ ECJPECDES    OF GLECRITURE_JG, &
+ ECJDSC2      OF GLECRITURE_JG, &
+ ECJDSC3      OF GLECRITURE_JG, &
+ ECINUMLIG  OF GLIMPUTATION, &
+ CPTCLE     OF GLIMPUTATION, &
+ CPTDSCABR  OF VCPT_DSC    , &
+ CIECLE     OF GLIMPUTATION, &
+ UNACLE     OF GLIMPUTATION, &
+ UNANOMABR  OF MCUNITE_ADM , &
+ PRJCLE     OF GLIMPUTATION, &
+ PRJDSC1    OF GPPROJETS     , &
+ PRACLE     OF GLIMPUTATION, &
+ PRADSC1    OF GPPRO_ACTIVITE  , &
+ IMMCLE     OF GLIMPUTATION, &
+ IMMDSC     OF IMIMMOBILISATION , &
+ ECIFLGFAC  OF GLIMPUTATION, &
+ CLICLE     OF GLIMPUTATION, &
+ T_MNT_DEBIT               , &
+ T_MNT_CREDIT              , &
+ LGLNBRTRSVER   OF GLLOT   , &
+ LGLNBRTRS      OF GLLOT   , &
+  LGLNBRTRSERR OF GLLOT     , &
+ LGLCUMMNTVER OF GLLOT     , &
+ LGLCUMMNT    OF GLLOT
+
+
+
+
+;
+; Mise à jour de la date de vérification du lot
+; Si pas journalisé
+;
+OUTPUT GLLOT UPDATE AT LGLCLE &
+  IF LGLDATJOU OF GLLOT = 0
+
+ITEM LGLDATVAL OF GLLOT FINAL SYSDATE
+
+
+
+BUILD gl300t

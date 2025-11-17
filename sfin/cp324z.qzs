@@ -1,0 +1,277 @@
+;/T/ Journal de caisse-déboursé
+;
+;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur...: Thomas BRENNEUR
+;    Date Création.: 10 Aout 1993
+;
+;    Description...: Consultation d'un journal détaillé des chèques ayant été
+;                    portés au Grand-Livre. Ce journal présente le sommaire des
+;                    paiements ainsi que l'écriture comptable.
+;
+;    Paramètres....: Compagnie
+;                    Periode CTB
+;                    No Lot (Un ou tous)
+;
+;/M/ Marie-Josée Hamel, 96.03.14, ne pas sélectionner le paiement qui sont
+;                                 annulés avant l'impression et la journal.
+;-------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST   ; permet de faire les SET REPORT DEV....
+
+;
+; Lecture des chèques
+;
+
+ACCESS  CPPAIEMENT &
+
+  ;
+  ; On retrouve la description du compte d'encaisse
+  ;
+  LINK  LBQCPTENC OF CPPAIEMENT &
+    TO  CPTCLE                  OF VCPT_DSC &
+
+  ;
+  ; On retrouve la référence du chèque (à qui il est destiné)
+  ;
+
+  LINK  REFCIECLE OF CPPAIEMENT, &
+        REFCLETYP OF CPPAIEMENT, &
+        REFCLENUM OF CPPAIEMENT, &
+        RADCLE    OF CPPAIEMENT  &
+    TO  REFCIECLE, &
+        REFCLETYP, &
+        REFCLENUM, &
+        RADCLE                    OF VRAD_01 &
+
+  ;
+  ; On retrouve l'écriture comptable associée au chèque
+  ;
+  LINK  HISCLE OF CPPAIEMENT &
+    TO  HISCLE                    OF MCHIS_ECR &
+
+  ;
+  ; On retrouve la description du compte et de l'unité de chaque ligne
+  ; de cette écriture comptable
+  ;
+  LINK  CPTCLE OF MCHIS_ECR &
+    TO  CPTCLE                    OF VCPT_DSC ALIAS A_HIS_CPTDSC &
+
+  LINK  CIECLE OF MCHIS_ECR, &
+        UNACLE OF MCHIS_ECR &
+    TO  CIECLE, &
+        UNACLE                    OF MCUNITE_ADM
+
+CHOOSE  CIECLE  PARM, &  ; Compagnie
+        PECCLE  PARM, &  ; Période comptable
+        LCPCLE  PARM     ; Lot
+
+;
+; On ne sélectionne que les chèques journalisés. Et tous les types de transactions sont
+; sélectionnés : chèques (CH) et chèques annulés (CA).
+;
+
+SELECT  CPPAIEMENT &
+        IF    PAMDATJOU <> 0 &
+          AND NOT (   PAMCODANN OF CPPAIEMENT = "1" &
+                   AND 0 = SIZE( TRUNCATE( PAMPAMCLEANN OF CPPAIEMENT ) ) )
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE CHARACTER SIZE 5 = "1" + PECCLE OF CPPAIEMENT &
+         IF PECCLE OF CPPAIEMENT[1:1] < "8" &
+         ELSE "0" + PECCLE OF CPPAIEMENT
+
+
+SORT ON CIECLE    OF CPPAIEMENT, &
+        D_PECCLE_SIE, &
+        LCPCLE    OF CPPAIEMENT, &
+        LBQCPTENC OF CPPAIEMENT, &
+        PAMCLE    OF CPPAIEMENT, &
+        CPTCLE    OF MCHIS_ECR , &
+        UNACLE    OF MCHIS_ECR
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+; Titre du rapport.
+;
+DEFINE  DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+        "Journal de caisse-déboursé."
+@ELSE
+        "%%%Journal de caisse-déboursé."
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = ""
+
+;
+; Numéro du raport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "CP324"
+
+;
+; Nom de la compagnie du menu.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+USE usflgdet NOLIST                    ;Flag Bilingue (O/N)
+
+DEFINE  D_PAMCODANN CHARACTER SIZE 3 &
+        = DZ_FLGAFFO IF PAMCODANN OF CPPAIEMENT = "1" ELSE &
+          DZ_FLGAFFN IF PAMCODANN OF CPPAIEMENT = "0"
+
+DEFINE  D_DSC CHARACTER SIZE 12 &
+        = "Description:" &
+              IF    0 <> SIZE (TRUNCATE(PAMDSC1 OF CPPAIEMENT)) &
+                OR  0 <> SIZE (TRUNCATE(PAMDSC2 OF CPPAIEMENT)) ELSE ""
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+; Impression de l'en-tête.
+;
+USE ustit180 NOLIST
+  SKIP &
+@IF FRANCAIS
+    TAB 001 "Période........:" &
+@ELSE
+    TAB 001 "Period.........:" &
+@ENDIF
+    TAB 018 PECCLE OF CPPAIEMENT &
+  SKIP &
+@IF FRANCAIS
+    TAB 001 "Compte encaisse:" &
+@ELSE
+    TAB 001 "%%%pte encaisse:" &
+@ENDIF
+    TAB 018 LBQCPTENC OF CPPAIEMENT &
+    TAB 025 CPTDSC    OF VCPT_DSC   &
+@IF FRANCAIS
+    TAB 065 "Devise:" &
+@ELSE
+    TAB 065 "%%%ise:" &
+@ENDIF
+    TAB 073 DEVCLE OF VRAD_01 &
+  SKIP 2 &
+@IF FRANCAIS
+    TAB 001 "  No                                  Date   No chèque                    Montant" &
+@ELSE
+    TAB 001 "  %%                                  %%%%   %% %%%%%%                    %%%%%%%" &
+@ENDIF
+  SKIP &
+@IF FRANCAIS
+    TAB 001 "chèque      Fournisseur/Employé      chèque  pré-impr. Type Lot  Ann.      chèque                  Compte                 Unité administrative           Débit          Crédit" &
+@ELSE
+    TAB 001 "%%%%%%      %%%%%%%%%%%%%%%%%%%      %%%%%%  %%%%%%%%% %%%% %%%  %%%%      %%%%%%                  %%%%%%                 %%%%% %%%%%%%%%%%%%%           %%%%%          %%%%%%" &
+@ENDIF
+  SKIP &
+    TAB 001 "------- --------------------------- -------- --------- ---- ---- ---- ---------------     --------------------------- ----------------------------- --------------- ---------------"
+
+HEADING AT LBQCPTENC &
+  SKIP PAGE
+
+REPORT &
+    TAB 001 PAMCLE    OF CPPAIEMENT PRINT AT PAMCLE &
+    TAB 009 REFCLENUM OF CPPAIEMENT PRINT AT PAMCLE &
+    TAB 016 RADNOM    OF VRAD_01    PRINT AT PAMCLE PICTURE "^^^^^^^^^^^^^^^^^^^^" &
+    TAB 037 PAMDAT    OF CPPAIEMENT PRINT AT PAMCLE &
+    TAB 046 PAMNUMPIM OF CPPAIEMENT PRINT AT PAMCLE &
+    TAB 057 PAMTYPECR OF CPPAIEMENT PRINT AT PAMCLE &
+    TAB 061 LCPCLE    OF CPPAIEMENT PRINT AT PAMCLE &
+    TAB 066 D_PAMCODANN             PRINT AT PAMCLE &
+    TAB 071 PAMMNT    OF CPPAIEMENT PRINT AT PAMCLE PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+    TAB 091 CPTCLE    OF MCHIS_ECR    &
+    TAB 098 CPTDSCABR OF A_HIS_CPTDSC &
+    TAB 119 UNACLE    OF MCHIS_ECR    &
+    TAB 128 UNANOMABR OF MCUNITE_ADM  &
+    TAB 149 HECMNTDBT OF MCHIS_ECR    PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 BWZ &
+    TAB 165 HECMNTCRT OF MCHIS_ECR    PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 BWZ
+
+FOOTING AT PAMCLE &
+    TAB 010 D_DSC &
+    TAB 023 PAMDSC1 OF CPPAIEMENT &
+    TAB 149 "--------------- ---------------" &
+  SKIP &
+    TAB 023 PAMDSC2 OF CPPAIEMENT &
+    TAB 149 HECMNTDBT OF MCHIS_ECR  SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+    ;TAB 165 HECMNTCRT OF MCHIS_ECR  SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+    TAB 164 HECMNTCRT OF MCHIS_ECR  SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+  SKIP 2
+
+FOOTING AT LBQCPTENC &
+    TAB 001 " " &
+  SKIP 2 &
+    TAB 149 "--------------- ---------------" &
+  SKIP &
+@IF FRANCAIS
+    TAB 119 "Total du compte d'encaisse :" &
+@ELSE
+    TAB 119 "%%%al du compte d'encaisse :" &
+@ENDIF
+    TAB 149 HECMNTDBT OF MCHIS_ECR  SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+    TAB 165 HECMNTCRT OF MCHIS_ECR  SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+  SKIP &
+    TAB 149 "=============== ===============" &
+  SKIP 2
+
+FOOTING AT D_PECCLE_SIE &
+    TAB 001 " " &
+  SKIP 2 &
+    TAB 149 "--------------- ---------------" &
+  SKIP &
+@IF FRANCAIS
+    TAB 127 "Total de la période :" &
+@ELSE
+    TAB 127 "%%%al de la période :" &
+@ENDIF
+    TAB 149 HECMNTDBT OF MCHIS_ECR  SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+    TAB 165 HECMNTCRT OF MCHIS_ECR  SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+  SKIP &
+    TAB 149 "=============== ===============" &
+  SKIP PAGE
+
+BUILD cp324z
+@IF FORMAT
+
+CP324                                                                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                             Page:9999
+99/99/99 HH:MM xxxxxxxxxxxx                                                   Journal caisse déboursés
+                                                            xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+Période........: 99-99
+Compte encaisse: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  Devise: xxx
+
+  No                                  Date   No chèque                    Montant
+chèque      Fournisseur/Employé      chèque  pré-impr. Type Lot  Ann.      chèque                  Compte                 Unité administrative           Débit          Crédit
+------- --------------------------- -------- --------- ---- ---- ---- ---------------     --------------------------- ----------------------------- --------------- ----------------
+1234567 123456 xxxxxxxxxxxxxxxxxxxx xx/xx/xx 12345678   xx  xxxx xxx  999,999,999.99-/CAN 123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- 999,999,999.99-
+                                                                                          123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- 999,999,999.99-
+                                                                                          123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- 999,999,999.99-
+         Description: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                                      --------------- ---------------
+                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                                      999,999,999.99- 999,999,999.99-
+
+1234567 123456 xxxxxxxxxxxxxxxxxxxx xx/xx/xx 12345678   xx  xxxx xxx  999,999,999.99-/CAN 123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- 999,999,999.99-
+                                                                                          123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- 999,999,999.99-
+                                                                                          123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- 999,999,999.99-
+         Description: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                                      --------------- --------------
+                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                                      999,999,999.99- 999,999,999.99-
+
+1234567 123456 xxxxxxxxxxxxxxxxxxxx xx/xx/xx 12345678   xx  xxxx xxx  999,999,999.99-/CAN 123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- 999,999,999.99-
+                                                                                          123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- 999,999,999.99-
+                                                                                          123456 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- 999,999,999.99-
+         Description: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                                      --------------- --------------
+                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                                      999,999,999.99- 999,999,999.99-
+
+                                                                                                                                                    --------------- ---------------
+                                                                                                                      Total du compte d'encaisse :  999,999,999.99- 999,999,999.99-
+                                                                                                                                                    =============== ===============
+
+                                                                                                                                                    --------------- ---------------
+                                                                                                                              Total de la période : 999,999,999.99- 999,999,999.99-
+                                                                                                                                                    =============== ===============
+
+@ENDIF

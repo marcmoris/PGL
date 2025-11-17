@@ -1,0 +1,251 @@
+;/T/ Vérification des amortissements à effectuer
+;
+;/P/ Programmeur...: Alain Côté
+;    Date Création.: 28 mars 1994
+;
+;/V3.02.00/ Alain Côté, 28 mars 1994, Immobilisation
+;
+;    Description...: Cette liste imprime le montant d'amortissement par
+;                    immobilisation. Le but est de vérifier chaque amortis-
+;                    sement avant le lancement du transfert au Grand Livre.
+;
+;    Particularités: ATTENTION: Les critères de sélection et de calcul sont les
+;                               mêmes que ceux de la procédure IM700T.qts.
+;
+;/M/ Stephane Jackson, 98-08-21
+;
+;    Ajustement pour le changement de siècle
+;
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST
+
+;-------------------------------------------------------------------------------
+;
+;
+ACCESS IMIMMOBILISATION &
+  ;
+  ; Holding, pour avoir le nombre de période comptable.
+  ;
+  LINK ( "1" ) &
+    TO CIENMC OF MCHOLDING &
+  ;
+  ; Description du compte d'amortissement accumulé.
+  ;
+  LINK IMMCPTAMTACC OF IMIMMOBILISATION &
+    TO CPTCLE OF VCPT_DSC OPTIONAL
+
+CHOOSE CIECLE PARM
+
+DEFINE D_PECCLE CHARACTER SIZE 4 = PARM
+
+; Ajustement pour le changement de siècle
+DEFINE D_IMMPERAMT_SIE CHARACTER SIZE 5 = "1" + IMMPERAMT OF IMIMMOBILISATION &
+         IF IMMPERAMT OF IMIMMOBILISATION[1:1] < "8" &
+         ELSE "0" + IMMPERAMT OF IMIMMOBILISATION
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE CHARACTER SIZE 5 = "1" + D_PECCLE &
+         IF D_PECCLE[1:1] < "8" &
+         ELSE "0" + D_PECCLE
+
+SELECT IMIMMOBILISATION IF     IMMFLGTRS OF IMIMMOBILISATION = "1" &
+                           AND (   IMMPERAMT OF IMIMMOBILISATION = "" &
+                                OR D_IMMPERAMT_SIE <= D_PECCLE_SIE ) &
+                           AND IMMPECALI OF IMIMMOBILISATION = "" &
+                           AND 0 < (   IMMMNTINI    OF IMIMMOBILISATION &
+                                     + IMMMNTAJT    OF IMIMMOBILISATION &
+                                     - IMMMNTREC    OF IMIMMOBILISATION &
+                                     - IMMAMTACC    OF IMIMMOBILISATION &
+                                     - IMMMNTAMTANN OF IMIMMOBILISATION ) &
+                           AND IMMCPTDEPAMT OF IMIMMOBILISATION <> "" &
+                           AND IMMCPTAMTACC OF IMIMMOBILISATION <> "" &
+                           AND (    (     IMMTYPAMO OF IMIMMOBILISATION = "D" &
+                                      AND IMMTAUAMT OF IMIMMOBILISATION <> 0 ) &
+                                 OR (     IMMTYPAMO OF IMIMMOBILISATION = "L" &
+                                      AND IMMDURAMT    OF IMIMMOBILISATION > &
+                                          IMMNBRPERAMT OF IMIMMOBILISATION ) )
+
+
+;
+; Ajout de l'amortissement annuel à l'amortissement accumulé en début
+; d'année.
+;
+
+DEFINE D_IMMAMTACC FLOAT SIZE 8 = IMMAMTACC    OF IMIMMOBILISATION + &
+                                  IMMMNTAMTANN OF IMIMMOBILISATION &
+                     IF     D_PECCLE_SIE[1:3] > D_IMMPERAMT_SIE[1:3] &
+                        AND "" <> TRUNCATE( IMMPERAMT OF IMIMMOBILISATION ) &
+                             ELSE IMMAMTACC OF IMIMMOBILISATION
+
+;
+; Mise à zéro de l'amortissement annuel si on change d'année d'amortissement.
+;
+
+DEFINE D_IMMMNTAMTANN FLOAT SIZE 8 = 0 &
+                     IF     D_PECCLE_SIE[1:3] > D_IMMPERAMT_SIE[1:3] &
+                        AND "" <> TRUNCATE( IMMPERAMT OF IMIMMOBILISATION ) &
+                                ELSE IMMMNTAMTANN OF IMIMMOBILISATION
+
+;
+; Montant à amortir.
+;
+DEFINE D_IMIMNTAMO   FLOAT SIZE 8  =   IMMMNTINI OF IMIMMOBILISATION &
+                                     + IMMMNTAJT OF IMIMMOBILISATION &
+                                     - IMMMNTREC OF IMIMMOBILISATION
+
+;
+; Montant non amorti.
+;
+DEFINE D_IMIMNTNONAMT FLOAT SIZE 8 =     D_IMIMNTAMO &
+                                       - D_IMMAMTACC &
+                                       - D_IMMMNTAMTANN
+
+;
+; Montant de l'amortissement selon le type d'amortissement. Pour la
+; méthode dégressive il faut avoir le montant non amorti en début d'année,
+; c'est pour cette raison que l'on ajoute l'amortissement annuel dans le
+; calcul, car le montant non amorti précédemment calculé inclu
+; l'amortissement annuel.
+;
+DEFINE D_IMIMNTAMT    FLOAT SIZE 8 = &
+                          ROUND( D_IMIMNTNONAMT / &
+                                 ( IMMDURAMT OF IMIMMOBILISATION - &
+                                   IMMNBRPERAMT OF IMIMMOBILISATION ) ) &
+                       IF IMMTYPAMO OF IMIMMOBILISATION = "L" &
+                     ELSE ROUND( ( D_IMIMNTNONAMT &
+                                   + D_IMMMNTAMTANN ) * &
+                                 IMMTAUAMT OF IMIMMOBILISATION / &
+                                 HLDNBRPERCTB OF MCHOLDING )
+
+;
+; Solde de l'immobilisation. Montant non amorti avant traitement moin
+; l'amortissement de la période.
+;
+DEFINE D_SLDIMM   FLOAT SIZE 8 = D_IMIMNTNONAMT - &
+                                 D_IMIMNTAMT
+;
+; Variables obligatoires pour les en-têtes standards.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+       "Vérification des amortissements à effectuer"
+@ELSE
+       "%%%Vérification des amortissements à effectuer"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = " "
+
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE  7 = "IM312"
+;
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM
+
+
+SORT ON CIECLE       OF IMIMMOBILISATION &
+     ON IMMCPTAMTACC OF IMIMMOBILISATION &
+     ON IMMCLE       OF IMIMMOBILISATION
+
+
+USE ustitstd NOLIST
+SKIP &
+  TAB 001 &
+@IF FRANCAIS
+          "Période.......:" &
+@ELSE
+          "Period........:" &
+@ENDIF
+  TAB 017 D_PECCLE &
+SKIP &
+  TAB 001 &
+@IF FRANCAIS
+          "Compte........:" &
+@ELSE
+          "Account.......:" &
+@ENDIF
+  TAB 017 CPTCLE OF VCPT_DSC &
+  TAB 024 CPTDSC OF VCPT_DSC &
+SKIP 2 &
+  TAB 001 &
+@IF FRANCAIS
+          "    Numéro                                                    Montant" &
+@ELSE
+          "%%% Numéro                                                    Montant" &
+@ENDIF
+SKIP &
+  TAB 001 &
+@IF FRANCAIS
+          "Immobilisation                Description                    non amorti    Amortissement       Solde" &
+@ELSE
+          "%%%obilisation                Description                    non amorti    Amortissement       Solde" &
+@ENDIF
+SKIP &
+  TAB 001 "--------------  ----------------------------------------   -------------   -------------   -------------"
+
+
+
+REPORT &
+  TAB 001 IMMCLE OF IMIMMOBILISATION &
+  TAB 017 IMMDSC OF IMIMMOBILISATION &
+  TAB 060 D_IMIMNTNONAMT &
+            PICTURE "^^,^^^,^^^.^^" &
+            SIGNIFICANCE 4 &
+  TAB 076 D_IMIMNTAMT &
+            PICTURE "^^,^^^,^^^.^^" &
+            SIGNIFICANCE 4 &
+  TAB 092 D_SLDIMM &
+            PICTURE "^^,^^^,^^^.^^" &
+            SIGNIFICANCE 4
+
+
+FOOTING AT IMMCPTAMTACC &
+  TAB 075 "--------------" &
+SKIP &
+  TAB 067 "Total:" &
+  TAB 075 D_IMIMNTAMT &
+            SUBTOTAL  &
+            PICTURE "^^^,^^^,^^^.^^" &
+            SIGNIFICANCE 4 &
+SKIP PAGE
+
+
+BUILD im312z
+
+@IF FORMAT
+
+IM312                                         XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX                                    PAGE: 9999
+99/99/99 99:99 XXXXXXXXXXXX                 Vérification des amortissements à effectuer
+                                    XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+Période.......: xx-xx
+Compte........: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+    Numéro                                                    Montant
+Immobilisation                Description                    non amorti    Amortissement       Solde
+--------------  ----------------------------------------   -------------   -------------   -------------
+ xxxxxxxxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx
+ xxxxxxxxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx
+ xxxxxxxxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx
+ xxxxxxxxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx
+ xxxxxxxxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx
+ xxxxxxxxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx
+ xxxxxxxxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx
+ xxxxxxxxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx
+ xxxxxxxxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx
+ xxxxxxxxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx
+ xxxxxxxxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx
+ xxxxxxxxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx
+ xxxxxxxxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx
+ xxxxxxxxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx
+ xxxxxxxxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx
+ xxxxxxxxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx
+ xxxxxxxxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx
+ xxxxxxxxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx   xxxxxxxxxxxxx
+                                                                          --------------
+                                                                  Total:  999,999,999.99
+@ENDIF

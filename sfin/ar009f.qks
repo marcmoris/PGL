@@ -1,0 +1,226 @@
+;/T/ Réception - Ecran de génération d'imputation comptable.
+;
+;/P/ Programmeur..: Nancy Marceau
+;    Date Création: 12 avril 1994
+;
+;    Description..: Cet écran permet la génération automatique de l'imputation
+;                   comptable de la réception de la commande d'achat.  Cet écran
+;                   est appelé de façon invisible à l'utilisateur lors de
+;                   l'approbation de la réception.
+;
+;                   Cet écran n'a pas besoin de notion de sécurité.
+;
+;
+;/M/ Programmeur.......: Patrick Langlois
+;    Date modification.: 09 Juin 1999
+;    Description.......: Migration Achat/Réception/Inventaire de l'environnement (BOC)
+;
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN ar009f NOMODE ACTION LABEL " " &
+              FROM 23,70 TO 23,80 &
+              RECEIVING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        ARRECEPTION
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de compagnie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie du menu.
+
+TEMPORARY T_TAXMODTPS CHARACTER SIZE 1  ; Mode de taxation fédéral.
+TEMPORARY T_TAXMODTVQ CHARACTER SIZE 1  ; Mode de taxation provincial.
+
+;
+; La transaction UPDATE doit être celle de l'appelant.
+;
+TRANSACTION UPDATE INHERITED NOCOMMIT
+
+FILE ARRECEPTION  MASTER
+
+;-------------------------------------------------------------------------------
+;
+; Le sélect permet de lire que les lignes de détail qui contiennent un
+; montant imputable.
+;
+FILE ARREC_DETAIL  DESIGNER OPEN READ
+  SELECT IF 0 <> REDMNTTOT OF ARREC_DETAIL
+
+;-------------------------------------------------------------------------------
+;
+; Fichier d'imputation pour l'écriture.
+;
+FILE ARREC_IMPUTATION  DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+; Le fichier de taxe nous permet d'avoir le mode de taxation de chacun des
+; codes pour imputer le bon montant au revenu.
+;
+FILE MCTAXE              DESIGNER OPEN READ SHARE
+
+;-------------------------------------------------------------------------------
+;
+; Procédure qui génère le montant d'imputation et qui parcours l'ensemble du
+; détail de la réception.
+;
+PROCEDURE INTERNAL PARCOURIR_DETAIL_RECEPTION
+BEGIN
+;
+; On lit chacune des lignes de la réception.
+;
+  WHILE RETRIEVING ARREC_DETAIL &
+    VIA   CIECLE, &
+          RECCLE &
+    USING CIECLE OF ARRECEPTION, &
+          RECCLE OF ARRECEPTION
+
+    BEGIN
+      ;
+      ; Lecture du mode de taxation fédéral.
+      ;
+      GET MCTAXE &
+        VIA   TAXCLETYP, &
+              TAXCLECOD &
+        USING REDTAXTYPTPS OF ARREC_DETAIL, &
+              REDTAXCODTPS OF ARREC_DETAIL OPTIONAL
+      IF ACCESSOK
+      THEN LET T_TAXMODTPS = TAXMOD OF MCTAXE
+      ELSE LET T_TAXMODTPS = ""
+
+      ;
+      ; Lecture du mode de taxation provincial.
+      ;
+      GET MCTAXE &
+        VIA   TAXCLETYP, &
+              TAXCLECOD &
+        USING REDTAXTYPTVQ OF ARREC_DETAIL, &
+              REDTAXCODTVQ OF ARREC_DETAIL OPTIONAL
+      IF ACCESSOK
+      THEN LET T_TAXMODTVQ = TAXMOD OF MCTAXE
+      ELSE LET T_TAXMODTVQ = ""
+
+
+      ;
+      ; Génération de l'imputation.
+      ;
+      GET ARREC_IMPUTATION &
+        VIA   CIECLE, &
+              RECCLE, &
+              CPTCLE, &
+              UNACLE, &
+              PRJCLE, &
+              PRACLE, &
+              IMMCLE, &
+              REITAXTYPTPS, &
+              REITAXCODTPS, &
+              REITAXTYPTVQ, &
+              REITAXCODTVQ  &
+        USING CIECLE OF ARREC_DETAIL, &
+              RECCLE OF ARREC_DETAIL, &
+              CPTCLE OF ARREC_DETAIL, &
+              UNACLE OF ARREC_DETAIL, &
+              PRJCLE OF ARREC_DETAIL, &
+              PRACLE OF ARREC_DETAIL, & 
+              IMMCLE OF ARREC_DETAIL, &
+              REDTAXTYPTPS OF ARREC_DETAIL, &
+              REDTAXCODTPS OF ARREC_DETAIL, &
+              REDTAXTYPTVQ OF ARREC_DETAIL, &
+              REDTAXCODTVQ OF ARREC_DETAIL  OPTIONAL
+      IF ACCESSOK
+      THEN BEGIN
+        LET REIMNT    OF ARREC_IMPUTATION = REIMNT    OF ARREC_IMPUTATION + &
+                                            REDMNTTOT OF ARREC_DETAIL
+
+        LET RECCUMMNT OF ARRECEPTION      = RECCUMMNT OF ARRECEPTION  + &
+                                            REDMNTTOT OF ARREC_DETAIL
+
+        IF T_TAXMODTPS = "S"
+        THEN LET REIMNT OF ARREC_IMPUTATION = REIMNT OF ARREC_IMPUTATION - &
+                                              REDMNTTPS OF ARREC_DETAIL
+        IF T_TAXMODTVQ = "S"
+        THEN LET REIMNT OF ARREC_IMPUTATION = REIMNT    OF ARREC_IMPUTATION - &
+                                              REDMNTTVQ OF ARREC_DETAIL
+
+        LET REIMNTTPS OF ARREC_IMPUTATION = REIMNTTPS OF ARREC_IMPUTATION + &
+                                            REDMNTTPS OF ARREC_DETAIL
+        LET REIMNTTVQ OF ARREC_IMPUTATION = REIMNTTVQ OF ARREC_IMPUTATION + &
+                                            REDMNTTVQ OF ARREC_DETAIL
+        LET REIMNTCTI OF ARREC_IMPUTATION = REIMNTCTI OF ARREC_IMPUTATION + &
+                                            REDMNTCTI OF ARREC_DETAIL
+        LET REIMNTRTI OF ARREC_IMPUTATION = REIMNTRTI OF ARREC_IMPUTATION + &
+                                            REDMNTRTI OF ARREC_DETAIL
+
+      END
+        ;
+        ; L'imputation n'existe pas.
+        ;
+      ELSE BEGIN
+        LET CIECLE       OF ARREC_IMPUTATION = CIECLE    OF ARRECEPTION
+        LET RECCLE       OF ARREC_IMPUTATION = RECCLE    OF ARRECEPTION
+        LET REITIMSTP    OF ARREC_IMPUTATION = SYSDATE * 1000000 + &
+                                               ROUND(SYSTIME / 100)
+        LET PRJCLE       OF ARREC_IMPUTATION = PRJCLE OF ARREC_DETAIL
+        LET PRACLE       OF ARREC_IMPUTATION = PRACLE OF ARREC_DETAIL
+        LET IMMCLE       OF ARREC_IMPUTATION = IMMCLE OF ARREC_DETAIL
+        LET CPTCLE       OF ARREC_IMPUTATION = CPTCLE OF ARREC_DETAIL
+        LET UNACLE       OF ARREC_IMPUTATION = UNACLE OF ARREC_DETAIL
+        LET REICODDC     OF ARREC_IMPUTATION = "D"
+        LET REIMNT       OF ARREC_IMPUTATION = REDMNTTOT OF ARREC_DETAIL
+        LET RECCUMMNT    OF ARRECEPTION      = RECCUMMNT OF ARRECEPTION  + &
+                                               REIMNT    OF ARREC_IMPUTATION
+        IF T_TAXMODTPS = "S"
+        THEN LET REIMNT OF ARREC_IMPUTATION  = REIMNT    OF ARREC_IMPUTATION - &
+                                               REDMNTTPS OF ARREC_DETAIL
+        IF T_TAXMODTVQ = "S"
+        THEN LET REIMNT OF ARREC_IMPUTATION  = REIMNT    OF ARREC_IMPUTATION - &
+                                               REDMNTTVQ OF ARREC_DETAIL
+
+        LET REIMNTTPS    OF ARREC_IMPUTATION = REDMNTTPS OF ARREC_DETAIL
+        LET REIMNTTVQ    OF ARREC_IMPUTATION = REDMNTTVQ OF ARREC_DETAIL
+
+        LET REIMNTCTI OF ARREC_IMPUTATION = REDMNTCTI OF ARREC_DETAIL
+        LET REIMNTRTI OF ARREC_IMPUTATION = REDMNTRTI OF ARREC_DETAIL
+
+        LET REITAXTYPTPS OF ARREC_IMPUTATION = REDTAXTYPTPS OF ARREC_DETAIL
+        IF REDMNTTPS OF ARREC_DETAIL <> 0
+        THEN LET REITAXCODTPS OF ARREC_IMPUTATION = REDTAXCODTPS OF ARREC_DETAIL
+
+        LET REITAXTYPTVQ OF ARREC_IMPUTATION = REDTAXTYPTVQ OF ARREC_DETAIL
+        IF REDMNTTVQ OF ARREC_DETAIL <> 0
+        THEN LET REITAXCODTVQ OF ARREC_IMPUTATION = REDTAXCODTVQ OF ARREC_DETAIL
+
+      END
+
+      PUT ARREC_IMPUTATION
+    END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Cette procédure est exécutée que si la réception n'est pas journalisée.
+;
+; Dans un premier temps nous détruisons la ventilation comptable qui
+; peut exister et nous la reproduisons.
+;
+PROCEDURE PREENTRY
+BEGIN
+  IF 0 = RECDATJOU OF ARRECEPTION
+  THEN BEGIN
+    WHILE RETRIEVING ARREC_IMPUTATION &
+      VIA   CIECLE, &
+            RECCLE  &
+      USING CIECLE OF ARRECEPTION, &
+            RECCLE OF ARRECEPTION
+    BEGIN
+      DELETE ARREC_IMPUTATION
+      PUT ARREC_IMPUTATION
+    END
+
+    LET RECCUMMNT OF ARRECEPTION = 0
+    DO INTERNAL PARCOURIR_DETAIL_RECEPTION
+    PUT ARRECEPTION
+  END
+  RETURN
+END
+
+BUILD

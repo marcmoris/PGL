@@ -1,0 +1,1383 @@
+;/T/ Transfert Croisière Nordik : Factures Informstock
+;
+;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur...: Steeve Duguay
+;    Date Création.: 10 mai 1995
+;
+;    Description...: Passerelle d'entré des factures Informstock.
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST
+
+RUN fa702a
+;
+; Pour arrêter la procédure en cas d'erreur
+;
+GLOBAL TEMPORARY G_ERREUR       CHARACTER SIZE 5
+GLOBAL TEMPORARY G_CIECLE       CHARACTER SIZE 4  PARM ; Compagnie de création
+GLOBAL TEMPORARY G_PECCLE       CHARACTER SIZE 4  PARM ; Période comptable
+GLOBAL TEMPORARY G_LCRCLE       CHARACTER SIZE 4  PARM ; Lot de création
+GLOBAL TEMPORARY G_PRJCLE       CHARACTER SIZE 8  PARM ; Projet
+GLOBAL TEMPORARY G_PRACLE       CHARACTER SIZE 3  PARM ; Sous-projet
+
+;---------------------------------------------------------------
+; Validation des données du fichier entrée FAFAR_PASSERELLE
+;
+REQUEST VALIDATION_FICHIER_ENTETE
+
+ACCESS FAFAR_PASSERELLE &
+
+; Imputation générale
+  LINK G_CIECLE &
+    TO CIECLE OF FAFAR_IMP_GEN OPTIONAL &
+
+; Vérification si le client existe et appartient à cette compagnie
+  LINK "----"                        , &
+       FPACLICLE OF FAFAR_PASSERELLE , &
+       G_CIECLE                        &
+    TO CLICIECLE                     , &
+       CLICLE                        , &
+       CIECLE OF VCLC_CLI OPTIONAL     &
+
+; Vérification si le client par défaut existe et appartient à cette compagnie
+  LINK "----"                        , &
+       FIGCLICLE OF FAFAR_IMP_GEN    , &
+       G_CIECLE                        &
+    TO CLICIECLE                     , &
+       CLICLE                        , &
+       CIECLE OF VCLC_CLI ALIAS A_CLI_DEF OPTIONAL &
+
+; Vérification du statut de la période comptable si elle existe
+  LINK G_CIECLE  , &
+       G_PECCLE    &
+    TO CIECLE    , &
+       PECCLE OF MCPERIODE_CIE OPTIONAL &
+
+; Vérification si un lot de type FA exist
+  LINK G_CIECLE                     , &
+       G_PECCLE                     , &
+       G_LCRCLE                     , &
+        "FA"                          &
+   TO  CIECLE                       , &
+       PECCLE                       , &
+       LCRCLE                       , &
+       LCRTYPECR  OF CRLOT  OPTIONAL  &
+
+; Vérification du projet
+  LINK G_CIECLE  , &
+       G_PRJCLE  , &
+       "A"         &
+    TO CIECLE    , &
+       PRJCLE    , &
+       PRJSTU OF GPPROJETS OPTIONAL &
+
+; Vérification du projet (BILAN)
+  LINK G_CIECLE  , &
+       PRJCLE OF FAFAR_IMP_GEN, &
+       "A"         &
+    TO CIECLE    , &
+       PRJCLE    , &
+       PRJSTU OF GPPROJETS ALIAS GPPROJETS2 OPTIONAL &
+
+; Vérification du sous-projet
+  LINK G_CIECLE  , &
+       G_PRJCLE  , &
+       G_PRACLE  , &
+       "A"         &
+    TO CIECLE    , &
+       PRJCLE    , &
+       PRACLE    , &
+       PRASTU OF GPPRO_ACTIVITE OPTIONAL &
+
+; Vérification du sous-projet (BILAN)
+  LINK G_CIECLE  , &
+       PRJCLE OF FAFAR_IMP_GEN, &
+       PRACLE OF FAFAR_IMP_GEN, &
+       "A"         &
+    TO CIECLE    , &
+       PRJCLE    , &
+       PRACLE    , &
+       PRASTU OF GPPRO_ACTIVITE ALIAS GPPRO_ACTIVITE2 OPTIONAL &
+
+; Vérification de l'immobilisation
+  LINK G_CIECLE  , &
+       FIGIMMCLE OF FAFAR_IMP_GEN, &
+       "A"         &
+    TO CIECLE    , &
+       IMMCLE    , &
+       IMMSTU OF IMIMMOBILISATION  OPTIONAL &
+
+; Vérification de l'immobilisation (BILAN)
+  LINK G_CIECLE  , &
+       IMMCLE OF FAFAR_IMP_GEN, &
+       "A"         &
+    TO CIECLE    , &
+       IMMCLE    , &
+       IMMSTU OF IMIMMOBILISATION ALIAS IMIMMOBILISATION2 OPTIONAL &
+
+; Validation de l'unité administrative. (REVENU)
+  LINK G_CIECLE              , &
+       FIGUNAREV OF FAFAR_IMP_GEN &
+    TO CIECLE                , &
+       UNACLE OF MCUNITE_ADM OPTIONAL &
+
+; Validation de l'unité administrative. (ESCOMPTE)
+  LINK G_CIECLE              , &
+       FIGUNAESC OF FAFAR_IMP_GEN &
+    TO CIECLE                , &
+       UNACLE OF MCUNITE_ADM ALIAS MCUNITE_ADM2 OPTIONAL &
+
+; Validation de l'unité administrative. (PAIEMENT)
+  LINK G_CIECLE              , &
+       FIGUNAPAI OF FAFAR_IMP_GEN &
+    TO CIECLE                , &
+       UNACLE OF MCUNITE_ADM ALIAS MCUNITE_ADM3 OPTIONAL &
+
+; Vérification si un numéro de facture identique n'existe pas déjà
+  LINK G_CIECLE, &
+       (PACK(FPAFARCLE OF FAFAR_PASSERELLE)) &
+    TO CIECLE, &
+       FARCLE OF FACPT_A_REC OPTIONAL
+
+
+; POUR ELIMINER LES IMPURETEES DU FICHIER D'ENTREE
+
+SELECT IF FPACODTRA OF FAFAR_PASSERELLE = "V"  OR &
+          FPACODTRA OF FAFAR_PASSERELLE = "R"  OR &
+         (FPACODTRA OF FAFAR_PASSERELLE = "W" AND &
+         ("CODE POSTAL"    = FPADSC OF FAFAR_PASSERELLE[1:11]  OR &
+          "%# RESERVATION" = FPADSC OF FAFAR_PASSERELLE[1:14]))
+
+
+
+TEMPORARY T_MESERR CHARACTER SIZE 80 ; Pour les erreurs.
+
+@IF FRANCAIS
+ITEM T_MESERR = &
+       G_PECCLE                        + " Cette période n'existe pas                                       " &
+     IF NOT RECORD MCPERIODE_CIE EXIST  &
+
+ELSE   G_PECCLE                        + " Cette période est fermée                                         " &
+     IF PCCSTUCR OF MCPERIODE_CIE = "F" &
+
+ELSE   FIGCLICLE OF FAFAR_IMP_GEN      + " Ce client n'existe pas / n'est pas définie dans cette compagnie  " &
+     IF NOT RECORD A_CLI_DEF    EXIST &
+
+ELSE   FIGCLICLE OF FAFAR_IMP_GEN      + " Ce client n'as pas de code de taxe de définie                    " &
+     IF CLCTAXCODTPS OF A_CLI_DEF= "" OR CLCTAXCODTVP OF A_CLI_DEF= "" &
+
+ELSE   FIGCLICLE OF FAFAR_IMP_GEN      + " Ce client est inactif                                            " &
+     IF CLISTU OF A_CLI_DEF= "I" &
+
+ELSE   G_LCRCLE                 + " Ce lot n'existe pas / n'est pas de type Facture                  " &
+     IF NOT RECORD CRLOT         EXIST  &
+
+ELSE   G_LCRCLE                 + " Le lot est journalisé                                            " &
+     IF LCRDATJOU OF CRLOT <> 0         &
+
+ELSE   G_LCRCLE                 + " Le lot est authorisé à journalisation                            " &
+     IF LCRATRJOU OF CRLOT = "1"        &
+
+ELSE   G_LCRCLE                 + " Le lot ne doit pas avoir de transaction                          " &
+     IF LCRNBRTRS OF CRLOT <> 0        &
+
+ELSE   G_PRJCLE                 + " Ce projet n'existe pas ou n'est pas actif" &
+     IF NOT RECORD GPPROJETS     EXIST  &
+
+ELSE   G_PRACLE                 + " Ce sous-projet n'existe pas ou n'est pas actif" &
+     IF NOT RECORD GPPRO_ACTIVITE EXIST  &
+
+ELSE   FIGIMMCLE OF FAFAR_IMP_GEN + " Cette immobilisation n'existe pas ou n'est pas active" &
+     IF NOT RECORD IMIMMOBILISATION EXIST  &
+
+ELSE   PRJCLE OF FAFAR_IMP_GEN  + " Ce projet n'existe pas ou n'est pas actif" &
+     IF NOT RECORD GPPROJETS2    EXIST  &
+
+ELSE   PRACLE OF FAFAR_IMP_GEN  + " Ce sous-projet n'existe pas ou n'est pas actif" &
+     IF NOT RECORD GPPRO_ACTIVITE2 EXIST  &
+
+ELSE   IMMCLE OF FAFAR_IMP_GEN  + " Cette immobilisation n'existe pas ou n'est pas active" &
+     IF NOT RECORD IMIMMOBILISATION2 EXIST  &
+
+ELSE   FIGUNAREV OF FAFAR_IMP_GEN + " Cette unité administrative n'existe" &
+     IF NOT RECORD MCUNITE_ADM      EXIST  &
+
+ELSE   FIGUNAESC OF FAFAR_IMP_GEN + " Cette unité administrative n'existe" &
+     IF NOT RECORD MCUNITE_ADM2     EXIST  &
+
+ELSE   FIGUNAPAI OF FAFAR_IMP_GEN + " Cette unité administrative n'existe" &
+     IF NOT RECORD MCUNITE_ADM3     EXIST  &
+
+ELSE   FPACLICLE OF FAFAR_PASSERELLE   + " Ce client n'existe pas / n'est pas définie dans cette compagnie  " &
+     IF NOT RECORD VCLC_CLI     EXIST AND &
+       FPACLICLE OF FAFAR_PASSERELLE <> " " &
+
+ELSE   FPACLICLE OF FAFAR_PASSERELLE   + " Ce client n'as pas de code de taxe de définie                    " &
+     IF (CLCTAXCODTPS OF VCLC_CLI = "" OR CLCTAXCODTVP OF VCLC_CLI = "") AND &
+         FPACLICLE OF FAFAR_PASSERELLE <> " " &
+
+ELSE   FPACLICLE OF FAFAR_PASSERELLE   + " Ce client est inactif                                            " &
+     IF CLISTU OF VCLC_CLI = "I" &
+
+ELSE   FPAFARCLE OF FAFAR_PASSERELLE   + " Cette facture exist déjà                                         " &
+     IF RECORD FACPT_A_REC       EXIST  &
+
+ELSE ""
+@ENDIF
+
+; affectation d'erreurs
+ITEM G_ERREUR = "ARRET" IF T_MESERR <> ""
+
+SUBFILE WFA702X IF G_ERREUR = "ARRET" &
+INCLUDE T_MESERR
+
+
+BUILD
+
+
+USE ussetqts NOLIST
+
+RUN fa702b
+
+GLOBAL TEMPORARY G_ERREUR       CHARACTER SIZE 5
+GLOBAL TEMPORARY G_CIECLE       CHARACTER SIZE 4  PARM ; Compagnie de création
+GLOBAL TEMPORARY G_PECCLE       CHARACTER SIZE 4  PARM ; Période comptable
+GLOBAL TEMPORARY G_LCRCLE       CHARACTER SIZE 4  PARM ; Lot de création
+GLOBAL TEMPORARY G_PRJCLE       CHARACTER SIZE 8  PARM ; Projet
+GLOBAL TEMPORARY G_PRACLE       CHARACTER SIZE 3  PARM ; Sous-projet
+
+;---------------------------------------------------------------
+; Validation des données du fichier entrée FAFAR_PASSERELLE
+;
+REQUEST VALIDATION_FICHIER_ENTETE2
+
+ACCESS FAFAR_PASSERELLE &
+
+; Imputation générale
+  LINK G_CIECLE &
+    TO CIECLE OF FAFAR_IMP_GEN OPTIONAL &
+
+; Validation du code de transaction
+  LINK G_CIECLE              , &
+       FPACODTRA               &
+    TO CIECLE                , &
+       FCTCLE OF FACOD_TRANS OPTIONAL &
+
+; Validation du code de paiement 1
+  LINK G_CIECLE              , &
+       FPAMODPAI1              &
+    TO CIECLE                , &
+       FCPCLE OF FACOD_PAIEMENT ALIAS FACOD_PAIEMENT1 OPTIONAL &
+
+; Validation du code de paiement 2
+  LINK G_CIECLE              , &
+       FPAMODPAI2              &
+    TO CIECLE                , &
+       FCPCLE OF FACOD_PAIEMENT ALIAS FACOD_PAIEMENT2 OPTIONAL &
+
+; Validation du produit
+  LINK G_CIECLE                   , &
+      (FPATRPCLE OF FAFAR_PASSERELLE[1:3]) &
+    TO CIECLE                     , &
+       TRPCLE OF FATRAJET_PRODUIT ALIAS FATRAJET_PRODUIT1 OPTIONAL &
+
+; Validation du produit
+  LINK G_CIECLE                   , &
+      (FPATRPCLE OF FAFAR_PASSERELLE[1:2] + " ") &
+    TO CIECLE                     , &
+       TRPCLE OF FATRAJET_PRODUIT ALIAS FATRAJET_PRODUIT2 OPTIONAL &
+
+; Validation du produit
+  LINK G_CIECLE                   , &
+      (FPATRPCLE OF FAFAR_PASSERELLE[1:3] + " ") &
+    TO CIECLE                     , &
+       TRPCLE OF FATRAJET_PRODUIT ALIAS FATRAJET_PRODUIT3 OPTIONAL &
+
+; Validation de l'élément de tarification
+  LINK G_CIECLE                      ,      &
+       ("0000")                             &
+    TO CIECLE                        , &
+       ETACLE OF FAELEMENT_TARIF ALIAS FAELEMENT_TARIF1 OPTIONAL  &
+
+; Validation de l'élément de tarification
+  LINK G_CIECLE                      ,      &
+       (FPATRPCLE OF FAFAR_PASSERELLE[4:4]) &
+    TO CIECLE                        , &
+       ETACLE OF FAELEMENT_TARIF ALIAS FAELEMENT_TARIF2 OPTIONAL  &
+
+; Validation de l'élément de tarification
+  LINK G_CIECLE                      ,      &
+       (FPATRPCLE OF FAFAR_PASSERELLE[5:4]) &
+    TO CIECLE                        , &
+       ETACLE OF FAELEMENT_TARIF ALIAS FAELEMENT_TARIF3 OPTIONAL  &
+
+; Validation de la grille de tarification
+  LINK G_CIECLE                   , &
+       TRPCLE OF FATRAJET_PRODUIT1, &
+       ETACLE OF FAELEMENT_TARIF1 , &
+       "A"                          &
+    TO CIECLE                     , &
+       TRPCLE                     , &
+       ETACLE                     , &
+       GRTSTU OF FAGRILLE_TARIF   ALIAS FAGRILLE_TARIF1   OPTIONAL &
+
+; Validation de la grille de tarification
+  LINK G_CIECLE                   , &
+       TRPCLE OF FATRAJET_PRODUIT2, &
+       ETACLE OF FAELEMENT_TARIF2 , &
+       "A"                          &
+    TO CIECLE                     , &
+       TRPCLE                     , &
+       ETACLE                     , &
+       GRTSTU OF FAGRILLE_TARIF   ALIAS FAGRILLE_TARIF2   OPTIONAL &
+
+; Validation de la grille de tarification
+  LINK G_CIECLE                   , &
+       TRPCLE OF FATRAJET_PRODUIT3, &
+       ETACLE OF FAELEMENT_TARIF3 , &
+       "A"                          &
+    TO CIECLE                     , &
+       TRPCLE                     , &
+       ETACLE                     , &
+       GRTSTU OF FAGRILLE_TARIF   ALIAS FAGRILLE_TARIF3   OPTIONAL &
+
+; Validation de la charte de compte.
+  LINK ETACPTCLE OF FAELEMENT_TARIF1, &
+       G_CIECLE                     , &
+       FIGUNAREV OF FAFAR_IMP_GEN     &
+    TO CPTCLE                       , &
+       CIECLE                       , &
+       UNACLE OF MCCHARTE_UNA         &
+       ALIAS A_UNA_REVENU1 OPTIONAL    &
+
+; Validation de la charte de compte.
+  LINK ETACPTESC OF FAELEMENT_TARIF1, &
+       G_CIECLE                     , &
+       FIGUNAESC OF FAFAR_IMP_GEN     &
+    TO CPTCLE                       , &
+       CIECLE                       , &
+       UNACLE OF MCCHARTE_UNA         &
+       ALIAS A_UNA_ESCOMPTE1 OPTIONAL  &
+
+; Validation de la charte de compte.
+  LINK FCPCPTCLE OF FACOD_PAIEMENT1 , &
+       G_CIECLE                     , &
+       FIGUNAPAI OF FAFAR_IMP_GEN     &
+    TO CPTCLE                       , &
+       CIECLE                       , &
+       UNACLE OF MCCHARTE_UNA         &
+       ALIAS A_UNA_PAIEMENT1 OPTIONAL  &
+
+; Validation de la charte de compte.
+  LINK FCPCPTCLE OF FACOD_PAIEMENT2 , &
+       G_CIECLE                     , &
+       FIGUNAPAI OF FAFAR_IMP_GEN     &
+    TO CPTCLE                       , &
+       CIECLE                       , &
+       UNACLE OF MCCHARTE_UNA         &
+       ALIAS A_UNA_PAIEMENT2 OPTIONAL  &
+
+; Validation de la charte de compte.
+  LINK ETACPTCLE OF FAELEMENT_TARIF2, &
+       G_CIECLE                     , &
+       FIGUNAREV OF FAFAR_IMP_GEN     &
+    TO CPTCLE                       , &
+       CIECLE                       , &
+       UNACLE OF MCCHARTE_UNA         &
+       ALIAS A_UNA_REVENU2 OPTIONAL    &
+
+; Validation de la charte de compte.
+  LINK ETACPTESC OF FAELEMENT_TARIF2, &
+       G_CIECLE                     , &
+       FIGUNAESC OF FAFAR_IMP_GEN     &
+    TO CPTCLE                       , &
+       CIECLE                       , &
+       UNACLE OF MCCHARTE_UNA         &
+       ALIAS A_UNA_ESCOMPTE2 OPTIONAL &
+
+
+; Validation de la charte de compte.
+  LINK ETACPTCLE OF FAELEMENT_TARIF3, &
+       G_CIECLE                     , &
+       FIGUNAREV OF FAFAR_IMP_GEN     &
+    TO CPTCLE                       , &
+       CIECLE                       , &
+       UNACLE OF MCCHARTE_UNA         &
+       ALIAS A_UNA_REVENU3 OPTIONAL    &
+
+; Validation de la charte de compte.
+  LINK ETACPTESC OF FAELEMENT_TARIF3, &
+       G_CIECLE                     , &
+       FIGUNAESC OF FAFAR_IMP_GEN     &
+    TO CPTCLE                       , &
+       CIECLE                       , &
+       UNACLE OF MCCHARTE_UNA         &
+       ALIAS A_UNA_ESCOMPTE3 OPTIONAL
+
+
+; POUR ELIMINER LES IMPURETEES DU FICHIER D'ENTREE
+
+SELECT IF FPACODTRA OF FAFAR_PASSERELLE = "V"  OR &
+          FPACODTRA OF FAFAR_PASSERELLE = "R"  OR &
+         (FPACODTRA OF FAFAR_PASSERELLE = "W" AND &
+         ("CODE POSTAL"    = FPADSC OF FAFAR_PASSERELLE[1:11]  OR &
+          "%# RESERVATION" = FPADSC OF FAFAR_PASSERELLE[1:14]))
+
+TEMPORARY T_MESERR2 CHARACTER SIZE 80 ; Pour les erreurs.
+
+@IF FRANCAIS
+ITEM T_MESERR2 = &
+        FPATRPCLE OF FAFAR_PASSERELLE[1:3] + " Ce produit est inactif " &
+     IF TRPSTU OF FATRAJET_PRODUIT1 <> "A"  AND &
+        0 = INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")       AND &
+       (FPACODTRA OF FAFAR_PASSERELLE <> "W"                OR &
+       (FPACODTRA OF FAFAR_PASSERELLE =  "W"               AND &
+        "CODE POSTAL"    <> FPADSC OF FAFAR_PASSERELLE[1:11] AND &
+        "%# RESERVATION" <> FPADSC OF FAFAR_PASSERELLE[1:14])) &
+
+ELSE   FPATRPCLE OF FAFAR_PASSERELLE[1:2] + " Ce produit est inactif " &
+     IF TRPSTU OF FATRAJET_PRODUIT2 <> "A" AND &
+        3 = INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-") AND &
+       (FPACODTRA OF FAFAR_PASSERELLE <> "W"                OR &
+       (FPACODTRA OF FAFAR_PASSERELLE =  "W"               AND &
+        "CODE POSTAL"    <> FPADSC OF FAFAR_PASSERELLE[1:11] AND &
+        "%# RESERVATION" <> FPADSC OF FAFAR_PASSERELLE[1:14])) &
+
+ELSE   FPATRPCLE OF FAFAR_PASSERELLE[1:3] + " Ce produit est inactif " &
+     IF TRPSTU OF FATRAJET_PRODUIT3 <> "A" AND &
+        4 = INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-") AND &
+       (FPACODTRA OF FAFAR_PASSERELLE <> "W"                OR &
+       (FPACODTRA OF FAFAR_PASSERELLE =  "W"               AND &
+        "CODE POSTAL"    <> FPADSC OF FAFAR_PASSERELLE[1:11] AND &
+        "%# RESERVATION" <> FPADSC OF FAFAR_PASSERELLE[1:14])) &
+
+ELSE   FPATRPCLE OF FAFAR_PASSERELLE[1:3] + " Ce produit n'existe pas " &
+     IF NOT RECORD FATRAJET_PRODUIT1 EXIST  AND &
+        0 = INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")       AND &
+       (FPACODTRA OF FAFAR_PASSERELLE <> "W"                OR &
+       (FPACODTRA OF FAFAR_PASSERELLE =  "W"               AND &
+        "CODE POSTAL"    <> FPADSC OF FAFAR_PASSERELLE[1:11] AND &
+        "%# RESERVATION" <> FPADSC OF FAFAR_PASSERELLE[1:14])) &
+
+ELSE   FPATRPCLE OF FAFAR_PASSERELLE[1:2] + " Ce produit n'existe pas " &
+     IF NOT RECORD FATRAJET_PRODUIT2 EXIST  AND &
+        3 = INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-") AND &
+       (FPACODTRA OF FAFAR_PASSERELLE <> "W"                OR &
+       (FPACODTRA OF FAFAR_PASSERELLE =  "W"               AND &
+        "CODE POSTAL"    <> FPADSC OF FAFAR_PASSERELLE[1:11] AND &
+        "%# RESERVATION" <> FPADSC OF FAFAR_PASSERELLE[1:14])) &
+
+ELSE   FPATRPCLE OF FAFAR_PASSERELLE[1:3] + " Ce produit n'existe pas " &
+     IF NOT RECORD FATRAJET_PRODUIT3 EXIST  AND &
+        4 = INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-") AND &
+       (FPACODTRA OF FAFAR_PASSERELLE <> "W"                OR &
+       (FPACODTRA OF FAFAR_PASSERELLE =  "W"               AND &
+        "CODE POSTAL"    <> FPADSC OF FAFAR_PASSERELLE[1:11] AND &
+        "%# RESERVATION" <> FPADSC OF FAFAR_PASSERELLE[1:14])) &
+
+ELSE   FPATRPCLE OF FAFAR_PASSERELLE[4:4] + " Cet élément de tarification n'existe pas" &
+     IF NOT RECORD FAELEMENT_TARIF2  EXIST  AND &
+        3 =  INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-") AND &
+       (FPACODTRA OF FAFAR_PASSERELLE <> "W"                OR &
+       (FPACODTRA OF FAFAR_PASSERELLE =  "W"               AND &
+        "CODE POSTAL"    <> FPADSC OF FAFAR_PASSERELLE[1:11] AND &
+        "%# RESERVATION" <> FPADSC OF FAFAR_PASSERELLE[1:14])) &
+
+ELSE   FPATRPCLE OF FAFAR_PASSERELLE[5:4] + " Cet élément de tarification n'existe pas" &
+     IF NOT RECORD FAELEMENT_TARIF3  EXIST  AND &
+        4 =  INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-") AND &
+       (FPACODTRA OF FAFAR_PASSERELLE <> "W"                OR &
+       (FPACODTRA OF FAFAR_PASSERELLE =  "W"               AND &
+        "CODE POSTAL"    <> FPADSC OF FAFAR_PASSERELLE[1:11] AND &
+        "%# RESERVATION" <> FPADSC OF FAFAR_PASSERELLE[1:14])) &
+
+ELSE   "0000 Cet élément de tarification n'existe pas" &
+     IF NOT RECORD FAELEMENT_TARIF1  EXIST  AND &
+        0 = INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-") AND &
+       (FPACODTRA OF FAFAR_PASSERELLE <> "W"                OR &
+       (FPACODTRA OF FAFAR_PASSERELLE =  "W"               AND &
+        "CODE POSTAL"    <> FPADSC OF FAFAR_PASSERELLE[1:11] AND &
+        "%# RESERVATION" <> FPADSC OF FAFAR_PASSERELLE[1:14])) &
+
+ELSE   FPATRPCLE OF FAFAR_PASSERELLE[1:3] + " / 0000  Cette grille de tarification est inexistante ou inactive." &
+     IF NOT RECORD FAGRILLE_TARIF1   EXIST  AND &
+        0 = INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")       AND &
+       (FPACODTRA OF FAFAR_PASSERELLE <> "W"                OR &
+       (FPACODTRA OF FAFAR_PASSERELLE =  "W"               AND &
+        "CODE POSTAL"    <> FPADSC OF FAFAR_PASSERELLE[1:11] AND &
+        "%# RESERVATION" <> FPADSC OF FAFAR_PASSERELLE[1:14])) &
+
+ELSE   FPATRPCLE OF FAFAR_PASSERELLE[1:2] + " / " + &
+       FPATRPCLE OF FAFAR_PASSERELLE[4:4] + "  Cette grille de tarification est inexistante ou inactive." &
+     IF NOT RECORD FAGRILLE_TARIF2   EXIST  AND &
+        3 =  INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-") AND &
+       (FPACODTRA OF FAFAR_PASSERELLE <> "W"                OR &
+       (FPACODTRA OF FAFAR_PASSERELLE =  "W"               AND &
+        "CODE POSTAL"    <> FPADSC OF FAFAR_PASSERELLE[1:11] AND &
+        "%# RESERVATION" <> FPADSC OF FAFAR_PASSERELLE[1:14])) &
+
+ELSE   FPATRPCLE OF FAFAR_PASSERELLE[1:3] + " / " + &
+       FPATRPCLE OF FAFAR_PASSERELLE[5:4] + "  Cette grille de tarification est inexistante ou inactive." &
+     IF NOT RECORD FAGRILLE_TARIF3   EXIST  AND &
+        4 =  INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-") AND &
+       (FPACODTRA OF FAFAR_PASSERELLE <> "W"                OR &
+       (FPACODTRA OF FAFAR_PASSERELLE =  "W"               AND &
+        "CODE POSTAL"    <> FPADSC OF FAFAR_PASSERELLE[1:11] AND &
+        "%# RESERVATION" <> FPADSC OF FAFAR_PASSERELLE[1:14])) &
+
+ELSE   "La combinaison " + FIGUNAREV OF FAFAR_IMP_GEN + "/" + &
+        ETACPTCLE OF FAELEMENT_TARIF1  + &
+       " n'existe pas" &
+     IF NOT RECORD A_UNA_REVENU1    EXIST  AND &
+        0 = INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-") AND &
+       (FPACODTRA OF FAFAR_PASSERELLE <> "W"                OR &
+       (FPACODTRA OF FAFAR_PASSERELLE =  "W"               AND &
+        "CODE POSTAL"    <> FPADSC OF FAFAR_PASSERELLE[1:11] AND &
+        "%# RESERVATION" <> FPADSC OF FAFAR_PASSERELLE[1:14])) &
+
+ELSE   "La combinaison " + FIGUNAREV OF FAFAR_IMP_GEN  + "/" + &
+        ETACPTCLE OF FAELEMENT_TARIF2  + &
+       " n'existe pas" &
+     IF NOT RECORD A_UNA_REVENU2    EXIST  AND &
+        3 =  INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-") AND &
+       (FPACODTRA OF FAFAR_PASSERELLE <> "W"                OR &
+       (FPACODTRA OF FAFAR_PASSERELLE =  "W"               AND &
+        "CODE POSTAL"    <> FPADSC OF FAFAR_PASSERELLE[1:11] AND &
+        "%# RESERVATION" <> FPADSC OF FAFAR_PASSERELLE[1:14])) &
+
+ELSE   "La combinaison " + FIGUNAREV OF FAFAR_IMP_GEN  + "/" + &
+        ETACPTCLE OF FAELEMENT_TARIF3  + &
+       " n'existe pas" &
+     IF NOT RECORD A_UNA_REVENU3    EXIST  AND &
+        4 =  INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-") AND &
+       (FPACODTRA OF FAFAR_PASSERELLE <> "W"                OR &
+       (FPACODTRA OF FAFAR_PASSERELLE =  "W"               AND &
+        "CODE POSTAL"    <> FPADSC OF FAFAR_PASSERELLE[1:11] AND &
+        "%# RESERVATION" <> FPADSC OF FAFAR_PASSERELLE[1:14])) &
+
+ELSE   "La combinaison " + FIGUNAESC OF FAFAR_IMP_GEN + "/" + &
+        ETACPTESC OF FAELEMENT_TARIF1 + &
+       " n'existe pas" &
+     IF NOT RECORD A_UNA_ESCOMPTE1  EXIST  AND &
+        0 = INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-") AND &
+        FPAMNTESC OF FAFAR_PASSERELLE <> "     0.00" AND &
+       (FPACODTRA OF FAFAR_PASSERELLE <> "W"                OR &
+       (FPACODTRA OF FAFAR_PASSERELLE =  "W"               AND &
+        "CODE POSTAL"    <> FPADSC OF FAFAR_PASSERELLE[1:11] AND &
+        "%# RESERVATION" <> FPADSC OF FAFAR_PASSERELLE[1:14])) &
+
+ELSE   "La combinaison " + FIGUNAESC OF FAFAR_IMP_GEN + "/" + &
+        ETACPTESC OF FAELEMENT_TARIF2 + &
+       " n'existe pas" &
+     IF NOT RECORD A_UNA_ESCOMPTE2  EXIST  AND &
+        3 = INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-") AND &
+        FPAMNTESC OF FAFAR_PASSERELLE <> "     0.00" AND &
+       (FPACODTRA OF FAFAR_PASSERELLE <> "W"                OR &
+       (FPACODTRA OF FAFAR_PASSERELLE =  "W"               AND &
+        "CODE POSTAL"    <> FPADSC OF FAFAR_PASSERELLE[1:11] AND &
+        "%# RESERVATION" <> FPADSC OF FAFAR_PASSERELLE[1:14])) &
+
+ELSE   "La combinaison " + FIGUNAESC OF FAFAR_IMP_GEN + "/" + &
+        ETACPTESC OF FAELEMENT_TARIF3 + &
+       " n'existe pas" &
+     IF NOT RECORD A_UNA_ESCOMPTE3  EXIST  AND &
+        4 = INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-") AND &
+        FPAMNTESC OF FAFAR_PASSERELLE <> "     0.00" AND &
+       (FPACODTRA OF FAFAR_PASSERELLE <> "W"                OR &
+       (FPACODTRA OF FAFAR_PASSERELLE =  "W"               AND &
+        "CODE POSTAL"    <> FPADSC OF FAFAR_PASSERELLE[1:11] AND &
+        "%# RESERVATION" <> FPADSC OF FAFAR_PASSERELLE[1:14])) &
+
+ELSE   FPAMODPAI1 OF FAFAR_PASSERELLE + " Ce code de paiement n'existe pas" &
+     IF NOT RECORD FACOD_PAIEMENT1 EXIST AND  &
+        FPAMODPAI1 OF FAFAR_PASSERELLE <> " " &
+
+ELSE   FPAMODPAI2 OF FAFAR_PASSERELLE + " Ce code de paiement n'existe pas" &
+     IF NOT RECORD FACOD_PAIEMENT2 EXIST AND  &
+        FPAMODPAI2 OF FAFAR_PASSERELLE <> " " &
+
+ELSE   "La combinaison " + FIGUNAPAI OF FAFAR_IMP_GEN + "/" + &
+        FCPCPTCLE OF FACOD_PAIEMENT1 + &
+       " n'existe pas" &
+     IF NOT RECORD A_UNA_PAIEMENT1  EXIST  AND &
+        0 <>INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-") AND &
+        FPAMODPAI1 OF FAFAR_PASSERELLE <> " "        AND &
+       (FPACODTRA OF FAFAR_PASSERELLE <> "W"                OR &
+       (FPACODTRA OF FAFAR_PASSERELLE =  "W"               AND &
+        "CODE POSTAL"    <> FPADSC OF FAFAR_PASSERELLE[1:11] AND &
+        "%# RESERVATION" <> FPADSC OF FAFAR_PASSERELLE[1:14])) AND &
+        FCPREC    OF FACOD_PAIEMENT1  =  "1" &
+
+ELSE   "La combinaison " + FIGUNAPAI OF FAFAR_IMP_GEN + "/" + &
+        FCPCPTCLE OF FACOD_PAIEMENT2 + &
+       " n'existe pas" &
+     IF NOT RECORD A_UNA_PAIEMENT2  EXIST  AND &
+        0 <>INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-") AND &
+        FPAMODPAI2 OF FAFAR_PASSERELLE <> " "        AND &
+       (FPACODTRA OF FAFAR_PASSERELLE <> "W"                OR &
+       (FPACODTRA OF FAFAR_PASSERELLE =  "W"               AND &
+        "CODE POSTAL"    <> FPADSC OF FAFAR_PASSERELLE[1:11] AND &
+        "%# RESERVATION" <> FPADSC OF FAFAR_PASSERELLE[1:14])) AND &
+        FCPREC    OF FACOD_PAIEMENT2  =  "1" &
+
+ELSE   FPACODTRA OF FAFAR_PASSERELLE + " Ce code de transaction n'existe pas" &
+     IF NOT RECORD FACOD_TRANS EXIST  &
+
+ELSE ""
+@ENDIF
+
+; affectation d'erreurs
+ITEM G_ERREUR = "ARRET" IF T_MESERR2 <> ""
+
+OUTPUT *WFA702X ADD IF G_ERREUR = "ARRET"
+  ITEM T_MESERR FINAL T_MESERR2
+
+
+REQUEST FIN-ERREUR
+
+ACCESS *WFA702X
+
+ITEM G_ERREUR = "ARRET"
+
+SORT ON T_MESERR
+
+SUBFILE WFA702E KEEP AT T_MESERR INCLUDE T_MESERR
+
+
+;---------------------------------------------------------------
+; Création de la facture
+;
+REQUEST CREATION_FACTURE TERMINATE IF G_ERREUR = "ARRET"
+
+ACCESS FAFAR_PASSERELLE &
+
+; Imputation générale
+  LINK G_CIECLE &
+    TO CIECLE OF FAFAR_IMP_GEN OPTIONAL &
+
+  LINK "----" , &
+       FPACLICLE OF FAFAR_PASSERELLE , &
+       G_CIECLE                        &
+    TO CLICIECLE                     , &
+       CLICLE                        , &
+       CIECLE OF VCLC_CLI OPTIONAL     &
+
+  LINK "----" , &
+       FIGCLICLE OF FAFAR_IMP_GEN    , &
+       G_CIECLE                        &
+    TO CLICIECLE                     , &
+       CLICLE                        , &
+       CIECLE OF VCLC_CLI ALIAS A_CLI_DEF OPTIONAL &
+
+  LINK G_CIECLE                      , &
+       FPACODTRA OF FAFAR_PASSERELLE   &
+    TO CIECLE                        , &
+       FCTCLE    OF FACOD_TRANS OPTIONAL &
+
+  LINK G_CIECLE                      , &
+       FPAMODPAI1 OF FAFAR_PASSERELLE  &
+    TO CIECLE                        , &
+       FCPCLE     OF FACOD_PAIEMENT ALIAS FACOD_PAIEMENT1 OPTIONAL &
+
+  LINK G_CIECLE                      , &
+       FPAMODPAI2 OF FAFAR_PASSERELLE  &
+    TO CIECLE                        , &
+       FCPCLE     OF FACOD_PAIEMENT ALIAS FACOD_PAIEMENT2 OPTIONAL &
+
+; Validation du produit
+  LINK G_CIECLE                   , &
+      (FPATRPCLE OF FAFAR_PASSERELLE[1:3]) &
+    TO CIECLE                     , &
+       TRPCLE OF FATRAJET_PRODUIT ALIAS FATRAJET_PRODUIT1 OPTIONAL &
+
+; Validation du produit
+  LINK G_CIECLE                   , &
+      (FPATRPCLE OF FAFAR_PASSERELLE[1:2] + " ") &
+    TO CIECLE                     , &
+       TRPCLE OF FATRAJET_PRODUIT ALIAS FATRAJET_PRODUIT2 OPTIONAL &
+
+; Validation du produit
+  LINK G_CIECLE                   , &
+      (FPATRPCLE OF FAFAR_PASSERELLE[1:3] + " ") &
+    TO CIECLE                     , &
+       TRPCLE OF FATRAJET_PRODUIT ALIAS FATRAJET_PRODUIT3 OPTIONAL &
+
+; Port d'origine
+  LINK TRPPORORI OF FATRAJET_PRODUIT1 &
+    TO FPOCLE OF FAPORT ALIAS FAPORT_ORI1 OPTIONAL &
+
+; Port d'origine
+  LINK TRPPORORI OF FATRAJET_PRODUIT2 &
+    TO FPOCLE OF FAPORT ALIAS FAPORT_ORI2 OPTIONAL &
+
+; Port d'origine
+  LINK TRPPORORI OF FATRAJET_PRODUIT3 &
+    TO FPOCLE OF FAPORT ALIAS FAPORT_ORI3 OPTIONAL &
+
+; Port d'origine
+  LINK TRPPORDES OF FATRAJET_PRODUIT1 &
+    TO FPOCLE OF FAPORT ALIAS FAPORT_DES1 OPTIONAL &
+
+; Port d'origine
+  LINK TRPPORDES OF FATRAJET_PRODUIT2 &
+    TO FPOCLE OF FAPORT ALIAS FAPORT_DES2 OPTIONAL &
+
+; Port d'origine
+  LINK TRPPORDES OF FATRAJET_PRODUIT3 &
+    TO FPOCLE OF FAPORT ALIAS FAPORT_DES3 OPTIONAL &
+
+; Validation de l'élément de tarification
+  LINK G_CIECLE                      , &
+       ("0000")                        &
+    TO CIECLE                        , &
+       ETACLE OF FAELEMENT_TARIF ALIAS FAELEMENT_TARIF1 OPTIONAL &
+
+; Validation de l'élément de tarification
+  LINK G_CIECLE                      ,      &
+       (FPATRPCLE OF FAFAR_PASSERELLE[4:4]) &
+    TO CIECLE                        , &
+       ETACLE OF FAELEMENT_TARIF ALIAS FAELEMENT_TARIF2 OPTIONAL &
+
+; Validation de l'élément de tarification
+  LINK G_CIECLE                      ,      &
+       (FPATRPCLE OF FAFAR_PASSERELLE[5:4]) &
+    TO CIECLE                        , &
+       ETACLE OF FAELEMENT_TARIF ALIAS FAELEMENT_TARIF3 OPTIONAL &
+
+; Période de roulement
+  LINK G_CIECLE, &
+       (NCONVERT(FPADAT OF FAFAR_PASSERELLE[7:2])) &
+    TO CIECLE, &
+       PERANN OF FAPERIODE OPTIONAL
+
+; POUR ELIMINER LES IMPURETEES DU FICHIER D'ENTREE
+
+DEFINE D_FARDAT DATE = DATE(DAYS(NCONVERT(FPADAT OF FAFAR_PASSERELLE[7:2] + &
+                                          FPADAT OF FAFAR_PASSERELLE[4:2] + &
+                                          FPADAT OF FAFAR_PASSERELLE[1:2])))
+
+SELECT IF FPACODTRA OF FAFAR_PASSERELLE = "V"  OR &
+          FPACODTRA OF FAFAR_PASSERELLE = "R"  OR &
+         (FPACODTRA OF FAFAR_PASSERELLE = "W" AND &
+         ("CODE POSTAL"    = FPADSC OF FAFAR_PASSERELLE[1:11]  OR &
+          "%# RESERVATION" = FPADSC OF FAFAR_PASSERELLE[1:14]))
+
+SELECT FAPERIODE IF D_FARDAT >= PERDATDEB OF FAPERIODE AND &
+                    D_FARDAT <= PERDATFIN OF FAPERIODE
+
+DEFINE D_TRI    CHARACTER SIZE 1 = "A"                                         &
+                     IF FPACODTRA OF FAFAR_PASSERELLE = "W"                AND &
+                       ("CODE POSTAL"    = FPADSC OF FAFAR_PASSERELLE[1:11] OR &
+                        "%# RESERVATION" <> FPADSC OF FAFAR_PASSERELLE[1:14]) &
+                   ELSE "B"
+
+DEFINE D_FARCLE    CHARACTER SIZE 9 = PACK(FPAFARCLE OF FAFAR_PASSERELLE)
+
+SORT ON D_FARCLE, &
+        D_TRI
+
+TEMPORARY T_PERCLE             CHARACTER SIZE 4
+TEMPORARY T_FHIANN             CHARACTER SIZE 2
+TEMPORARY T_PERJOU             CHARACTER SIZE 1
+TEMPORARY T_CLICLE             CHARACTER SIZE 6
+TEMPORARY T_RADCLE     INTEGER  UNSIGNED SIZE 2
+TEMPORARY T_FARDAT                       DATE
+TEMPORARY T_FARTERNET          CHARACTER SIZE 4
+TEMPORARY T_FARTERESC1         CHARACTER SIZE 4
+TEMPORARY T_FARTERESC2         CHARACTER SIZE 4
+TEMPORARY T_FARTERFRS          CHARACTER SIZE 4
+TEMPORARY T_FARMNT                 FLOAT SIZE 8
+TEMPORARY T_FARMNTNET              FLOAT SIZE 8
+TEMPORARY T_FARMNTESC              FLOAT SIZE 8
+TEMPORARY T_FARMNTTPS              FLOAT SIZE 8
+TEMPORARY T_FARMNTTVQ              FLOAT SIZE 8
+TEMPORARY T_FARMNTREC              FLOAT SIZE 8
+TEMPORARY T_MNTBRU                 FLOAT SIZE 8
+TEMPORARY T_MNTPAI1                FLOAT SIZE 8
+TEMPORARY T_MNTPAI2                FLOAT SIZE 8
+TEMPORARY T_FFDCLELIG            INTEGER SIZE 4
+TEMPORARY T_FARDSC1            CHARACTER SIZE 40
+TEMPORARY T_DSCPAI1            CHARACTER SIZE 30
+TEMPORARY T_DSCPAI2            CHARACTER SIZE 30
+TEMPORARY T_FFDDSC             CHARACTER SIZE 50
+TEMPORARY T_CODTPS             CHARACTER SIZE 2
+TEMPORARY T_CODTVQ             CHARACTER SIZE 2
+TEMPORARY T_SOLDE                  FLOAT SIZE 8
+TEMPORARY T_FFDMNTNET              FLOAT SIZE 8
+TEMPORARY T_FFDMNTTPS              FLOAT SIZE 8
+TEMPORARY T_FFDMNTTVQ              FLOAT SIZE 8
+TEMPORARY T_FFDPRIUNI              FLOAT SIZE 8
+TEMPORARY T_FFDQTEFAC            INTEGER SIZE 4
+TEMPORARY T_FFDMNTESC              FLOAT SIZE 8
+TEMPORARY T_FFDMNTPAI1             FLOAT SIZE 8
+TEMPORARY T_FFDMNTPAI2             FLOAT SIZE 8
+TEMPORARY T_TRPCLE             CHARACTER SIZE 3
+TEMPORARY T_ETACLE             CHARACTER SIZE 4
+TEMPORARY T_ETACPTCLE          CHARACTER SIZE 6
+TEMPORARY T_ETACPTESC          CHARACTER SIZE 6
+TEMPORARY T_CODPOS             CHARACTER SIZE 16
+TEMPORARY T_NUMRES             CHARACTER SIZE 16
+TEMPORARY T_NUMRES2            CHARACTER SIZE 30
+TEMPORARY T_FHIHRE      INTEGER UNSIGNED SIZE 4
+TEMPORARY T_CPTFAC      INTEGER UNSIGNED SIZE 4
+TEMPORARY T_POUESC                 FLOAT SIZE 8
+TEMPORARY T_DSCPORORI          CHARACTER SIZE 50
+TEMPORARY T_DSCPORDES          CHARACTER SIZE 50
+TEMPORARY T_CPTFAR      INTEGER UNSIGNED SIZE 4
+
+ITEM T_CPTFAC = T_CPTFAC + 1            &
+                RESET AT D_FARCLE TO 0
+
+ITEM T_CPTFAR = T_CPTFAR + 1            &
+                RESET AT D_FARCLE TO 0
+
+ITEM T_PERCLE = PERCLE OF FAPERIODE     &
+             IF RECORD FAPERIODE EXISTS &
+           ELSE " "
+
+ITEM T_FHIANN = PERCLE OF FAPERIODE[1:2] &
+             IF RECORD FAPERIODE EXISTS  &
+           ELSE " "
+
+ITEM T_CLICLE = FPACLICLE OF FAFAR_PASSERELLE        &
+             IF FPACLICLE OF FAFAR_PASSERELLE <> " " &
+           ELSE FIGCLICLE OF FAFAR_IMP_GEN
+
+ITEM T_RADCLE = CLCADRETACPT OF VCLC_CLI                &
+             IF FPACLICLE    OF FAFAR_PASSERELLE <> " " &
+           ELSE CLCADRETACPT OF A_CLI_DEF
+
+ITEM T_FARTERNET  = CLCTERNET  OF VCLC_CLI                &
+                 IF FPACLICLE  OF FAFAR_PASSERELLE <> " " &
+               ELSE CLCTERNET  OF A_CLI_DEF
+
+ITEM T_FARTERESC1 = CLCTERESC1 OF VCLC_CLI                &
+                 IF FPACLICLE  OF FAFAR_PASSERELLE <> " " &
+               ELSE CLCTERESC1 OF A_CLI_DEF
+
+ITEM T_FARTERESC2 = CLCTERESC2 OF VCLC_CLI                &
+                 IF FPACLICLE  OF FAFAR_PASSERELLE <> " " &
+               ELSE CLCTERESC2 OF A_CLI_DEF
+
+ITEM T_FARTERFRS  = CLCTERFRS  OF VCLC_CLI                &
+                 IF FPACLICLE  OF FAFAR_PASSERELLE <> " " &
+               ELSE CLCTERFRS  OF A_CLI_DEF
+
+ITEM T_FARDAT = DATE(DAYS(NCONVERT(FPADAT OF FAFAR_PASSERELLE[7:2] + &
+                                   FPADAT OF FAFAR_PASSERELLE[4:2] + &
+                                   FPADAT OF FAFAR_PASSERELLE[1:2])))
+
+ITEM T_PERJOU = ASCII(MOD(DAYS(T_FARDAT),7))
+
+ITEM T_FFDMNTTVQ  = NCONVERT(FPATAXTVQ  OF FAFAR_PASSERELLE[1:4] + &
+                             FPATAXTVQ  OF FAFAR_PASSERELLE[6:2])
+
+ITEM T_FFDMNTTPS  = NCONVERT(FPATAXTPS  OF FAFAR_PASSERELLE[1:6] + &
+                             FPATAXTPS  OF FAFAR_PASSERELLE[8:2])
+
+ITEM T_FFDPRIUNI  = NCONVERT(FPAPRIUNI  OF FAFAR_PASSERELLE[1:6] + &
+                             FPAPRIUNI  OF FAFAR_PASSERELLE[8:2]) * 100
+
+ITEM T_FFDQTEFAC  = NCONVERT(FPAQTEFAC  OF FAFAR_PASSERELLE)
+
+ITEM T_POUESC     = NCONVERT(FPAMNTESC  OF FAFAR_PASSERELLE[1:6] + &
+                             FPAMNTESC  OF FAFAR_PASSERELLE[8:2])
+
+ITEM T_FFDMNTPAI1 = NCONVERT(FPAMNTPAI1 OF FAFAR_PASSERELLE[1:6] + &
+                             FPAMNTPAI1 OF FAFAR_PASSERELLE[8:2])
+
+ITEM T_FFDMNTPAI2 = NCONVERT(FPAMNTPAI2 OF FAFAR_PASSERELLE[1:6] + &
+                             FPAMNTPAI2 OF FAFAR_PASSERELLE[8:2])
+
+
+ITEM T_MNTBRU    = ROUND(T_FFDQTEFAC * T_FFDPRIUNI / 100 )
+
+ITEM T_FFDMNTESC  = ROUND(T_MNTBRU * (T_POUESC / 10000))
+
+ITEM T_MNTPAI1   = T_FFDMNTPAI1                             &
+                IF FCPREC OF FACOD_PAIEMENT1 = "1"          &
+              ELSE 0
+
+ITEM T_MNTPAI2   = T_FFDMNTPAI2                             &
+                IF FCPREC OF FACOD_PAIEMENT2 = "1"          &
+              ELSE 0
+
+ITEM T_FARMNTTPS = T_FARMNTTPS + T_FFDMNTTPS &
+                   RESET AT D_FARCLE TO 0
+
+ITEM T_FARMNTTVQ = T_FARMNTTVQ + T_FFDMNTTVQ &
+                   RESET AT D_FARCLE TO 0
+
+ITEM T_FARMNT    = T_FARMNT + T_MNTBRU + T_FFDMNTTPS + &
+                   T_FFDMNTTVQ - T_FFDMNTESC           &
+                   RESET AT D_FARCLE TO 0
+
+ITEM T_FARMNTNET = T_FARMNTNET + T_MNTBRU + T_FFDMNTTPS + &
+                   T_FFDMNTTVQ - T_FFDMNTESC              &
+                   RESET AT D_FARCLE TO 0
+
+ITEM T_FARMNTESC = T_FARMNTESC + T_FFDMNTESC           &
+                   RESET AT D_FARCLE TO 0
+
+ITEM T_FARMNTREC = T_MNTPAI1 + T_MNTPAI2 &
+                   RESET AT D_FARCLE TO 0
+
+ITEM T_SOLDE     = T_FARMNTNET - T_FARMNTREC &
+                   RESET AT D_FARCLE TO 0
+
+ITEM T_FARDSC1   = FCTDSCFRA OF FACOD_TRANS                 &
+                IF (CLILNG    OF VCLC_CLI         =  "F" AND &
+                    FPACLICLE OF FAFAR_PASSERELLE <> " ") OR &
+                   (CLILNG    OF A_CLI_DEF        =  "F" AND &
+                    FPACLICLE OF FAFAR_PASSERELLE =  " ")    &
+               ELSE FCTDSCANG OF FACOD_TRANS
+
+ITEM T_DSCPAI1   = FCPDSCFRA OF FACOD_PAIEMENT1             &
+                IF (CLILNG    OF VCLC_CLI         =  "F" AND &
+                    FPACLICLE OF FAFAR_PASSERELLE <> " ") OR &
+                   (CLILNG    OF A_CLI_DEF        =  "F" AND &
+                    FPACLICLE OF FAFAR_PASSERELLE =  " ")    &
+               ELSE FCPDSCANG OF FACOD_PAIEMENT1
+
+ITEM T_DSCPAI2   = FCPDSCFRA OF FACOD_PAIEMENT2             &
+                IF (CLILNG    OF VCLC_CLI         =  "F" AND &
+                    FPACLICLE OF FAFAR_PASSERELLE <> " ") OR &
+                   (CLILNG    OF A_CLI_DEF        =  "F" AND &
+                    FPACLICLE OF FAFAR_PASSERELLE =  " ")    &
+               ELSE FCPDSCANG OF FACOD_PAIEMENT2
+
+ITEM T_FFDCLELIG  = T_FFDCLELIG + 1000 &
+                    RESET AT D_FARCLE TO 0
+
+ITEM T_FFDDSC     = FPADSC OF FAFAR_PASSERELLE                         &
+                 IF FPACODTRA OF FAFAR_PASSERELLE = "W"            AND &
+                    "CODE POSTAL"    <> FPADSC OF FAFAR_PASSERELLE[1:11] AND &
+                    "%# RESERVATION" <> FPADSC OF FAFAR_PASSERELLE[1:14] &
+               ELSE TRUNCATE(ETADSCFRA OF FAELEMENT_TARIF2)          &
+                IF (CLILNG    OF VCLC_CLI         =  "F"         AND &
+                    3 =INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACLICLE OF FAFAR_PASSERELLE <> " ")         OR &
+                   (CLILNG    OF A_CLI_DEF        =  "F"         AND &
+                    3 =INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACLICLE OF FAFAR_PASSERELLE =  " ")            &
+               ELSE TRUNCATE(ETADSCANG OF FAELEMENT_TARIF2)          &
+                IF (CLILNG    OF VCLC_CLI        <>  "F"         AND &
+                    3 =INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACLICLE OF FAFAR_PASSERELLE <> " ")         OR &
+                   (CLILNG    OF A_CLI_DEF       <>  "F"         AND &
+                    3 =INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACLICLE OF FAFAR_PASSERELLE =  " ")            &
+               ELSE TRUNCATE(ETADSCFRA OF FAELEMENT_TARIF3)          &
+                IF (CLILNG    OF VCLC_CLI         =  "F"         AND &
+                    4 =INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACLICLE OF FAFAR_PASSERELLE <> " ")         OR &
+                   (CLILNG    OF A_CLI_DEF        =  "F"         AND &
+                    4 =INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACLICLE OF FAFAR_PASSERELLE =  " ")            &
+               ELSE TRUNCATE(ETADSCANG OF FAELEMENT_TARIF3)          &
+                IF (CLILNG    OF VCLC_CLI        <>  "F"         AND &
+                    4 =INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACLICLE OF FAFAR_PASSERELLE <> " ")         OR &
+                   (CLILNG    OF A_CLI_DEF       <>  "F"         AND &
+                    4 =INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACLICLE OF FAFAR_PASSERELLE =  " ")            &
+              ELSE  TRUNCATE(ETADSCFRA OF FAELEMENT_TARIF1)          &
+                IF (CLILNG    OF VCLC_CLI         =  "F"         AND &
+                    0= INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACLICLE OF FAFAR_PASSERELLE <> " ")         OR &
+                   (CLILNG    OF A_CLI_DEF        =  "F"         AND &
+                    0= INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACLICLE OF FAFAR_PASSERELLE =  " ")            &
+              ELSE  TRUNCATE(ETADSCANG OF FAELEMENT_TARIF1)
+
+
+ITEM T_DSCPORORI  = FPODSCFRA OF FAPORT_ORI2                         &
+                IF (CLILNG    OF VCLC_CLI         =  "F"         AND &
+                    3 =INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACODTRA OF FAFAR_PASSERELLE <>"W"          AND &
+                    FPACLICLE OF FAFAR_PASSERELLE <> " ")         OR &
+                   (CLILNG    OF A_CLI_DEF        =  "F"         AND &
+                    3 =INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACODTRA OF FAFAR_PASSERELLE <>"W"          AND &
+                    FPACLICLE OF FAFAR_PASSERELLE =  " ")            &
+               ELSE FPODSCANG OF FAPORT_ORI2                         &
+                IF (CLILNG    OF VCLC_CLI        <>  "F"         AND &
+                    3 =INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACODTRA OF FAFAR_PASSERELLE <>"W"          AND &
+                    FPACLICLE OF FAFAR_PASSERELLE <> " ")         OR &
+                   (CLILNG    OF A_CLI_DEF       <>  "F"         AND &
+                    3 =INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACODTRA OF FAFAR_PASSERELLE <>"W"          AND &
+                    FPACLICLE OF FAFAR_PASSERELLE =  " ")            &
+              ELSE  FPODSCFRA OF FAPORT_ORI3                         &
+                IF (CLILNG    OF VCLC_CLI         =  "F"         AND &
+                    4 =INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACODTRA OF FAFAR_PASSERELLE <>"W"          AND &
+                    FPACLICLE OF FAFAR_PASSERELLE <> " ")         OR &
+                   (CLILNG    OF A_CLI_DEF        =  "F"         AND &
+                    4 =INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACODTRA OF FAFAR_PASSERELLE <>"W"          AND &
+                    FPACLICLE OF FAFAR_PASSERELLE =  " ")            &
+               ELSE FPODSCANG OF FAPORT_ORI3                         &
+                IF (CLILNG    OF VCLC_CLI        <>  "F"         AND &
+                    4 =INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACODTRA OF FAFAR_PASSERELLE <>"W"          AND &
+                    FPACLICLE OF FAFAR_PASSERELLE <> " ")         OR &
+                   (CLILNG    OF A_CLI_DEF       <>  "F"         AND &
+                    4 =INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACODTRA OF FAFAR_PASSERELLE <>"W"          AND &
+                    FPACLICLE OF FAFAR_PASSERELLE =  " ")            &
+               ELSE FPODSCFRA OF FAPORT_ORI1                         &
+                IF (CLILNG    OF VCLC_CLI         =  "F"         AND &
+                    0= INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACODTRA OF FAFAR_PASSERELLE <>"W"          AND &
+                    FPACLICLE OF FAFAR_PASSERELLE <> " ")         OR &
+                   (CLILNG    OF A_CLI_DEF        =  "F"         AND &
+                    0= INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACODTRA OF FAFAR_PASSERELLE <>"W"          AND &
+                    FPACLICLE OF FAFAR_PASSERELLE =  " ")            &
+               ELSE FPODSCANG OF FAPORT_ORI1                         &
+                 IF FPACODTRA OF FAFAR_PASSERELLE <>"W"              &
+                    RESET AT D_FARCLE TO " "
+
+ITEM T_DSCPORDES  = FPODSCFRA OF FAPORT_DES2                         &
+                IF (CLILNG    OF VCLC_CLI         =  "F"         AND &
+                    3 =INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACODTRA OF FAFAR_PASSERELLE <>"W"          AND &
+                    FPACLICLE OF FAFAR_PASSERELLE <> " ")         OR &
+                   (CLILNG    OF A_CLI_DEF        =  "F"         AND &
+                    3 =INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACODTRA OF FAFAR_PASSERELLE <>"W"          AND &
+                    FPACLICLE OF FAFAR_PASSERELLE =  " ")            &
+               ELSE FPODSCANG OF FAPORT_DES2                         &
+                IF (CLILNG    OF VCLC_CLI        <>  "F"         AND &
+                    3 =INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACODTRA OF FAFAR_PASSERELLE <>"W"          AND &
+                    FPACLICLE OF FAFAR_PASSERELLE <> " ")         OR &
+                   (CLILNG    OF A_CLI_DEF       <>  "F"         AND &
+                    3 =INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACODTRA OF FAFAR_PASSERELLE <>"W"          AND &
+                    FPACLICLE OF FAFAR_PASSERELLE =  " ")            &
+              ELSE  FPODSCFRA OF FAPORT_DES3                         &
+                IF (CLILNG    OF VCLC_CLI         =  "F"         AND &
+                    4 =INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACODTRA OF FAFAR_PASSERELLE <>"W"          AND &
+                    FPACLICLE OF FAFAR_PASSERELLE <> " ")         OR &
+                   (CLILNG    OF A_CLI_DEF        =  "F"         AND &
+                    4 =INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACODTRA OF FAFAR_PASSERELLE <>"W"          AND &
+                    FPACLICLE OF FAFAR_PASSERELLE =  " ")            &
+               ELSE FPODSCANG OF FAPORT_DES3                         &
+                IF (CLILNG    OF VCLC_CLI        <>  "F"         AND &
+                    4 =INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACODTRA OF FAFAR_PASSERELLE <>"W"          AND &
+                    FPACLICLE OF FAFAR_PASSERELLE <> " ")         OR &
+                   (CLILNG    OF A_CLI_DEF       <>  "F"         AND &
+                    4 =INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACODTRA OF FAFAR_PASSERELLE <>"W"          AND &
+                    FPACLICLE OF FAFAR_PASSERELLE =  " ")            &
+               ELSE FPODSCFRA OF FAPORT_DES1                         &
+                IF (CLILNG    OF VCLC_CLI         =  "F"         AND &
+                    0= INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACODTRA OF FAFAR_PASSERELLE <>"W"          AND &
+                    FPACLICLE OF FAFAR_PASSERELLE <> " ")         OR &
+                   (CLILNG    OF A_CLI_DEF        =  "F"         AND &
+                    0= INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-")  AND &
+                    FPACODTRA OF FAFAR_PASSERELLE <>"W"          AND &
+                    FPACLICLE OF FAFAR_PASSERELLE =  " ")            &
+               ELSE FPODSCANG OF FAPORT_DES1                         &
+                 IF FPACODTRA OF FAFAR_PASSERELLE <>"W"              &
+                    RESET AT D_FARCLE TO " "
+
+ITEM T_CODTPS     = CLCTAXCODTPS OF VCLC_CLI                &
+                 IF FPACLICLE    OF FAFAR_PASSERELLE <> " " &
+               ELSE CLCTAXCODTPS OF A_CLI_DEF
+
+ITEM T_CODTVQ     = CLCTAXCODTVP OF VCLC_CLI                &
+                 IF FPACLICLE    OF FAFAR_PASSERELLE <> " " &
+               ELSE CLCTAXCODTVP OF A_CLI_DEF
+
+ITEM T_FFDMNTNET  = T_MNTBRU + T_FFDMNTTVQ + T_FFDMNTTPS
+
+ITEM T_TRPCLE     = TRPCLE OF FATRAJET_PRODUIT2                   &
+                 IF 3 =  INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-") &
+               ELSE TRPCLE OF FATRAJET_PRODUIT3                   &
+                 IF 4 =  INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-") &
+               ELSE TRPCLE OF FATRAJET_PRODUIT1
+
+ITEM T_ETACLE     = ETACLE OF FAELEMENT_TARIF2                    &
+                 IF 3 =  INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-") &
+               ELSE ETACLE OF FAELEMENT_TARIF3                    &
+                 IF 4 =  INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-") &
+               ELSE "0000"
+
+ITEM T_ETACPTCLE  = ETACPTCLE OF FAELEMENT_TARIF2                 &
+                 IF 3 =  INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-") &
+               ELSE ETACPTCLE OF FAELEMENT_TARIF3                 &
+                 IF 4 =  INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-") &
+               ELSE ETACPTCLE OF FAELEMENT_TARIF1
+
+ITEM T_ETACPTESC  = ETACPTESC OF FAELEMENT_TARIF2                 &
+                 IF 3 =  INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-") &
+               ELSE ETACPTESC OF FAELEMENT_TARIF3                 &
+                 IF 4 =  INDEX(FPATRPCLE OF FAFAR_PASSERELLE,"-") &
+               ELSE ETACPTESC OF FAELEMENT_TARIF1
+
+ITEM T_CODPOS     = FPATRPCLE OF FAFAR_PASSERELLE &
+                 IF FPACODTRA OF FAFAR_PASSERELLE = "W" AND &
+                    FPADSC    OF FAFAR_PASSERELLE = "CODE POSTAL" &
+                    RESET AT D_FARCLE TO " "
+
+ITEM T_NUMRES     = FPATRPCLE OF FAFAR_PASSERELLE &
+                 IF FPACODTRA OF FAFAR_PASSERELLE = "W" AND &
+                    "%# RESERVATION" = FPADSC OF FAFAR_PASSERELLE[1:14] AND &
+                    FPADSC    OF FAFAR_PASSERELLE = "%# RESERVATION" AND &
+                    FPATRPCLE OF FAFAR_PASSERELLE <> " " &
+                    RESET AT D_FARCLE TO " "
+
+ITEM T_NUMRES2    = "# Réservation: " + FPATRPCLE OF FAFAR_PASSERELLE &
+                 IF FPACODTRA OF FAFAR_PASSERELLE = "W" AND &
+                    "%# RESERVATION" = FPADSC OF FAFAR_PASSERELLE[1:14] AND &
+                    FPATRPCLE OF FAFAR_PASSERELLE <> " " &
+                    RESET AT D_FARCLE TO " "
+
+ITEM T_FHIHRE     = NCONVERT(FPAHRE OF FAFAR_PASSERELLE[1:2] + &
+                             FPAHRE OF FAFAR_PASSERELLE[4:2])
+
+OUTPUT FAFAR_DETAIL ADD
+ITEM CIECLE       OF FAFAR_DETAIL= G_CIECLE                      ; C    4  Numéro de la compagnie - Entité légale.
+ITEM FARCLE       OF FAFAR_DETAIL= D_FARCLE                      ; C    9  Numéro de la facture ou de la note de crédit.
+ITEM FFDCLELIG    OF FAFAR_DETAIL= T_FFDCLELIG                   ; I    4  Séquence.
+ITEM FFDDSC       OF FAFAR_DETAIL= T_FFDDSC                      ; C   50  Description pour l'analyse de compte.
+ITEM TRPCLE       OF FAFAR_DETAIL= T_TRPCLE                      ; C    3  Produit
+ITEM ETACLE       OF FAFAR_DETAIL= T_ETACLE                      ; C    4  Élément de tarification
+ITEM FFDTYP       OF FAFAR_DETAIL= "2"                           ; C    1  Type de trans.
+ITEM FFDPRI       OF FAFAR_DETAIL= 0                             ; I    2  Numéro du prix.
+ITEM FFDQTEFAC    OF FAFAR_DETAIL= T_FFDQTEFAC                   ; I    4  Quantité facturée
+ITEM FFDTAXTYPTPS OF FAFAR_DETAIL= "F"                           ; C    1  Type code de taxe
+ITEM FFDTAXCODTPS OF FAFAR_DETAIL= T_CODTPS                      ; C    2  Code de taxe
+ITEM FFDTAXTYPTVQ OF FAFAR_DETAIL= "P"                           ; C    1  Type de code de taxe
+ITEM FFDTAXCODTVQ OF FAFAR_DETAIL= T_CODTVQ                      ; C    2  Code de taxe
+ITEM FFDPRIUNI    OF FAFAR_DETAIL= T_FFDPRIUNI                   ; F    8  Prix unitaire
+ITEM PRJCLE       OF FAFAR_DETAIL= G_PRJCLE                      ; C    4  Projet
+ITEM PRACLE       OF FAFAR_DETAIL= G_PRACLE                      ; C    8  Sous-projet
+ITEM CPTCLE       OF FAFAR_DETAIL= T_ETACPTCLE                   ; C    4  Compte
+ITEM UNACLE       OF FAFAR_DETAIL= FIGUNAREV OF FAFAR_IMP_GEN    ; C    8  Unité adm.
+ITEM IMMCLE       OF FAFAR_DETAIL= FIGIMMCLE OF FAFAR_IMP_GEN    ; C    8  Immobilisation
+ITEM FFDTIMSTP    OF FAFAR_DETAIL= SYSDATE * 1000000 + ROUND(SYSTIME/100)
+ITEM FFDMNTTOT    OF FAFAR_DETAIL= T_FFDMNTNET                   ; F    8  Mnt brut
+ITEM FFDMNTNET    OF FAFAR_DETAIL= T_FFDMNTNET                   ; F    8  Montant net
+ITEM FFDMNTTVQ    OF FAFAR_DETAIL= T_FFDMNTTVQ                   ; F    8  Montant de T.V.P.
+ITEM FFDMNTTPS    OF FAFAR_DETAIL= T_FFDMNTTPS                   ; F    8  Montant de T.P.S.
+
+
+OUTPUT FAFAR_DETAIL ADD IF T_FFDMNTESC <> 0 ALIAS SF1
+ITEM CIECLE       OF SF1         = G_CIECLE                      ; C    4  Numéro de la compagnie - Entité légale.
+ITEM FARCLE       OF SF1         = D_FARCLE                      ; C    9  Numéro de la facture ou de la note de crédit.
+ITEM FFDCLELIG    OF SF1         = T_FFDCLELIG + 10              ; I    4  Séquence.
+ITEM FFDDSC       OF SF1         = "Escompte"                    ; C   50  Description pour l'analyse de compte.
+ITEM TRPCLE       OF SF1         = T_TRPCLE                      ; C    3  Produit
+ITEM ETACLE       OF SF1         = T_ETACLE                      ; C    4  Élément de tarification
+ITEM FFDTYP       OF SF1         = "4"                           ; C    1  Type de trans.
+ITEM FFDPRI       OF SF1         = 0                             ; I    2  Numéro du prix.
+ITEM FFDQTEFAC    OF SF1         = 0                             ; I    4  Quantité facturée
+ITEM FFDTAXTYPTPS OF SF1         = "F"                           ; C    1  Type code de taxe
+ITEM FFDTAXCODTPS OF SF1         = "99"                          ; C    2  Code de taxe
+ITEM FFDTAXTYPTVQ OF SF1         = "P"                           ; C    1  Type de code de taxe
+ITEM FFDTAXCODTVQ OF SF1         = "99"                          ; C    2  Code de taxe
+ITEM FFDPRIUNI    OF SF1         = T_FFDMNTESC * 100             ; F    8  Prix unitaire
+ITEM PRJCLE       OF SF1         = G_PRJCLE                      ; C    4  Projet
+ITEM PRACLE       OF SF1         = G_PRACLE                      ; C    8  Sous-projet
+ITEM CPTCLE       OF SF1         = T_ETACPTESC                   ; C    4  Compte
+ITEM UNACLE       OF SF1         = FIGUNAESC OF FAFAR_IMP_GEN    ; C    8  Unité adm.
+ITEM IMMCLE       OF SF1         = FIGIMMCLE OF FAFAR_IMP_GEN    ; C    8  Immobilisation
+ITEM FFDTIMSTP    OF SF1         = SYSDATE * 1000000 + ROUND(SYSTIME/100)
+ITEM FFDMNTTOT    OF SF1         = T_FFDMNTESC * -1              ; F    8  Mnt brut
+ITEM FFDMNTNET    OF SF1         = T_FFDMNTESC * -1              ; F    8  Montant net
+ITEM FFDMNTTVQ    OF SF1         = 0                             ; F    8  Montant de T.V.P.
+ITEM FFDMNTTPS    OF SF1         = 0                             ; F    8  Montant de T.P.S.
+
+
+OUTPUT FAFAR_DETAIL ADD &
+ IF T_FFDMNTPAI1<>0 AND FCPREC OF FACOD_PAIEMENT1 = "1" ALIAS SF2 AT D_FARCLE
+ITEM CIECLE       OF SF2         = G_CIECLE                      ; C    4  Numéro de la compagnie - Entité légale.
+ITEM FARCLE       OF SF2         = D_FARCLE                      ; C    9  Numéro de la facture ou de la note de crédit.
+ITEM FFDCLELIG    OF SF2         = T_FFDCLELIG + 20              ; I    4  Séquence.
+ITEM FFDDSC       OF SF2         = T_DSCPAI1                     ; C   50  Description pour l'analyse de compte.
+ITEM TRPCLE       OF SF2         = " "                           ; C    3  Produit
+ITEM ETACLE       OF SF2         = " "                           ; C    4  Élément de tarification
+ITEM FFDTYP       OF SF2         = "3"                           ; C    1  Type de trans.
+ITEM FFDPRI       OF SF2         = 0                             ; I    2  Numéro du prix.
+ITEM FFDQTEFAC    OF SF2         = 0                             ; I    4  Quantité facturée
+ITEM FFDTAXTYPTPS OF SF2         = " "                           ; C    1  Type code de taxe
+ITEM FFDTAXCODTPS OF SF2         = " "                           ; C    2  Code de taxe
+ITEM FFDTAXTYPTVQ OF SF2         = " "                           ; C    1  Type de code de taxe
+ITEM FFDTAXCODTVQ OF SF2         = " "                           ; C    2  Code de taxe
+ITEM FFDPRIUNI    OF SF2         = 0                             ; F    8  Prix unitaire
+ITEM PRJCLE       OF SF2         = PRJCLE    OF FAFAR_IMP_GEN    ; C    4  Projet
+ITEM PRACLE       OF SF2         = PRACLE    OF FAFAR_IMP_GEN    ; C    8  Sous-projet
+ITEM CPTCLE       OF SF2         = FCPCPTCLE OF FACOD_PAIEMENT1  ; C    4  Compte
+ITEM UNACLE       OF SF2         = FIGUNAPAI OF FAFAR_IMP_GEN    ; C    8  Unité adm.
+ITEM IMMCLE       OF SF2         = IMMCLE    OF FAFAR_IMP_GEN    ; C    8  Immobilisation
+ITEM FFDTIMSTP    OF SF2         = SYSDATE * 1000000 + ROUND(SYSTIME/100)
+ITEM FFDMNTTOT    OF SF2         = T_FFDMNTPAI1                  ; F    8  Mnt brut
+ITEM FFDMNTNET    OF SF2         = T_FFDMNTPAI1                  ; F    8  Montant net
+ITEM FFDMNTTVQ    OF SF2         = 0                             ; F    8  Montant de T.V.P.
+ITEM FFDMNTTPS    OF SF2         = 0                             ; F    8  Montant de T.P.S.
+
+OUTPUT FAFAR_DETAIL ADD &
+IF T_FFDMNTPAI2<>0 AND FCPREC OF FACOD_PAIEMENT2 = "1" ALIAS SF3 AT D_FARCLE
+ITEM CIECLE       OF SF3         = G_CIECLE                      ; C    4  Numéro de la compagnie - Entité légale.
+ITEM FARCLE       OF SF3         = D_FARCLE                      ; C    9  Numéro de la facture ou de la note de crédit.
+ITEM FFDCLELIG    OF SF3         = T_FFDCLELIG + 30              ; I    4  Séquence.
+ITEM FFDDSC       OF SF3         = T_DSCPAI2                     ; C   50  Description pour l'analyse de compte.
+ITEM TRPCLE       OF SF3         = " "                           ; C    3  Produit
+ITEM ETACLE       OF SF3         = " "                           ; C    4  Élément de tarification
+ITEM FFDTYP       OF SF3         = "3"                           ; C    1  Type de trans.
+ITEM FFDPRI       OF SF3         = 0                             ; I    2  Numéro du prix.
+ITEM FFDQTEFAC    OF SF3         = 0                             ; I    4  Quantité facturée
+ITEM FFDTAXTYPTPS OF SF3         = " "                           ; C    1  Type code de taxe
+ITEM FFDTAXCODTPS OF SF3         = " "                           ; C    2  Code de taxe
+ITEM FFDTAXTYPTVQ OF SF3         = " "                           ; C    1  Type de code de taxe
+ITEM FFDTAXCODTVQ OF SF3         = " "                           ; C    2  Code de taxe
+ITEM FFDPRIUNI    OF SF3         = 0                             ; F    8  Prix unitaire
+ITEM PRJCLE       OF SF3         = PRJCLE    OF FAFAR_IMP_GEN    ; C    4  Projet
+ITEM PRACLE       OF SF3         = PRACLE    OF FAFAR_IMP_GEN    ; C    8  Sous-projet
+ITEM CPTCLE       OF SF3         = FCPCPTCLE OF FACOD_PAIEMENT2  ; C    4  Compte
+ITEM UNACLE       OF SF3         = FIGUNAPAI OF FAFAR_IMP_GEN    ; C    8  Unité adm.
+ITEM IMMCLE       OF SF3         = IMMCLE    OF FAFAR_IMP_GEN    ; C    8  Immobilisation
+ITEM FFDTIMSTP    OF SF3         = SYSDATE * 1000000 + ROUND(SYSTIME/100)
+ITEM FFDMNTTOT    OF SF3         = T_FFDMNTPAI2                  ; F    8  Mnt brut
+ITEM FFDMNTNET    OF SF3         = T_FFDMNTPAI2                  ; F    8  Montant net
+ITEM FFDMNTTVQ    OF SF3         = 0                             ; F    8  Montant de T.V.P.
+ITEM FFDMNTTPS    OF SF3         = 0                             ; F    8  Montant de T.P.S.
+
+OUTPUT FACPT_A_REC ADD AT D_FARCLE IF T_CPTFAC > 0
+ITEM CIECLE     OF FACPT_A_REC = G_CIECLE                      ; C    4  Numéro de la compagnie - Entité légale.
+ITEM FARCLE     OF FACPT_A_REC = D_FARCLE                      ; C    9  Numéro de la facture ou de la note de crédit.
+ITEM REFCIECLE  OF FACPT_A_REC = "----"                        ; C    4  Compagnie
+ITEM REFCLETYP  OF FACPT_A_REC = "C"                           ; C    1  Type de référence (C-lient, E-mploye, F-ournisseur)
+ITEM REFCLENUM  OF FACPT_A_REC = T_CLICLE                      ; C    6  Numéro de la référence
+ITEM RADCLE     OF FACPT_A_REC = T_RADCLE                      ; IU   2  Numéro séquentiel d'adresse.
+ITEM FARDSC1    OF FACPT_A_REC = T_NUMRES2                     ; C   40  Description pour l'analyse de compte.
+ITEM FARDSC2    OF FACPT_A_REC = " "                           ; C   40  Description pour l'analyse de compte.
+ITEM PECCLE     OF FACPT_A_REC = G_PECCLE                      ; C    4  Numéro de la période comptable. (...)
+ITEM LCRCLE     OF FACPT_A_REC = G_LCRCLE                      ; C    4  Numéro du lot.
+ITEM FARTYPECR  OF FACPT_A_REC = "FA"                          ; C    2  Type de facture.
+ITEM FARCMDCLI  OF FACPT_A_REC = FPACMDCLE OF FAFAR_PASSERELLE ; C   15  Numéro de commande du client.
+ITEM FARDAT     OF FACPT_A_REC = T_FARDAT                      ; IU   8  Date de la facture ou de la note de crédit.
+ITEM FARDATJOU  OF FACPT_A_REC = 0                             ; IU   8  Date de journalisation.
+ITEM FARHREJOU  OF FACPT_A_REC = 0                             ; IU   4  Heure de journalisation.
+ITEM FARTERNET  OF FACPT_A_REC = T_FARTERNET                   ; C    4  Terme net.
+ITEM FARDATNET  OF FACPT_A_REC = 0                             ; IU   8  Date due pour l'encaissement.
+ITEM FARTERESC1 OF FACPT_A_REC = T_FARTERESC1                  ; C    4  Terme d'escompte (1).
+ITEM FARDATESC1 OF FACPT_A_REC = 0                             ; IU   8  Date d'escompte (1).
+ITEM FARTERESC2 OF FACPT_A_REC = T_FARTERESC2                  ; C    4  Terme d'escompte (2).
+ITEM FARDATESC2 OF FACPT_A_REC = 0                             ; IU   8  Date d'escompte (2).
+ITEM FARTERFRS  OF FACPT_A_REC = T_FARTERFRS                   ; C    4  Terme de frais d'intérêt.
+ITEM FARDATFRS  OF FACPT_A_REC = 0                             ; IU   8  Date de frais d'intérêt.
+ITEM FARMNT     OF FACPT_A_REC = T_FARMNT                      ; F    8  Mnt brut de la facture ou note de crédit incluant les taxes.
+ITEM FARMNTNET  OF FACPT_A_REC = T_FARMNTNET                   ; F    8  Montant escomptable pour le calcul de l'escompte.
+ITEM FARMNTTPS  OF FACPT_A_REC = T_FARMNTTPS                   ; F    8  Montant de T.V.P.
+ITEM FARMNTTVQ  OF FACPT_A_REC = T_FARMNTTVQ                   ; F    8  Montant de T.P.S.
+ITEM FARMNTREC  OF FACPT_A_REC = T_FARMNTREC                   ; F    8  Montant de T.P.S.
+ITEM FARDATCRE  OF FACPT_A_REC = SYSDATE                       ; IU   8  Date de création du document.
+ITEM FARHRECRE  OF FACPT_A_REC = SYSTIME / 10000               ; IU   2  Heure de création du document.
+ITEM FARUSRCRE  OF FACPT_A_REC = LOGONID                       ; C   12  Usager de création du document.
+ITEM FARCODPOS  OF FACPT_A_REC = T_CODPOS                      ; C   16  Code postal, Zip ou ...
+ITEM FARDERLIG  OF FACPT_A_REC = T_FFDCLELIG
+ITEM FARSTU     OF FACPT_A_REC = "A"
+ITEM FARMNTESC  OF FACPT_A_REC = T_FARMNTESC
+
+
+OUTPUT FAFAR_ENTETE ADD AT D_FARCLE IF T_CPTFAC > 0
+ITEM CIECLE     OF FAFAR_ENTETE = G_CIECLE                      ; C    4  Numéro de la compagnie - Entité légale.
+ITEM FARCLE     OF FAFAR_ENTETE = D_FARCLE                      ; C    9  Numéro de la facture ou de la note de crédit.
+ITEM FFEPORORI  OF FAFAR_ENTETE = T_DSCPORORI                   ; C    50
+ITEM FFEPORDES  OF FAFAR_ENTETE = T_DSCPORDES                   ; C    50
+ITEM FFEDES     OF FAFAR_ENTETE = " "                           ; C    50
+
+OUTPUT FAFAR_HIST ADD
+ITEM CIECLE     OF FAFAR_HIST  = G_CIECLE                      ; C    4  Numéro de la compagnie - Entité légale.
+ITEM FHIFARCLE  OF FAFAR_HIST  = D_FARCLE                      ; C    9  Numéro de la facture ou de la note de crédit.
+ITEM FFDCLELIG  OF FAFAR_HIST  = T_FFDCLELIG
+ITEM FHIORI     OF FAFAR_HIST  = "1" IF "P" <> T_TRPCLE[1:1] &
+                            ELSE "0"
+ITEM FHIDSC     OF FAFAR_HIST  = FPADSC    OF FAFAR_PASSERELLE ; C   25  Description pour l'analyse de compte.
+ITEM FHICMDCLE  OF FAFAR_HIST  = FPACMDCLE OF FAFAR_PASSERELLE ; C   16  Numéro de commande du client.
+ITEM FHIDAT     OF FAFAR_HIST  = T_FARDAT                      ; IU   8  Date de la facture ou de la note de crédit.
+ITEM FHIHRE     OF FAFAR_HIST  = T_FHIHRE                      ; IU   4  Heure
+ITEM FHICLICLE  OF FAFAR_HIST  = FPACLICLE OF FAFAR_PASSERELLE ; C    6
+ITEM FHIMAG     OF FAFAR_HIST  = FPAMAG    OF FAFAR_PASSERELLE ; IU   8
+ITEM FHIDEP     OF FAFAR_HIST  = FPADEP    OF FAFAR_PASSERELLE ; IU   4
+ITEM FHIFIL     OF FAFAR_HIST  = FPAFIL    OF FAFAR_PASSERELLE ; IU   8
+ITEM FHIVEN     OF FAFAR_HIST  = FPAVEN    OF FAFAR_PASSERELLE ; IU   4
+ITEM FHICODTRA  OF FAFAR_HIST  = FPACODTRA OF FAFAR_PASSERELLE ; C    1
+ITEM FHITRPCLE  OF FAFAR_HIST  = T_TRPCLE                      ; C    3
+ITEM FHIETACLE  OF FAFAR_HIST  = T_ETACLE                      ; C    4
+ITEM FHIUSRCMD  OF FAFAR_HIST  = FPAUSRCMD OF FAFAR_PASSERELLE ; C    16
+ITEM FHICOU     OF FAFAR_HIST  = T_FFDMNTNET                   ; IU   8
+ITEM FHIQTEFAC  OF FAFAR_HIST  = T_FFDQTEFAC                   ; I    4
+ITEM FHIPRIUNI  OF FAFAR_HIST  = T_FFDPRIUNI                   ; F    8
+ITEM FHIMNTESC  OF FAFAR_HIST  = T_FFDMNTESC                   ; F    8
+ITEM FHIMNTPAI1 OF FAFAR_HIST  = T_FFDMNTPAI1                  ; F    8
+ITEM FHIMODPAI1 OF FAFAR_HIST  = FPAMODPAI1 OF FAFAR_PASSERELLE; F    8
+ITEM FHIMNTPAI2 OF FAFAR_HIST  = T_FFDMNTPAI2                  ; F    8
+ITEM FHIMODPAI2 OF FAFAR_HIST  = FPAMODPAI2 OF FAFAR_PASSERELLE; F    8
+ITEM FHIMNTTPS  OF FAFAR_HIST  = T_FFDMNTTPS                   ; F    8
+ITEM FHIMNTTVQ  OF FAFAR_HIST  = T_FFDMNTTVQ                   ; F    8
+ITEM FHICODPOS  OF FAFAR_HIST  = T_CODPOS                      ; C   16
+ITEM FHIRES     OF FAFAR_HIST  = T_NUMRES                      ; C   16
+ITEM FHIPERCLE  OF FAFAR_HIST  = T_PERCLE
+ITEM FHIANN     OF FAFAR_HIST  = T_FHIANN
+ITEM FHIPERJOU  OF FAFAR_HIST  = T_PERJOU
+
+SUBFILE WFA702A KEEP &
+  INCLUDE D_FARCLE                       , &
+          FPACODTRA   OF FAFAR_PASSERELLE, &
+          T_CPTFAR                       , &
+          T_MNTBRU                       , &
+          T_FFDMNTNET                    , &
+          T_FFDMNTTPS                    , &
+          T_FFDMNTTVQ                    , &
+          T_FFDMNTESC                    , &
+          T_FFDMNTPAI1                   , &
+          T_FFDMNTPAI2                   , &
+          T_FARMNTREC                    , &
+          T_SOLDE                        , &
+          G_CIECLE                       , &
+          G_LCRCLE
+
+REQUEST FIN TERMINATE IF G_ERREUR = "ARRET"
+
+ACCESS CRLOT
+
+
+CHOOSE CIECLE PARM, &
+       PECCLE PARM  RANGE,&
+       LCRCLE PARM
+
+; Ajustement pour le changement de siècle
+DEFINE D_ANNSIE CHARACTER SIZE 4 = PARM
+
+SELECT IF PECCLE OF CRLOT[1:2] = D_ANNSIE[3:2]
+
+OUTPUT CRLOT UPDATE
+ITEM LCRTYPECR OF CRLOT FINAL "PF" ; Attention voir l'écran FA720.qks pour
+                                   ; le traitement d'un lot PF
+
+DISPLAY "Terminer sans erreur "
+
+
+BUILD
+
+;
+;Attention il y a un quick en batch qui suit
+;

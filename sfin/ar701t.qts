@@ -1,0 +1,813 @@
+;/T/ Transfert des factures d'achat aux payables
+;
+;/P/ Programmeur...: Nancy Marceau
+;    Date Création.: 10 mai 1994
+;
+;    Description...: Cette procédure permet de transférer toutes les factures
+;                    du module des achats vers les payables dans un lot qui est
+;                    spécifié par l'utilisateur.
+;
+;    Paramètres....: Compagnie  (Compagnie du menu)
+;                    Période    (Période des payables)
+;                    Lot        (Lot des payables)
+;
+;    Particularités: Aucune
+;
+;    Programmeur..: Josée Bédard
+;    Date modif...: 27-Mai-94
+;
+;    Description..: Adaptation pour ajouter le couru à recevoir sur les taxes
+;                   lors de l'enregistrement de la dépense (Reception)
+;
+;
+;/M/ Modifié par..: Guy Chabot le 1 mars 1995
+;            but..: Renversement du courus par le taux de la réception.
+;
+;/M/ Marie-Josée Hamel, 96.03.26, enlever le renversement du couru pour qu'il
+;                                 se fasse lors de la journalisation.
+;
+;/M/ Marie-Josée Hamel, 96.09.24, ajouter un parametre usager de création
+;
+;/M/ Programmeur.......: Francois Richard
+;    Date modification.: 15 Juin 1999
+;    Description.......: Migration Achat/Réception/Inventaire de l'environnement
+;                        BOC
+;***********************************************************************************************************************************
+;
+;/M/ Modifié par.......: Marc Poulin     
+;    Date modification.: 02 mars 2000
+;    Description.......: Corriger le calcul de la valeur facturée en fonction des devises étrangères.
+;
+;    Référence.........: Stabilisation du module Achat/Réception Inventaire (point 05).
+;
+;    Signet............: MP-00-03-02_S05.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+USE ussetqts NOLIST   ; set process nolimit
+
+
+RUN ar701t
+;
+; Pour arrêter la procédure en cas d'erreur
+;
+GLOBAL TEMPORARY G_ERREUR       CHARACTER SIZE 5
+
+GLOBAL TEMPORARY G_CIECLE       CHARACTER SIZE 4 ; Compagnie de création
+GLOBAL TEMPORARY G_PECCLE       CHARACTER SIZE 4 ; Période comptable
+GLOBAL TEMPORARY G_LCPCLE       CHARACTER SIZE 4 ; Lot de création
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure valide que le lot existe
+;
+REQUEST VALIDE_LOT
+
+ACCESS CPLOT   &
+   ;
+   ; Pour valider que la période des payables n'est pas fermée.
+   ;
+  LINK CIECLE OF CPLOT, &
+       PECCLE OF CPLOT  &
+    TO CIECLE, &
+       PECCLE OF MCPERIODE_CIE
+
+TEMPORARY T_MESERR CHARACTER SIZE 80 ; Pour les erreurs.
+
+CHOOSE CIECLE PARM, & ; Compagnie du lot
+       PECCLE PARM, & ; Période du lot
+       LCPCLE PARM    ; Numéro de lot
+
+ITEM T_MESERR = &
+@IF FRANCAIS
+  "Ce lot n'est pas du bon type " + LCPCLE OF CPLOT  &
+
+@ELSE
+  "%%%Ce lot n'est pas du bon type " + LCPCLE OF CPLOT  &
+@ENDIF
+  IF LCPTYPECR OF CPLOT <> "FA" ELSE &
+
+@IF FRANCAIS
+  "Ce lot ne vous est pas destiné " + LCPCLE OF CPLOT  &
+
+@ELSE
+  "%%%Ce lot ne vous est pas destiné " + LCPCLE OF CPLOT  &
+@ENDIF
+  IF LCPUSR OF CPLOT <> LOGONID ELSE &
+
+
+
+@IF FRANCAIS
+  "La période du lot des payables est fermée. " + LCPCLE OF CPLOT  &
+
+@ELSE
+  "%%%La période du lot des payables est fermée. " + LCPCLE OF CPLOT  &
+@ENDIF
+  IF PCCSTUCP OF MCPERIODE_CIE = "F" ELSE &
+
+
+@IF FRANCAIS
+  "Le lot est déjà journalisé " + LCPCLE OF CPLOT &
+@ELSE
+  "%%%Le lot est déjà journalisé " + LCPCLE OF CPLOT  &
+@ENDIF
+  IF LCPDATJOU OF CPLOT <> 0 ELSE &
+
+@IF FRANCAIS
+  "Le lot est déjà autorisé à la journalisation " + LCPCLE OF CPLOT  &
+@ELSE
+  "%%%Le lot est déjà autorisé à la journalisation " + LCPCLE OF CPLOT  &
+@ENDIF
+   IF LCPATRJOU OF CPLOT = "1"
+
+ITEM G_ERREUR = "ARRET" IF T_MESERR <> ""
+
+ITEM G_CIECLE = CIECLE OF CPLOT
+ITEM G_PECCLE = PECCLE OF CPLOT
+ITEM G_LCPCLE = LCPCLE OF CPLOT
+
+SUBFILE WAR701LO &
+  INCLUDE CIECLE       OF CPLOT , &
+          PECCLE       OF CPLOT , &
+          LCPCLE       OF CPLOT , &
+          LCPTYPECR    OF CPLOT , &
+          LCPDATJOU    OF CPLOT , &
+          LCPNBRTRS    OF CPLOT , &
+          LCPNBRTRSVER OF CPLOT , &
+          LCPCUMMNT    OF CPLOT,  &
+          LCPCUMMNTVER OF CPLOT,  &
+          LCPNBRTRSERR OF CPLOT,  &
+          LCPDSC       OF CPLOT
+
+
+SUBFILE WUS900ER KEEP &
+                 IF T_MESERR <> "" &
+  INCLUDE CIECLE OF CPLOT ALIAS CIECLE, &
+          G_PECCLE              ALIAS PECCLE, &
+          T_MESERR
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Cette procédure permet d'effectuer le transfert des factures vers les
+; payables.
+;
+REQUEST CREATION_FACTURES_CAP TERMINATE IF G_ERREUR <> ""
+
+ACCESS *WAR701LO  &
+  LINK CIECLE OF WAR701LO, &
+       PECCLE OF WAR701LO  &
+    TO FACCIECLE, &
+       PECCLE OF ARFACTURE_REC    &
+    ;
+    ; Pour savoir si le fournisseur est retenu.
+    ;
+  LINK FOUCIECLE OF ARFACTURE_REC, &
+       FOUCLE    OF ARFACTURE_REC, &
+       FACCIECLE OF ARFACTURE_REC  &
+    TO FOUCIECLE, &
+       FOUCLE,    &
+       FOCCIECLE OF VFOC_FOU
+
+SELECT ARFACTURE_REC IF FACDATTRF = 0     ; Date de transfert à zéro
+
+OUTPUT CPCPT_A_PAYER  ADD NOITEM
+  ITEM FOUCIECLE  OF CPCPT_A_PAYER FINAL FOUCIECLE  OF ARFACTURE_REC
+  ITEM FOUCLE     OF CPCPT_A_PAYER FINAL FOUCLE     OF ARFACTURE_REC
+  ITEM CAPCLE     OF CPCPT_A_PAYER FINAL FACCLE     OF ARFACTURE_REC
+  ITEM CAPCIECLE  OF CPCPT_A_PAYER FINAL FACCIECLE  OF ARFACTURE_REC
+  ITEM REFCIECLE  OF CPCPT_A_PAYER FINAL FOUCIECLE  OF ARFACTURE_REC
+  ITEM REFCLETYP  OF CPCPT_A_PAYER FINAL REFCLETYP  OF ARFACTURE_REC
+  ITEM REFCLENUM  OF CPCPT_A_PAYER FINAL FOUCLE     OF ARFACTURE_REC
+  ITEM RADCLE     OF CPCPT_A_PAYER FINAL RADCLE     OF ARFACTURE_REC
+  ITEM PECCLE     OF CPCPT_A_PAYER FINAL PECCLE     OF ARFACTURE_REC
+  ITEM LCPCLE     OF CPCPT_A_PAYER FINAL G_LCPCLE
+
+  ITEM CAPTYPECR  OF CPCPT_A_PAYER FINAL "FA" &
+ IF FACMNTTOT OF ARFACTURE_REC >= 0 ELSE "CR" ;Factures, Crédit.
+
+  ITEM CAPDAT     OF CPCPT_A_PAYER FINAL FACDAT     OF ARFACTURE_REC
+  ITEM CAPRTU     OF CPCPT_A_PAYER FINAL FOURTU     OF VFOC_FOU
+  ITEM CAPTERNET  OF CPCPT_A_PAYER FINAL FACTERNET  OF ARFACTURE_REC
+  ITEM CAPDATNET  OF CPCPT_A_PAYER FINAL FACDATDUE  OF ARFACTURE_REC
+  ITEM CAPTERESC1 OF CPCPT_A_PAYER FINAL FACTERESC1 OF ARFACTURE_REC
+  ITEM CAPDATESC1 OF CPCPT_A_PAYER FINAL FACDATESC1 OF ARFACTURE_REC
+  ITEM CAPTERESC2 OF CPCPT_A_PAYER FINAL FACTERESC2 OF ARFACTURE_REC
+  ITEM CAPDATESC2 OF CPCPT_A_PAYER FINAL FACDATESC2 OF ARFACTURE_REC
+  ITEM CAPDSC1    OF CPCPT_A_PAYER FINAL FACCOM1    OF ARFACTURE_REC
+  ITEM CAPDSC2    OF CPCPT_A_PAYER FINAL FACCOM2    OF ARFACTURE_REC
+  ITEM CAPMNT     OF CPCPT_A_PAYER FINAL FACMNTTOT  OF ARFACTURE_REC
+  ITEM CAPMNTTPS  OF CPCPT_A_PAYER FINAL FACMNTTPS  OF ARFACTURE_REC
+  ITEM CAPMNTTVQ  OF CPCPT_A_PAYER FINAL FACMNTTVQ  OF ARFACTURE_REC
+  ITEM CAPMNTCTI  OF CPCPT_A_PAYER FINAL FACMNTCTI  OF ARFACTURE_REC
+  ITEM CAPMNTRTI  OF CPCPT_A_PAYER FINAL FACMNTRTI  OF ARFACTURE_REC
+  ITEM CAPMNTNET  OF CPCPT_A_PAYER FINAL FACMNTNET  OF ARFACTURE_REC
+  ITEM CAPCUMMNT  OF CPCPT_A_PAYER FINAL FACMNTTOT  OF ARFACTURE_REC
+  ITEM CAPFLGCED  OF CPCPT_A_PAYER FINAL "0"
+  ITEM CAPCPTCAP  OF CPCPT_A_PAYER FINAL FOCCPTCAP  OF VFOC_FOU
+  ITEM CAPUSRCRE  OF CPCPT_A_PAYER FINAL FACUSRCRE  OF ARFACTURE_REC
+  ITEM CAPDATCRE  OF CPCPT_A_PAYER FINAL FACDATCRE  OF ARFACTURE_REC
+  ITEM CAPHRECRE  OF CPCPT_A_PAYER FINAL FACHRECRE  OF ARFACTURE_REC
+  ITEM CAPUSRMOD  OF CPCPT_A_PAYER FINAL FACUSRMOD  OF ARFACTURE_REC
+  ITEM CAPDATMOD  OF CPCPT_A_PAYER FINAL FACDATMOD  OF ARFACTURE_REC
+  ITEM CAPHREMOD  OF CPCPT_A_PAYER FINAL FACHREMOD  OF ARFACTURE_REC
+;
+; Mise à jour de la date de transfert.
+;
+OUTPUT ARFACTURE_REC  UPDATE NOITEM
+  ITEM FACDATTRF OF ARFACTURE_REC FINAL SYSDATE
+  ITEM LCPCLE    OF ARFACTURE_REC FINAL G_LCPCLE
+
+;
+; Subfile qui conserve les factures traitées.
+;
+SUBFILE WAR701FA KEEP &
+        INCLUDE FOUCIECLE    OF ARFACTURE_REC, &
+                FOUCLE       OF ARFACTURE_REC, &
+                FACCLE       OF ARFACTURE_REC, &
+                FACCIECLE    OF ARFACTURE_REC, &
+                FACDAT       OF ARFACTURE_REC, &
+                FACTYPECR    OF ARFACTURE_REC, &
+                ENTCLE       OF ARFACTURE_REC, &
+                CIECLE       OF WAR701LO, &
+                PECCLE       OF WAR701LO, &
+                LCPCLE       OF WAR701LO, &
+                LCPTYPECR    OF WAR701LO, &
+                LCPDATJOU    OF WAR701LO, &
+                LCPNBRTRS    OF WAR701LO, &
+                LCPNBRTRSVER OF WAR701LO, &
+                LCPCUMMNT    OF WAR701LO, &
+                LCPCUMMNTVER OF WAR701LO, &
+                LCPNBRTRSERR OF WAR701LO,  &
+                LCPDSC       OF WAR701LO,  &
+                CAPMNT       OF CPCPT_A_PAYER, &
+                CAPCUMMNT    OF CPCPT_A_PAYER, &
+                REFCIECLE    OF CPCPT_A_PAYER, &
+                REFCLENUM    OF CPCPT_A_PAYER, &
+                REFCLETYP    OF CPCPT_A_PAYER, &
+                RADCLE       OF CPCPT_A_PAYER, &
+                CAPTYPECR    OF CPCPT_A_PAYER, &
+                CAPDAT       OF CPCPT_A_PAYER, &
+                CAPRTU       OF CPCPT_A_PAYER, &
+                CAPTERNET    OF CPCPT_A_PAYER, &
+                CAPDATNET    OF CPCPT_A_PAYER, &
+                CAPTERESC1   OF CPCPT_A_PAYER, &
+                CAPDATESC1   OF CPCPT_A_PAYER, &
+                CAPMNTTPS    OF CPCPT_A_PAYER, &
+                CAPMNTTVQ    OF CPCPT_A_PAYER, &
+                CAPMNTCTI    OF CPCPT_A_PAYER, &
+                CAPMNTRTI    OF CPCPT_A_PAYER, &
+                CAPMNTNET    OF CPCPT_A_PAYER, &
+                CAPDSC1      OF CPCPT_A_PAYER, &
+                CAPDSC2      OF CPCPT_A_PAYER
+
+;------------------------------------------------------------------------------
+;
+; Procédure qui calcul le montant de renversement de dépense ou d'inventaire.
+;
+REQUEST RENVERSEMENT_DEBIT
+
+ACCESS *WAR701FA  &
+
+  LINK  FOUCIECLE OF WAR701FA, &
+        FOUCLE    OF WAR701FA, &
+        FACCIECLE OF WAR701FA  &
+    TO  FOUCIECLE, &
+        FOUCLE,    &
+        FOCCIECLE OF VFOC_FOU    &
+
+  LINK  DEVCLE OF VFOC_FOU &
+    TO  DEVCLE OF MCDEVISE   &
+
+  LINK  CIECLE OF WAR701FA TO CIECLE OF MCCOMPAGNIE   &
+
+  LINK  FOUCIECLE OF WAR701FA, &
+        FOUCLE    OF WAR701FA, &
+        FACCLE    OF WAR701FA, &
+        FACCIECLE OF WAR701FA  &
+    TO  FOUCIECLE, &
+        FOUCLE,    &
+        FACCLE,    &
+        FACCIECLE OF ARFAC_DETAIL   &
+
+  LINK  FACCIECLE OF WAR701FA, &
+        RECCLE    OF ARFAC_DETAIL &
+    TO  CIECLE, &
+        RECCLE OF ARRECEPTION    OPTIONAL &
+
+  LINK  CIECLE OF ARRECEPTION, &
+        ENTCLE OF ARRECEPTION  &
+    TO  CIECLE, &
+        ENTCLE OF ARENTREPOT   OPTIONAL &
+
+  LINK  FOUCIECLE OF WAR701FA, &
+        FOUCLE    OF WAR701FA, &
+        FACCLE    OF WAR701FA, &
+        FACCIECLE OF WAR701FA, &
+        RECCLE    OF ARFAC_DETAIL &
+    TO  FOUCIECLE, &
+        FOUCLE,    &
+        FACCLE,    &
+        FACCIECLE, &
+        RECCLE OF ARDER_ITEM   &
+
+  LINK  FACCIECLE OF ARDER_ITEM, &
+        RECCLE    OF ARDER_ITEM, &
+        DEICLE    OF ARDER_ITEM  &
+    TO  CIECLE, &
+        RECCLE, &
+        REDCLE OF ARREC_DETAIL   OPTIONAL &
+
+  LINK  REDTAXTYPTPS OF ARREC_DETAIL, &
+        REDTAXCODTPS OF ARREC_DETAIL  &
+    TO  TAXCLETYP, &
+        TAXCLECOD OF MCTAXE   ALIAS A_TAX_TPS OPTIONAL &
+
+  LINK  REDTAXTYPTVQ OF ARREC_DETAIL, &
+        REDTAXCODTVQ OF ARREC_DETAIL  &
+    TO  TAXCLETYP, &
+        TAXCLECOD OF MCTAXE   ALIAS A_TAX_TVQ OPTIONAL
+
+TEMPORARY TZ_MNTTXB FLOAT SIZE 08
+TEMPORARY TZ_MNTTPS FLOAT SIZE 08
+TEMPORARY TZ_MNTTVQ FLOAT SIZE 08
+
+TEMPORARY T_MNTTOT  FLOAT SIZE 08
+TEMPORARY T_MNTRNF  FLOAT SIZE 08
+TEMPORARY T_MNTDBT  FLOAT SIZE 08
+TEMPORARY T_MNTTPS  FLOAT SIZE 08
+TEMPORARY T_MNTTVQ  FLOAT SIZE 08
+TEMPORARY T_MNTCTI  FLOAT SIZE 08
+TEMPORARY T_MNTRTI  FLOAT SIZE 08
+
+TEMPORARY T_COUMYN1  FLOAT SIZE 08
+TEMPORARY T_COUMYN2  FLOAT SIZE 08
+TEMPORARY T_QTEAJT  INTEGER SIZE 04
+
+TEMPORARY T_ESCUNI  FLOAT SIZE 8
+
+SORT   ON FOUCIECLE OF WAR701FA &
+       ON FOUCLE    OF WAR701FA &
+       ON FACCLE    OF WAR701FA &
+       ON FACCIECLE OF ARFAC_DETAIL &
+       ON RECCLE    OF ARFAC_DETAIL
+
+ITEM TZ_MNTTPS = 0
+ITEM TZ_MNTTVQ = 0
+
+
+ITEM T_ESCUNI  = ROUND( DEIMNTESC OF ARDER_ITEM / &
+                       (DEIQTEFAC OF ARDER_ITEM / 1000) * 100)
+
+ITEM TZ_MNTTXB = ROUND( (DEIQTEFAC    OF ARDER_ITEM + &
+                         REDQTERECREJ OF ARREC_DETAIL) * &
+                        (REDPRIUNI    OF ARREC_DETAIL - T_ESCUNI) / 100000) &
+
+     IF     DEIFLGCOM OF ARDER_ITEM = "1" &
+        AND FACTYPECR OF WAR701FA <> "CR" &
+     ELSE ROUND(DEIQTEFAC OF ARDER_ITEM * &
+                (REDPRIUNI OF ARREC_DETAIL - T_ESCUNI) / 100000) &
+     IF     FACTYPECR OF WAR701FA <> "CR" &
+     ELSE DEIMNTTOT OF ARDER_ITEM
+
+ITEM T_MNTTOT  = TZ_MNTTXB
+
+;------------------------------------------------------------------------------
+
+ITEM TZ_MNTTPS = TZ_MNTTXB - &
+                 ROUND( TZ_MNTTXB / (1 + TAXPCT OF A_TAX_TPS) ) &
+
+     IF  TAXMOD    OF A_TAX_TPS = "I" AND &
+        (TAXFLGNET OF A_TAX_TPS = "1" OR TAXFLGNET OF A_TAX_TPS = "3") AND &
+         TAXMOD    OF A_TAX_TVQ = "S" &
+     ELSE TZ_MNTTPS
+
+;------------------------------------------------------------------------------
+
+ITEM TZ_MNTTXB = TZ_MNTTXB - TZ_MNTTPS &
+
+     IF TAXMOD OF A_TAX_TPS = "I" AND TAXMOD OF A_TAX_TVQ = "S" &
+     ELSE TZ_MNTTXB
+
+;------------------------------------------------------------------------------
+
+ITEM TZ_MNTTPS = ROUND( TZ_MNTTXB * TAXPCT OF A_TAX_TPS ) &
+
+     IF TAXMOD OF A_TAX_TPS = "S" AND TAXMOD OF A_TAX_TVQ = "S" &
+     ELSE TZ_MNTTPS
+
+;------------------------------------------------------------------------------
+
+ITEM TZ_MNTTXB = TZ_MNTTXB + TZ_MNTTPS &
+
+     IF (TAXMOD    OF A_TAX_TPS = "I" OR TAXMOD OF A_TAX_TPS = "S") AND &
+         TAXFLGNET OF A_TAX_TVQ = "2" AND &
+         TAXMOD    OF A_TAX_TVQ = "S" &
+     ELSE TZ_MNTTXB
+
+;------------------------------------------------------------------------------
+
+ITEM TZ_MNTTVQ = ROUND(TZ_MNTTXB * TAXPCT OF A_TAX_TVQ) &
+
+     IF (TAXMOD    OF A_TAX_TPS = "I" OR TAXMOD OF A_TAX_TPS = "S") AND &
+         TAXMOD    OF A_TAX_TVQ = "S" &
+     ELSE TZ_MNTTVQ
+
+;-------------------------------------------------------------------------------
+
+ITEM TZ_MNTTVQ = ROUND( TZ_MNTTXB * TAXPCT OF A_TAX_TVQ ) &
+
+     IF (TAXMOD    OF A_TAX_TPS <> "I" AND TAXMOD OF A_TAX_TPS <> "S") AND &
+         TAXMOD    OF A_TAX_TVQ = "S" &
+     ELSE TZ_MNTTVQ
+
+;-------------------------------------------------------------------------------
+
+ITEM TZ_MNTTVQ = ROUND( ROUND ( TZ_MNTTXB / (1 + TAXPCT OF A_TAX_TVQ + &
+                                                 TAXPCT OF A_TAX_TPS) ) &
+                 * TAXPCT OF A_TAX_TVQ) &
+     IF TAXMOD    OF A_TAX_TVQ = "I" AND TAXMOD OF A_TAX_TPS = "I" AND &
+        TAXFLGNET OF A_TAX_TVQ = "1" &
+     ELSE TZ_MNTTVQ
+
+;-------------------------------------------------------------------------------
+
+ITEM TZ_MNTTVQ = TZ_MNTTXB - &
+                 ROUND( TZ_MNTTXB / (1 + TAXPCT OF A_TAX_TVQ) ) &
+
+     IF  TAXMOD OF A_TAX_TVQ = "I" AND &
+        (TAXMOD OF A_TAX_TPS <> "I" OR TAXFLGNET OF A_TAX_TVQ <> "1") &
+     ELSE TZ_MNTTVQ
+
+;-------------------------------------------------------------------------------
+
+ITEM TZ_MNTTXB = TZ_MNTTXB - TZ_MNTTVQ &
+
+     IF TAXMOD OF A_TAX_TPS = "S" AND TAXMOD OF A_TAX_TVQ = "I" &
+     ELSE TZ_MNTTXB
+
+;-------------------------------------------------------------------------------
+
+ITEM TZ_MNTTPS = ROUND( TZ_MNTTXB * TAXPCT OF A_TAX_TPS ) &
+
+     IF TAXMOD OF A_TAX_TPS = "S" AND TAXMOD OF A_TAX_TVQ <> "S" &
+     ELSE TZ_MNTTPS
+
+;-------------------------------------------------------------------------------
+
+ITEM TZ_MNTTXB = TZ_MNTTXB - TZ_MNTTVQ &
+
+     IF TAXMOD OF A_TAX_TVQ = "I" AND TAXFLGNET OF A_TAX_TPS = "1" AND &
+        TAXMOD OF A_TAX_TPS = "I" &
+     ELSE TZ_MNTTXB
+
+;-------------------------------------------------------------------------------
+
+ITEM TZ_MNTTPS = TZ_MNTTXB - &
+                 ROUND( TZ_MNTTXB / (1 + TAXPCT OF A_TAX_TPS) ) &
+
+     IF TAXMOD OF A_TAX_TPS  = "I" AND TAXFLGNET OF A_TAX_TPS = "1" AND &
+        TAXMOD OF A_TAX_TVQ <> "S" &
+     ELSE TZ_MNTTPS
+
+;-------------------------------------------------------------------------------
+
+ITEM TZ_MNTTPS = TZ_MNTTXB - &
+                 ROUND( TZ_MNTTXB / (1 + TAXPCT OF A_TAX_TPS) ) &
+
+     IF TAXMOD OF A_TAX_TPS  = "I" AND TAXFLGNET OF A_TAX_TPS <> "1" AND &
+        TAXMOD OF A_TAX_TVQ <> "S" &
+     ELSE TZ_MNTTPS
+
+;-------------------------------------------------------------------------------
+
+ITEM T_MNTDBT = T_MNTTOT + TZ_MNTTPS + TZ_MNTTVQ &
+
+     IF TAXMOD OF A_TAX_TPS = "S" AND TAXMOD OF A_TAX_TVQ = "S" &
+     ELSE T_MNTTOT + TZ_MNTTPS &
+
+          IF TAXMOD OF A_TAX_TPS = "S" &
+          ELSE T_MNTTOT + TZ_MNTTVQ &
+
+               IF TAXMOD OF A_TAX_TVQ = "S" &
+               ELSE T_MNTTOT
+
+ITEM T_MNTRNF SUBTOTAL T_MNTDBT RESET AT RECCLE
+
+ITEM T_MNTTPS = 0 - TZ_MNTTPS
+ITEM T_MNTTVQ = 0 - TZ_MNTTVQ
+ITEM T_MNTCTI = ROUND( T_MNTTPS * TAXPCTCTI OF A_TAX_TPS )
+ITEM T_MNTRTI = ROUND( T_MNTTVQ * TAXPCTCTI OF A_TAX_TVQ )
+
+ITEM T_COUMYN1 = ROUND( (REDMNTTOT OF ARREC_DETAIL - &
+                         REDMNTCTI OF ARREC_DETAIL - &
+                         REDMNTRTI OF ARREC_DETAIL) / &
+                         REDQTEREC OF ARREC_DETAIL * 100000) &
+                         IF DEIQTEFAC OF ARDER_ITEM <> 0
+
+;
+; Contient le coût moyen du produit pour la ligne de réception.
+;
+SUBFILE WAR701CM IF "CR" <> FACTYPECR OF WAR701FA &
+        INCLUDE FOUCIECLE OF WAR701FA     , &
+                FOUCLE    OF WAR701FA     , &
+                REFCLETYP OF WAR701FA     , &
+                RADCLE    OF WAR701FA     , &
+                FACCLE    OF WAR701FA     , &
+                CIECLE    OF ARREC_DETAIL , &
+                ENTCLE    OF ARRECEPTION  , &
+                CMDCLE    OF ARRECEPTION  , & ; MP-00-03-02_S05.
+                FACDAT    OF WAR701FA     , &
+                RECCLE    OF ARREC_DETAIL , &
+                REDCLE    OF ARREC_DETAIL , &
+                PRDCLE    OF ARREC_DETAIL , &
+                CMDAJT    OF ARREC_DETAIL , & ; MP-00-03-02_S05.
+                DEIPRIUNI OF ARDER_ITEM ALIAS PRDDERCOU, &
+                T_COUMYN1 ALIAS PRDCOUMYN1, &
+                T_COUMYN2 ALIAS PRDCOUMYN2, &
+                T_QTEAJT  ALIAS PRDQTEAJT
+
+;
+; Contient par facture le montant pour le renversement du couru.
+;
+SUBFILE WAR701RF AT RECCLE &
+        INCLUDE FOUCIECLE    OF WAR701FA               , &
+                FOUCLE       OF WAR701FA               , &
+                FACTYPECR    OF WAR701FA               , &
+                ENTCLE       OF WAR701FA               , &
+                REFCLETYP    OF WAR701FA               , &
+                RADCLE       OF WAR701FA               , &
+                FACCLE       OF WAR701FA   ALIAS CAPCLE, &
+                FACCIECLE    OF WAR701FA   ALIAS CIECLE, &
+                RECCLE       OF ARFAC_DETAIL           , &
+                ENTCPTCOU    OF ARENTREPOT ALIAS CPTCLE, &
+                ENTUNACOU    OF ARENTREPOT ALIAS UNACLE, &
+                CIEUNABIL    OF MCCOMPAGNIE            , &
+                T_MNTRNF
+
+;-------------------------------------------------------------------------------
+;
+; Ajout de la bonne imputation de dépense ou d'inventaire.
+;
+REQUEST CREER_MONTANTS_IMPUTATION
+
+ACCESS *WAR701RF  &
+
+  LINK  FOUCIECLE OF WAR701RF, &
+        FOUCLE    OF WAR701RF, &
+        CAPCLE    OF WAR701RF, &
+        CIECLE    OF WAR701RF, &
+        RECCLE    OF WAR701RF  &
+    TO  FOUCIECLE, &
+        FOUCLE,    &
+        FACCLE,    &
+        FACCIECLE, &
+        RECCLE OF ARDER_ITEM   &
+
+  LINK  DEITAXTYPTPS OF ARDER_ITEM, &
+        DEITAXCODTPS OF ARDER_ITEM  &
+    TO  TAXCLETYP, &
+        TAXCLECOD OF MCTAXE   ALIAS A_TAX_TPS OPTIONAL &
+
+  LINK  DEITAXTYPTVQ OF ARDER_ITEM, &
+        DEITAXCODTVQ OF ARDER_ITEM  &
+    TO  TAXCLETYP, &
+        TAXCLECOD OF MCTAXE   ALIAS A_TAX_TVQ OPTIONAL &
+
+  LINK  FOUCIECLE OF WAR701RF, &
+        FOUCLE    OF WAR701RF, &
+        CIECLE    OF WAR701RF  &
+    TO  FOUCIECLE, &
+        FOUCLE   , &
+        FOCCIECLE  OF VFOC_FOU   OPTIONAL
+
+TEMPORARY T_MNTIMP FLOAT SIZE 08
+TEMPORARY T_COUMYN FLOAT SIZE 08
+
+TEMPORARY T_CPTCOU CHARACTER SIZE 6
+TEMPORARY T_UNACLE CHARACTER SIZE 8
+
+TEMPORARY T_CODDC CHARACTER SIZE 01
+
+SORTED ON FOUCIECLE OF WAR701RF &
+       ON FOUCLE    OF WAR701RF &
+       ON CAPCLE    OF WAR701RF &
+       ON CIECLE    OF WAR701RF &
+       ON RECCLE    OF WAR701RF
+
+ITEM T_CODDC RESET AT INITIAL TO "D"
+
+ITEM T_CPTCOU = CPTCLE OF WAR701RF IF FACTYPECR OF WAR701RF <> "CR" &
+                                   ELSE FOCCPTCAP OF VFOC_FOU
+ITEM T_UNACLE = UNACLE OF WAR701RF IF FACTYPECR OF WAR701RF <> "CR" &
+                                   ELSE CIEUNABIL OF WAR701RF
+
+ITEM T_COUMYN = ROUND( (DEIMNTTOT OF ARDER_ITEM - &
+                        DEIMNTCTI OF ARDER_ITEM - &
+                        DEIMNTRTI OF ARDER_ITEM) / &
+                        DEIQTEFAC OF ARDER_ITEM * 100000) &
+                        IF DEIQTEFAC OF ARDER_ITEM <> 0
+
+ITEM T_MNTIMP = DEIMNTTOT OF ARDER_ITEM - DEIMNTTPS OF ARDER_ITEM - &
+                DEIMNTTVQ OF ARDER_ITEM &
+
+     IF TAXMOD OF A_TAX_TPS = "S" AND TAXMOD OF A_TAX_TVQ = "S" &
+     ELSE DEIMNTTOT OF ARDER_ITEM - DEIMNTTPS OF ARDER_ITEM &
+
+          IF TAXMOD OF A_TAX_TPS = "S" &
+          ELSE DEIMNTTOT OF ARDER_ITEM - DEIMNTTVQ OF ARDER_ITEM &
+
+               IF TAXMOD OF A_TAX_TVQ = "S" &
+               ELSE DEIMNTTOT OF ARDER_ITEM
+
+;
+; Contient le coût moyen du produit pour la ligne de réception.
+;
+
+OUTPUT *WAR701CM ADD NOITEM
+
+  ITEM FOUCIECLE  OF WAR701CM FINAL FOUCIECLE OF WAR701RF
+  ITEM FOUCLE     OF WAR701CM FINAL FOUCLE    OF WAR701RF
+  ITEM REFCLETYP  OF WAR701CM FINAL REFCLETYP OF WAR701RF
+  ITEM RADCLE     OF WAR701CM FINAL RADCLE    OF WAR701RF
+  ITEM FACCLE     OF WAR701CM FINAL CAPCLE    OF WAR701RF
+  ITEM CIECLE     OF WAR701CM FINAL CIECLE    OF WAR701RF
+  ITEM RECCLE     OF WAR701CM FINAL RECCLE    OF WAR701RF
+  ITEM REDCLE     OF WAR701CM FINAL DEICLE    OF ARDER_ITEM
+  ITEM ENTCLE     OF WAR701CM FINAL ENTCLE    OF WAR701RF
+  ITEM FACDAT     OF WAR701CM FINAL 0
+  ITEM PRDCLE     OF WAR701CM FINAL PRDCLE    OF ARDER_ITEM
+  ITEM PRDDERCOU  OF WAR701CM FINAL DEIPRIUNI OF ARDER_ITEM &
+       IF "CR" <> FACTYPECR OF WAR701RF ELSE 0
+  ITEM PRDCOUMYN1 OF WAR701CM FINAL 0
+  ITEM PRDCOUMYN2 OF WAR701CM FINAL T_COUMYN
+  ITEM PRDQTEAJT  OF WAR701CM FINAL DEIQTEFAC OF ARDER_ITEM
+
+
+SUBFILE WAR701IM KEEP INCLUDE &
+  FOUCIECLE    OF WAR701RF , &
+  FOUCLE       OF WAR701RF , &
+  CAPCLE       OF WAR701RF , &
+  CPTCLE       OF ARDER_ITEM , &
+  UNACLE       OF ARDER_ITEM , &
+  CIECLE       OF WAR701RF , &
+  PRJCLE       OF ARDER_ITEM , &
+  PRACLE       OF ARDER_ITEM , &
+  IMMCLE       OF ARDER_ITEM , &
+  DEITAXTYPTPS OF ARDER_ITEM ALIAS CCITAXTYPTPS  , &
+  DEITAXCODTPS OF ARDER_ITEM ALIAS CCITAXCODTPS  , &
+  DEITAXTYPTVQ OF ARDER_ITEM ALIAS CCITAXTYPTVQ  , &
+  DEITAXCODTVQ OF ARDER_ITEM ALIAS CCITAXCODTVQ  , &
+  T_CODDC  ALIAS CCICODDC      , &
+  T_MNTIMP ALIAS CCIMNT        , &
+  DEIMNTTPS    OF ARDER_ITEM ALIAS CCIMNTTPS     , &
+  DEIMNTTVQ    OF ARDER_ITEM ALIAS CCIMNTTVQ     , &
+  DEIMNTCTI    OF ARDER_ITEM ALIAS CCIMNTCTI     , &
+  DEIMNTRTI    OF ARDER_ITEM ALIAS CCIMNTRTI
+
+;-------------------------------------------------------------------------------
+;
+; Cette procédure permet de créer l'imputation de la facture
+;
+REQUEST CREATION_IMPUTATION_CAP
+
+ACCESS *WAR701IM
+
+TEMPORARY T_MNTIMP FLOAT SIZE 08
+TEMPORARY T_MNTTPS FLOAT SIZE 08
+TEMPORARY T_MNTTVQ FLOAT SIZE 08
+TEMPORARY T_MNTCTI FLOAT SIZE 08
+TEMPORARY T_MNTRTI FLOAT SIZE 08
+
+SORT    ON FOUCIECLE &
+        ON FOUCLE    &
+        ON CAPCLE    &
+        ON PRJCLE    &
+        ON PRACLE    &
+        ON IMMCLE    &
+        ON CPTCLE    &
+        ON UNACLE    &
+        ON CCITAXCODTPS &
+        ON CCITAXCODTVQ
+
+ITEM T_MNTIMP SUBTOTAL CCIMNT    RESET AT CCITAXCODTVQ
+ITEM T_MNTTPS SUBTOTAL CCIMNTTPS RESET AT CCITAXCODTVQ
+ITEM T_MNTTVQ SUBTOTAL CCIMNTTVQ RESET AT CCITAXCODTVQ
+ITEM T_MNTCTI SUBTOTAL CCIMNTCTI RESET AT CCITAXCODTVQ
+ITEM T_MNTRTI SUBTOTAL CCIMNTRTI RESET AT CCITAXCODTVQ
+
+OUTPUT CPCAP_IMPUTATION  ADD AT CCITAXCODTVQ NOITEM &
+                        IF T_MNTIMP <> 0
+  ITEM FOUCIECLE    OF CPCAP_IMPUTATION FINAL FOUCIECLE OF WAR701IM
+  ITEM FOUCLE       OF CPCAP_IMPUTATION FINAL FOUCLE    OF WAR701IM
+  ITEM CAPCLE       OF CPCAP_IMPUTATION FINAL CAPCLE    OF WAR701IM
+  ITEM CCITIMSTP    OF CPCAP_IMPUTATION FINAL SYSDATE * 1000000 + &
+                                              ROUND(SYSTIME / 100)
+  ITEM PRJCLE       OF CPCAP_IMPUTATION FINAL PRJCLE    OF WAR701IM
+  ITEM PRACLE       OF CPCAP_IMPUTATION FINAL PRACLE    OF WAR701IM
+  ITEM IMMCLE       OF CPCAP_IMPUTATION FINAL IMMCLE    OF WAR701IM
+  ITEM CPTCLE       OF CPCAP_IMPUTATION FINAL CPTCLE    OF WAR701IM
+  ITEM UNACLE       OF CPCAP_IMPUTATION FINAL UNACLE    OF WAR701IM
+  ITEM CCICODDC     OF CPCAP_IMPUTATION FINAL "D"
+  ITEM CCIMNT       OF CPCAP_IMPUTATION FINAL T_MNTIMP
+
+  ITEM CCITAXTYPTPS OF CPCAP_IMPUTATION FINAL CCITAXTYPTPS OF WAR701IM
+  ITEM CCITAXCODTPS OF CPCAP_IMPUTATION FINAL CCITAXCODTPS OF WAR701IM &
+                                              IF T_MNTTPS <> 0
+
+  ITEM CCITAXTYPTVQ OF CPCAP_IMPUTATION FINAL CCITAXTYPTVQ OF WAR701IM
+  ITEM CCITAXCODTVQ OF CPCAP_IMPUTATION FINAL CCITAXCODTVQ OF WAR701IM &
+                                              IF T_MNTTVQ <> 0
+
+  ITEM CCIMNTTPS    OF CPCAP_IMPUTATION FINAL T_MNTTPS
+  ITEM CCIMNTTVQ    OF CPCAP_IMPUTATION FINAL T_MNTTVQ
+  ITEM CCIMNTCTI    OF CPCAP_IMPUTATION FINAL T_MNTCTI
+  ITEM CCIMNTRTI    OF CPCAP_IMPUTATION FINAL T_MNTRTI
+
+;-------------------------------------------------------------------------------
+;
+; Ajustement du coût moyen du produit.
+;
+REQUEST AJUSTEMENT_COUT
+
+ACCESS *WAR701CM LINK FOUCIECLE OF WAR701CM            , &
+                      REFCLETYP OF WAR701CM            , &
+                      FOUCLE    OF WAR701CM            , &
+                      RADCLE    OF WAR701CM              &
+                  TO  REFCIECLE                        , &
+                      REFCLETYP                        , &
+                      REFCLENUM                        , &
+                      RADCLE OF MCREF_ADRESSE   OPTIONAL &
+
+                 LINK CIECLE OF WAR701CM               , &
+                      PRDCLE OF WAR701CM                 &
+                   TO CIECLE                           , &
+                      PRDCLE OF ARPRODUIT       OPTIONAL &
+
+                 LINK FOUCIECLE OF WAR701CM            , & ; MP-00-03-02_S05.
+                      FOUCLE    OF WAR701CM            , & ; MP-00-03-02_S05.
+                      CIECLE    OF WAR701CM              & ; MP-00-03-02_S05.
+                   TO FOUCIECLE                        , & ; MP-00-03-02_S05.
+                      FOUCLE                           , & ; MP-00-03-02_S05.
+                      FOCCIECLE OF VFOC_FOU     OPTIONAL & ; MP-00-03-02_S05.
+
+                 LINK CIECLE    OF WAR701CM            , & ; MP-00-03-02_S05.
+                      CMDCLE    OF WAR701CM            , & ; MP-00-03-02_S05.
+                      CMDAJT    OF WAR701CM            , & ; MP-00-03-02_S05.
+                      REDCLE    OF WAR701CM              & ; MP-00-03-02_S05.
+                   TO CIECLE                           , & ; MP-00-03-02_S05.
+                      CMDCLE                           , & ; MP-00-03-02_S05.
+                      CMDAJT                           , & ; MP-00-03-02_S05.
+                      CDECLE    OF ARCMD_DETAIL OPTIONAL & ; MP-00-03-02_S05.
+
+                LINK  "1"                                & ; MP-00-03-02_S05.
+                  TO  CIENMC    OF MCHOLDING               ; MP-00-03-02_S05.
+
+TEMPORARY T_QTEAJT INTEGER SIZE 04
+TEMPORARY T_PRX1   FLOAT   SIZE 08
+TEMPORARY T_PRX2   FLOAT   SIZE 08
+TEMPORARY T_MNTAJT FLOAT   SIZE 08
+TEMPORARY T_TAUX   FLOAT   SIZE 08 ; MP-00-03-02_S05.
+
+SORT ON CIECLE OF WAR701CM &
+     ON RECCLE OF WAR701CM &
+     ON REDCLE OF WAR701CM &
+     ON PRDCLE OF WAR701CM
+
+ITEM T_QTEAJT SUBTOTAL PRDQTEAJT  RESET AT REDCLE
+ITEM T_PRX1   SUBTOTAL PRDCOUMYN1 RESET AT REDCLE
+ITEM T_PRX2   SUBTOTAL PRDCOUMYN2 RESET AT REDCLE
+
+ITEM T_TAUX   = DEVTAU OF ARCMD_DETAIL      & ; MP-00-03-02_S05.
+             IF DEVTAU OF ARCMD_DETAIL <> 0 & ; MP-00-03-02_S05.
+           ELSE 1                             ; MP-00-03-02_S05.
+
+ITEM T_MNTAJT = ROUND( T_QTEAJT * (T_PRX2 - T_PRX1) / 100000) RESET AT REDCLE
+
+OUTPUT ARPRD_HISTO  ADD AT REDCLE &
+  IF (PRDTYP OF ARPRODUIT = "I" OR PRDTYP OF ARPRODUIT = "N") NOITEM
+  ITEM CIECLE     OF ARPRD_HISTO FINAL CIECLE     OF WAR701CM
+  ITEM PRDCLE     OF ARPRD_HISTO FINAL PRDCLE     OF WAR701CM
+  ITEM PRDTYP     OF ARPRD_HISTO FINAL PRDTYP     OF ARPRODUIT
+  ITEM PRHTIMSTP  OF ARPRD_HISTO FINAL SYSDATE * 1000000 + ROUND(SYSTIME / 100)
+  ITEM ENTCLE     OF ARPRD_HISTO FINAL ENTCLE     OF WAR701CM
+  ITEM PECCLE     OF ARPRD_HISTO FINAL G_PECCLE
+  ITEM PRHNUMREF  OF ARPRD_HISTO FINAL FACCLE     OF WAR701CM
+  ITEM PRHDATREF  OF ARPRD_HISTO FINAL FACDAT     OF WAR701CM
+  ITEM PRHTYP     OF ARPRD_HISTO FINAL "04"
+  ITEM PRHQTETRS  OF ARPRD_HISTO FINAL T_QTEAJT
+  ITEM PRHNUMREF2 OF ARPRD_HISTO FINAL RECCLE     OF WAR701CM
+  ITEM PRHDERCOU  OF ARPRD_HISTO FINAL ROUND(PRDDERCOU OF WAR701CM * T_TAUX) ; MP-00-03-02_S05.
+  ITEM PRHUSRCRE  OF ARPRD_HISTO FINAL LOGONID
+  ITEM PRHDATCRE  OF ARPRD_HISTO FINAL SYSDATE
+  ITEM PRHHRECRE  OF ARPRD_HISTO FINAL SYSTIME / 10000
+  ITEM PRHITM     OF ARPRD_HISTO FINAL REDCLE     OF WAR701CM
+  ITEM FOUCIECLE  OF ARPRD_HISTO FINAL FOUCIECLE  OF WAR701CM
+  ITEM FOUCLE     OF ARPRD_HISTO FINAL FOUCLE     OF WAR701CM
+  ITEM PRHFLGCPL  OF ARPRD_HISTO FINAL "0"
+  ITEM PRHNBRJRS  OF ARPRD_HISTO FINAL 0
+  ITEM PRHVAL     OF ARPRD_HISTO FINAL ROUND(T_MNTAJT * T_TAUX) ; MP-00-03-02_S05.
+  ITEM PRHDSC     OF ARPRD_HISTO FINAL RADNOM     OF MCREF_ADRESSE
+
+BUILD

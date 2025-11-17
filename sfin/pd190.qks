@@ -1,0 +1,596 @@
+;/T/ 1.4.1 Identification du P/O pour les transferts
+;
+;/P/ Programmeur..: René Bonneau
+;    Date Création: 1994-10-12
+;
+;    Description..: Cette écran permet de faire l'identification du bon de
+;                   commande pour le transfert.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd190 ACTIONBAR                      &
+             MODE LABEL "" AT 2,80          &
+             NOACTION                       &
+             AUTOUPDATE                     &
+             ACTIVITIES CHANGE, FIND, ENTRY &
+             FIELDMARK RETAIN STARTUP       &
+             HELP POPUP FROM 4,9 TO 20,72   &
+             RECEIVING T_CIECLEMNU ,        &
+                       T_CIENOM
+
+
+;-------------------------------------------------------------------------------
+;
+; Déclaration de la transaction pour donner un numéro séquentiel
+;
+
+TRANSACTION NO_SEQ READ WRITE &
+                   RESERVING FOR PROTECTED WRITE PDSEQ_BON_COMMAN IN DICT
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+
+USE ussectmp  NOLIST
+    "PD190"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+
+USE pd190.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+
+USE usactecr  NOLIST
+
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Détail P/O                   " ACTION DESIGNER D001
+  MENUITEM LABEL "Vérification                 " ACTION DESIGNER D002
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%Détail (P/O)              " ACTION DESIGNER D001
+  MENUITEM LABEL "%%%Vérification              " ACTION DESIGNER D002
+@ENDIF
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu.
+;
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Clés de recherche pour les popup de consultations et les sous écrans
+;
+
+TEMPORARY T_FOUCLE       CHARACTER SIZE 6
+TEMPORARY T_USINE_SEC    CHARACTER SIZE 1
+TEMPORARY T_PJTABR       CHARACTER SIZE 2
+TEMPORARY T_PJTANN       CHARACTER SIZE 2
+TEMPORARY T_PJTNUMSEQ    CHARACTER SIZE 3
+TEMPORARY T_PJTNUMPRO    CHARACTER SIZE 7
+TEMPORARY T_CHAMP        INTEGER UNSIGNED SIZE 01
+
+
+;-------------------------------------------------------------------------------
+;
+; Bon de commande
+;
+
+FILE PDBON_COMMANDE   PRIMARY                          &
+                      NOITEM
+
+  ACCESS VIA     CIECLE,                               &
+                 BCMNUMBCM                             &
+         USING   T_CIECLEMNU,                          &
+                 BCMNUMBCM        OF PDBON_COMMANDE    &
+         REQUEST BCMNUMBCM        OF PDBON_COMMANDE    &
+         ORDERBY CIECLE,                               &
+                 BCMNUMBCM
+
+  ACCESS VIA     CIECLE      &
+         USING   T_CIECLEMNU &
+         ORDERBY CIECLE,     &
+                 BCMNUMBCM
+
+  ITEM   CIECLE           OF PDBON_COMMANDE   INITIAL T_CIECLEMNU
+  ITEM   BCMCODTYPBCM     OF PDBON_COMMANDE   INITIAL "T"
+  ITEM   BCMDATCRE        OF PDBON_COMMANDE   INITIAL SYSDATE
+  ITEM   BCMHRECRE        OF PDBON_COMMANDE   INITIAL SYSTIME / 10000
+  ITEM   BCMUSRCRE        OF PDBON_COMMANDE   INITIAL LOGONID
+  ITEM   FOCCIECLE        OF PDBON_COMMANDE   INITIAL T_CIECLEMNU
+  ITEM  FOUCIECLE         OF PDBON_COMMANDE   INITIAL "----"
+  ITEM   BCMDATMAJ        OF PDBON_COMMANDE   FINAL   SYSDATE &
+         IF NOT NEWRECORD OF PDBON_COMMANDE   AND     &
+            ALTEREDRECORD OF PDBON_COMMANDE
+  ITEM   BCMHREMAJ        OF PDBON_COMMANDE   FINAL   SYSTIME / 10000 &
+         IF NOT NEWRECORD OF PDBON_COMMANDE   AND     &
+            ALTEREDRECORD OF PDBON_COMMANDE
+  ITEM   BCMUSRMAJ        OF PDBON_COMMANDE   FINAL   LOGONID &
+         IF NOT NEWRECORD OF PDBON_COMMANDE   AND     &
+            ALTEREDRECORD OF PDBON_COMMANDE
+
+  SELECT IF BCMCODTYPBCM  OF PDBON_COMMANDE = "T"
+
+
+;-------------------------------------------------------------------------------
+;
+; Fournisseurs
+;
+
+FILE VFOC_FOU         REFERENCE
+
+  ACCESS VIA     FOUCLE,                              &
+                 FOCCIECLE,                           &
+                 FOCUSISEC                            &
+         USING   FOUCLE           OF PDBON_COMMANDE,  &
+                 T_CIECLEMNU,                         &
+                 "1"
+
+
+;-------------------------------------------------------------------------------
+;
+; Adresse du fournisseur
+;
+
+FILE MCREF_ADRESSE    REFERENCE
+
+  ACCESS VIA     REFCLETYP,                            &
+                 REFCLENUM ,                           &
+                 RADCLE                                &
+         USING   "F",                                  &
+                 FOUCLE           OF VFOC_FOU,         &
+                 FOCADRACH        OF VFOC_FOU
+
+
+;-------------------------------------------------------------------------------
+;
+; Projet
+;
+
+FILE PDPROJET         REFERENCE
+
+  ACCESS VIA     CIECLE,                                &
+                 PJTNUMPRO                              &
+         USING   T_CIECLEMNU,                           &
+                 PJTNUMPRO       OF PDBON_COMMANDE
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro séquentiel pour les bons de commande
+;
+
+FILE PDSEQ_BON_COMMAN DESIGNER &
+                      TRANSACTION NO_SEQ
+
+
+;-------------------------------------------------------------------------------
+;
+;
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Identification du P/O de transfert " &
+@ELSE
+      " %%%Identification du P/O de transfert " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+ALIGN (2,3,19)
+
+
+FIELD BCMNUMBCM        OF PDBON_COMMANDE   &
+label "No de P/O.....:"&
+        HIDDEN ID 05                       &
+        DISPLAY                            &
+        REFRESH
+
+
+ALIGN (2,3,19) (36,37,53)
+
+
+FIELD BCMCODTYPBCM     OF PDBON_COMMANDE   &
+label "Type de P/O...:"&
+        HIDDEN ID 10                       &
+        DISPLAY
+
+
+FIELD BCMDATMAJ        OF PDBON_COMMANDE    FORMAT YYYYMMDD &
+PATTERN "####/##/##"&
+label "Date dern MAJ.:"&
+        HIDDEN ID 15                       &
+        DISPLAY                            &
+        REFRESH
+
+
+ALIGN (2,3,19) (36,37,37)
+
+
+FIELD FOUCLE           OF PDBON_COMMANDE   &
+label "Fournisseur...:"&
+        HIDDEN ID 20                       &
+        REQUIRED NOCHANGE                  &
+        LOOKUP ON VFOC_FOU                 &
+          MESSAGE 2917 ; Ce founisseur n'existe pas
+
+
+FIELD FOUNOM           OF VFOC_FOU         &
+        HIDDEN ID 25                       &
+        DISPLAY                            &
+        NOLABEL
+
+
+ALIGN (2,3,19)
+
+
+FIELD RADADR1          OF MCREF_ADRESSE    &
+label "Adresse.......:"&
+        HIDDEN ID 30                       &
+        DISPLAY
+
+
+FIELD RADADR2          OF MCREF_ADRESSE    &
+        ID SAME                            &
+        DISPLAY                            &
+        NOLABEL
+
+
+FIELD RADADR3          OF MCREF_ADRESSE    &
+        ID SAME                            &
+        DISPLAY                            &
+        NOLABEL
+
+
+FIELD RADADR4          OF MCREF_ADRESSE    &
+        ID SAME                            &
+        DISPLAY                            &
+        NOLABEL
+
+
+FIELD RADCP            OF MCREF_ADRESSE    &
+        ID SAME                            &
+        DISPLAY                            &
+        NOLABEL
+
+
+ALIGN (2,3,19) (36,37,53)
+
+
+FIELD RADTEL           OF MCREF_ADRESSE    &
+label "Téléphone.....:"&
+        HIDDEN ID 35                       &
+        DISPLAY
+
+
+FIELD RADFAX           OF MCREF_ADRESSE    &
+label "Fax...........:"&
+        HIDDEN ID 40                       &
+        DISPLAY
+
+
+FIELD FOULNG           OF VFOC_FOU         &
+label "Langue........:"&
+        HIDDEN ID 45                       &
+        DISPLAY
+
+
+ALIGN (2,3,19)
+
+
+FIELD BCMDSC001        OF PDBON_COMMANDE   &
+label "Description...:"&
+        HIDDEN ID 55
+
+
+FIELD BCMDSC002        OF PDBON_COMMANDE   &
+        ID SAME                            &
+        NOLABEL
+
+
+SKIP 1
+
+
+ALIGN (2,3,19) (,,30)
+
+
+FIELD PJTNUMPRO        OF PDBON_COMMANDE   &
+label "Num projet....:"&
+        HIDDEN ID 65                       &
+        REQUIRED                           &
+        NOCHANGE                           &
+        LOOKUP ON PDPROJET                 &
+          VIA    CIECLE,                   &
+                 PJTNUMPRO                 &
+          USING  T_CIECLEMNU,                         &
+                 PJTNUMPRO        OF PDBON_COMMANDE   &
+          MESSAGE 3131 ; Ce numéro de projet n'existe pas
+
+FIELD PJTNOM           OF PDPROJET         &
+        DISPLAY
+
+
+SKIP 1
+
+
+ALIGN (2,3,19) (30,,31) (36,37,53) (64,,65)
+
+
+FIELD BCMDATIMP        OF PDBON_COMMANDE    FORMAT YYYYMMDD &
+PATTERN "####/##/##"&
+        HIDDEN ID 90                       &
+        DISPLAY                            &
+        LABEL "Impression 1..:"
+
+
+FIELD BCMHREIMP        OF PDBON_COMMANDE   &
+        ID SAME                            &
+        DISPLAY                            &
+        NOLABEL
+
+
+FIELD BCMDATDERIMP     OF PDBON_COMMANDE    FORMAT YYYYMMDD &
+PATTERN "####/##/##"&
+        HIDDEN ID 92                       &
+        DISPLAY                            &
+        LABEL "Dernière imp..:"
+
+
+FIELD BCMHREDERIMP     OF PDBON_COMMANDE   &
+        ID SAME                            &
+        DISPLAY                            &
+        NOLABEL
+
+
+ SUBSCREEN pd190a AUTO        &
+   HIDDEN                     &
+   NOLABEL                    &
+   NOMARK                     &
+   MODE SAME                  &
+   PASSING PDBON_COMMANDE,    &
+           T_CIECLEMNU,       &
+           T_CIENOM
+
+
+; SUBSCREEN pd190b AUTO        &
+;   HIDDEN                     &
+;   NOLABEL                    &
+;   NOMARK                     &
+;   MODE SAME                  &
+;   PASSING PDBON_COMMANDE,    &
+;           T_CIECLEMNU,       &
+;           T_CIENOM
+;
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur (pop-up) pour les fournisseurs.
+;
+
+PROCEDURE INPUT FOUCLE
+BEGIN
+
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_USINE_SEC = "1"
+    LET T_FOUCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd117 MODE F               &
+                     PASSING T_CIECLEMNU, &
+                             T_FOUCLE,    &
+                             T_USINE_SEC
+    LET FIELDTEXT = TRUNCATE( T_FOUCLE )
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel dépisteur No commande int (attention cet appel est particulier)
+;
+
+PROCEDURE INPUT PJTNUMPRO OF PDBON_COMMANDE
+BEGIN
+
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PJTABR           = ""
+    LET T_PJTANN           = ""
+    LET T_PJTNUMSEQ        = ""
+    LET T_PJTNUMPRO        = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_CHAMP            = 4
+    RUN SCREEN pd129 MODE F                     &
+                     PASSING T_PJTABR,          &
+                             T_PJTANN,          &
+                             T_PJTNUMSEQ,       &
+                             T_PJTNUMPRO,       &
+                             T_CHAMP,           &
+                             T_CIECLEMNU
+    LET FIELDTEXT          = TRUNCATE( T_PJTNUMPRO )
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Initialise les champs numéro de projet
+;
+
+PROCEDURE PROCESS PJTNUMPRO OF PDBON_COMMANDE
+BEGIN
+  LET     PJTABR OF PDBON_COMMANDE    = PJTABR OF PDPROJET
+  LET     PJTANN OF PDBON_COMMANDE    = PJTANN OF PDPROJET
+  LET     PJTNUMSEQ OF PDBON_COMMANDE = PJTNUMSEQ OF PDPROJET
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+
+  USE ussecent NOLIST
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Détail (P/O)
+;
+
+PROCEDURE DESIGNER D001
+BEGIN
+
+  RUN SCREEN  pd190a                   &
+              PASSING PDBON_COMMANDE,  &
+                      T_CIECLEMNU,     &
+                      T_CIENOM         &
+              MODE F
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Vérification bon commande transfert
+;
+
+PROCEDURE DESIGNER D002
+BEGIN
+
+  RUN SCREEN  pd190c                     &
+              PASSING   PDBON_COMMANDE,  &
+                        T_CIECLEMNU,     &
+                        T_CIENOM         &
+              MODE F
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDBON_COMMANDE &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+
+  IF     ALTEREDRECORD     OF PDBON_COMMANDE &
+     AND NOT NEWRECORD     OF PDBON_COMMANDE &
+     AND NOT DELETEDRECORD OF PDBON_COMMANDE &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  ;-----------------------------------------------------------------------------
+  ;
+  ; Incrémentation du numéro de séquence
+  ;
+  IF 0 = BCMNUMBCM OF PDBON_COMMANDE
+  THEN BEGIN
+    START TRANSACTION NO_SEQ
+    GET PDSEQ_BON_COMMAN OPTIONAL       &
+      VIA     CIECLE                    &
+      USING   T_CIECLEMNU
+    IF NOT ACCESSOK
+    THEN BEGIN
+      LET CIECLE    OF PDSEQ_BON_COMMAN = T_CIECLEMNU
+    END
+    LET BCQNUM    OF PDSEQ_BON_COMMAN = BCQNUM OF PDSEQ_BON_COMMAN + 1
+    LET BCMNUMBCM OF PDBON_COMMANDE   = BCQNUM OF PDSEQ_BON_COMMAN
+    PUT PDSEQ_BON_COMMAN
+    DISPLAY BCMNUMBCM OF PDBON_COMMANDE
+  END
+
+END
+
+
+BUILD
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+********************** Identification du P/O de transfert **********************
+*                                                                              *
+* No de P/O.....: xxxxxxxxx                                                    *
+* Type de P/O...: x                 Date dern MAJ.: xxxxxxxx                   *
+* Fournisseur...: xxxxxx            xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   *
+* Adresse.......: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxx                                                   *
+* Téléphone.....: xxxxxxxxxxxxx     Fax...........: xxxxxxxxxxxxx              *
+* Langue........: x                                                            *
+* Description...: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                                                                              *
+* Num projet....: xxxxxxxxx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx          *
+*                                                                              *
+* Projet........: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+* Impression 1..: xxxxxxxx xxxxx    Dernière imp..: xxxxxxxx xxxxx             *
+*                                                                              *
+********************************************************************************
+@ENDIF

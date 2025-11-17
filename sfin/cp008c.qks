@@ -1,0 +1,364 @@
+;/T/ Paiements - Talon du paiement
+;
+;/P/ Programmeur..: Alain Côté / Adapté pour PGL par Thomas BRENNEUR
+;    Date Création: 2 Juillet 1993
+;
+;    Description..: Saisie du talon du paiement .
+;                   Le talon de chèque est composé d'un nombre de lignes fixe,
+;                   c-a-d. UNE PAGE D'ÉCRAN. En mode ENTRY ou FIND il modifie
+;                   les mêmes lignes.
+;
+;/M/ François Déry, 30 avril 1999
+;       Modifier l'accèss au fichier de séquence car il a
+;       été converti en format interbase au lieu d'indexé.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cp008c ACTIONBAR &
+              MODE LABEL "" AT 2,80 &
+              NOACTION FIELDMARK &
+              FROM 8,1 TO 23,80 &
+              MESSAGE ON 24 &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING   CPPAIEMENT   , &
+                          VFOC_FOU     , &
+                          MCREF_ADRESSE
+
+USE ustrasse NOLIST
+
+USE ussectmp NOLIST
+    "CP008C"
+
+USE cp008c.hlp NOLIST
+
+USE usactecr NOLIST
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE CPPAM_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_RAD_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE MCRAD_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+
+;-------------------------------------------------------------------------------
+
+FILE CPPAIEMENT       MASTER
+
+FILE VFOC_FOU         MASTER
+
+FILE MCREF_ADRESSE    MASTER
+
+;-------------------------------------------------------------------------------
+
+FILE CPPAM_TALON      PRIMARY &
+                      OCCURS 10 &
+                      NOITEMS
+
+  ITEM CIECLE     OF CPPAM_TALON INITIAL CIECLE     OF CPPAIEMENT
+  ITEM LBQCPTENC  OF CPPAM_TALON INITIAL LBQCPTENC  OF CPPAIEMENT
+  ITEM PAMCLE     OF CPPAM_TALON FINAL   PAMCLE     OF CPPAIEMENT
+
+FILE CPPAM_TALON      ALIAS PTA_EXISTE &
+                      DESIGNER OPEN READ SHARE
+
+;-------------------------------------------------------------------------------
+;
+; Numéro de séquence des adresses pour les fournisseurs divers.
+;
+FILE MCRAD_SEQ        DESIGNER &
+                      TRANSACTION GEN_RAD_SEQ
+
+;-------------------------------------------------------------------------------
+;
+; Numérotation du numéro de paiement, le numéro est attribué par compagnie
+; et par compte d'encaisse.
+;
+FILE CPPAM_SEQ  DESIGNER &
+                TRANSACTION GEN_NUM_SEQ
+
+  ACCESS  VIA   CIECLE   , &
+                LBQCPTENC  &
+          USING CIECLE    OF CPPAIEMENT, &
+                LBQCPTENC OF CPPAIEMENT
+
+  ITEM CIECLE     OF CPPAM_SEQ INITIAL CIECLE    OF CPPAIEMENT
+  ITEM LBQCPTENC  OF CPPAM_SEQ INITIAL LBQCPTENC OF CPPAIEMENT
+
+;-------------------------------------------------------------------------------
+
+USE ushilite NOLIST     ; Hilite pour tout les écrans
+
+DRAW FROM  2, 1 TO  2,79
+DRAW FROM  2, 1 TO 16, 1
+DRAW FROM  3,80 TO 16,80
+DRAW FROM 16, 1 TO 16,80
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+      " Talon du paiement " &
+@ELSE
+      " Payment Stub " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+   "No ligne   Description du talon" &
+@ELSE
+   "Line No.   Description of stub" &
+@ENDIF
+     AT ,3
+
+SKIP
+
+ALIGN (6,5,6) (,,14)
+
+CLUSTER OCCURS WITH CPPAM_TALON
+
+FIELD PTACLELIG OF CPPAM_TALON &
+      ID 01 HIDDEN &
+      LABEL " " &
+      DISPLAY &
+      SIGNIFICANCE 2
+
+FIELD PTADSC OF CPPAM_TALON
+
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès pour l'écran par son code.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  ;
+  ; S'il y a déjà des records il faut les lire.
+  ;
+  GET PTA_EXISTE &
+      VIA     CIECLE   , &
+              LBQCPTENC, &
+              PAMCLE     &
+      USING   CIECLE    OF CPPAIEMENT, &
+              LBQCPTENC OF CPPAIEMENT, &
+              PAMCLE    OF CPPAIEMENT  &
+      OPTIONAL
+
+  IF ACCESSOK
+  THEN BEGIN
+    FOR CPPAM_TALON
+    BEGIN
+      GET CPPAM_TALON &
+        VIA     CIECLE   , &
+                LBQCPTENC, &
+                PAMCLE   , &
+                PTACLELIG  &
+        USING   CIECLE    OF CPPAIEMENT, &
+                LBQCPTENC OF CPPAIEMENT, &
+                PAMCLE    OF CPPAIEMENT, &
+                OCCURRENCE               &
+        UNIQUE
+    END
+  END
+  ;
+  ; Affiche le numéro de ligne et la description déjà existante.
+  ;
+  FOR CPPAM_TALON
+  BEGIN
+    LET PTACLELIG OF CPPAM_TALON = OCCURRENCE
+    DISPLAY PTACLELIG OF CPPAM_TALON
+    DISPLAY PTADSC    OF CPPAM_TALON
+  END
+  ;
+  ; Demande chaque ligne.
+  ;
+  FOR CPPAM_TALON
+  BEGIN
+    ACCEPT PTADSC OF CPPAM_TALON
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; La recherche se fait selon le numéro d'occurence(ligne).
+;
+;
+PROCEDURE FIND
+BEGIN
+  FOR CPPAM_TALON
+  BEGIN
+    ;
+    ; L'option UNIQUE force la ré-évaluation de la clef à chaque occurrence.
+    ;
+    GET CPPAM_TALON &
+      VIA     CIECLE   , &
+              LBQCPTENC, &
+              PAMCLE   , &
+              PTACLELIG  &
+      USING   CIECLE    OF CPPAIEMENT, &
+              LBQCPTENC OF CPPAIEMENT, &
+              PAMCLE    OF CPPAIEMENT, &
+              OCCURRENCE               &
+      UNIQUE
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR CPPAM_TALON
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF CPPAM_TALON &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF CPPAM_TALON &
+       AND NOT NEWRECORD     OF CPPAM_TALON &
+       AND NOT DELETEDRECORD OF CPPAM_TALON &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+    ;
+    ; Le talon n'est pas modifiable si le chèque est imprimé
+    ;
+    IF     (    ALTEREDRECORD OF CPPAM_TALON   &
+            OR  NEWRECORD     OF CPPAM_TALON   &
+            OR  DELETEDRECORD OF CPPAM_TALON ) &
+       AND PAMFLGIMP OF CPPAIEMENT = "1"
+    THEN ERROR 490 ; Vous ne pouvez plus modifier cette information, le chèque est imprimé.
+    ;
+    ; Mise à jour du timbre de modification si l'usager change le talon
+    ;
+    IF    NOT NEWRECORD OF CPPAIEMENT &
+      AND ALTEREDRECORD OF CPPAM_TALON
+    THEN BEGIN
+      LET PAMDATMOD OF CPPAIEMENT = SYSDATE
+      LET PAMHREMOD OF CPPAIEMENT = SYSTIME / 10000
+      LET PAMUSRMOD OF CPPAIEMENT = LOGONID
+    END
+  END
+END
+
+;
+; La procédure UPDATE est utilisée à cause des numéros séquentiels sur
+; l'adresse et le numéro de paiement.
+;
+PROCEDURE UPDATE
+BEGIN
+  ;
+  ; On incrémente l'adresse pour les fournisseurs divers
+  ;
+  IF    NEWRECORD OF CPPAIEMENT       &
+    AND RADCLE    OF CPPAIEMENT = 0   &
+    AND REFCLETYP OF CPPAIEMENT = "F" &
+    AND FOUTYP    OF VFOC_FOU   = "D" &
+    AND PAMDEPDIR OF CPPAIEMENT = "1"
+  THEN BEGIN
+    START TRANSACTION GEN_RAD_SEQ
+    GET MCRAD_SEQ VIA REFCIECLE, &
+                      REFCLETYP, &
+                      REFCLENUM  &
+                  USING REFCIECLE OF CPPAIEMENT, &
+                        REFCLETYP OF CPPAIEMENT, &
+                        REFCLENUM OF CPPAIEMENT  &
+                  OPTIONAL
+    LET REFCIECLE OF MCRAD_SEQ = REFCIECLE OF CPPAIEMENT
+    LET REFCLETYP OF MCRAD_SEQ = REFCLETYP OF CPPAIEMENT
+    LET REFCLENUM OF MCRAD_SEQ = REFCLENUM OF CPPAIEMENT
+    LET RASNUMSEQ OF MCRAD_SEQ = RASNUMSEQ OF MCRAD_SEQ + 1
+    LET RADCLE    OF CPPAIEMENT = RASNUMSEQ OF MCRAD_SEQ
+    PUT MCRAD_SEQ
+    COMMIT TRANSACTION GEN_RAD_SEQ
+  END
+
+  ;
+  ; On obtient un numéro de paiement pour le nouveau paiement
+  ;
+  IF NEWRECORD OF CPPAIEMENT
+  THEN BEGIN
+    START TRANSACTION GEN_NUM_SEQ
+    GET CPPAM_SEQ OPTIONAL
+    LET PSENUMSEQ OF CPPAM_SEQ = PSENUMSEQ OF CPPAM_SEQ + 1
+    LET PAMCLE OF CPPAIEMENT &
+                = ASCII(PSENUMSEQ OF CPPAM_SEQ,PSELONNUM OF CPPAM_SEQ)
+    PUT CPPAM_SEQ
+    COMMIT TRANSACTION GEN_NUM_SEQ
+  END
+
+  PUT CPPAIEMENT
+  PUT MCREF_ADRESSE
+
+  FOR CPPAM_TALON
+  BEGIN
+    PUT CPPAM_TALON
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; L'usager ne peut pas détruire une ligne mais il peut la mettre à blanc.
+;
+;
+PROCEDURE DELETE
+BEGIN
+  LET PTADSC OF CPPAM_TALON = " "
+  DISPLAY PTADSC OF CPPAM_TALON
+END
+
+BUILD
+;
+;****************************** Talon du paiement ******************************x
+;*                                                                              *
+;* No ligne   Description du talon                                              *
+;*    xx      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      *
+;*    xx      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      *
+;*    xx      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      *
+;*    xx      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      *
+;*    xx      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      *
+;*    xx      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      *
+;*    xx      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      *
+;*    xx      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      *
+;*    xx      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      *
+;*    xx      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx      *
+;*                                                                              *
+;********************************************************************************

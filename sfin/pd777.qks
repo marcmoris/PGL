@@ -1,0 +1,673 @@
+;/T/ 2.4.4. Enregistrer le débitage - procédure de transfert
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date création: 1995-04-21
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   le débitage des pièces de granit.
+;
+;    Type d'appel.: Ecran
+;
+;/M/ François Déry, 6 mai 1999
+;       Changer Initialize en entry pour unix.
+;
+;/M/ Programmeur..: Sébastien Chabot
+;    Date modif...: 18 Septembre 1996
+;    Description..: Modification selon la demande du client (gra01 9311 305)
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd777 MENU
+
+;-------------------------------------------------------------------------------
+;
+; Variables reçu en paramètres
+;
+TEMPORARY T_DEBNUMRAP INTEGER UNSIGNED SIZE 4 RESET AT STARTUP ; NUM RAPPORT
+TEMPORARY T_CIECLEMNU CHARACTER        SIZE 4 RESET AT STARTUP
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du volume d'une pièce de granit
+;
+USE usvarvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Débitage
+;
+
+FILE PDDEBITAGE IN DICT DESIGNER
+
+
+;-------------------------------------------------------------------------------
+;
+; Détail débitage
+;
+
+FILE PDDET_DEBITAGE IN DICT DESIGNER
+
+
+;-------------------------------------------------------------------------------
+;
+; Détail débitage
+;
+
+FILE PDDET_DEBITAGE IN DICT DESIGNER ALIAS DDE_VALIDE
+
+FILE PDDET_DEBITAGE IN DICT DESIGNER ALIAS MAJ_DET_DEBITAGE
+
+;-------------------------------------------------------------------------------
+;
+; Tranche
+;
+
+FILE PDTRANCHE IN DICT DESIGNER
+
+
+;-------------------------------------------------------------------------------
+;
+; Diagramme
+;
+
+FILE PDDIAGRAMME IN DICT DESIGNER
+
+
+;-------------------------------------------------------------------------------
+;
+; Priorité diagramme
+;
+
+FILE PDPRIORITE_DIAG IN DICT DESIGNER
+
+
+;-------------------------------------------------------------------------------
+;
+; Produit dimension
+;
+
+FILE PDPROD_DIMENSION IN DICT DESIGNER
+
+
+;-------------------------------------------------------------------------------
+;
+; Message
+;
+
+FILE PDFICMES DESIGNER
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables nécessaire pour le traitement
+;
+
+TEMPORARY T_RAPVAL     CHARACTER SIZE 01
+TEMPORARY T_MESSAGE    CHARACTER SIZE 90
+TEMPORARY T_QTE_IMP    INTEGER   SIZE 04
+TEMPORARY T_CODPRI_IMP CHARACTER SIZE 02                   ; <-- SEBCHA960918
+
+FIELD T_CIECLEMNU REQUIRED
+
+FIELD T_DEBNUMRAP REQUIRED
+
+;----------------------------------------------------------------------------
+PROCEDURE INTERNAL DEL_LIEN
+BEGIN
+  WHILE RETRIEVING PDDET_DEBITAGE VIA CIECLE,DEBNUMRAP USING T_CIECLEMNU,T_DEBNUMRAP
+  BEGIN
+   IF DDESTU OF PDDET_DEBITAGE = "M" OR DDESTU OF PDDET_DEBITAGE = "D"
+   THEN BEGIN
+     DELETE PDDET_DEBITAGE
+     PUT PDDET_DEBITAGE RESET
+   END
+  END
+END
+;-------------------------------------------------------------------------------
+;
+; Cette procédure permet de valider les lignes de détail du rapport
+;
+
+PROCEDURE INTERNAL VAL_DET_RAP
+BEGIN
+  WHILE RETRIEVING PDDET_DEBITAGE &
+    VIA     CIECLE,   &
+            DEBNUMRAP &
+    USING   T_CIECLEMNU,  &
+            T_DEBNUMRAP
+  BEGIN
+    IF DDESTU OF PDDET_DEBITAGE = "E"
+    THEN BEGIN
+      LET T_RAPVAL = "1"
+      LET CIECLE           OF PDFICMES = CIECLE    OF PDDET_DEBITAGE
+      LET FMGNUMRAP        OF PDFICMES = DEBNUMRAP OF PDDET_DEBITAGE
+      LET FMGNUMLIG        OF PDFICMES = DDENUMLIG OF PDDET_DEBITAGE
+      LET FMGDSC           OF PDFICMES = "Cette ligne a été ajouté ou modifier depuis la validation : " + ASCII(DDENUMLIG OF DDE_VALIDE)
+      PUT PDFICMES RESET
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Cette procédure fait la mise à jour de la tranche
+;
+PROCEDURE INTERNAL MAJ_TRANCHE
+BEGIN
+  IF DDESTU OF PDDET_DEBITAGE = "V" OR DDESTU OF PDDET_DEBITAGE = "T"
+  THEN BEGIN
+    GET PDTRANCHE &
+      VIA   CIECLE,       &
+            TRANUMTRA002  &
+      USING T_CIECLEMNU,  &
+            TRANUMTRA002 OF PDDET_DEBITAGE opt
+    IF ACCESSOK
+    THEN BEGIN
+      LET TRASTU OF PDTRANCHE = "T"
+      PUT PDTRANCHE
+
+    GET MAJ_DET_DEBITAGE VIA CIECLE, DEBNUMRAP, DDENUMLIG, DDESTU &
+                       USING T_CIECLEMNU, DEBNUMRAP OF PDDET_DEBITAGE, DDENUMLIG OF PDDET_DEBITAGE, DDESTU OF PDDET_DEBITAGE OPT
+    IF ACCESSOK
+    THEN BEGIN
+           LET DDESTU OF MAJ_DET_DEBITAGE = "T"
+           PUT MAJ_DET_DEBITAGE
+    END
+
+    END
+    ELSE BEGIN
+      ERROR 1840 ; Ce numéro de tranche n'existe pas
+    END
+  END
+  ELSE BEGIN
+    GET PDTRANCHE &
+      VIA   CIECLE,      &
+            TRANUMTRA002 &
+      USING T_CIECLEMNU, &
+            TRANUMTRA002 OF PDDET_DEBITAGE opt
+    IF ACCESSOK
+    THEN BEGIN
+      LET TRASTU OF PDTRANCHE = "I"
+      PUT PDTRANCHE
+    END
+    ELSE BEGIN
+      ERROR 1840 ; Ce numéro de tranche n'existe pas
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Mise à jour du diagramme
+;
+
+PROCEDURE INTERNAL MAJ_DIAGRAMME
+BEGIN
+  ;
+  ; Traitement pour mise à jour lors d'une nouvelle ligne du rapport
+  ;
+  IF DDESTU OF PDDET_DEBITAGE = "V"
+  THEN BEGIN
+    GET MAJ_DET_DEBITAGE VIA CIECLE, DEBNUMRAP, DDENUMLIG, DDESTU &
+                       USING T_CIECLEMNU, DEBNUMRAP OF PDDET_DEBITAGE, DDENUMLIG OF PDDET_DEBITAGE, DDESTU OF PDDET_DEBITAGE OPT
+    IF ACCESSOK
+    THEN BEGIN
+           LET DDESTU OF MAJ_DET_DEBITAGE = "T"
+           PUT MAJ_DET_DEBITAGE
+    END
+    ;
+    ; Initialisation de la quantité debité à imputer
+    ;
+    LET T_QTE_IMP    = DDEQTEFAB OF PDDET_DEBITAGE
+    LET T_CODPRI_IMP = DDECODPRI OF PDDET_DEBITAGE
+    ;
+    ; Imputation par priorité
+    ;
+    ;*****************************************************************; <-- SEBCHA960918
+    ;* ATTENTION ! vous allez remarquer que ce while retrieving est  *; <-- SEBCHA960918
+    ;* répété trois fois pour la raison que nous devons traiter les  *; <-- SEBCHA960918
+    ;* priorité en trois blocs différent dans un ordre bien précis.  *; <-- SEBCHA960918
+    ;*          C'est-à-dire                                         *; <-- SEBCHA960918
+    ;*                                                               *; <-- SEBCHA960918
+    ;* 1 --> toutes les priorités >= à la priorité de pddet_debitage *; <-- SEBCHA960918
+    ;* 2 --> toutes les priorités <  à la priorité de pddet_debitage *; <-- SEBCHA960918
+    ;* 3 --> toutes les priorités =  à la priorité 99                *; <-- SEBCHA960918
+    ;*                                                               *; <-- SEBCHA960918
+    ;*****************************************************************; <-- SEBCHA960918
+
+    ;*****************************************************************; <-- SEBCHA960918
+    ;* 1 --> toutes les priorités >= à la priorité de pddet_debitage *; <-- SEBCHA960918
+    ;*****************************************************************; <-- SEBCHA960918
+
+    WHILE RETRIEVING PDPRIORITE_DIAG &
+      VIA     CIECLE,     &
+              DIANUM002   &
+      USING   T_CIECLEMNU,                &
+              DIANUM002 OF PDDET_DEBITAGE &
+      ORDERBY CIECLE,    &
+              DIANUM002, &
+              PRICODPRI ASCENDING
+    BEGIN
+      ;
+      ; Vérifie que notre quantité est différente de 0
+      ;
+      IF T_QTE_IMP > 0                                                ; <-- SEBCHA960918
+      THEN BEGIN                                                      ; <-- SEBCHA960918
+
+         ; Sélectionnent les prioritées plus grandes que la priorité  ; <-- SEBCHA960918
+         ; indiqué lors du débitage et                                ; <-- SEBCHA960918
+         ; Sélectionnent les priorités qui ont une quantité planifié  ; <-- SEBCHA960918
+         IF     PRICODPRI OF PDPRIORITE_DIAG        >= T_CODPRI_IMP & ; <-- SEBCHA960918
+            AND PDGQTEPLACPEGRA  OF PDPRIORITE_DIAG > 0               ; <-- SEBCHA960918
+         THEN BEGIN                                                   ; <-- SEBCHA960918
+            ;
+            ; La quantité à imputer est plus grande que la quantité planifier
+            ; pour la priorité
+            ;
+            IF T_QTE_IMP > (PDGQTEPLACPEGRA  OF PDPRIORITE_DIAG &
+                            - PDGQTECPEPRDGRA  OF PDPRIORITE_DIAG)
+            THEN BEGIN
+               LET T_QTE_IMP = T_QTE_IMP - &
+                       (PDGQTEPLACPEGRA OF PDPRIORITE_DIAG &
+                     - PDGQTECPEPRDGRA OF PDPRIORITE_DIAG)
+
+               LET PDGQTECPEPRDGRA OF PDPRIORITE_DIAG = &
+                       PDGQTECPEPRDGRA OF PDPRIORITE_DIAG + &
+                      ( PDGQTEPLACPEGRA OF PDPRIORITE_DIAG &
+                     - PDGQTECPEPRDGRA OF PDPRIORITE_DIAG )
+
+               PUT PDPRIORITE_DIAG RESET
+            END
+            ;
+            ; La quantité à imputer est plus petite ou égale à la quantité
+            ; planifier pour la priorité
+            ;
+            ELSE BEGIN
+              LET PDGQTECPEPRDGRA  OF PDPRIORITE_DIAG = &
+                  PDGQTECPEPRDGRA  OF PDPRIORITE_DIAG + T_QTE_IMP
+
+              LET T_QTE_IMP = 0                                       ; <-- SEBCHA960918
+              PUT PDPRIORITE_DIAG RESET
+            END
+         END
+      END                                                             ; <-- SEBCHA960918
+      ELSE BREAK                                                      ; <-- SEBCHA960918
+    END
+    ;*****************************************************************; <-- SEBCHA960918
+    ;* 2 --> toutes les priorités <  à la priorité de pddet_debitage *; <-- SEBCHA960918
+    ;*****************************************************************; <-- SEBCHA960918
+
+    WHILE RETRIEVING PDPRIORITE_DIAG &                                ; <-- SEBCHA960918
+      VIA     CIECLE,     &                                           ; <-- SEBCHA960918
+              DIANUM002   &                                           ; <-- SEBCHA960918
+      USING   T_CIECLEMNU,                &                           ; <-- SEBCHA960918
+              DIANUM002 OF PDDET_DEBITAGE &                           ; <-- SEBCHA960918
+      ORDERBY CIECLE,    &                                            ; <-- SEBCHA960918
+              DIANUM002, &                                            ; <-- SEBCHA960918
+              PRICODPRI ASCENDING                                     ; <-- SEBCHA960918
+    BEGIN                                                             ; <-- SEBCHA960918
+      ;
+      ; Vérifie que notre quantité est différente de 0
+      ;
+      IF T_QTE_IMP > 0                                                ; <-- SEBCHA960918
+      THEN BEGIN                                                      ; <-- SEBCHA960918
+
+         ; Sélectionnent les prioritées plus grandes que la priorité  ; <-- SEBCHA960918
+         ; indiqué lors du débitage et                                ; <-- SEBCHA960918
+         ; Sélectionnent les priorités qui ont une quantité planifié  ; <-- SEBCHA960918
+         IF     PRICODPRI OF PDPRIORITE_DIAG        < T_CODPRI_IMP &  ; <-- SEBCHA960918
+            AND PDGQTEPLACPEGRA  OF PDPRIORITE_DIAG > 0               ; <-- SEBCHA960918
+         THEN BEGIN                                                   ; <-- SEBCHA960918
+            ;
+            ; La quantité à imputer est plus grande que la quantité planifier
+            ; pour la priorité
+            ;
+            IF T_QTE_IMP > (PDGQTEPLACPEGRA  OF PDPRIORITE_DIAG &
+                            - PDGQTECPEPRDGRA  OF PDPRIORITE_DIAG)
+            THEN BEGIN
+
+               LET T_QTE_IMP = T_QTE_IMP - &
+                       (PDGQTEPLACPEGRA OF PDPRIORITE_DIAG &
+                     - PDGQTECPEPRDGRA OF PDPRIORITE_DIAG)
+
+               LET PDGQTECPEPRDGRA OF PDPRIORITE_DIAG = &
+                       PDGQTECPEPRDGRA OF PDPRIORITE_DIAG + &
+                      ( PDGQTEPLACPEGRA OF PDPRIORITE_DIAG &
+                     - PDGQTECPEPRDGRA OF PDPRIORITE_DIAG )
+
+               PUT PDPRIORITE_DIAG RESET
+            END
+            ;
+            ; La quantité à imputer est plus petite ou égale à la quantité
+            ; planifier pour la priorité
+            ;
+            ELSE BEGIN
+              LET PDGQTECPEPRDGRA  OF PDPRIORITE_DIAG = &
+                  PDGQTECPEPRDGRA  OF PDPRIORITE_DIAG + T_QTE_IMP
+
+              LET T_QTE_IMP = 0                                       ; <-- SEBCHA960918
+              PUT PDPRIORITE_DIAG RESET                                     ; <-- SEBCHA960918
+            END
+         END
+      END                                                             ; <-- SEBCHA960918
+      ELSE BREAK                                                      ; <-- SEBCHA960918
+    END
+    ;*****************************************************************; <-- SEBCHA960918
+    ;* 3 --> toutes les priorités =  à la priorité 99                *; <-- SEBCHA960918
+    ;*****************************************************************; <-- SEBCHA960918
+
+    IF T_QTE_IMP > 0                                                  ; <-- SEBCHA960918
+    THEN BEGIN                                                        ; <-- SEBCHA960918
+      LET T_CODPRI_IMP = '99'                                         ; <-- SEBCHA960918
+      GET PDPRIORITE_DIAG &                                           ; <-- SEBCHA960918
+          VIA     CIECLE,     &                                       ; <-- SEBCHA960918
+                  DIANUM002,   &                                      ; <-- SEBCHA960918
+                  PRICODPRI   &                                       ; <-- SEBCHA960918
+          USING   T_CIECLEMNU,                &                       ; <-- SEBCHA960918
+                  DIANUM002 OF PDDET_DEBITAGE, &                      ; <-- SEBCHA960918
+                  T_CODPRI_IMP OPT                                    ; <-- SEBCHA960918
+      IF ACCESSOK                                                     ; <-- SEBCHA960918
+      THEN BEGIN                                                      ; <-- SEBCHA960918
+        LET PDGQTECPEPRDGRA  OF PDPRIORITE_DIAG = &                   ; <-- SEBCHA960918
+            PDGQTECPEPRDGRA  OF PDPRIORITE_DIAG + T_QTE_IMP           ; <-- SEBCHA960918
+        LET T_QTE_IMP = 0                                             ; <-- SEBCHA960918
+        PUT PDPRIORITE_DIAG RESET                                          ; <-- SEBCHA960918
+      END                                                             ; <-- SEBCHA960918
+    END                                                               ; <-- SEBCHA960918
+  END                                                                 ; <-- SEBCHA960918
+
+  ;
+  ; Traitement pour mise à jour lors d'une modification d'une ligne du rapport
+  ;
+  IF DDESTU OF PDDET_DEBITAGE = "M"
+  THEN BEGIN
+    ; Pour ne pas avoir deux fois la même transaction 'M' à traiter
+    IF 0 = SIZE(TRUNC(DDECOM OF PDDET_DEBITAGE))
+    THEN BEGIN
+
+    LET DDECOM OF PDDET_DEBITAGE = "*"
+
+    ;
+    ; Initialisation de la quantité debité à imputer
+    ;
+    LET T_QTE_IMP = DDEQTEFAB OF PDDET_DEBITAGE
+    ;
+    ; Imputation par priorité
+    ;
+    WHILE RETRIEVING PDPRIORITE_DIAG &
+      VIA     CIECLE,    &
+              DIANUM002  &
+      USING   T_CIECLEMNU,                &
+              DIANUM002 OF PDDET_DEBITAGE &
+      ORDERBY CIECLE,    &
+              DIANUM002, &
+              PRICODPRI DESCENDING
+    BEGIN
+
+     IF T_QTE_IMP > 0                                                ; <-- SEBCHA960918
+      THEN BEGIN                                                      ; <-- SEBCHA960918
+        IF PDGQTECPEPRDGRA  OF PDPRIORITE_DIAG > 0                    ; <-- SEBCHA960918
+        THEN BEGIN                                                    ; <-- SEBCHA960918
+          IF T_QTE_IMP > PDGQTECPEPRDGRA  OF PDPRIORITE_DIAG          ; <-- SEBCHA960918
+          THEN BEGIN                                                  ; <-- SEBCHA960918
+            LET T_QTE_IMP = T_QTE_IMP - PDGQTECPEPRDGRA  OF PDPRIORITE_DIAG ; <-- SEBCHA960918
+            LET PDGQTECPEPRDGRA  OF PDPRIORITE_DIAG = 0
+            PUT PDPRIORITE_DIAG RESET                                      ; <-- SEBCHA960918
+          END                                                         ; <-- SEBCHA960918
+          ELSE BEGIN                                                  ; <-- SEBCHA960918
+            LET PDGQTECPEPRDGRA OF PDPRIORITE_DIAG = &                ; <-- SEBCHA960918
+                PDGQTECPEPRDGRA OF PDPRIORITE_DIAG - T_QTE_IMP        ; <-- SEBCHA960918
+            LET T_QTE_IMP = 0                                         ; <-- SEBCHA960918
+            PUT PDPRIORITE_DIAG RESET                                      ; <-- SEBCHA960918
+         END                                                         ; <-- SEBCHA960918
+        END                                                           ; <-- SEBCHA960918
+      END                                                             ; <-- SEBCHA960918
+      ELSE BREAK                                                      ; <-- SEBCHA960918
+    END                                                               ; <-- SEBCHA960918
+  END
+  PUT PDDET_DEBITAGE
+  END                                                                 ; <-- SEBCHA960918
+END                                                                   ; <-- SEBCHA960918
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul du volume d'une pièce de granit
+;
+
+USE uscalvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure permettant de mettre à jour les produits de dimension
+;
+
+PROCEDURE INTERNAL MAJ_PROD_DIMEN
+BEGIN
+  IF DDESTU OF PDDET_DEBITAGE = "V"
+  THEN BEGIN
+    GET PDPROD_DIMENSION OPTIONAL &
+      VIA   CIECLE, &
+            PDILON, &
+            PDIHAU, &
+            PDIEPA, &
+            TGRCODGRA, &
+            TYFCODFIN &
+      USING T_CIECLEMNU,              &
+            DDELON OF PDDET_DEBITAGE, &
+            DDEHAU OF PDDET_DEBITAGE, &
+            DDEEPA OF PDDET_DEBITAGE, &
+            TGRCODGRA OF PDDET_DEBITAGE, &
+            TYFCODFIN OF PDDET_DEBITAGE
+    IF ACCESSOK
+    THEN BEGIN
+      ;
+      ; Mise à jour de la quantité produite
+      ;
+      LET PDIQTE OF PDPROD_DIMENSION = PDIQTE OF PDPROD_DIMENSION + &
+                                       DDEQTEFAB OF PDDET_DEBITAGE
+    END
+    ELSE BEGIN
+      ;
+      ; Création du produit de dimension
+      ;
+      LET PDILON    OF PDPROD_DIMENSION = DDELON OF PDDET_DEBITAGE
+      LET PDIHAU    OF PDPROD_DIMENSION = DDEHAU OF PDDET_DEBITAGE
+      LET PDIEPA    OF PDPROD_DIMENSION = DDEEPA OF PDDET_DEBITAGE
+      LET TGRCODGRA OF PDPROD_DIMENSION = TGRCODGRA OF PDDET_DEBITAGE
+      LET TYFCODFIN OF PDPROD_DIMENSION = TYFCODFIN OF PDDET_DEBITAGE
+      LET PDIQTE    OF PDPROD_DIMENSION = DDEQTEFAB OF PDDET_DEBITAGE
+      LET PDITYPPRD OF PDPROD_DIMENSION = "PD"
+      LET CIECLE    OF PDPROD_DIMENSION = T_CIECLEMNU
+
+      LET TZ_LARGEUR   = PDILON OF PDPROD_DIMENSION
+      LET TZ_HAUTEUR   = PDIHAU OF PDPROD_DIMENSION
+      LET TZ_EPAISSEUR = PDIEPA OF PDPROD_DIMENSION
+
+      DO  INTERNAL CALVOL
+
+      LET PDIVOLMC3 OF PDPROD_DIMENSION = TZ_VOLUME
+      LET PDISURMC2 OF PDPROD_DIMENSION = TZ_MC2
+      PUT PDPROD_DIMENSION
+   END
+  END
+
+  IF DDESTU OF PDDET_DEBITAGE = "M"
+  THEN BEGIN
+    GET PDPROD_DIMENSION OPTIONAL &
+      VIA   CIECLE, &
+            PDILON, &
+            PDIHAU, &
+            PDIEPA, &
+            TGRCODGRA, &
+            TYFCODFIN &
+      USING T_CIECLEMNU,              &
+            DDELON OF PDDET_DEBITAGE, &
+            DDEHAU OF PDDET_DEBITAGE, &
+            DDEEPA OF PDDET_DEBITAGE, &
+            TGRCODGRA OF PDDET_DEBITAGE, &
+            TYFCODFIN OF PDDET_DEBITAGE
+    IF ACCESSOK
+    THEN BEGIN
+      ;
+      ; Mise à jour de la quantité produite
+      ;
+      IF DDEQTEFAB OF PDDET_DEBITAGE <= PDIQTE OF PDPROD_DIMENSION
+      THEN BEGIN
+        LET PDIQTE OF PDPROD_DIMENSION = PDIQTE OF PDPROD_DIMENSION - &
+                                         DDEQTEFAB OF PDDET_DEBITAGE
+        PUT PDPROD_DIMENSION
+      END
+
+@IF PROSIG
+      ELSE BEGIN
+        ERROR 2098 ; La quatité à enlever est plus grande que la quantité produite
+      END
+@ENDIF
+
+    END
+    ELSE BEGIN
+      ERROR 1863 ; Ce code de produit n'existe pas
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Traite le rapport de débitage
+;
+
+PROCEDURE INTERNAL TRAITE_RAPPORT
+BEGIN
+
+  WHILE RETRIEVING PDDET_DEBITAGE &
+    VIA   CIECLE,      &
+          DEBNUMRAP    &
+    USING T_CIECLEMNU,            &
+          DEBNUMRAP OF PDDEBITAGE &
+    ORDERBY CIECLE,    &
+            DEBNUMRAP, &
+            DDENUMLIG, &
+            DDESTU ASCENDING
+  BEGIN
+    ;
+    ; Traite la tranche
+    ;
+    IF 0 <> SIZE(TRUNCATE(TRANUMTRA002 OF PDDET_DEBITAGE)) AND &
+       0 <> NCONVERT(TRANUMTRA002 OF PDDET_DEBITAGE)
+    THEN BEGIN
+      DO INTERNAL MAJ_TRANCHE
+    END
+    ;
+    ; Traite de diagramme
+    ;
+    IF 0 <> SIZE(TRUNCATE(DIANUM002 OF PDDET_DEBITAGE)) AND &
+       1 <> SIZE(TRUNCATE(DIANUM002 OF PDDET_DEBITAGE))
+    THEN BEGIN
+      DO INTERNAL MAJ_DIAGRAMME
+    END
+    ;
+    ; Traite les produits de dimension
+    ;
+    IF 0 = SIZE(TRUNCATE(DIANUM002 OF PDDET_DEBITAGE))
+    THEN BEGIN
+      DO INTERNAL MAJ_PROD_DIMEN
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Traitement
+;
+
+PROCEDURE ENTRY
+BEGIN
+
+  LET T_RAPVAL = "0"
+
+  ACCEPT T_CIECLEMNU
+  ACCEPT T_DEBNUMRAP
+
+  GET PDDEBITAGE OPTIONAL &
+    VIA   CIECLE,     &
+          DEBNUMRAP   &
+    USING T_CIECLEMNU,&
+          T_DEBNUMRAP
+  IF ACCESSOK
+  THEN BEGIN
+    ;
+    ; Valide que le statut du rapport est valide
+    ;
+    IF DEBSTU OF PDDEBITAGE = "V" &
+       OR &
+       DEBSTU OF PDDEBITAGE = "C" &
+       OR &
+       DEBSTU OF PDDEBITAGE = "M"
+    THEN BEGIN
+      ;
+      ; Valide toutes les lignes de detail
+      ;
+      DO INTERNAL VAL_DET_RAP
+      ;
+      ; Traite le rapport
+      ;
+      DO INTERNAL TRAITE_RAPPORT
+
+      GET PDDEBITAGE OPTIONAL &
+        VIA   CIECLE,   &
+              DEBNUMRAP &
+        USING T_CIECLEMNU,  &
+              T_DEBNUMRAP
+      IF ACCESSOK
+      THEN BEGIN
+        LET DEBSTU = "T"
+
+        PUT PDDEBITAGE
+      END
+      ELSE BEGIN
+        ERROR 2099 ; Ce numéro de rapport n'existe pas
+      END
+    END
+    ELSE BEGIN
+      LET T_RAPVAL = "1"
+      LET CIECLE           OF PDFICMES = CIECLE    OF PDDEBITAGE
+      LET FMGNUMRAP        OF PDFICMES = DEBNUMRAP OF PDDEBITAGE
+      LET FMGNUMLIG        OF PDFICMES = 0
+      LET FMGDSC           OF PDFICMES = "Ce rapport n'a pas été validé : " + ASCII(DEBNUMRAP OF PDDEBITAGE,9)
+      PUT PDFICMES RESET
+    END
+    ; Dans le cas ou le rapport de debitage a fonctionne !
+    IF T_RAPVAL <> "1"
+    THEN BEGIN
+           LET CIECLE           OF PDFICMES = CIECLE    OF PDDEBITAGE
+           LET FMGNUMRAP        OF PDFICMES = DEBNUMRAP OF PDDEBITAGE
+           LET FMGNUMLIG        OF PDFICMES = 0
+           LET FMGDSC           OF PDFICMES = "Ce rapport est transféré : "  + ASCII(DEBNUMRAP OF PDDEBITAGE,9)
+           PUT PDFICMES RESET
+    END
+  END
+  ELSE BEGIN
+    LET T_RAPVAL = "1"
+    LET CIECLE           OF PDFICMES = CIECLE    OF PDDEBITAGE
+    LET FMGNUMRAP        OF PDFICMES = DEBNUMRAP OF PDDEBITAGE
+    LET FMGNUMLIG        OF PDFICMES = 0
+    LET FMGDSC           OF PDFICMES = "Ce rapport n'existe pas : "  + ASCII(DEBNUMRAP OF PDDEBITAGE,9)
+    PUT PDFICMES RESET
+  END
+
+  DO INTERNAL DEL_LIEN
+  RETURN
+END
+
+
+BUILD

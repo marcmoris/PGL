@@ -1,0 +1,724 @@
+;/T/ 2.5.8 Retour de marchandises.
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1995-10-23
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   les retours de marchandises.
+;
+;/M/ François Déry, 12 mai 1999
+;       Ajout du in dict sur la transaction des séquences.
+;
+;/M/ Programmeur..: Nancy Breton
+;    Date modif...: 1998-09-23
+;
+;    Description..:
+;
+;
+;/M/ programmeure..: Claudie Doyon
+;    Date..........: 1999-05-06
+;    Etat..........: TERMINER
+;    Description...: Modification de la procédure find(optional)
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd222  ACTIONBAR                    &
+              MODE LABEL "" AT 2,80        &
+              NOACTION                     &
+              ACTIVITIES CHANGE,FIND,ENTRY &
+              FIELDMARK RETAIN STARTUP     &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU ,      &
+                        T_CIENOM
+
+
+;-------------------------------------------------------------------------------
+;
+; Déclaration de la transaction pour donner un numéro séquentiel
+;
+
+TRANSACTION NO_SEQ READ WRITE &
+                   RESERVING FOR PROTECTED WRITE PDSEQ_RETOUR IN DICT, &
+                                                 PDSEQ_FACTURE IN DICT
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD222"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+USE pd222.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Bloc                            " ACTION DESIGNER D001
+  MENUITEM LABEL "Tranche                         " ACTION DESIGNER D002
+  MENUITEM LABEL "Diagramme                       " ACTION DESIGNER D003
+  MENUITEM LABEL "Produit dimension               " ACTION DESIGNER D004
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%Bloc                         " ACTION DESIGNER D001
+  MENUITEM LABEL "%%%Tranche                      " ACTION DESIGNER D002
+  MENUITEM LABEL "%%%Diagramme                    " ACTION DESIGNER D003
+  MENUITEM LABEL "%%%Produit dimension            " ACTION DESIGNER D004
+@ENDIF
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables nécessaires au traitement
+;
+
+TEMPORARY T_TAXCLETYP    CHARACTER SIZE 01 ; Popup sur les codes de taxes
+TEMPORARY T_TAXCLECOD    CHARACTER SIZE 02 ; Popup sur les codes de taxes
+TEMPORARY T_TAXMODPAT    CHARACTER SIZE 05 ; Popup sur les codes de taxes
+
+TEMPORARY T_FLGMOD       CHARACTER SIZE 01 ; Flag pour déceler s'il y eu modif.
+
+
+;-------------------------------------------------------------------------------
+;
+; Temporaires necessaires au calcul des taxes
+;
+
+USE ustaxtmp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Facture
+;
+
+FILE PDRETOUR    PRIMARY &
+                 NOITEM &
+                 NODELETE
+
+  ACCESS VIA     CIECLE,          &
+                 RTONUMSEQ        &
+         USING   T_CIECLEMNU,                          &
+                 RTONUMSEQ        OF PDRETOUR          &
+         REQUEST RTONUMSEQ        OF PDRETOUR          &
+         ORDERBY CIECLE,          &
+                 RTONUMSEQ
+
+  ACCESS VIA     CIECLE           &
+         USING   T_CIECLEMNU      &
+         ORDERBY CIECLE,          &
+                 RTONUMSEQ
+
+
+  ITEM CIECLE       OF PDRETOUR INITIAL T_CIECLEMNU
+  ITEM RTODATCRE    OF PDRETOUR INITIAL SYSDATE
+  ITEM RTOHRECRE    OF PDRETOUR INITIAL SYSTIME / 10000
+  ITEM RTOUSRCRE    OF PDRETOUR INITIAL LOGONID
+
+  ITEM RTOVOLMC3BLO OF PDRETOUR INITIAL 0.00
+  ITEM RTOSURMC2TRA OF PDRETOUR INITIAL 0.00
+  ITEM RTOSURMC2DIA OF PDRETOUR INITIAL 0.00
+  ITEM RTOSURMC2PD  OF PDRETOUR INITIAL 0.00
+
+
+  ITEM RTODATDERMAJ OF PDRETOUR FINAL SYSDATE &
+                                      IF NOT NEWRECORD OF PDRETOUR &
+                                         AND &
+                                         ALTEREDRECORD OF PDRETOUR
+
+  ITEM RTOHREDERMAJ OF PDRETOUR FINAL SYSTIME / 10000 &
+                                      IF NOT NEWRECORD OF PDRETOUR &
+                                         AND &
+                                         ALTEREDRECORD OF PDRETOUR
+
+  ITEM RTOUSRDERMAJ OF PDRETOUR FINAL LOGONID &
+                                      IF NOT NEWRECORD OF PDRETOUR &
+                                         AND &
+                                         ALTEREDRECORD OF PDRETOUR
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro séquentiel pour les retours de marchandises
+;
+
+FILE PDSEQ_RETOUR  DESIGNER &
+                   TRANSACTION NO_SEQ
+
+;-------------------------------------------------------------------------------
+FILE PDSORTIE_PRODUIT REFERENCE
+  ACCESS VIA     CIECLE,                               &
+                 SPRNUMSOR                             &
+         USING   T_CIECLEMNU,                          &
+                 SPRNUMSOR        OF PDSORTIE_PRODUIT
+;-------------------------------------------------------------------------------
+FILE PDEXPEDITION REFERENCE
+
+  ACCESS  VIA     CIECLE,     &
+                  EXPNUMEXP   &
+          USING   T_CIECLEMNU, &
+                  EXPNUMEXP OF PDEXPEDITION
+;--------------------------------------------------
+
+FILE PDBON_LIVRAISON REFERENCE
+  ACCESS  VIA     CIECLE,           &
+                  EXPNUMEXP,        &
+                  BLINUMBLI         &
+          USING   T_CIECLEMNU,      &
+                  EXPNUMEXP OF PDEXPEDITION,&
+                  BLINUMBLI OF PDBON_LIVRAISON
+
+;-------------------------------------------------------------------------------
+;
+; Client
+;
+FILE VCLC_CLI        REFERENCE
+
+  ACCESS VIA     CLICIECLE,          &
+                 CLICLE,             &
+                 CIECLE              &
+         USING   "----",             &
+                 CLICLE OF PDBON_LIVRAISON, &
+                 T_CIECLEMNU
+;-------------------------------------------------------------------------------
+;
+; Projet
+;
+FILE PDPROJET REFERENCE
+
+  ACCESS VIA     CIECLE,           &
+                 PJTABR            &
+         USING   T_CIECLEMNU,      &
+                 PJTABR            OF PDBON_LIVRAISON
+;-------------------------------------------------------------------------------
+;
+; Validation des codes de taxes fédéral.
+;
+
+FILE MCTAXE           REFERENCE &
+                      ALIAS A_TAX_TPS
+
+  ACCESS  VIA   TAXCLETYP,       &
+                TAXCLECOD        &
+          USING RTOTAXTYPTPS     OF PDRETOUR ,        &
+                RTOTAXCODTPS     OF PDRETOUR
+;-------------------------------------------------------------------------------
+;
+; Validation des codes de taxes provincial.
+;
+
+FILE MCTAXE           REFERENCE &
+                      ALIAS A_TAX_TVP
+
+  ACCESS  VIA   TAXCLETYP,       &
+                TAXCLECOD        &
+          USING RTOTAXTYPTVQ     OF PDRETOUR ,        &
+                RTOTAXCODTVQ     OF PDRETOUR
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Retour marchandises " &
+@ELSE
+      " %%%Retour marchandises " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+
+ALIGN ( ,3,19) (41,41,57)
+
+
+FIELD RTONUMSEQ        OF PDRETOUR         &
+label "Num. séquence.:"&
+        DISPLAY                            &
+        REFRESH
+
+FIELD EXPNUMEXP  OF PDEXPEDITION &
+LABEL "Num. expédi...:" &
+;      REQUIRED          &
+      NOCHANGE          &
+      HIDDEN
+
+
+FIELD SPRNUMSOR OF PDSORTIE_PRODUIT &
+label "No sortie.....:"&
+      HIDDEN &
+      LOOKUP NOTON PDSORTIE_PRODUIT &
+      MESSAGE = "non existant"
+
+
+FIELD BLINUMBLI OF PDBON_LIVRAISON &
+LABEL "Bon livraison.:" &
+;      REQUIRED          &
+      NOCHANGE          &
+      HIDDEN
+
+
+;ALIGN ( ,3,19) (41,41,57) (,,59)
+
+FIELD RTODATRET        OF PDRETOUR          FORMAT YYYYMMDD &
+PATTERN "####/##/##"&
+label "Date retour...:"&
+        HIDDEN ID 05                       &
+        DEFAULT SYSDATE
+
+
+SKIP TO LINE 10
+
+
+ALIGN (,3,19) (,,29)
+
+
+FIELD CLICLE           OF PDBON_LIVRAISON &
+label "Client........:"&
+        DISPLAY
+
+
+FIELD CLINOM           OF VCLC_CLI &
+        DISPLAY
+
+
+FIELD PJTNUMPRO        OF PDPROJET &
+label "Num projet....:"&
+        DISPLAY
+
+
+FIELD PJTNOM           OF PDPROJET         &
+        DISPLAY
+
+
+
+SKIP TO LINE 20
+
+
+ALIGN (,3,19) (,41,57)
+
+
+FIELD RTOVOLMC3BLO     OF PDRETOUR         &
+label "Bloc..........:"&
+        DISPLAY                            &
+        REFRESH
+
+
+FIELD RTOSURMC2DIA     OF PDRETOUR         &
+label "Diagramme.....:"&
+        DISPLAY                            &
+        REFRESH
+
+
+FIELD RTOSURMC2TRA     OF PDRETOUR         &
+label "Tranche.......:"&
+        DISPLAY                            &
+        REFRESH
+
+
+FIELD RTOSURMC2PD      OF PDRETOUR         &
+label "Prod. dimen...:"&
+        DISPLAY                            &
+        REFRESH
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Validation de la date de retour
+;
+
+;PROCEDURE EDIT RTODATRET OF PDRETOUR
+;BEGIN
+;  IF FIELDVALUE < FTRDATFAC OF PDFACTURE
+;  THEN BEGIN
+;    ERROR 3231 ; La date de retour doit être suppérieur à la date de la facture
+;  END
+;END
+;-------------------------------------------------------------------------------
+;
+; Bloc
+;
+
+PROCEDURE DESIGNER D001
+BEGIN
+IF ALTEREDRECORD OF PDRETOUR
+THEN ERROR = "FAIRE MISE A JOUR POUR ACCEDER AU SOUS-ECRAN"
+
+;  IF FTRTYPFAC OF PDFACTURE <> "D"
+;  THEN BEGIN
+;    ERROR 3230 ; On ne peut accéder le sous-écran pour ce type de facture
+;  END
+  RUN SCREEN  pd222a &
+              PASSING T_CIECLEMNU,        &
+                      T_CIENOM,           &
+                      PDRETOUR           &
+              MODE SAME
+
+  DISPLAY RTOVOLMC3BLO     OF PDRETOUR
+  DISPLAY RTOSURMC2DIA     OF PDRETOUR
+  DISPLAY RTOSURMC2TRA     OF PDRETOUR
+  DISPLAY RTOSURMC2PD      OF PDRETOUR
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Tranche
+;
+
+PROCEDURE DESIGNER D002
+BEGIN
+IF ALTEREDRECORD OF PDRETOUR
+THEN ERROR = "FAIRE MISE A JOUR POUR ACCEDER AU SOUS-ECRAN"
+
+  RUN SCREEN  pd222b &
+              PASSING T_CIECLEMNU,        &
+                      T_CIENOM,           &
+                      PDRETOUR           &
+                      ;PDFACTURE           &
+              MODE SAME
+
+  DISPLAY RTOVOLMC3BLO     OF PDRETOUR
+  DISPLAY RTOSURMC2DIA     OF PDRETOUR
+  DISPLAY RTOSURMC2TRA     OF PDRETOUR
+  DISPLAY RTOSURMC2PD      OF PDRETOUR
+
+END
+;-------------------------------------------------------------------------------
+;
+; Diagramme
+;
+
+PROCEDURE DESIGNER D003
+BEGIN
+IF ALTEREDRECORD OF PDRETOUR
+THEN ERROR = "FAIRE MISE A JOUR POUR ACCEDER AU SOUS-ECRAN"
+
+;  IF FTRTYPFAC OF PDFACTURE <> "C"
+;  THEN BEGIN
+;    ERROR 3230 ; On ne peut accéder le sous-écran pour ce type de facture
+;  END
+  RUN SCREEN  pd222c &
+              PASSING T_CIECLEMNU,        &
+                      T_CIENOM,           &
+                      PDRETOUR           &
+                     ; PDFACTURE           &
+              MODE SAME
+
+  DISPLAY RTOVOLMC3BLO     OF PDRETOUR
+  DISPLAY RTOSURMC2DIA     OF PDRETOUR
+  DISPLAY RTOSURMC2TRA     OF PDRETOUR
+  DISPLAY RTOSURMC2PD      OF PDRETOUR
+
+END
+;-------------------------------------------------------------------------------
+;
+; Produit dimension
+;
+
+PROCEDURE DESIGNER D004
+BEGIN
+IF ALTEREDRECORD OF PDRETOUR
+THEN ERROR = "FAIRE MISE A JOUR POUR ACCEDER AU SOUS-ECRAN"
+
+;  IF FTRTYPFAC OF PDFACTURE <> "D"
+;  THEN BEGIN
+;    ERROR 3230 ; On ne peut accéder le sous-écran pour ce type de facture
+;  END
+  RUN SCREEN  pd222d &
+              PASSING T_CIECLEMNU,        &
+                      T_CIENOM,           &
+                      PDRETOUR           &
+                     ; PDFACTURE           &
+              MODE SAME
+
+  DISPLAY RTOVOLMC3BLO     OF PDRETOUR
+  DISPLAY RTOSURMC2DIA     OF PDRETOUR
+  DISPLAY RTOSURMC2TRA     OF PDRETOUR
+  DISPLAY RTOSURMC2PD      OF PDRETOUR
+
+END
+
+;------------------------------------------------------------------------------
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  DISPLAY RTONUMSEQ OF PDRETOUR
+  ACCEPT EXPNUMEXP OF PDEXPEDITION
+  ACCEPT SPRNUMSOR OF PDSORTIE_PRODUIT
+  ACCEPT BLINUMBLI OF PDBON_LIVRAISON
+  IF BLINUMBLI OF PDBON_LIVRAISON <> ""
+  THEN BEGIN
+    GET PDBON_LIVRAISON VIA  CIECLE,      &
+                             EXPNUMEXP ,  &
+                             BLINUMBLI    &
+                       USING T_CIECLEMNU, &
+                             EXPNUMEXP OF PDEXPEDITION, &
+                             BLINUMBLI OF PDBON_LIVRAISON OPT
+    IF ACCESSOK
+    THEN BEGIN
+      GET VCLC_CLI VIA CLICIECLE, &
+                       CLICLE,    &
+                       CIECLE     &
+                 USING "----",    &
+                       CLICLE OF PDBON_LIVRAISON, &
+                       T_CIECLEMNU
+      DISPLAY CLICLE OF PDBON_LIVRAISON
+      DISPLAY CLINOM OF VCLC_CLI
+      GET PDPROJET VIA CIECLE,PJTABR USING T_CIECLEMNU,PJTABR OF PDBON_LIVRAISON
+      DISPLAY PJTNUMPRO OF PDPROJET
+      DISPLAY PJTNOM    OF PDPROJET
+    END
+    ELSE ERROR = "CE BON INEXISTANT"
+  END
+  ACCEPT RTODATRET OF PDRETOUR
+  DISPLAY CLICLE OF PDBON_LIVRAISON
+  DISPLAY CLINOM OF VCLC_CLI
+  DISPLAY PJTNUMPRO OF PDPROJET
+  DISPLAY PJTNOM OF PDPROJET
+  DISPLAY RTOVOLMC3BLO OF PDRETOUR
+  DISPLAY RTOSURMC2DIA OF PDRETOUR
+  DISPLAY RTOSURMC2TRA OF PDRETOUR
+  DISPLAY RTOSURMC2PD OF PDRETOUR
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDRETOUR &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDRETOUR &
+     AND NOT NEWRECORD     OF PDRETOUR &
+     AND NOT DELETEDRECORD OF PDRETOUR &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  ;
+  ; Incrémentation du numéro de séquence
+  ;
+  IF 0 = RTONUMSEQ OF PDRETOUR
+  THEN BEGIN
+    START TRANSACTION NO_SEQ
+    GET PDSEQ_RETOUR OPTIONAL           &
+      VIA   CIECLE                      &
+      USING T_CIECLEMNU
+    IF NOT ACCESSOK
+    THEN BEGIN
+      LET CIECLE OF PDSEQ_RETOUR = T_CIECLEMNU
+    END
+    LET SETNUMRAP        OF PDSEQ_RETOUR     = SETNUMRAP        OF PDSEQ_RETOUR + 1
+    LET RTONUMSEQ        OF PDRETOUR         = SETNUMRAP        OF PDSEQ_RETOUR
+    PUT PDSEQ_RETOUR
+    DISPLAY RTONUMSEQ OF PDRETOUR
+    IF EXPNUMEXP OF PDEXPEDITION <> 0
+    THEN BEGIN
+     LET EXPNUMEXP OF PDRETOUR = EXPNUMEXP OF PDEXPEDITION
+     LET BLINUMBLI OF PDRETOUR = BLINUMBLI OF PDBON_LIVRAISON
+    END
+    ELSE IF SPRNUMSOR OF PDSORTIE_PRODUIT <> 0
+     THEN LET SPRNUMSOR OF PDRETOUR = SPRNUMSOR OF PDSORTIE_PRODUIT
+    ELSE BEGIN
+     LET EXPNUMEXP OF PDRETOUR = 0
+     LET BLINUMBLI OF PDRETOUR = "00"
+     LET SPRNUMSOR OF PDRETOUR = 0
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Permet de faire afficher le numéro de séquence
+;
+
+PROCEDURE POSTUPDATE
+BEGIN
+  DISPLAY RTOVOLMC3BLO     OF PDRETOUR
+  DISPLAY RTOSURMC2DIA     OF PDRETOUR
+  DISPLAY RTOSURMC2TRA     OF PDRETOUR
+  DISPLAY RTOSURMC2PD      OF PDRETOUR
+  IF CORRECTMODE
+  THEN BEGIN
+    DISPLAY RTONUMSEQ OF PDRETOUR
+    WARNING = " "
+  END
+END
+
+;----------------------------------------------------------
+
+PROCEDURE PATH
+BEGIN
+  REQUEST RTONUMSEQ OF PDRETOUR
+  IF PROMPTOK
+  THEN LET PATH = 1
+
+  IF PATH = 0
+  THEN BEGIN
+    REQUEST EXPNUMEXP OF PDEXPEDITION
+    IF PROMPTOK
+    THEN BEGIN
+      REQUEST BLINUMBLI OF PDBON_LIVRAISON
+      IF PROMPTOK
+      THEN LET PATH = 2
+      ELSE LET PATH = 3
+    END
+ ;   ELSE REQUEST SPRNUMSOR OF PDSORTIE_PRODUIT
+ ;   IF PROMPTOK
+ ;   THEN LET PATH = 4
+  ELSE LET PATH = 5
+  END
+END
+
+;---------------------------------------
+PROCEDURE FIND
+BEGIN
+  IF PATH = 1
+  THEN BEGIN
+    GET PDRETOUR  VIA   CIECLE  , &
+                       RTONUMSEQ &
+                 USING T_CIECLEMNU, &
+                       RTONUMSEQ OF PDRETOUR
+   IF EXPNUMEXP OF PDRETOUR <> 0
+    THEN BEGIN
+      GET PDEXPEDITION OPTIONAL VIA   CIECLE,   &
+                            EXPNUMEXP &
+                       USING T_CIECLEMNU, &
+                             EXPNUMEXP OF PDRETOUR
+      GET PDBON_LIVRAISON OPTIONAL  VIA   CIECLE , &
+                                  EXPNUMEXP, &
+                                  BLINUMBLI  &
+                          USING T_CIECLEMNU, &
+                                EXPNUMEXP OF PDRETOUR, &
+                                BLINUMBLI OF PDRETOUR
+    END
+    ELSE IF SPRNUMSOR OF PDRETOUR  <> 0
+    THEN GET PDSORTIE_PRODUIT     VIA CIECLE,SPRNUMSOR USING &
+                                     T_CIECLEMNU,SPRNUMSOR OF PDRETOUR
+
+
+    END
+    ELSE IF PATH = 2
+    THEN GET PDRETOUR  VIA CIECLE,EXPNUMEXP,BLINUMBLI ORDERBY CIECLE , EXPNUMEXP,BLINUMBLI USING &
+           T_CIECLEMNU,EXPNUMEXP OF PDEXPEDITION,BLINUMBLI OF PDBON_LIVRAISON
+
+    ELSE
+    IF PATH = 3
+    THEN GET PDRETOUR  VIA CIECLE,EXPNUMEXP ORDERBY CIECLE , EXPNUMEXP,BLINUMBLI USING &
+           T_CIECLEMNU,EXPNUMEXP OF PDEXPEDITION
+
+    ELSE
+    IF PATH = 4
+    THEN GET PDRETOUR  VIA CIECLE,SPRNUMSOR ORDERBY CIECLE,SPRNUMSOR USING &
+         T_CIECLEMNU,SPRNUMSOR OF PDSORTIE_PRODUIT
+
+    ELSE
+    IF PATH = 5
+      THEN GET PDRETOUR  VIA CIECLE ORDERBY CIECLE , &
+           RTONUMSEQ USING T_CIECLEMNU
+END
+
+;-----------------------------------
+PROCEDURE UPDATE
+BEGIN
+  PUT PDRETOUR
+END
+
+BUILD DETAIL LIST
+
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+***************************** Retour marchandises ******************************
+*                                                                              *
+* Num. séquence.: xxxxxxxxx             No. facture...: xxxxxxx                *
+* Date retour...: xxxxxxxx              Type facture..: x xxxxxxxxxxxxxxxxx    *
+*                                                                              *
+*                                                                              *
+*                                                                              *
+* Client........: xxxxxx    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           *
+* Num. commande.: xxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           *
+* Num projet....: xxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx           *
+*                                                                              *
+*                                                                              *
+* Bloc..........: xxxxxxxxx             Diagramme.....: xxxxxxxxx              *
+* Tranche.......: xxxxxxxxx             Prod. dimen...: xxxxxxxxx              *
+*                                                                              *
+********************************************************************************
+@ENDIF

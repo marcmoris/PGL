@@ -1,0 +1,390 @@
+;/T/ Immobilisation
+;
+;/P/ Programmeur..: Thomas BRENNEUR
+;    Date Création: 12 Juin 1993
+;
+;/V3.02.00/ Alain Côté, 23 février 1994, Immobilisation
+;
+;
+;    Description..: Ventilation de la facture par immobilisation.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cp003d ACTIONBAR &
+              MODE LABEL "" AT 2,80 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              FROM 12,1 TO 23,80 &
+              MESSAGE ON 24 &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING   CPCPT_A_PAYER, &
+                          VFOC_FOU
+
+USE ussectmp NOLIST
+    "CP003D"
+
+USE cp003d.hlp NOLIST
+
+USE ustrasse  NOLIST
+
+
+TRANSACTION MAJ_TBL_CAP INHERITED
+
+
+USE usactecr   NOLIST
+
+;-------------------------------------------------------------------------------
+
+FILE CPCPT_A_PAYER    MASTER
+FILE VFOC_FOU         MASTER
+
+;-------------------------------------------------------------------------------
+
+FILE CPCAP_IMM        PRIMARY &
+                      OCCURS 5 &
+                      NOITEMS
+
+  ACCESS  VIA   FOUCIECLE , &
+                FOUCLE    , &
+                CAPCLE      &
+          USING FOUCIECLE OF CPCPT_A_PAYER , &
+                FOUCLE    OF CPCPT_A_PAYER , &
+                CAPCLE    OF CPCPT_A_PAYER
+
+  ITEM FOUCIECLE OF CPCAP_IMM INITIAL FOUCIECLE OF CPCPT_A_PAYER
+  ITEM FOUCLE    OF CPCAP_IMM INITIAL FOUCLE    OF CPCPT_A_PAYER
+  ITEM CAPCLE    OF CPCAP_IMM INITIAL CAPCLE    OF CPCPT_A_PAYER
+  ITEM PECCLE    OF CPCAP_IMM INITIAL PECCLE    OF CPCPT_A_PAYER
+  ITEM LCPCLE    OF CPCAP_IMM INITIAL LCPCLE    OF CPCPT_A_PAYER
+  ITEM CIECLE    OF CPCAP_IMM INITIAL CAPCIECLE OF CPCPT_A_PAYER
+  ITEM CAPTYPECR OF CPCAP_IMM INITIAL CAPTYPECR OF CPCPT_A_PAYER
+  ITEM CAPDAT    OF CPCAP_IMM INITIAL CAPDAT    OF CPCPT_A_PAYER
+
+;
+; Valide l'immobilisation et affiche la description.
+;
+FILE IMIMMOBILISATION REFERENCE &
+                      OCCURS WITH CPCAP_IMM
+
+  ACCESS  VIA   CIECLE, &
+                IMMCLE &
+          USING CIECLE OF CPCAP_IMM , &
+                IMMCLE OF CPCAP_IMM
+
+  SELECT IF IMMSTU OF IMIMMOBILISATION = "A"
+
+;
+; Devise du fournisseur.
+;
+FILE MCDEVISE         REFERENCE
+  ACCESS VIA DEVCLE &
+         USING DEVCLE OF VFOC_FOU
+
+;
+; Paramètres pour la compagnie consolidé(holding)
+;
+FILE MCHOLDING REFERENCE
+
+  ACCESS VIA CIENMC USING "1"
+
+;
+; Cacul du total de la ventilation.
+;
+FILE CPCAP_IMM        ALIAS A_CIM_TOTAL &
+                      DESIGNER &
+                      OPEN READ SHARE
+
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_CIECLE CHARACTER SIZE  4 ; Popup sur les immobilisations.
+TEMPORARY T_IMMCLE CHARACTER SIZE 12 ; Popup sur les immobilisations.
+
+
+TEMPORARY T_TOTIMM FLOAT SIZE 8 RESET AT STARTUP ; Total de la
+                                                 ; ventilation-immobilisation
+
+;
+; Calcul du montant de la facture dans la devise du Grand Livre.
+;
+DEFINE D_CAPMNT_HLD FLOAT SIZE 8 = CAPMNT OF CPCPT_A_PAYER &
+                                  IF DEVCLE OF VFOC_FOU = DEVCLE OF MCHOLDING &
+                              ELSE ROUND( CAPMNT OF CPCPT_A_PAYER * &
+                                          DEVTAU OF MCDEVISE )
+
+;
+; On affiche le code de devise du fournisseur seulement si la devise du
+; fournisseur est différente de la devise du Grand Livre.
+;
+DEFINE D_DEVCLE CHARACTER SIZE 4 = " " &
+                                  IF DEVCLE OF VFOC_FOU = DEVCLE OF MCHOLDING &
+                              ELSE "/" + DEVCLE OF VFOC_FOU
+
+;
+; Reste à ventiler.
+;
+DEFINE D_BALIMM FLOAT SIZE 8 = D_CAPMNT_HLD - T_TOTIMM
+
+
+;------------------------------------------------------------------------------
+
+USE ushilite NOLIST     ; Hilite pour tout les écrans
+
+DRAW FROM  2, 1 TO  2,79
+DRAW FROM  2, 1 TO 12, 1
+DRAW FROM  3,80 TO 12,80
+DRAW FROM 12, 1 TO 12,80
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+      " Immobilisation " &
+@ELSE
+      " Capital Assets " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP
+
+ALIGN(,3,19) (,,33) (,48,64)
+
+FIELD CAPMNT OF CPCPT_A_PAYER &
+        FIXED
+
+FIELD D_DEVCLE &
+        FIXED
+
+FIELD D_BALIMM &
+        FIXED  &
+@IF FRANCAIS
+        LABEL "Reste à vent..:" &
+@ELSE
+        LABEL "Left to sell..:" &
+@ENDIF
+        PICTURE "^^,^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5
+
+SKIP
+DRAW ,1 TO ,80
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+" No                                                                 Montant " &
+@ELSE
+" %%%                                                                Montant " &
+@ENDIF
+     AT ,3
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+"Immo.        Description          Commentaire                      à imputer" &
+@ELSE
+"%%%o.        Description          Commentaire                      à imputer" &
+@ENDIF
+   AT ,3
+
+ALIGN (3,2,3) (,,16) (,,37) (,,66)
+
+CLUSTER OCCURS WITH CPCAP_IMM ID BASE 05
+
+FIELD IMMCLE OF CPCAP_IMM HIDDEN LABEL " " &
+        REQUIRED &
+        LOOKUP &
+          NOTON CPCAP_IMM &
+            VIA   FOUCIECLE, &
+                  FOUCLE, &
+                  CAPCLE, &
+                  IMMCLE &
+            USING FOUCIECLE OF CPCAP_IMM, &
+                  FOUCLE    OF CPCAP_IMM, &
+                  CAPCLE    OF CPCAP_IMM, &
+                  IMMCLE    OF CPCAP_IMM &
+            MESSAGE 486, &; Cet immobilisation est déjà défini pour cette facture.
+          ON IMIMMOBILISATION &
+            VIA   CIECLE , &
+                  IMMCLE   &
+            USING CIECLE OF CPCAP_IMM , &
+                  IMMCLE OF CPCAP_IMM   &
+            MESSAGE 491 ; Cette immobilisation n'existe pas ou est inactive.
+
+FIELD IMMDSC OF IMIMMOBILISATION &
+        DISPLAY &
+        SIZE 20
+
+FIELD CIMDSC OF CPCAP_IMM &
+        FOR 1,28
+
+FIELD CIMMNT OF CPCAP_IMM &
+        REQUIRED
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès pour l'écran par son code.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+  ;
+  ; Calcul pour avoir le total de la ventilation.
+  ;
+  WHILE RETRIEVING A_CIM_TOTAL &
+      VIA   FOUCIECLE, &
+            FOUCLE, &
+            CAPCLE &
+      USING FOUCIECLE OF CPCPT_A_PAYER, &
+            FOUCLE    OF CPCPT_A_PAYER, &
+            CAPCLE    OF CPCPT_A_PAYER
+  BEGIN
+    LET T_TOTIMM = T_TOTIMM + CIMMNT OF A_CIM_TOTAL
+  END
+  DISPLAY D_BALIMM
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Accés au sous-écran de consultation des immobilisations
+;
+;
+PROCEDURE INPUT IMMCLE
+BEGIN
+  ;
+  ; Valide si l'usager peut faire de la saisie.
+  ;
+  USE ussecent NOLIST
+
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = CIECLE OF CPCAP_IMM
+    LET T_IMMCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN im102 MODE F &
+                     PASSING T_CIECLE , &
+                             T_IMMCLE
+    LET FIELDTEXT = TRUNCATE( T_IMMCLE )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Mise à jour du total de la ventilation.
+;
+;
+PROCEDURE EDIT CIMMNT
+BEGIN
+  ;
+  ; Valide la partie décimale.
+  ;
+  USE usvaldec NOLIST
+
+  LET T_TOTIMM = T_TOTIMM - OLDVALUE(CIMMNT OF CPCAP_IMM) + FIELDVALUE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Affiche le solde 'reste à ventiler'.
+;
+;
+PROCEDURE PROCESS CIMMNT
+BEGIN
+  DISPLAY D_BALIMM
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR CPCAP_IMM
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF  DELETEDRECORD OF CPCAP_IMM &
+      AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la mise à jour(Entrée, Modification)
+    ;
+    IF     ALTEREDRECORD     OF CPCAP_IMM &
+       AND NOT NEWRECORD     OF CPCAP_IMM &
+       AND NOT DELETEDRECORD OF CPCAP_IMM &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+    ;
+    ; Mise à jour du timbre de modification si l'usager change la ventilation
+    ;
+    IF   NEWRECORD     OF CPCAP_IMM &
+      OR ALTEREDRECORD OF CPCAP_IMM &
+      OR DELETEDRECORD OF CPCAP_IMM
+    THEN BEGIN
+      LET CAPDATMOD OF CPCPT_A_PAYER = SYSDATE
+      LET CAPHREMOD OF CPCPT_A_PAYER = SYSTIME / 10000
+      LET CAPUSRMOD OF CPCPT_A_PAYER = LOGONID
+    END
+  END
+
+  IF 0 > ABS(CAPMNT OF CPCPT_A_PAYER) - ABS(T_TOTIMM)
+  THEN ERROR 487 ; Le total de la ventilation est supérieure à la facture.
+
+  IF 0 < ABS(CAPMNT OF CPCPT_A_PAYER) - ABS(T_TOTIMM)
+  THEN WARNING 488 ; Le total de la ventilation est inférieure à la facture.
+
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Maintenance du cumulatif ventilé.
+;
+;
+PROCEDURE DELETE
+BEGIN
+  IF NOT DELETEDRECORD OF CPCAP_IMM
+  THEN BEGIN
+    LET T_TOTIMM = T_TOTIMM - CIMMNT OF CPCAP_IMM
+    DISPLAY D_BALIMM
+    DELETE CPCAP_IMM
+  END
+END
+
+PROCEDURE POSTUPDATE
+BEGIN
+  COMMIT TRANSACTION MAJ_TBL_CAP
+END
+
+BUILD list detail
+
+@IF FORMAT
+
+******************************** Immobilisation *******************************x
+* Montant brut..: xxxxxxxxxxxxxxxxxx           Reste à vent..: xxxxxxxxxxxxxx  *
+********************************************************************************
+*  No                                                                 Montant  *
+* Immo.        Description          Commentaire                      à imputer *
+* xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+* xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+* xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+* xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+* xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+********************************************************************************
+@ENDIF

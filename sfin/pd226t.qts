@@ -1,0 +1,786 @@
+;/T/ 2.5.4 Impression du bon de livraison
+;
+;/P/ Programmeur..: REMY DEMERS
+;    Date Création: 1998-01-06
+;
+;    Description..: trouver les info pour un bon de livraison soit dans
+;                   les tables normal si ces une premiere impression,
+;                   ou dans la table historique si ces une reimpression.
+;
+;       *** NOTE : Un bon de livraison ne se fait que pour des diagrammes
+;                  ou des tranches.
+;
+;/M/ François Déry, 6 mai 1999
+;       Correction du nom de subfile miniscule/majuscule.
+;
+;/M/ Programmeur...: Nancy Breton
+;    Date Modif....: 1998-12-11
+;    Description...: Enlever un lien que ne servait pas et qui fesait doubler
+;                    les valeurs. J,ai enlever le append sur le subfile
+;                    WPD226_PARAMETRE_UN
+;
+;/M/ Programmeur...: Patrick Langlois
+;    Date Modif....: 1999-06-08
+;    Description...: Corriger requête "MAJ_DIAGRAMME" mette à jour seulement les
+;                    diagrammes qui sont sur le bon de commande
+;/M/ Programmeur....: Bernard Samson
+;   date modif.....: 1999-10-01
+;   Description....: Correction de la request de mise à jour du total de diagramme
+;                    pour qu'il tienne compte du total déjà enregistré et qu'ils 
+;                    ne cummulle pas les quantités déjà transféré. 
+;
+; Première partie
+;---------------------------------------------------------------------------------
+
+USE ussetqts NOLIST
+SET LOCK RECORD UPDATE
+
+RUN pd226ta
+
+;-----------------------------------------------------------------------
+;
+REQUEST SELECTION
+
+ACCESS PDBON_LIVRAISON
+
+CHOOSE CIECLE    PARM ,&
+       EXPNUMEXP PARM ,&
+       BLINUMBLI PARM
+
+  SUBFILE WPD226_PARAMETRE_UN KEEP &
+    INCLUDE CIECLE    OF PDBON_LIVRAISON, &
+            EXPNUMEXP OF PDBON_LIVRAISON, &
+            BLINUMBLI OF PDBON_LIVRAISON, &
+            COMNUMCOM OF PDBON_LIVRAISON
+
+;-----------------------------------------------------------------
+REQUEST BCK_MAJ_DIAGRAMME
+
+ACCESS *WPD226_PARAMETRE_UN              &
+
+  LINK CIECLE    OF WPD226_PARAMETRE_UN, &
+       EXPNUMEXP OF WPD226_PARAMETRE_UN, &
+       BLINUMBLI OF WPD226_PARAMETRE_UN  &
+  TO   CIECLE                          , &
+       EXPNUMEXP                       , &
+       BLINUMBLI OF PDLIVRE_CAISSON      &
+
+  LINK CIECLE    OF PDLIVRE_CAISSON    , &
+       CAINUMCAI OF PDLIVRE_CAISSON      &
+  TO   CIECLE                          , &
+       CAINUMCAI OF PDCAISSON            &
+
+  LINK CIECLE    OF PDCAISSON          , &
+       CAINUMCAI OF PDCAISSON            &
+  TO   CIECLE                          , &
+       CAINUMCAI OF PDEMBAL_DIAG         &
+
+  LINK CIECLE    OF PDEMBAL_DIAG       , &
+       PJTABR    OF PDEMBAL_DIAG       , &
+       DIANUM002 OF PDEMBAL_DIAG         &
+  TO   CIECLE                          , &
+       PJTABR                          , &
+       DIANUM002 OF PDDIAGRAMME
+
+SORT ON CIECLE    OF WPD226_PARAMETRE_UN &
+     ON DIANUM002 OF PDEMBAL_DIAG
+
+SUBFILE WPD226_BCKDIA KEEP AT DIANUM002 INCLUDE PDDIAGRAMME
+
+;-----------------------------------------------------------------
+REQUEST MAJ_DIAGRAMME
+
+ACCESS *WPD226_PARAMETRE_UN              &
+
+  LINK CIECLE    OF WPD226_PARAMETRE_UN, &
+       EXPNUMEXP OF WPD226_PARAMETRE_UN, &
+       BLINUMBLI OF WPD226_PARAMETRE_UN  &
+  TO   CIECLE                          , &
+       EXPNUMEXP                       , &
+       BLINUMBLI OF PDLIVRE_CAISSON      &
+
+  LINK CIECLE    OF PDLIVRE_CAISSON    , &
+       CAINUMCAI OF PDLIVRE_CAISSON      &
+  TO   CIECLE                          , &
+       CAINUMCAI OF PDCAISSON            &
+
+  LINK CIECLE    OF PDCAISSON          , &
+       CAINUMCAI OF PDCAISSON            &
+  TO   CIECLE                          , &
+       CAINUMCAI OF PDEMBAL_DIAG         &
+
+  LINK CIECLE    OF PDEMBAL_DIAG       , &
+       PJTABR    OF PDEMBAL_DIAG       , &
+       DIANUM002 OF PDEMBAL_DIAG         &
+  TO   CIECLE                          , &
+       PJTABR                          , &
+       DIANUM002 OF PDDIAGRAMME
+
+
+SORT ON CIECLE    OF WPD226_PARAMETRE_UN &
+     ON DIANUM002 OF PDEMBAL_DIAG
+
+TEMP T_CUMUL INT SIZE 4
+
+ITEM T_CUMUL SUBTOTAL EMDQTEPRD OF PDEMBAL_DIAG &
+             IF CAISTU OF PDCAISSON <> "E" &
+             RESET AT DIANUM002
+
+OUTPUT PDDIAGRAMME UPDATE AT DIANUM002
+  ITEM DIAQTEEXPCLI OF PDDIAGRAMME FINAL DIAQTEEXPCLI OF PDDIAGRAMME + T_CUMUL
+
+;
+;fin des request pour la premiere impression ou pour ammendement
+;
+;------------------------------------------------------------------------------
+;----------------------------------------------------------------------
+;request pour la premiere impression
+;
+REQUEST BCK_BON_LIVRAISON
+
+ACCESS *WPD226_PARAMETRE_UN &
+
+  LINK CIECLE        OF WPD226_PARAMETRE_UN , &
+       EXPNUMEXP OF WPD226_PARAMETRE_UN , &
+       BLINUMBLI OF WPD226_PARAMETRE_UN   &
+  TO   CIECLE                           , &
+       EXPNUMEXP                        , &
+       BLINUMBLI OF PDBON_LIVRAISON       &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       EXPNUMEXP OF PDBON_LIVRAISON     , &
+       BLINUMBLI OF PDBON_LIVRAISON       &
+  TO   CIECLE                           , &
+       EXPNUMEXP                        , &
+       BLINUMBLI OF PDLIVRE_CAISSON       &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       CAINUMCAI OF PDLIVRE_CAISSON       &
+  TO   CIECLE                           , &
+       CAINUMCAI OF PDCAISSON             &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       TPDTYPPRD OF PDCAISSON             &
+  TO   CIECLE                           , &
+       TPDTYPPRD OF PDTYPE_PRODUIT        &
+
+  LINK CIECLE       OF PDBON_LIVRAISON  , &
+       PJTABR       OF PDBON_LIVRAISON  , &
+       COMNUMCOMINT OF PDBON_LIVRAISON    &
+  TO   CIECLE                           , &
+       PJTABR                           , &
+       COMNUMCOMINT OF PDCOMMAN_INTERNE   &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       CAINUMCAI OF PDCAISSON             &
+  TO   CIECLE                           , &
+       CAINUMCAI OF PDEMBAL_DIAG          OPTIONAL &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       PJTABR    OF PDEMBAL_DIAG  ,&
+       DIANUM002 OF PDEMBAL_DIAG          &
+  TO   CIECLE                           , &
+       PJTABR   ,&
+       DIANUM002 OF PDDIAGRAMME           OPTIONAL &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       TGRCODGRA OF PDDIAGRAMME           &
+  TO   CIECLE                           , &
+       TGRCODGRA OF PDTYPE_GRANIT        ALIAS A_TGR_DIA OPTIONAL &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       CAINUMCAI OF PDCAISSON             &
+  TO   CIECLE                           , &
+       CAINUMCAI OF PDEMBAL_TRANCHE       OPTIONAL &
+
+  LINK CIECLE       OF PDBON_LIVRAISON  , &
+       TRANUMTRA002 OF PDEMBAL_TRANCHE    &
+  TO   CIECLE                           , &
+       TRANUMTRA002 OF PDTRANCHE          OPTIONAL &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       TGRCODGRA OF PDTRANCHE             &
+  TO   CIECLE                           , &
+       TGRCODGRA OF PDTYPE_GRANIT         ALIAS A_TGR_TRA OPTIONAL ;&
+
+SELECT IF BLIDATIMP OF PDBON_LIVRAISON = 0
+
+DEFINE D_TRI_BON CHARACTER SIZE 11 = ASCII(EXPNUMEXP OF PDBON_LIVRAISON,9) &
+                                   + BLINUMBLI       OF PDBON_LIVRAISON
+
+SORT ON D_TRI_BON                          &
+     ON BLINUMBLI OF PDBON_LIVRAISON       &
+     ON CAINUMCAI OF PDCAISSON             &
+     ON PJTABR       OF PDCOMMAN_INTERNE   &
+     ON COMNUMCOMINT OF PDCOMMAN_INTERNE D
+
+SUBFILE WPD226_BCK_BLH KEEP AT D_TRI_BON INCLUDE CIECLE    OF PDBON_LIVRAISON, &
+                                                 EXPNUMEXP OF PDBON_LIVRAISON, &
+                                                 BLINUMBLI OF PDBON_LIVRAISON
+
+SUBFILE WPD226_BCK_CAI KEEP AT CAINUMCAI INCLUDE PDCAISSON
+SUBFILE WPD226_BCK_BLI KEEP AT BLINUMBLI INCLUDE PDBON_LIVRAISON
+
+;----------------------------------------------------------------------
+;request pour la premiere impression
+;
+REQUEST BON_LIVRAISON
+
+
+ACCESS *WPD226_PARAMETRE_UN &
+
+  LINK CIECLE        OF WPD226_PARAMETRE_UN , &
+       EXPNUMEXP OF WPD226_PARAMETRE_UN , &
+       BLINUMBLI OF WPD226_PARAMETRE_UN   &
+  TO   CIECLE                           , &
+       EXPNUMEXP                        , &
+       BLINUMBLI OF PDBON_LIVRAISON       &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       EXPNUMEXP OF PDBON_LIVRAISON     , &
+       BLINUMBLI OF PDBON_LIVRAISON       &
+  TO   CIECLE                           , &
+       EXPNUMEXP                        , &
+       BLINUMBLI OF PDLIVRE_CAISSON       &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       CAINUMCAI OF PDLIVRE_CAISSON       &
+  TO   CIECLE                           , &
+       CAINUMCAI OF PDCAISSON             &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       TPDTYPPRD OF PDCAISSON             &
+  TO   CIECLE                           , &
+       TPDTYPPRD OF PDTYPE_PRODUIT        &
+
+  LINK CIECLE       OF PDBON_LIVRAISON  , &
+       PJTABR       OF PDBON_LIVRAISON  , &
+       COMNUMCOMINT OF PDBON_LIVRAISON    &
+  TO   CIECLE                           , &
+       PJTABR                           , &
+       COMNUMCOMINT OF PDCOMMAN_INTERNE   &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       CAINUMCAI OF PDCAISSON             &
+  TO   CIECLE                           , &
+       CAINUMCAI OF PDEMBAL_DIAG          OPTIONAL &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       PJTABR    OF PDEMBAL_DIAG  ,&
+       DIANUM002 OF PDEMBAL_DIAG          &
+  TO   CIECLE                           , &
+       PJTABR   ,&
+       DIANUM002 OF PDDIAGRAMME           OPTIONAL &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       TGRCODGRA OF PDDIAGRAMME           &
+  TO   CIECLE                           , &
+       TGRCODGRA OF PDTYPE_GRANIT        ALIAS A_TGR_DIA OPTIONAL &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       CAINUMCAI OF PDCAISSON             &
+  TO   CIECLE                           , &
+       CAINUMCAI OF PDEMBAL_TRANCHE       OPTIONAL &
+
+  LINK CIECLE       OF PDBON_LIVRAISON  , &
+       TRANUMTRA002 OF PDEMBAL_TRANCHE    &
+  TO   CIECLE                           , &
+       TRANUMTRA002 OF PDTRANCHE          OPTIONAL &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       TGRCODGRA OF PDTRANCHE             &
+  TO   CIECLE                           , &
+       TGRCODGRA OF PDTYPE_GRANIT         ALIAS A_TGR_TRA OPTIONAL ;&
+
+
+SELECT IF BLIDATIMP OF PDBON_LIVRAISON = 0
+
+;
+; Variable de tri
+;
+
+DEFINE D_TRI_BON CHARACTER SIZE 11 =   ASCII(EXPNUMEXP OF PDBON_LIVRAISON,9) &
+                                     + BLINUMBLI OF PDBON_LIVRAISON
+                              ; Permet d'effectuer le tri PAR bon de livraison
+
+
+SORT ON D_TRI_BON                          &
+     ON BLINUMBLI OF PDBON_LIVRAISON       &
+     ON CAINUMCAI OF PDCAISSON             &
+     ON PJTABR       OF PDCOMMAN_INTERNE   &
+     ON COMNUMCOMINT OF PDCOMMAN_INTERNE D
+
+
+DEFINE D_DESCPRDCAI CHARACTER SIZE 10  = TRUNC(TPDDSC001 OF PDTYPE_PRODUIT)[1:10] &
+                                         IF   COMCODLNGCOR OF PDCOMMAN_INTERNE = "F" &
+                                         ELSE TRUNC(TPDDSC002 OF PDTYPE_PRODUIT)[1:10]
+
+DEFINE D_VOLMC3 FLOAT SIZE 8 = DIAVOLMC3 OF PDDIAGRAMME * EMDQTEPRD OF PDEMBAL_DIAG &
+                               IF TPDTYPPRD OF PDCAISSON = "DI" &
+                               ELSE TRAVOLMC3 OF PDTRANCHE * EMTQTEPRD OF PDEMBAL_TRANCHE
+
+DEFINE D_POIDKG FLOAT SIZE 8 = CAIPOIREE OF PDCAISSON &
+                               IF CAIPOIREE OF PDCAISSON <> 0 &
+                               ELSE CAIPOIEST OF PDCAISSON
+
+
+;
+; Variable qui permet de cumuler les informations sur le contenu
+; des caissons par bon de livraison
+;
+
+TEMPORARY T_COMNUMINT      CHARACTER SIZE 3
+;
+; Description du contenu du caisson
+;
+TEMPORARY T_DESCPRDCAI     CHARACTER SIZE 10
+TEMPORARY T_DESCPRD1       CHARACTER SIZE 12
+TEMPORARY T_DESCPRD2       CHARACTER SIZE 12
+TEMPORARY T_DESCPRDBON     CHARACTER SIZE 25
+
+;
+; Contient les quantités par bon de livraison
+;
+TEMPORARY T_TOT_QTEPRD     INTEGER SIZE 4
+TEMPORARY T_TOT_SURMC2     FLOAT   SIZE 8
+TEMPORARY T_TOT_VOLMC3     FLOAT   SIZE 8
+TEMPORARY T_TOT_POIDKG     FLOAT   SIZE 8
+TEMPORARY T_TOT_POIDKG2    FLOAT   SIZE 8
+
+
+  ITEM T_COMNUMINT = COMNUMCOMINT OF PDBON_LIVRAISON &
+                     IF T_COMNUMINT = "" &
+                        OR &
+                        T_COMNUMINT < COMNUMCOMINT OF PDCOMMAN_INTERNE &
+                     AT PJTABR OF PDCOMMAN_INTERNE RESET AT D_TRI_BON
+
+
+
+  ITEM T_DESCPRD1   = D_DESCPRDCAI &
+                      IF T_DESCPRD1 = "" AT CAINUMCAI RESET AT D_TRI_BON
+
+  ITEM T_DESCPRD2   = "-" + D_DESCPRDCAI &
+                      IF  T_DESCPRD1 <> "" &
+                          AND &
+                          D_DESCPRDCAI <> T_DESCPRD1 &
+                      ELSE ""                        &
+                      AT CAINUMCAI RESET AT D_TRI_BON
+
+  ITEM T_DESCPRDBON = TRUNCATE(T_DESCPRD1) + TRUNCATE(T_DESCPRD2) &
+                      AT D_TRI_BON RESET AT D_TRI_BON
+
+  ;
+  ; Faire les sommes par bon de livraison
+  ;
+
+  ITEM T_TOT_QTEPRD SUBTOTAL EMDQTEPRD OF PDEMBAL_DIAG &
+                             IF TPDTYPPRD OF PDCAISSON = "DI" , &
+                                EMTQTEPRD OF PDEMBAL_TRANCHE &
+                    RESET AT D_TRI_BON
+
+  ITEM T_TOT_SURMC2  SUBTOTAL CAIMC2 OF PDCAISSON AT CAINUMCAI RESET AT D_TRI_BON
+
+  ITEM T_TOT_VOLMC3  SUBTOTAL D_VOLMC3 RESET AT D_TRI_BON
+
+  ITEM T_TOT_POIDKG  SUBTOTAL D_POIDKG AT CAINUMCAI RESET AT D_TRI_BON
+
+  ITEM T_TOT_POIDKG2 = T_TOT_POIDKG AT D_TRI_BON RESET AT D_TRI_BON
+
+OUTPUT PDBON_LIVR_HIST ADD AT D_TRI_BON
+ITEM CIECLE         OF PDBON_LIVR_HIST FINAL CIECLE        OF PDBON_LIVRAISON
+ITEM EXPNUMEXP      OF PDBON_LIVR_HIST FINAL EXPNUMEXP     OF PDBON_LIVRAISON
+ITEM BLINUMBLI      OF PDBON_LIVR_HIST FINAL BLINUMBLI     OF PDBON_LIVRAISON
+ITEM BLIQTECAI      OF PDBON_LIVR_HIST FINAL BLIQTECAI     OF PDBON_LIVRAISON
+ITEM BLHDESCPRDBON  OF PDBON_LIVR_HIST FINAL T_DESCPRDBON
+ITEM BLHCOMNUMCOMINT   OF PDBON_LIVR_HIST FINAL T_COMNUMINT
+ITEM BLHTOT_QTEPRD  OF PDBON_LIVR_HIST FINAL T_TOT_QTEPRD
+ITEM BLHTOT_SURMC2  OF PDBON_LIVR_HIST FINAL T_TOT_SURMC2
+ITEM BLHTOT_VOLMC3  OF PDBON_LIVR_HIST FINAL T_TOT_VOLMC3
+ITEM BLHTOT_POIDKG2 OF PDBON_LIVR_HIST FINAL T_TOT_POIDKG2
+ITEM PJTABR         OF PDBON_LIVR_HIST FINAL PJTABR        OF PDCAISSON
+ITEM PJTANN         OF PDBON_LIVR_HIST FINAL PJTANN        OF PDCAISSON
+ITEM COMNUMCOM      OF PDBON_LIVR_HIST FINAL COMNUMCOM     OF PDCAISSON
+
+TEMP T_SYSDATE DATE
+ITEM T_SYSDATE = SYSDATE
+
+;
+; Mise à jour du statut du caisson
+;
+OUTPUT PDCAISSON UPDATE AT CAINUMCAI
+  ITEM CAISTU OF PDCAISSON FINAL "E" ; Expédier
+
+
+OUTPUT PDBON_LIVRAISON UPDATE AT BLINUMBLI
+  ITEM BLIDATIMP OF PDBON_LIVRAISON  FINAL T_SYSDATE
+
+;
+; Mise à jour des compteurs du caisson
+;
+
+
+BUILD
+
+; *************************************************************************************
+
+;/T/ 2.5.4 Impression du bon de livraison
+;
+;/P/ Programmeur..: REMY DEMERS
+;    Date Création: 1998-01-06
+;
+;    Description..: trouver les info pour un bon de livraison soit dans
+;                   les tables normal si ces une premiere impression,
+;                   ou dans la table historique si ces une reimpression.
+;
+;       *** NOTE : Un bon de livraison ne se fait que pour des diagrammes
+;                  ou des tranches.
+;
+;/M/ François Déry, 6 mai 1999
+;       Correction du nom de subfile miniscule/majuscule.
+;
+;/M/ Programmeur...: Nancy Breton
+;    Date Modif....: 1998-12-11
+;    Description...: Enlever un lien que ne servait pas et qui fesait doubler
+;                    les valeurs. J,ai enlever le append sur le subfile
+;                    WPD226_PARAMETRE_UN
+;
+;/M/ Programmeur...: Patrick Langlois
+;    Date Modif....: 1999-06-08
+;    Description...: Corriger requête "MAJ_DIAGRAMME" mette à jour seulement les
+;                    diagrammes qui sont sur le bon de commande
+;/M/ Programmeur....: Bernard Samson
+;   date modif.....: 1999-10-01
+;   Description....: Correction de la request de mise à jour du total de diagramme
+;                    pour qu'il tienne compte du total déjà enregistré et qu'ils 
+;                    ne cummulle pas les quantités déjà transféré. 
+;
+; Seconde partie
+;---------------------------------------------------------------------------------
+
+USE ussetqts NOLIST
+SET LOCK RECORD UPDATE
+
+RUN pd226tb
+
+;----------------------------------------------------------------------
+;request pour une ammendement
+;
+REQUEST BCK_BON_LIVRAISON_AMMEN ;EXECUTE IF G_BLIFLG = "O"
+
+ACCESS *WPD226_PARAMETRE_UN &
+
+  LINK CIECLE    OF WPD226_PARAMETRE_UN , &
+       EXPNUMEXP OF WPD226_PARAMETRE_UN , &
+       BLINUMBLI OF WPD226_PARAMETRE_UN   &
+  TO   CIECLE                           , &
+       EXPNUMEXP                        , &
+       BLINUMBLI OF PDBON_LIVRAISON       &
+
+  LINK CIECLE    OF WPD226_PARAMETRE_UN , &
+       EXPNUMEXP OF WPD226_PARAMETRE_UN , &
+       BLINUMBLI OF WPD226_PARAMETRE_UN   &
+    TO CIECLE                           , &
+       EXPNUMEXP                        , &
+       BLINUMBLI OF PDBON_LIVR_HIST       &
+
+  LINK CIECLE       OF PDBON_LIVRAISON  , &
+       PJTABR       OF PDBON_LIVRAISON  , &
+       COMNUMCOMINT OF PDBON_LIVRAISON    &
+  TO   CIECLE                           , &
+       PJTABR                           , &
+       COMNUMCOMINT OF PDCOMMAN_INTERNE   &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       EXPNUMEXP OF PDBON_LIVRAISON     , &
+       BLINUMBLI OF PDBON_LIVRAISON       &
+  TO   CIECLE                           , &
+       EXPNUMEXP                        , &
+       BLINUMBLI OF PDLIVRE_CAISSON       OPTIONAL &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       CAINUMCAI OF PDLIVRE_CAISSON       &
+  TO   CIECLE                           , &
+       CAINUMCAI OF PDCAISSON            OPTIONAL &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       TPDTYPPRD OF PDCAISSON             &
+  TO   CIECLE                           , &
+       TPDTYPPRD OF PDTYPE_PRODUIT        OPTIONAL &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       CAINUMCAI OF PDCAISSON             &
+  TO   CIECLE                           , &
+       CAINUMCAI OF PDEMBAL_DIAG          OPTIONAL &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       PJTABR    OF PDEMBAL_DIAG ,&
+       DIANUM002 OF PDEMBAL_DIAG          &
+  TO   CIECLE                           , &
+       PJTABR ,&
+        DIANUM002 OF PDDIAGRAMME           OPTIONAL &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       TGRCODGRA OF PDDIAGRAMME           &
+  TO   CIECLE                           , &
+       TGRCODGRA OF PDTYPE_GRANIT        ALIAS A_TGR_DIA OPTIONAL &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       CAINUMCAI OF PDCAISSON             &
+  TO   CIECLE                           , &
+       CAINUMCAI OF PDEMBAL_TRANCHE       OPTIONAL &
+
+  LINK CIECLE       OF PDBON_LIVRAISON  , &
+       TRANUMTRA002 OF PDEMBAL_TRANCHE    &
+  TO   CIECLE                           , &
+       TRANUMTRA002 OF PDTRANCHE          OPTIONAL &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       TGRCODGRA OF PDTRANCHE             &
+  TO   CIECLE                           , &
+       TGRCODGRA OF PDTYPE_GRANIT         ALIAS A_TGR_TRA OPTIONAL
+
+SELECT IF BLIFLG OF PDBON_LIVRAISON = "O"
+
+DEFINE D_TRI_BON CHARACTER SIZE 11 = ASCII(EXPNUMEXP OF PDBON_LIVRAISON,9) &
+                                   + BLINUMBLI       OF PDBON_LIVRAISON
+
+SORT ON D_TRI_BON                          &
+     ON BLINUMBLI OF PDBON_LIVRAISON       &
+     ON CAINUMCAI OF PDCAISSON             &
+     ON PJTABR       OF PDCOMMAN_INTERNE   &
+     ON COMNUMCOMINT OF PDCOMMAN_INTERNE D
+
+SUBFILE WPD226_BCK_BLH2 KEEP AT D_TRI_BON INCLUDE PDBON_LIVR_HIST
+SUBFILE WPD226_BCK_CAI2 KEEP AT CAINUMCAI INCLUDE PDCAISSON
+SUBFILE WPD226_BCK_BLI2 KEEP AT BLINUMBLI INCLUDE PDBON_LIVRAISON
+
+;----------------------------------------------------------------------
+;request pour une ammendement
+;
+REQUEST BON_LIVRAISON_AMMEN ;EXECUTE IF G_BLIFLG = "O"
+
+
+ACCESS *WPD226_PARAMETRE_UN &
+
+  LINK CIECLE    OF WPD226_PARAMETRE_UN , &
+       EXPNUMEXP OF WPD226_PARAMETRE_UN , &
+       BLINUMBLI OF WPD226_PARAMETRE_UN   &
+  TO   CIECLE                           , &
+       EXPNUMEXP                        , &
+       BLINUMBLI OF PDBON_LIVRAISON       &
+
+  LINK CIECLE    OF WPD226_PARAMETRE_UN , &
+       EXPNUMEXP OF WPD226_PARAMETRE_UN , &
+       BLINUMBLI OF WPD226_PARAMETRE_UN   &
+    TO CIECLE                           , &
+       EXPNUMEXP                        , &
+       BLINUMBLI OF PDBON_LIVR_HIST       &
+
+  LINK CIECLE       OF PDBON_LIVRAISON  , &
+       PJTABR       OF PDBON_LIVRAISON  , &
+       COMNUMCOMINT OF PDBON_LIVRAISON    &
+  TO   CIECLE                           , &
+       PJTABR                           , &
+       COMNUMCOMINT OF PDCOMMAN_INTERNE   &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       EXPNUMEXP OF PDBON_LIVRAISON     , &
+       BLINUMBLI OF PDBON_LIVRAISON       &
+  TO   CIECLE                           , &
+       EXPNUMEXP                        , &
+       BLINUMBLI OF PDLIVRE_CAISSON       OPTIONAL &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       CAINUMCAI OF PDLIVRE_CAISSON       &
+  TO   CIECLE                           , &
+       CAINUMCAI OF PDCAISSON            OPTIONAL &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       TPDTYPPRD OF PDCAISSON             &
+  TO   CIECLE                           , &
+       TPDTYPPRD OF PDTYPE_PRODUIT        OPTIONAL &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       CAINUMCAI OF PDCAISSON             &
+  TO   CIECLE                           , &
+       CAINUMCAI OF PDEMBAL_DIAG          OPTIONAL &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       PJTABR    OF PDEMBAL_DIAG ,&
+       DIANUM002 OF PDEMBAL_DIAG          &
+  TO   CIECLE                           , &
+       PJTABR ,&
+        DIANUM002 OF PDDIAGRAMME           OPTIONAL &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       TGRCODGRA OF PDDIAGRAMME           &
+  TO   CIECLE                           , &
+       TGRCODGRA OF PDTYPE_GRANIT        ALIAS A_TGR_DIA OPTIONAL &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       CAINUMCAI OF PDCAISSON             &
+  TO   CIECLE                           , &
+       CAINUMCAI OF PDEMBAL_TRANCHE       OPTIONAL &
+
+  LINK CIECLE       OF PDBON_LIVRAISON  , &
+       TRANUMTRA002 OF PDEMBAL_TRANCHE    &
+  TO   CIECLE                           , &
+       TRANUMTRA002 OF PDTRANCHE          OPTIONAL &
+
+  LINK CIECLE    OF PDBON_LIVRAISON     , &
+       TGRCODGRA OF PDTRANCHE             &
+  TO   CIECLE                           , &
+       TGRCODGRA OF PDTYPE_GRANIT         ALIAS A_TGR_TRA OPTIONAL
+
+SELECT IF BLIFLG OF PDBON_LIVRAISON = "O"
+
+;
+; Variable de tri
+;
+
+DEFINE D_TRI_BON CHARACTER SIZE 11 =   ASCII(EXPNUMEXP OF PDBON_LIVRAISON,9) &
+                                     + BLINUMBLI OF PDBON_LIVRAISON
+                              ; Permet d'effectuer le tri PAR bon de livraison
+
+
+SORT ON D_TRI_BON                          &
+     ON BLINUMBLI OF PDBON_LIVRAISON       &
+     ON CAINUMCAI OF PDCAISSON             &
+     ON PJTABR       OF PDCOMMAN_INTERNE   &
+     ON COMNUMCOMINT OF PDCOMMAN_INTERNE D
+
+
+DEFINE D_DESCPRDCAI CHARACTER SIZE 10  = TRUNC(TPDDSC001 OF PDTYPE_PRODUIT)[1:10] &
+                                         IF   COMCODLNGCOR OF PDCOMMAN_INTERNE = "F" &
+                                         ELSE TRUNC(TPDDSC002 OF PDTYPE_PRODUIT)[1:10]
+
+DEFINE D_VOLMC3 FLOAT SIZE 8 = DIAVOLMC3 OF PDDIAGRAMME * EMDQTEPRD OF PDEMBAL_DIAG &
+                               IF TPDTYPPRD OF PDCAISSON = "DI" &
+                               ELSE TRAVOLMC3 OF PDTRANCHE * EMTQTEPRD OF PDEMBAL_TRANCHE
+
+DEFINE D_POIDKG FLOAT SIZE 8 = CAIPOIREE OF PDCAISSON &
+                               IF CAIPOIREE OF PDCAISSON <> 0 & ;AND RECORD PDCAISSON EXIST &
+                               ELSE CAIPOIEST OF PDCAISSON
+
+
+;
+; Variable qui permet de cumuler les informations sur le contenu
+; des caissons par bon de livraison
+;
+
+TEMPORARY T_COMNUMINT      CHARACTER SIZE 3
+;
+; Description du contenu du caisson
+;
+TEMPORARY T_DESCPRDCAI     CHARACTER SIZE 10
+TEMPORARY T_DESCPRD1       CHARACTER SIZE 12
+TEMPORARY T_DESCPRD2       CHARACTER SIZE 12
+TEMPORARY T_DESCPRDBON     CHARACTER SIZE 25
+
+;
+; Contient les quantités par bon de livraison
+;
+TEMPORARY T_TOT_QTEPRD     INTEGER SIZE 4
+TEMPORARY T_TOT_SURMC2     FLOAT   SIZE 8
+TEMPORARY T_TOT_VOLMC3     FLOAT   SIZE 8
+TEMPORARY T_TOT_POIDKG     FLOAT   SIZE 8
+TEMPORARY T_TOT_POIDKG2    FLOAT   SIZE 8
+TEMP T_SYSDATE DATE
+
+ITEM T_SYSDATE = SYSDATE
+
+  ITEM T_COMNUMINT = COMNUMCOMINT OF PDBON_LIVRAISON &
+                     IF T_COMNUMINT = "" &
+                        OR &
+                        T_COMNUMINT < COMNUMCOMINT OF PDCOMMAN_INTERNE &
+                     AT PJTABR OF PDCOMMAN_INTERNE RESET AT D_TRI_BON
+
+  ITEM T_DESCPRD1   = D_DESCPRDCAI &
+                      IF T_DESCPRD1 = "" AND RECORD PDCAISSON EXIST AT CAINUMCAI RESET AT D_TRI_BON
+
+  ITEM T_DESCPRD2   = "-" + D_DESCPRDCAI &
+                      IF  T_DESCPRD1 <> "" &
+                          AND &
+                          D_DESCPRDCAI <> T_DESCPRD1 &
+                      ELSE ""                        &
+                       RESET AT D_TRI_BON  ;AT CAINUMCAI
+
+  ITEM T_DESCPRDBON = TRUNCATE(T_DESCPRD1) + TRUNCATE(T_DESCPRD2) &
+                      AT D_TRI_BON RESET AT D_TRI_BON
+
+  ;
+  ; Faire les sommes par bon de livraison
+  ;
+
+  ITEM T_TOT_QTEPRD SUBTOTAL EMDQTEPRD OF PDEMBAL_DIAG &
+                             IF TPDTYPPRD OF PDCAISSON = "DI" AND RECORD PDCAISSON EXIST , &
+                                EMTQTEPRD OF PDEMBAL_TRANCHE &
+                    RESET AT D_TRI_BON
+
+  ITEM T_TOT_SURMC2  SUBTOTAL CAIMC2 OF PDCAISSON IF RECORD PDCAISSON EXIST AT CAINUMCAI RESET AT D_TRI_BON
+
+  ITEM T_TOT_VOLMC3  SUBTOTAL D_VOLMC3 IF RECORD PDCAISSON EXIST RESET AT D_TRI_BON
+
+  ITEM T_TOT_POIDKG  SUBTOTAL D_POIDKG IF RECORD PDCAISSON EXIST AT CAINUMCAI RESET AT D_TRI_BON
+
+  ITEM T_TOT_POIDKG2 = T_TOT_POIDKG AT D_TRI_BON RESET AT D_TRI_BON
+
+
+OUTPUT PDBON_LIVR_HIST UPDATE AT D_TRI_BON
+ITEM CIECLE         OF PDBON_LIVR_HIST FINAL CIECLE        OF PDBON_LIVRAISON
+ITEM EXPNUMEXP      OF PDBON_LIVR_HIST FINAL EXPNUMEXP     OF PDBON_LIVRAISON
+ITEM BLINUMBLI      OF PDBON_LIVR_HIST FINAL BLINUMBLI     OF PDBON_LIVRAISON
+ITEM BLIQTECAI      OF PDBON_LIVR_HIST FINAL BLIQTECAI     OF PDBON_LIVRAISON
+ITEM BLHDESCPRDBON  OF PDBON_LIVR_HIST FINAL T_DESCPRDBON
+ITEM BLHCOMNUMCOMINT   OF PDBON_LIVR_HIST FINAL T_COMNUMINT
+ITEM BLHTOT_QTEPRD  OF PDBON_LIVR_HIST FINAL T_TOT_QTEPRD
+ITEM BLHTOT_SURMC2  OF PDBON_LIVR_HIST FINAL T_TOT_SURMC2
+ITEM BLHTOT_VOLMC3  OF PDBON_LIVR_HIST FINAL T_TOT_VOLMC3
+ITEM BLHTOT_POIDKG2 OF PDBON_LIVR_HIST FINAL T_TOT_POIDKG2
+ITEM PJTABR         OF PDBON_LIVR_HIST FINAL PJTABR        OF PDCOMMAN_INTERNE
+ITEM PJTANN         OF PDBON_LIVR_HIST FINAL PJTANN        OF PDCOMMAN_INTERNE
+ITEM COMNUMCOM      OF PDBON_LIVR_HIST FINAL COMNUMCOM     OF PDCOMMAN_INTERNE
+
+
+;
+; Mise à jour du statut du caisson
+;
+OUTPUT PDCAISSON UPDATE AT CAINUMCAI IF RECORD PDCAISSON EXIST
+  ITEM CAISTU OF PDCAISSON FINAL "E" ; Expédier
+
+OUTPUT PDBON_LIVRAISON UPDATE  AT BLINUMBLI
+  ITEM BLIDATIMP OF PDBON_LIVRAISON  FINAL T_SYSDATE
+
+;--------------------------------------------------------------------------
+;remettre le flag d ammendement a non
+;
+REQUEST BCK_MAJ_BLIFLG
+
+ACCESS *WPD226_PARAMETRE_UN &
+  LINK CIECLE ,&
+       EXPNUMEXP ,&
+       BLINUMBLI &
+    TO CIECLE ,&
+       EXPNUMEXP ,&
+       BLINUMBLI OF PDBON_LIVRAISON
+
+SUBFILE WPD226_BCK_BLI3 KEEP INCLUDE PDBON_LIVRAISON
+
+;--------------------------------------------------------------------------
+;remettre le flag d ammendement a non
+;
+REQUEST MAJ_BLIFLG
+
+ACCESS *WPD226_PARAMETRE_UN &
+  LINK CIECLE ,&
+       EXPNUMEXP ,&
+       BLINUMBLI &
+    TO CIECLE ,&
+       EXPNUMEXP ,&
+       BLINUMBLI OF PDBON_LIVRAISON
+
+OUTPUT PDBON_LIVRAISON UPDATE
+  ITEM BLIFLG OF PDBON_LIVRAISON FINAL "N"
+
+
+BUILD

@@ -1,0 +1,229 @@
+;/T/ Analyse de Compte interne
+;
+;/P/ Programmeur...: Chantal Martineau
+;    Date Création.: 19 Mai 1993
+;
+;    Description...: Ce rapport présente l'analyse des transactions
+;                    ayant affectées les soldes au grand livre.
+;
+;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;-------------------------------------------------------------------------------
+;***M    Date : 1993-05-19
+;***M    Note : Il va faloir le tester lorque les journalisations des
+;***M           modules Comptes à payer, comptes à recevoir seront
+;***M           fait. (Pour vérifier le Code référence (Client/employé/fourn)
+;***M           et le nom à apparaitre si pas de description saisie.
+;***M           Modification du prodcode pour inclure le traitement
+;***M           ou on calcul le solde d'ouverture. (cette procédure
+;***M           n'est pas fait encore.
+;***M
+;
+USE ussetqts NOLIST   ; permet de faire les SET ....
+
+RUN gl401t
+
+GLOBAL TEMPORARY G_SELANNFIN CHAR SIZE 2   PARM                ; Année financiere
+
+GLOBAL TEMPORARY G_SELPECDEB CHAR SIZE 2   PARM                ; Période de Début (Sans année financière)
+GLOBAL TEMPORARY G_SELPECFIN CHAR SIZE 2   PARM                ; Période de Fin           "
+GLOBAL TEMPORARY G_CPTCLE    CHAR SIZE 6   PARM                ; Compte (un seule compte)
+
+;-------------------------------------------------------------------------------
+; Cette requete sert à imprimer les transactions relier au compte pour chaque
+; période de la sélection. (Prendre note que si aucune transaction n'a été
+; trouver affectant ce compte pour une période dans la sélection, la période
+; doit sortir quand même.)
+
+REQUEST ANALYSE_TRANSACTION
+
+ACCESS MCUNITE_ADM &
+  LINK G_SELANNFIN          , &
+       G_CPTCLE             , &
+       CIECLE OF MCUNITE_ADM, &
+       UNACLE OF MCUNITE_ADM  &
+    TO SANANN               , &
+       CPTCLE               , &
+       CIECLE               , &
+       UNACLE          OF MCSOLDE_ANNUEL OPTIONAL &
+  LINK CIECLE OF MCUNITE_ADM                      &
+    TO CIECLE          OF MCPERIODE_CIE           &
+  LINK G_SELANNFIN                              , &
+       CIECLE OF MCSOLDE_ANNUEL                 , &
+       CPTCLE OF MCSOLDE_ANNUEL                 , &
+       UNACLE OF MCSOLDE_ANNUEL                 , &
+       PECCLE OF MCPERIODE_CIE                    &
+    TO SANANN                                   , &
+       CIECLE                                   , &
+       CPTCLE                                   , &
+       UNACLE                                   , &
+       PECCLE          OF VHIS_01 OPTIONAL        &
+  LINK G_CPTCLE                                   &
+    TO CPTCLE          OF VCPT_DSC                &
+  LINK REFCIECLE OF VHIS_01                     , &
+       REFCLETYP OF VHIS_01                     , &
+       REFCLENUM OF VHIS_01                       &
+    TO REFCIECLE                                , &
+       REFCLETYP                                , &
+       REFCLENUM       OF MCREFERENCE OPTIONAL
+
+
+
+CHOOSE CIECLE PARM, &                     ; Compagnie (Une)
+       UNACLE PARM                        ; Unité  (Un, plusieurs, ou tous)
+
+
+
+DEFINE G_FIN_DEB CHAR SIZE 4 = G_SELANNFIN + G_SELPECDEB
+DEFINE G_FIN_FIN CHAR SIZE 4 = G_SELANNFIN + G_SELPECFIN
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE CHARACTER SIZE 5 = "1" + PECCLE OF MCPERIODE_CIE &
+         IF PECCLE OF MCPERIODE_CIE[1:1] < "8" &
+         ELSE "0" + PECCLE OF MCPERIODE_CIE
+
+; Ajustement pour le changement de siècle
+DEFINE D_G_FIN_DEB CHARACTER SIZE 5 = "1" + G_FIN_DEB &
+         IF G_FIN_DEB[1:1] < "8" &
+         ELSE "0" + G_FIN_DEB
+
+; Ajustement pour le changement de siècle
+DEFINE D_G_FIN_FIN CHARACTER SIZE 5 = "1" + G_FIN_FIN &
+         IF G_FIN_FIN[1:1] < "8" &
+         ELSE "0" + G_FIN_FIN
+
+                                    ; Sélection selon les périodes sélectionné par l'usager
+SELECT MCPERIODE_CIE &
+   IF D_PECCLE_SIE >= D_G_FIN_DEB  AND &
+      D_PECCLE_SIE <= D_G_FIN_FIN
+
+
+TEMPORARY T_OUV_SANCUMANN    FLOAT SIZE 8 ; Calcul le solde de début du compte par période
+TEMPORARY T_OUV_SANCUMANN_DC FLOAT SIZE 8 ; Pour inverser les signe solde d'ouverture du compte (par période)
+TEMPORARY T_FLGDETHIS CHARACTER SIZE 1    ; Indique si un record dans la VHIS_01 existe.
+TEMPORARY T_HISDSCGEN CHARACTER SIZE 30   ; Si la description générale est absente on prend le nom de la référence
+TEMPORARY T_SANBDG    FLOAT SIZE 8        ; Montant budget à date par période
+
+  ITEM T_OUV_SANCUMANN = SANSLDOUV OF MCSOLDE_ANNUEL&   ;initialisation au solde d'ouverture pour la période 1
+                         IF "01" <= PECCLE OF MCPERIODE_CIE[3:2]
+
+  ITEM T_OUV_SANCUMANN = T_OUV_SANCUMANN  +  (SANCUMREE1 OF MCSOLDE_ANNUEL)& ; ajout du solde de la période 1
+                         IF "02" <= PECCLE OF MCPERIODE_CIE[3:2]
+
+  ITEM T_OUV_SANCUMANN = T_OUV_SANCUMANN  +  (SANCUMREE2 OF MCSOLDE_ANNUEL)& ;                "             2
+                         IF "03" <= PECCLE OF MCPERIODE_CIE[3:2]
+
+  ITEM T_OUV_SANCUMANN = T_OUV_SANCUMANN  +  (SANCUMREE3 OF MCSOLDE_ANNUEL)& ;                "             3
+                         IF "04" <= PECCLE OF MCPERIODE_CIE[3:2]
+
+  ITEM T_OUV_SANCUMANN = T_OUV_SANCUMANN  +  (SANCUMREE4 OF MCSOLDE_ANNUEL)& ;                "             4
+                         IF "05" <= PECCLE OF MCPERIODE_CIE[3:2]
+
+  ITEM T_OUV_SANCUMANN = T_OUV_SANCUMANN  +  (SANCUMREE5 OF MCSOLDE_ANNUEL)& ;                "             5
+                         IF "06" <= PECCLE OF MCPERIODE_CIE[3:2]
+
+  ITEM T_OUV_SANCUMANN = T_OUV_SANCUMANN  +  (SANCUMREE6 OF MCSOLDE_ANNUEL)& ;                "             6
+                         IF "07" <= PECCLE OF MCPERIODE_CIE[3:2]
+
+  ITEM T_OUV_SANCUMANN = T_OUV_SANCUMANN  +  (SANCUMREE7 OF MCSOLDE_ANNUEL)& ;                "             7
+                         IF "08" <= PECCLE OF MCPERIODE_CIE[3:2]
+
+  ITEM T_OUV_SANCUMANN = T_OUV_SANCUMANN  +  (SANCUMREE8 OF MCSOLDE_ANNUEL)& ;                "             8
+                         IF "09" <= PECCLE OF MCPERIODE_CIE[3:2]
+
+  ITEM T_OUV_SANCUMANN = T_OUV_SANCUMANN  +  (SANCUMREE9  OF MCSOLDE_ANNUEL)& ;                "             9
+                         IF "10" <= PECCLE OF MCPERIODE_CIE[3:2]
+
+  ITEM T_OUV_SANCUMANN = T_OUV_SANCUMANN  +  (SANCUMREE10 OF MCSOLDE_ANNUEL)& ;                "             10
+                         IF "11" <= PECCLE OF MCPERIODE_CIE[3:2]
+
+  ITEM T_OUV_SANCUMANN = T_OUV_SANCUMANN  +  (SANCUMREE11 OF MCSOLDE_ANNUEL)& ;                "             11
+                         IF "12" <= PECCLE OF MCPERIODE_CIE[3:2]
+
+  ITEM T_OUV_SANCUMANN = T_OUV_SANCUMANN  +  (SANCUMREE12 OF MCSOLDE_ANNUEL)& ;                "             12
+                         IF "13" <= PECCLE OF MCPERIODE_CIE[3:2]
+
+  ITEM T_OUV_SANCUMANN = T_OUV_SANCUMANN  +  (SANCUMREE13 OF MCSOLDE_ANNUEL)& ;                "             13
+                         IF "14" <= PECCLE OF MCPERIODE_CIE[3:2]
+
+;
+; inversion du signe du montant du solde d'ouverture lorsque le compte
+; est créditeur.
+;
+  ITEM T_OUV_SANCUMANN_DC &
+       =     0 - T_OUV_SANCUMANN  IF CPTCODDC OF VCPT_DSC = "C" &
+       ELSE      T_OUV_SANCUMANN
+;
+; Indique s'il y a des transactions de sélectioner (va servir au quiz pour altérer les lignes de détails
+; lorsque le compte n'aura pas de transaction.)
+;
+  ITEM T_FLGDETHIS = "1" IF RECORD VHIS_01 EXIST ELSE "0"
+
+;
+; Losque la description général est absente on imprime le nom de la référence
+;
+  ITEM T_HISDSCGEN = REFNOM OF MCREFERENCE IF HISDSCGEN OF VHIS_01 = "" &
+                     ELSE HISDSCGEN OF VHIS_01
+
+;
+; Cumulatif Budget à date (pour la période)
+;
+  ITEM T_SANBDG = SANBDG1 OF MCSOLDE_ANNUEL &
+                   IF "01" <= PECCLE OF MCPERIODE_CIE[3:2]
+  ITEM T_SANBDG = T_SANBDG + SANBDG2 OF MCSOLDE_ANNUEL &
+                   IF "02" <= PECCLE OF MCPERIODE_CIE[3:2]
+  ITEM T_SANBDG = T_SANBDG + SANBDG3 OF MCSOLDE_ANNUEL &
+                   IF "03" <= PECCLE OF MCPERIODE_CIE[3:2]
+  ITEM T_SANBDG = T_SANBDG + SANBDG4 OF MCSOLDE_ANNUEL &
+                   IF "04" <= PECCLE OF MCPERIODE_CIE[3:2]
+  ITEM T_SANBDG = T_SANBDG + SANBDG5 OF MCSOLDE_ANNUEL &
+                   IF "05" <= PECCLE OF MCPERIODE_CIE[3:2]
+  ITEM T_SANBDG = T_SANBDG + SANBDG6 OF MCSOLDE_ANNUEL &
+                   IF "06" <= PECCLE OF MCPERIODE_CIE[3:2]
+  ITEM T_SANBDG = T_SANBDG + SANBDG7 OF MCSOLDE_ANNUEL &
+                   IF "07" <= PECCLE OF MCPERIODE_CIE[3:2]
+  ITEM T_SANBDG = T_SANBDG + SANBDG8 OF MCSOLDE_ANNUEL &
+                   IF "08" <= PECCLE OF MCPERIODE_CIE[3:2]
+  ITEM T_SANBDG = T_SANBDG + SANBDG9 OF MCSOLDE_ANNUEL &
+                   IF "09" <= PECCLE OF MCPERIODE_CIE[3:2]
+  ITEM T_SANBDG = T_SANBDG + SANBDG10 OF MCSOLDE_ANNUEL &
+                   IF "10" <= PECCLE OF MCPERIODE_CIE[3:2]
+  ITEM T_SANBDG = T_SANBDG + SANBDG11 OF MCSOLDE_ANNUEL &
+                   IF "11" <= PECCLE OF MCPERIODE_CIE[3:2]
+  ITEM T_SANBDG = T_SANBDG + SANBDG12 OF MCSOLDE_ANNUEL &
+                   IF "12" <= PECCLE OF MCPERIODE_CIE[3:2]
+  ITEM T_SANBDG = T_SANBDG + SANBDG13 OF MCSOLDE_ANNUEL &
+                   IF "13" <= PECCLE OF MCPERIODE_CIE[3:2]
+  ITEM T_SANBDG = T_SANBDG + SANBDG14 OF MCSOLDE_ANNUEL &
+                   IF "14" <= PECCLE OF MCPERIODE_CIE[3:2]
+
+
+SUBFILE WGL401A KEEP  INCLUDE &
+  CIECLE    OF MCUNITE_ADM  , &
+  G_CPTCLE                  , &
+  CPTDSC    OF VCPT_DSC     , &
+  UNACLE    OF MCUNITE_ADM  , &
+  UNANOMABR OF MCUNITE_ADM  , &
+  PECCLE    OF MCPERIODE_CIE, &
+  HISDAT    OF VHIS_01      , &
+  HISNUMDOC OF VHIS_01      , &
+  REFCLENUM OF VHIS_01      , &
+  T_HISDSCGEN               , &
+  T_SANBDG                  , &
+  HECMNTDBT OF VHIS_01      , &
+  HECMNTCRT OF VHIS_01      , &
+  HISDSCSAI OF VHIS_01      , &
+  HISDSCSAI2 OF VHIS_01     , &
+  T_OUV_SANCUMANN_DC        , &
+  T_FLGDETHIS               , &
+  G_SELANNFIN               , &
+  G_SELPECDEB               , &
+  G_SELPECFIN
+
+
+BUILD gl401t

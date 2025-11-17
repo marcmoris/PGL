@@ -1,0 +1,1140 @@
+;/T/ Paiements - ventilation de factures
+;
+;/P/ Programmeur..: Thomas BRENNEUR
+;    Date Création: 29 Juin 1993
+;
+;    Description..: saisie de la ventilation d'un paiement par factures.
+;                   NOTE : l'usager ne peut pas mélanger un paiement de
+;                   paiement automatique avec d'autre types de paiements.
+;                   C'est à dire que si l'usager paye un paiement automatique,
+;                   alors il ne peut pas payer une facture. De même, il ne peut
+;                   pas payer des facture et ajouter un paiement automatique
+;                   sur le même chèque. De plus, il ne peut pas payer plus
+;                   d'une cédule de paiement automatique à la fois.
+;                   NOTE : il n'y a pas de calcul automatique d'escompte.
+;                   Celui-ci est fait uniquement lors de la préparation des
+;                   paiements. Mais l'usager peut quand même entrer un montant
+;                   d'escompte s'il le désire.
+;
+;/M/ François Déry, 30 avril 1999
+;       Modifier l'accèss au fichier de séquence car il a
+;       été converti en format interbase au lieu d'indexé.
+;
+;/M/ Date modif...: 09-Mars-1994
+;
+;    Programmeur..: Guy Chabot
+;
+;    Description..: Correction du ACCESS de la table CPCPT_A_PAYER pour
+;                   ne rérérer que les factures de la compagnie du paiement.
+;
+;                   Ajout de CAPCIECLE dans l'appel du popup CP105 pour ne
+;                   référer que les pièces de la même compagnie.
+;
+;-------------------------------------------------------------------------------
+;/V/ 3.00.02    Guy Chabot 12-mai-1994 (197).
+;
+;/V3.02.04/, Nancy Marceau, 94/06/09, (267)
+;/V3.02.04/, Nancy Marceau, 94/06/09, (265)
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cp008a   ACTIONBAR &
+                MODE LABEL "" AT 2,80 &
+                NOACTION FIELDMARK RETAIN STARTUP &
+                MESSAGE ON 24 &
+                HELP POPUP FROM 4,9 TO 20,72 &
+                RECEIVING T_CIECLEMNU   , &
+                          T_CIENOM      , &
+                          T_FOUCIECLE   , &
+                          T_EMPCIECLE   , &
+                          D_LCPATRJOU   , &
+                          CPPAIEMENT    , &
+                          VFOC_FOU      , &
+                          MCREF_ADRESSE , &
+                          MCREFERENCE
+
+USE ustrasse NOLIST
+
+USE ussectmp NOLIST
+    "CP008A"
+
+USE cp008a.hlp NOLIST
+
+USE usactecr NOLIST
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE CPPAM_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_RAD_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE MCRAD_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE  4 RESET AT STARTUP ; compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; Nom de la Cie
+TEMPORARY T_FOUCIECLE CHARACTER SIZE  4 RESET AT STARTUP ; Cie du fournisseur
+TEMPORARY T_EMPCIECLE CHARACTER SIZE  4 RESET AT STARTUP ; Cie de l'employé
+
+DEFINE    D_LCPATRJOU CHARACTER SIZE  1
+
+;-------------------------------------------------------------------------------
+;
+; Relation maitres provenant de l'écran principal contenants :
+;
+;     Le paiement,
+;     Le fournisseur,
+;     L'adresse (dans le cas d'un fournisseur divers)
+;     La référence (pour avoir l'employé)
+;     Le lot
+;
+FILE CPPAIEMENT     MASTER
+FILE VFOC_FOU       MASTER
+FILE MCREF_ADRESSE  MASTER
+FILE MCREFERENCE    MASTER
+
+;-------------------------------------------------------------------------------
+
+;
+; On détermine la compagnie à utiliser pour retrouver la référence en fonction
+; de son type (Fournisseur ou Employé)
+;
+DEFINE  D_FOUEMPCIECLE CHARACTER SIZE 4 &
+        = T_EMPCIECLE IF REFCLETYP OF CPPAIEMENT = "E" ELSE &
+          T_FOUCIECLE
+
+;
+; Si on ventile des factures alors on utilise la compagnie du fournisseur
+; pour retrouver les documents. Mais si on ventile des rapports de dépenses,
+; alors on utilise la compagnie du menu pour retrouver les documents car les
+; rapports de dépenses sont spécifiques à chaque compagnie alors que les
+; facture sont par fournisseur.
+;
+DEFINE  D_CIECLE CHARACTER SIZE 4 &
+        = T_FOUCIECLE IF REFCLETYP OF CPPAIEMENT = "F" ELSE  &
+          T_CIECLEMNU
+;
+; Dans le cas des rapports de dépenses, la clée du document est vide
+;
+DEFINE  D_FOUCLE CHARACTER SIZE 6 &
+        = REFCLENUM OF CPPAIEMENT IF REFCLETYP OF CPPAIEMENT = "F" ELSE &
+          ""
+
+;-------------------------------------------------------------------------------
+;
+; On ventile le paiement directement dans l'historique
+;
+; Note : Lors de ce traitement, les triggers TCPHSTO et TCPHDEL vont
+;        gérer le flag de réservation des cédules de paiements
+;
+;
+FILE CPCAP_HISTO  PRIMARY &
+                  OCCURS 14 &
+                  NOITEMS
+
+  ACCESS  VIA   CPHCLE1, &
+                CPHCLE2, &
+                CPHCLE3  &
+          USING CIECLE    OF CPPAIEMENT, &
+                LBQCPTENC OF CPPAIEMENT, &
+                PAMCLE    OF CPPAIEMENT
+
+  ITEM  FOUCIECLE OF CPCAP_HISTO  INITIAL D_CIECLE
+  ITEM  FOUCLE    OF CPCAP_HISTO  INITIAL D_FOUCLE
+  ITEM  CPHTIMSTP OF CPCAP_HISTO  INITIAL SYSDATE * 1000000 &
+                                          + ROUND(SYSTIME / 100)
+  ITEM  CPHCLE1   OF CPCAP_HISTO  INITIAL CIECLE    OF CPPAIEMENT
+  ITEM  CPHCLE2   OF CPCAP_HISTO  INITIAL LBQCPTENC OF CPPAIEMENT
+  ;
+  ; L'énoncé fixed est égal à mettre l'item initial et final en même temps.
+  ;
+  ; Il y a une valeur FIXED car le PAMCLE est initialiser
+  ; au preupdate. ainsi le lookup noton fonctionne.
+  ITEM  CPHCLE3   OF CPCAP_HISTO  INITIAL PAMCLE    OF CPPAIEMENT FIXED
+  ITEM  CPHTYPECR OF CPCAP_HISTO  INITIAL PAMTYPECR OF CPPAIEMENT
+  ITEM  CPHTYPTRA OF CPCAP_HISTO  INITIAL PAMTYPECR OF CPPAIEMENT
+  ITEM  CPHDAT    OF CPCAP_HISTO  INITIAL PAMDAT    OF CPPAIEMENT
+  ITEM  PECCLE    OF CPCAP_HISTO  INITIAL PECCLE    OF CPPAIEMENT
+  ITEM  LCPCLE    OF CPCAP_HISTO  INITIAL LCPCLE    OF CPPAIEMENT
+
+
+;-------------------------------------------------------------------------------
+;
+; Consultation des factures/paiements auto/rapports de dépenses à payer
+;
+;
+FILE CPCPT_A_PAYER REFERENCE OCCURS WITH CPCAP_HISTO
+
+  ACCESS  VIA   FOUCIECLE, &
+                FOUCLE   , &
+                CAPCLE   , &
+                CAPCIECLE  &
+          USING D_CIECLE             , &
+                D_FOUCLE             , &
+                CAPCLE OF CPCAP_HISTO, &
+                CIECLE OF CPPAIEMENT
+;
+; Solde de la cédule
+;
+FILE VCPC_SLD REFERENCE OCCURS WITH CPCAP_HISTO
+
+  ACCESS  VIA   FOUCIECLE, &
+                FOUCLE   , &
+                CAPCLE   , &
+                CPCCLELIG  &
+          USING FOUCIECLE OF CPCPT_A_PAYER, &
+                FOUCLE    OF CPCPT_A_PAYER, &
+                      CAPCLE    OF CPCPT_A_PAYER, &
+                CPCCLELIG OF CPCAP_HISTO
+
+
+;-------------------------------------------------------------------------------
+;
+; Numérotation du numéro de paiement, le numéro est attribué par compagnie
+; et par compte d'encaisse.
+;
+FILE CPPAM_SEQ  DESIGNER &
+                TRANSACTION GEN_NUM_SEQ
+
+  ACCESS  VIA   CIECLE   , &
+                LBQCPTENC  &
+          USING CIECLE    OF CPPAIEMENT, &
+                LBQCPTENC OF CPPAIEMENT
+
+  ITEM CIECLE     OF CPPAM_SEQ INITIAL CIECLE    OF CPPAIEMENT
+  ITEM LBQCPTENC  OF CPPAM_SEQ INITIAL LBQCPTENC OF CPPAIEMENT
+
+;-------------------------------------------------------------------------------
+;
+; Numéro de séquence des adresses pour les clients divers.
+;
+FILE MCRAD_SEQ        DESIGNER &
+                      TRANSACTION GEN_RAD_SEQ
+
+;-------------------------------------------------------------------------------
+;
+; Recopie du talon du paiement automatique dans le talon du chèque
+;
+FILE CPCAP_TALON DESIGNER
+
+FILE CPPAM_TALON DESIGNER
+
+FILE CPPAM_TALON  DELETE &
+                  OCCURS WITH CPCAP_HISTO &
+                  ALIAS A_PTA_DELETE &
+                  NOITEM
+
+  ACCESS  VIA   CIECLE   , &
+                LBQCPTENC, &
+                PAMCLE     &
+          USING CIECLE    OF CPPAIEMENT, &
+                LBQCPTENC OF CPPAIEMENT, &
+                PAMCLE    OF CPPAIEMENT
+
+;-------------------------------------------------------------------------------
+;
+; Copie et calcul de l'imputation d'un paiement automatique
+; ( Identique au traitement contenu dans la préparation des paiements
+; CP702T.qts ).
+;
+FILE CPCAP_IMPUTATION DESIGNER
+
+FILE CPPAM_IMPUTATION DESIGNER
+
+FILE CPPAM_IMPUTATION DELETE &
+                      OCCURS WITH CPCAP_HISTO &
+                      ALIAS A_CPI_DELETE &
+                      NOITEM
+
+  ACCESS  VIA   CIECLE   , &
+                LBQCPTENC, &
+                PAMCLE     &
+          USING CIECLE    OF CPPAIEMENT, &
+                LBQCPTENC OF CPPAIEMENT, &
+                PAMCLE    OF CPPAIEMENT
+
+FILE MCTAXE DESIGNER &
+            ALIAS A_TAX_TPS
+
+  ACCESS  VIA   TAXCLETYP, &
+                TAXCLECOD &
+          USING CCITAXTYPTPS OF CPCAP_IMPUTATION, &
+                CCITAXCODTPS OF CPCAP_IMPUTATION
+
+FILE MCTAXE DESIGNER &
+            ALIAS A_TAX_TVQ
+
+  ACCESS  VIA   TAXCLETYP, &
+                TAXCLECOD &
+          USING CCITAXTYPTVQ OF CPCAP_IMPUTATION, &
+                CCITAXCODTVQ OF CPCAP_IMPUTATION
+
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_FOUCLE    CHARACTER SIZE 6 ; Pour consulter les transactions
+TEMPORARY T_REFCLENUM CHARACTER SIZE 6 ; Pour consulter les références
+TEMPORARY T_CIECLE    CHARACTER SIZE 4 ; Pour consulter les transactions
+TEMPORARY T_CAPCIECLE CHARACTER SIZE 4 ; Pour consulter les transactions
+TEMPORARY T_REFCIECLE CHARACTER SIZE 4 ; Pour consulter les références
+TEMPORARY T_REFCLETYP CHARACTER SIZE 1 ; pour les types de transactions
+TEMPORARY T_TYPECRPAT CHARACTER SIZE 30; pattern pour consulation des documents
+TEMPORARY T_FLGSLD    CHARACTER SIZE 1 ; flag pour consultation des documents
+TEMPORARY T_CAPCLE    CHARACTER SIZE 15; pour consulter les documents á payer
+TEMPORARY T_CPCCLELIG INTEGER   SIZE 2
+;
+; Variable pour valider qu'il n'y est pas un paiement automatique et une facture.
+;
+TEMPORARY T_VALPA     CHARACTER SIZE 1
+
+;
+; Variables temporaires permettant de calculer l'imputation d'un paiement
+; automatique. (Voir traitement dans CP702T)
+;
+TEMPORARY T_CPIMNT    FLOAT   SIZE 8 ; Montant imputé
+TEMPORARY T_CPIMNTTPS FLOAT   SIZE 8 ; Taxe Fédérale
+TEMPORARY T_CPIMNTCTI FLOAT   SIZE 8 ; Taxe Fédérale remboursable
+TEMPORARY T_MNTNETTPS FLOAT   SIZE 8 ; Montant sans TPS ni TVQ ( = NET )
+TEMPORARY T_CPIMNTTVQ FLOAT   SIZE 8 ; Taxe Provinciale
+TEMPORARY T_CPIMNTRTI FLOAT   SIZE 8 ; Taxe Provinciale remboursable
+TEMPORARY T_MNTNETTVQ FLOAT   SIZE 8 ; Montant sans TVQ (mais avec TPS)
+TEMPORARY T_PCTREPTOT INTEGER SIZE 2 ; Total du pourcentage de répartition
+TEMPORARY T_MNTIMPTOT FLOAT   SIZE 8 ; Montant total imputé
+TEMPORARY T_DIFMNT    FLOAT   SIZE 8 ; Différence entre total et imputé
+TEMPORARY T_PAMMNTOLD FLOAT   SIZE 8 ; Montant du paiement avant modification
+
+
+DEFINE D_REFNOM CHAR SIZE 15 = &
+@IF FRANCAIS
+ "Employé.......:" &
+@ELSE
+ "Employe.......:" &
+@ENDIF
+  IF REFCLETYP OF CPPAIEMENT = "E" ELSE &
+@IF FRANCAIS
+ "Fournisseur...:" &
+@ELSE
+ "Supplier......:" &
+@ENDIF
+  IF REFCLETYP OF CPPAIEMENT = "F"
+
+
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+
+USE ustitstd NOLIST
+USE usdrwecr NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Ventilation des documents " &
+@ELSE
+      " Document Breakdown " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP
+
+ALIGN (3,3,19) (,49,65)
+
+FIELD PAMCLE OF CPPAIEMENT &
+LABEL "No paiement...:"&
+      DISPLAY &
+      PREDISPLAY
+
+FIELD PAMMNT OF CPPAIEMENT &
+LABEL "Mnt paiement..:"&
+      DISPLAY &
+      PREDISPLAY
+
+SKIP
+
+ALIGN (3,3,3) (,,19) (,,26)
+
+FIELD D_REFNOM &
+      DISPLAY &
+      PREDISPLAY
+
+FIELD REFCLENUM OF CPPAIEMENT &
+      DISPLAY &
+      PREDISPLAY
+
+FIELD RADNOMABR OF MCREF_ADRESSE &
+      DISPLAY &
+      PREDISPLAY
+
+SKIP
+
+DRAW FROM ,1 TO ,80
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+      "       Numéro de       No          Montant     Escompte         Montant      " &
+@ELSE
+      "       %%%%%%%%%       %%%         %%%%%%%     %%%%%%%%         %%%%%%%      " &
+@ENDIF
+      AT ,2
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      "       document      Cédule        à payer         pris            payé       " &
+@ELSE
+      "       %%%%%%%%      %%%%%%        %%%%%%%         %%%%            %%%%       " &
+@ENDIF
+      AT ,2
+
+SKIP
+
+ALIGN (2,3,8) (,,25) (,,31) (,,47) (,,60)
+
+CLUSTER OCCURS WITH CPCAP_HISTO ID BASE 05
+
+FIELD CAPCLE OF CPCAP_HISTO &
+      HIDDEN &
+      LABEL " " &
+      REQUIRED &
+      NOCHANGE &
+      LOOKUP ON CPCPT_A_PAYER &
+        MESSAGE 500 ; Ce numéro n'existe pas...
+
+FIELD T_VALPA SILENT IF CAPTYPECR OF CPCPT_A_PAYER = "PA" &
+       LOOKUP NOTON CPCAP_HISTO &
+          VIA   CPHCLE1, &
+                CPHCLE2, &
+                CPHCLE3  &
+          USING CIECLE    OF CPPAIEMENT, &
+                LBQCPTENC OF CPPAIEMENT, &
+                PAMCLE    OF CPPAIEMENT  &
+       MESSAGE 552 ; Paiement auto. et facture ne sont pas autorisé dans un même paiement.
+
+FIELD CPCCLELIG OF CPCAP_HISTO &
+      REQUIRED &
+      NOCHANGE &
+      LOOKUP &
+        NOTON CPCAP_HISTO &
+          VIA   CPHCLE1  , &
+                CPHCLE2  , &
+                CPHCLE3  , &
+                FOUCIECLE, &
+                FOUCLE   , &
+                CAPCLE   , &
+                CPCCLELIG  &
+          USING CPHCLE1   OF CPCAP_HISTO, &
+                CPHCLE2   OF CPCAP_HISTO, &
+                CPHCLE3   OF CPCAP_HISTO, &
+                FOUCIECLE OF CPCAP_HISTO, &
+                FOUCLE    OF CPCAP_HISTO, &
+                CAPCLE    OF CPCAP_HISTO, &
+                CPCCLELIG OF CPCAP_HISTO  &
+          MESSAGE 523, & ;Cette ventilation de facture existe déja.
+        ON VCPC_SLD &
+          MESSAGE 508 ; Cette ligne de cédule n'existe pas.
+
+FIELD CPHMNTCAP OF CPCAP_HISTO
+
+FIELD CPHMNTESC OF CPCAP_HISTO &
+      PICTURE "^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5
+
+FIELD CPHMNTPYE OF CPCAP_HISTO
+
+CLUSTER
+
+;-------------------------------------------------------------------------------
+; *** Sécurité d'accès ***
+;
+; Valide la sécurité d'accès pour l'écran par son code.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Consultation & validation du document à payer
+;
+;
+PROCEDURE INPUT CAPCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    IF REFCLETYP OF CPPAIEMENT = "F"
+    THEN LET T_TYPECRPAT  = "FA|CR|PA|NA"
+    ELSE LET T_TYPECRPAT  = "RD"
+    LET T_CIECLE    = D_CIECLE
+    LET T_FOUCLE    = D_FOUCLE
+    LET T_CAPCIECLE = CIECLE OF CPPAIEMENT
+    LET T_FLGSLD    = "1" ;on affiche que les facture ayant un solde à payer
+    LET T_CAPCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_REFCLENUM = REFCLENUM OF CPPAIEMENT
+    RUN SCREEN cp105 MODE F &
+              PASSING   T_CIECLE, &
+                        T_FOUCLE, &
+                        T_TYPECRPAT, &
+                        T_FLGSLD, &
+                        T_CAPCLE, &
+                        T_REFCLENUM, &
+                        T_CAPCIECLE
+
+    LET FIELDTEXT = TRUNCATE(T_CAPCLE)
+  END
+  ;
+  ; On force l'execution de la procedure EDIT.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(CAPCLE OF CPCAP_HISTO))
+  THEN LET FIELDTEXT = CAPCLE OF CPCAP_HISTO
+END
+
+;
+; Validation du document choisi
+;
+PROCEDURE EDIT CAPCLE
+BEGIN
+  IF FIELDTEXT <> ""
+  THEN BEGIN
+    IF CAPRTU OF CPCPT_A_PAYER <> "0"
+    THEN WARN 502 ; Ce document est présentement retenu...
+
+    IF CAPDATJOU OF CPCPT_A_PAYER = 0
+    THEN ERROR 524 ; Cette facture n'est pas journalisée...
+
+    IF REFCLETYP OF CPPAIEMENT = "E" AND (REFCLENUM OF CPCPT_A_PAYER <> REFCLENUM OF CPPAIEMENT)
+    THEN ERROR 538 ; Ce document n'appartient pas a cet employé.
+
+    ;
+    ; Dans le but d'éviter le message record idem à l'occurence (1)
+    ; provoquer par le lookup
+    ;
+    IF CAPTYPECR OF CPCPT_A_PAYER = "PA" AND &
+       OCCURRENCE              >  1
+    THEN ERROR 552 ; Paiement auto. et facture ne sont pas autorisé dans un même paiement.
+
+
+    IF (REFCLETYP OF CPPAIEMENT = "E" AND &
+        CAPTYPECR OF CPCPT_A_PAYER <> "RD") OR &
+       (REFCLETYP OF CPPAIEMENT = "F" AND &
+        CAPTYPECR OF CPCPT_A_PAYER <> "PA" AND &
+        CAPTYPECR OF CPCPT_A_PAYER <> "CR" AND &
+        CAPTYPECR OF CPCPT_A_PAYER <> "NA" AND &
+        CAPTYPECR OF CPCPT_A_PAYER <> "FA")
+    THEN ERROR 526 ; Cette association de document est invalide
+
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION & VALIDATION DE LA CÉDULE À PAYER
+;
+;
+;
+PROCEDURE INPUT CPCCLELIG
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE    = D_CIECLE
+    LET T_FOUCLE    = D_FOUCLE
+    LET T_CAPCLE    = CAPCLE OF CPCAP_HISTO
+    LET T_CPCCLELIG = 0
+    RUN SCREEN cp107 MODE F PASSING T_CIECLE, T_FOUCLE, T_CAPCLE, T_CPCCLELIG
+    LET FIELDTEXT = ASCII(T_CPCCLELIG)
+  END
+  ;
+  ; On force l'exécution de la procédure edit
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> CPCCLELIG OF CPCAP_HISTO
+  THEN LET FIELDTEXT = ASCII(CPCCLELIG OF CPCAP_HISTO,2)
+END
+
+PROCEDURE EDIT CPCCLELIG
+BEGIN
+  IF CPCFLGSEL = "1"
+  THEN ERROR 510; Cette ligne de cédule a déjà été sélèctionnée...
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Affectation du solde à payer dans le montant à payer si aucune valeur est
+; saisie.
+;
+;
+PROCEDURE INPUT CPHMNTCAP
+BEGIN
+  IF     NEWRECORD OF CPCAP_HISTO &
+     AND 0 = SIZE( TRUNCATE( FIELDTEXT ) ) &
+     AND 0 = CPHMNTCAP OF CPCAP_HISTO
+  THEN LET FIELDTEXT = ASCII( V_CPCSLD / 100) + "." + &
+                       ASCII( MOD( ABSOLUTE( V_CPCSLD ),100),2)
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du montant que l'on paye de la cédule et calcul du montant payé
+;
+;
+PROCEDURE EDIT CPHMNTCAP
+BEGIN
+  ;
+  ; Validation du nombre de décimales.
+  ;
+  USE usvaldec NOLIST
+
+  IF CPHMNTCAP OF CPCAP_HISTO >  V_CPCSLD OF VCPC_SLD
+  THEN ERROR 507 ; Ce montant est supérieur au solde à payer.
+
+  LET PAMCUMMNT OF CPPAIEMENT   = PAMCUMMNT OF CPPAIEMENT &
+                                - CPHMNTPYE OF CPCAP_HISTO
+  LET PAMMNT    OF CPPAIEMENT   = PAMMNT    OF CPPAIEMENT &
+                                - CPHMNTPYE OF CPCAP_HISTO
+
+  LET CPHMNTPYE OF CPCAP_HISTO  = CPHMNTCAP OF CPCAP_HISTO &
+                                - CPHMNTESC OF CPCAP_HISTO
+
+  LET PAMCUMMNT OF CPPAIEMENT   = PAMCUMMNT OF CPPAIEMENT &
+                                + CPHMNTPYE OF CPCAP_HISTO
+  LET PAMMNT    OF CPPAIEMENT   = PAMMNT    OF CPPAIEMENT &
+                                + CPHMNTPYE OF CPCAP_HISTO
+END
+
+PROCEDURE PROCESS CPHMNTCAP
+BEGIN
+  DISPLAY PAMMNT    OF CPPAIEMENT
+  DISPLAY CPHMNTPYE OF CPCAP_HISTO
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Force la procedure edit du montant d'escompte car il valide que l'ont ne
+; puisse payer plus que le montant à payer.
+;
+;
+PROCEDURE INPUT CPHMNTESC
+BEGIN
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> CPHMNTESC OF CPCAP_HISTO
+  THEN LET FIELDTEXT = ASCII( CPHMNTESC OF CPCAP_HISTO /100 ) + "." + &
+                       ASCII( MOD( ABSOLUTE( CPHMNTESC OF CPCAP_HISTO ),100),2)
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation de l'escompte et calcul du montant à payer
+;
+;
+PROCEDURE EDIT CPHMNTESC
+BEGIN
+  IF 0 > ABSOLUTE(CPHMNTCAP OF CPCAP_HISTO) - ABSOLUTE(CPHMNTESC OF CPCAP_HISTO)
+  THEN ERROR 509 ; On ne peut saisir un montant d'escompte supérieur au montant a payer.
+
+  LET PAMCUMMNT OF CPPAIEMENT   = PAMCUMMNT OF CPPAIEMENT &
+                                - CPHMNTPYE OF CPCAP_HISTO
+  LET PAMMNT    OF CPPAIEMENT   = PAMMNT    OF CPPAIEMENT &
+                                - CPHMNTPYE OF CPCAP_HISTO
+
+  LET CPHMNTPYE OF CPCAP_HISTO  = CPHMNTCAP OF CPCAP_HISTO &
+                                - CPHMNTESC OF CPCAP_HISTO
+
+  LET PAMCUMMNT OF CPPAIEMENT   = PAMCUMMNT OF CPPAIEMENT &
+                                + CPHMNTPYE OF CPCAP_HISTO
+  LET PAMMNT    OF CPPAIEMENT   = PAMMNT    OF CPPAIEMENT &
+                                + CPHMNTPYE OF CPCAP_HISTO
+
+  LET PAMMNTESC OF CPPAIEMENT   = PAMMNTESC OF CPPAIEMENT &
+                                  - OLDVALUE(CPHMNTESC OF CPCAP_HISTO) &
+                                  + FIELDVALUE
+END
+
+PROCEDURE PROCESS CPHMNTESC
+BEGIN
+  DISPLAY PAMMNT    OF CPPAIEMENT
+  DISPLAY CPHMNTPYE OF CPCAP_HISTO
+END
+
+;-------------------------------------------------------------------------------
+;
+; Ajout de lignes dans la ventilation du paiement
+;
+;
+PROCEDURE APPEND
+BEGIN
+
+  USE ussecent NOLIST
+
+  IF PAMFLGPA  OF CPPAIEMENT <> "1"
+  THEN BEGIN
+
+    ACCEPT CAPCLE OF CPCAP_HISTO
+
+    IF CAPTYPECR OF CPCPT_A_PAYER = "PA"
+    THEN EDIT T_VALPA
+      ;
+      ; Pour savoir s'il y a plus d'un paiement automatique
+      ;
+    IF    NEWRECORD OF CPCAP_HISTO &
+      AND CAPTYPECR OF CPCPT_A_PAYER = "PA"
+    THEN LET PAMFLGPA OF CPPAIEMENT = "1"
+
+
+    IF CAPFLGCED OF CPCPT_A_PAYER = "0"
+    THEN
+      BEGIN
+        LET CPCCLELIG OF CPCAP_HISTO = 1
+        EDIT CPCCLELIG OF CPCAP_HISTO
+        DISPLAY CPCCLELIG OF CPCAP_HISTO
+      END
+    ELSE ACCEPT CPCCLELIG OF CPCAP_HISTO
+    ACCEPT CPHMNTCAP OF CPCAP_HISTO
+    ;
+    ; Il n'y a pas d'escompte pour les rapports de dépenses et les paiements
+    ; automatiques.
+    ;
+    IF  REFCLETYP OF CPPAIEMENT = "E" &
+      OR (    REFCLETYP OF CPPAIEMENT    = "F" &
+          AND CAPTYPECR OF CPCPT_A_PAYER = "PA")
+    THEN BEGIN
+      LET PAMMNTESC OF CPPAIEMENT   = PAMMNTESC OF CPPAIEMENT &
+                                  - CPHMNTESC OF CPCAP_HISTO
+      LET CPHMNTESC OF CPCAP_HISTO = 0
+    END
+    ELSE ACCEPT CPHMNTESC OF CPCAP_HISTO
+  END
+  ;
+  ; Conserve sur la ligne si c'est un paiement automatique.
+  ;
+  IF CAPTYPECR OF CPCPT_A_PAYER = "PA"
+  THEN LET CPHFLGPA OF CPCAP_HISTO = "1"
+  ELSE LET CPHFLGPA OF CPCAP_HISTO = "0"
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; SAISIE DE DONNÉES
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  FOR CPCAP_HISTO
+  BEGIN
+    ;
+    ; Si le paiement est un paiement de paiement automatique, alors on
+    ; ne doit saisir qu'une seule ligne du cluster. Car il ne peut y avoir
+    ; qu'un seul paiement automatique par paiement.
+    ;
+    IF    PAMFLGPA OF CPPAIEMENT <> "1"       &
+      OR  (     PAMFLGPA  OF CPPAIEMENT = "1" &
+            AND OCCURRENCE              =  1 )
+    THEN PERFORM APPEND
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure appelée lors de la modification des lignes de ventilation
+;
+;
+;
+PROCEDURE DESIGNER 05
+BEGIN
+  ACCEPT CPHMNTCAP OF CPCAP_HISTO
+  ;
+  ; Il n'y a pas d'escompte pour les rapports de dépenses et les paiements
+  ; automatiques.
+  ;
+  IF  REFCLETYP OF CPPAIEMENT = "E" &
+    OR (    REFCLETYP OF CPPAIEMENT    = "F" &
+        AND CAPTYPECR OF CPCPT_A_PAYER = "PA")
+  THEN BEGIN
+    LET PAMMNTESC OF CPPAIEMENT   = PAMMNTESC OF CPPAIEMENT &
+                                  - CPHMNTESC OF CPCAP_HISTO
+    LET CPHMNTESC OF CPCAP_HISTO = 0
+  END
+  ELSE ACCEPT CPHMNTESC OF CPCAP_HISTO
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR CPCAP_HISTO
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF CPCAP_HISTO &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF CPCAP_HISTO &
+       AND NOT NEWRECORD     OF CPCAP_HISTO &
+       AND NOT DELETEDRECORD OF CPCAP_HISTO &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+    ;
+    ; Mise à jour du timbre de modification si l'usager change l'imputation
+    ;
+    IF    NOT NEWRECORD OF CPPAIEMENT &
+      AND ALTEREDRECORD OF CPCAP_HISTO
+    THEN BEGIN
+      LET PAMDATMOD OF CPPAIEMENT = SYSDATE
+      LET PAMHREMOD OF CPPAIEMENT = SYSTIME / 10000
+      LET PAMUSRMOD OF CPPAIEMENT = LOGONID
+    END
+  END
+
+  IF     PAMFLGIMP OF CPPAIEMENT = "1" &
+     AND PAMTYPPAM OF CPPAIEMENT <> "E"
+  THEN ERROR 490 ; Vous ne pouvez plus modifier cette information, le chèque
+                 ; est imprimé.
+
+  IF PAMDATJOU OF CPPAIEMENT <> 0
+  THEN ERROR 527 ; Impossible de modifier, ce paiement est journalisé.
+
+  IF PAMCODANN OF CPPAIEMENT = "1"
+  THEN ERROR 505 ; Ce paiement est annulé, vous ne pouvez plus le modifier.
+
+  IF D_LCPATRJOU = "1"
+  THEN ERROR 544 ; Ce lot est déjà autorisé.
+
+  IF PAMTYPECR OF CPPAIEMENT = "CA"
+  THEN ERROR 999 ; Impossible de modifier, ce paiement est une annulation.
+
+END
+
+;
+; Procédure de recopie du talon utilisée par la procédure update
+;
+PROCEDURE INTERNAL COPIE_TALON
+BEGIN
+  WHILE RETRIEVING CPCAP_TALON &
+        VIA   FOUCIECLE, &
+              FOUCLE   , &
+              CAPCLE     &
+        USING FOUCIECLE OF CPCPT_A_PAYER, &
+              FOUCLE    OF CPCPT_A_PAYER, &
+              CAPCLE    OF CPCPT_A_PAYER
+  BEGIN
+    LET CIECLE    OF CPPAM_TALON = CIECLE     OF CPPAIEMENT
+    LET LBQCPTENC OF CPPAM_TALON = LBQCPTENC  OF CPPAIEMENT
+    LET PAMCLE    OF CPPAM_TALON = PAMCLE     OF CPPAIEMENT
+    LET PTACLELIG OF CPPAM_TALON = CTACLELIG  OF CPCAP_TALON
+    LET PTADSC    OF CPPAM_TALON = CTADSC     OF CPCAP_TALON
+    PUT CPPAM_TALON RESET
+  END
+END
+
+;
+; Procédure de suppression de l'imputation du paiement
+;
+PROCEDURE INTERNAL DELETE_IMPUTATION_PA
+BEGIN
+  WHILE RETRIEVING CPPAM_IMPUTATION &
+        VIA   CIECLE   , &
+              LBQCPTENC, &
+              PAMCLE     &
+        USING CIECLE    OF CPPAIEMENT, &
+              LBQCPTENC OF CPPAIEMENT, &
+              PAMCLE    OF CPPAIEMENT
+  BEGIN
+    DELETE CPPAM_IMPUTATION
+    PUT CPPAM_IMPUTATION RESET
+  END
+END
+
+;
+; Procédure de copie et calcul de l'imputation d'un paiement automatique
+;
+PROCEDURE INTERNAL CALCUL_IMPUTATION_PA
+BEGIN
+  LET PAMCUMMNT OF CPPAIEMENT = CPHMNTPYE OF CPCAP_HISTO
+  LET PAMMNTTPS OF CPPAIEMENT = 0
+  LET PAMMNTCTI OF CPPAIEMENT = 0
+  LET PAMMNTTVQ OF CPPAIEMENT = 0
+  LET PAMMNTRTI OF CPPAIEMENT = 0
+
+  WHILE RETRIEVING CPCAP_IMPUTATION &
+        VIA   FOUCIECLE, &
+              FOUCLE   , &
+              CAPCLE     &
+        USING FOUCIECLE OF CPCPT_A_PAYER, &
+              FOUCLE    OF CPCPT_A_PAYER, &
+              CAPCLE    OF CPCPT_A_PAYER
+  BEGIN
+    ;
+    ; Calcul des montants de taxes de chaque ligne d'imputation
+    ;
+    GET A_TAX_TPS OPTIONAL
+    GET A_TAX_TVQ OPTIONAL
+
+    LET T_CPIMNT     = ROUND(   PAMMNT    OF CPPAIEMENT &
+                              * CCIPCTREP OF CPCAP_IMPUTATION)
+    LET T_MNTNETTVQ  = ROUND(   T_CPIMNT &
+                              / ( 1 + TAXPCT OF A_TAX_TVQ ))
+    LET T_CPIMNTTVQ  = T_CPIMNT - T_MNTNETTVQ
+    LET T_MNTNETTPS  = ROUND(   T_MNTNETTVQ &
+                              / ( 1 + TAXPCT OF A_TAX_TPS ))
+    LET T_CPIMNTTPS  = T_MNTNETTVQ - T_MNTNETTPS
+    LET T_CPIMNTCTI  = T_CPIMNTTPS * TAXPCTCTI OF A_TAX_TPS
+    LET T_CPIMNTRTI  = T_CPIMNTTVQ * TAXPCTCTI OF A_TAX_TVQ
+
+    LET PAMMNTTPS OF CPPAIEMENT = PAMMNTTPS OF CPPAIEMENT &
+                                + T_CPIMNTTPS
+    LET PAMMNTCTI OF CPPAIEMENT = PAMMNTCTI OF CPPAIEMENT &
+                                + T_CPIMNTCTI
+    LET PAMMNTTVQ OF CPPAIEMENT = PAMMNTTVQ OF CPPAIEMENT &
+                                + T_CPIMNTTVQ
+    LET PAMMNTRTI OF CPPAIEMENT = PAMMNTRTI OF CPPAIEMENT &
+                                + T_CPIMNTRTI
+
+    ;
+    ; Lorsqu'on répartit le montant total du paiement sur chaque ligne
+    ; d'imputation en fonction du pourcentage, il y a très souvent une
+    ; différence entre le montant total et la somme des montants répartits.
+    ; Cette différence provient des arrondis dans les calculs. Et comme il ne
+    ; faut pas générer de paiements "Hors balance" (montant total différent de
+    ; la somme imputée), on doit équilibrer le paiement avec l'imputation.
+    ;
+
+    LET T_PCTREPTOT  = T_PCTREPTOT + &
+                       ROUND(CCIPCTREP OF CPCAP_IMPUTATION * 10000)
+    LET T_MNTIMPTOT  = T_MNTIMPTOT + T_CPIMNT
+    IF T_PCTREPTOT = 10000
+    THEN LET T_DIFMNT = PAMMNT OF CPPAIEMENT - T_MNTIMPTOT
+    IF T_PCTREPTOT = 10000
+    THEN LET T_CPIMNT = T_CPIMNT + T_DIFMNT
+
+    ;
+    ; Transfert de l'imputation du compte à recevoir vers le paiement
+    ;
+
+    LET CIECLE         OF CPPAM_IMPUTATION = CIECLE        OF CPPAIEMENT
+    LET LBQCPTENC      OF CPPAM_IMPUTATION = LBQCPTENC     OF CPPAIEMENT
+    LET PAMCLE         OF CPPAM_IMPUTATION = PAMCLE        OF CPPAIEMENT
+    LET CPITIMSTP      OF CPPAM_IMPUTATION = SYSDATE * 1000000 &
+                                           + ROUND(SYSTIME / 100)
+    LET PRJCLE         OF CPPAM_IMPUTATION = PRJCLE        OF CPCAP_IMPUTATION
+    LET PRACLE         OF CPPAM_IMPUTATION = PRACLE        OF CPCAP_IMPUTATION
+    LET IMMCLE         OF CPPAM_IMPUTATION = IMMCLE        OF CPCAP_IMPUTATION
+    LET CPIFLGFAC      OF CPPAM_IMPUTATION = CCIFLGFAC     OF CPCAP_IMPUTATION
+    LET CLICIECLE      OF CPPAM_IMPUTATION = CLICIECLE     OF CPCAP_IMPUTATION
+    LET CPTCLE         OF CPPAM_IMPUTATION = CPTCLE        OF CPCAP_IMPUTATION
+    LET UNACLE         OF CPPAM_IMPUTATION = UNACLE        OF CPCAP_IMPUTATION
+    LET CPICODDC       OF CPPAM_IMPUTATION = CCICODDC      OF CPCAP_IMPUTATION
+    LET CPIMNT         OF CPPAM_IMPUTATION = T_CPIMNT
+    LET CPITAXTYPTPS   OF CPPAM_IMPUTATION = CCITAXTYPTPS  OF CPCAP_IMPUTATION
+    LET CPITAXCODTPS   OF CPPAM_IMPUTATION = CCITAXCODTPS  OF CPCAP_IMPUTATION
+    LET CPITAXTYPTVQ   OF CPPAM_IMPUTATION = CCITAXTYPTVQ  OF CPCAP_IMPUTATION
+    LET CPITAXCODTVQ   OF CPPAM_IMPUTATION = CCITAXCODTVQ  OF CPCAP_IMPUTATION
+    LET CPIMNTTPS      OF CPPAM_IMPUTATION = T_CPIMNTTPS
+    LET CPIMNTTVQ      OF CPPAM_IMPUTATION = T_CPIMNTTVQ
+    LET CPIMNTCTI      OF CPPAM_IMPUTATION = T_CPIMNTCTI
+    LET CPIMNTRTI      OF CPPAM_IMPUTATION = T_CPIMNTRTI
+
+    PUT CPPAM_IMPUTATION RESET
+  END
+
+  ;
+  ; On teste que l'imputation ait été créé sans problème. Pour ce faire
+  ; on vérifie le cumul du pourcentage imputé. Celui-ci doit absolument
+  ; être égal à 100% ( 10000 avec le scale-factor).
+  ;
+  IF T_PCTREPTOT <> 10000
+  THEN ERROR 535 ; L'imputation saisie dans le paiement ne donne pas 100.00 %
+
+END
+
+;
+; Mise à jour des données
+;
+PROCEDURE UPDATE
+BEGIN
+  ;
+  ; On incrémente l'adresse pour les fournisseurs divers
+  ;
+  IF    REFCLETYP OF CPPAIEMENT = "F" &
+    AND FOUTYP    OF VFOC_FOU   = "D" &
+    AND PAMDEPDIR OF CPPAIEMENT = "1"
+  THEN BEGIN
+    START TRANSACTION GEN_RAD_SEQ
+    GET MCRAD_SEQ VIA REFCIECLE, &
+                      REFCLETYP, &
+                      REFCLENUM  &
+                  USING REFCIECLE OF CPPAIEMENT, &
+                        REFCLETYP OF CPPAIEMENT, &
+                        REFCLENUM OF CPPAIEMENT  &
+                  OPTIONAL
+    LET REFCIECLE OF MCRAD_SEQ = REFCIECLE OF CPPAIEMENT
+    LET REFCLETYP OF MCRAD_SEQ = REFCLETYP OF CPPAIEMENT
+    LET REFCLENUM OF MCRAD_SEQ = REFCLENUM OF CPPAIEMENT
+    LET RASNUMSEQ OF MCRAD_SEQ = RASNUMSEQ OF MCRAD_SEQ + 1
+    LET RADCLE    OF CPPAIEMENT = RASNUMSEQ OF MCRAD_SEQ
+    PUT MCRAD_SEQ
+    COMMIT TRANSACTION GEN_RAD_SEQ
+  END
+
+  ;
+  ; On obtient un numéro de paiement pour le nouveau paiement
+  ;
+  IF NEWRECORD OF CPPAIEMENT
+  THEN BEGIN
+    START TRANSACTION GEN_NUM_SEQ
+    GET CPPAM_SEQ OPTIONAL
+    LET PSENUMSEQ OF CPPAM_SEQ = PSENUMSEQ OF CPPAM_SEQ + 1
+    LET PAMCLE OF CPPAIEMENT &
+                = ASCII(PSENUMSEQ OF CPPAM_SEQ,PSELONNUM OF CPPAM_SEQ)
+    PUT CPPAM_SEQ
+    COMMIT TRANSACTION GEN_NUM_SEQ
+  END
+
+  ;
+  ; Si on est en train de payer un paiement automatique, alors on doit
+  ; recopier le talon du paiement dans le talon du chèque, et calculer
+  ; l'imputation comptable.
+  ;
+  FOR CPCAP_HISTO
+  BEGIN
+    IF    CAPTYPECR OF CPCPT_A_PAYER = "PA"                 &
+      AND OCCURRENCE                 = 1                    &
+      AND (     NEWRECORD OF CPCAP_HISTO                    &
+            OR  (     NOT NEWRECORD OF CPCAP_HISTO          &
+                  AND ALTEREDRECORD OF CPCAP_HISTO          &
+                  AND T_PAMMNTOLD <> PAMMNT OF CPPAIEMENT))
+    THEN BEGIN
+      ;
+      ; On recopie le talon du paiement automatique
+      ;
+      IF NEWRECORD OF CPCAP_HISTO
+      THEN DO INTERNAL COPIE_TALON
+      ;
+      ; Si le montant du paiement automatique change, alors on supprime
+      ; l'ancienne imputation.
+      ;
+      IF    NOT NEWRECORD OF CPCAP_HISTO &
+        AND ALTEREDRECORD OF CPCAP_HISTO &
+        AND T_PAMMNTOLD <> PAMMNT OF CPPAIEMENT
+      THEN DO INTERNAL DELETE_IMPUTATION_PA
+      ;
+      ; On transfer et on calcule l'imputation comptable du
+      ; paiement automatique.
+      ;
+      DO INTERNAL CALCUL_IMPUTATION_PA
+    END
+  END
+
+  PUT CPPAIEMENT
+  PUT MCREF_ADRESSE
+  PUT A_PTA_DELETE
+  PUT A_CPI_DELETE
+  FOR CPCAP_HISTO
+  BEGIN
+    PUT CPCAP_HISTO
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; On garde em mémoire le montant du paiement. Ceci permet de savoir si ce
+; montant à été modifié (ne sert qu'aux paiements automatiques).
+;
+PROCEDURE POSTFIND
+BEGIN
+  IF PAMFLGPA OF CPPAIEMENT = "1"
+  THEN LET T_PAMMNTOLD = PAMMNT OF CPPAIEMENT
+END
+
+;-------------------------------------------------------------------------------
+;
+; Suppression d'une ligne de ventilation du paiement
+;
+;
+PROCEDURE DELETE
+BEGIN
+  IF NOT DELETEDRECORD OF CPCAP_HISTO
+  THEN BEGIN
+    LET PAMCUMMNT OF CPPAIEMENT = PAMCUMMNT OF CPPAIEMENT &
+                                - CPHMNTPYE OF CPCAP_HISTO
+    LET PAMMNT    OF CPPAIEMENT = PAMMNT    OF CPPAIEMENT &
+                                - CPHMNTPYE OF CPCAP_HISTO
+    IF CAPTYPECR  OF CPCPT_A_PAYER = "PA" &
+      AND NOT NEWRECORD OF CPPAIEMENT
+    THEN BEGIN
+      LET PAMFLGPA OF CPPAIEMENT = "0"
+      DELETE A_PTA_DELETE
+      DELETE A_CPI_DELETE
+      LET PAMMNTTPS OF CPPAIEMENT = 0
+      LET PAMMNTCTI OF CPPAIEMENT = 0
+      LET PAMMNTTVQ OF CPPAIEMENT = 0
+      LET PAMMNTRTI OF CPPAIEMENT = 0
+    END
+    DELETE CPCAP_HISTO
+    DISPLAY PAMMNT OF CPPAIEMENT
+  END
+END
+
+BUILD
+@IF FORMAT
+
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+************************** Ventilation des documents ***************************
+* No paiement...: xxxxxxx                       Mnt paiement..: xxxxxxxxxxxxxx *
+* xxxxxxxxxxxxxxx xxxxxx xxxxxxxxxxxxxxxxxxxx                                  *
+********************************************************************************
+*       Numéro de       No          Montant     Escompte         Montant       *
+*       document      Cédule        à payer         pris            payé       *
+*      xxxxxxxxxxxxxxx  xx    xxxxxxxxxxxxxx  xxxxxxxxxxx  xxxxxxxxxxxxxx      *
+*      xxxxxxxxxxxxxxx  xx    xxxxxxxxxxxxxx  xxxxxxxxxxx  xxxxxxxxxxxxxx      *
+*      xxxxxxxxxxxxxxx  xx    xxxxxxxxxxxxxx  xxxxxxxxxxx  xxxxxxxxxxxxxx      *
+*      xxxxxxxxxxxxxxx  xx    xxxxxxxxxxxxxx  xxxxxxxxxxx  xxxxxxxxxxxxxx      *
+*      xxxxxxxxxxxxxxx  xx    xxxxxxxxxxxxxx  xxxxxxxxxxx  xxxxxxxxxxxxxx      *
+*      xxxxxxxxxxxxxxx  xx    xxxxxxxxxxxxxx  xxxxxxxxxxx  xxxxxxxxxxxxxx      *
+*      xxxxxxxxxxxxxxx  xx    xxxxxxxxxxxxxx  xxxxxxxxxxx  xxxxxxxxxxxxxx      *
+*      xxxxxxxxxxxxxxx  xx    xxxxxxxxxxxxxx  xxxxxxxxxxx  xxxxxxxxxxxxxx      *
+*      xxxxxxxxxxxxxxx  xx    xxxxxxxxxxxxxx  xxxxxxxxxxx  xxxxxxxxxxxxxx      *
+*      xxxxxxxxxxxxxxx  xx    xxxxxxxxxxxxxx  xxxxxxxxxxx  xxxxxxxxxxxxxx      *
+*      xxxxxxxxxxxxxxx  xx    xxxxxxxxxxxxxx  xxxxxxxxxxx  xxxxxxxxxxxxxx      *
+*      xxxxxxxxxxxxxxx  xx    xxxxxxxxxxxxxx  xxxxxxxxxxx  xxxxxxxxxxxxxx      *
+*      xxxxxxxxxxxxxxx  xx    xxxxxxxxxxxxxx  xxxxxxxxxxx  xxxxxxxxxxxxxx      *
+*      xxxxxxxxxxxxxxx  xx    xxxxxxxxxxxxxx  xxxxxxxxxxx  xxxxxxxxxxxxxx      *
+********************************************************************************
+@ENDIF

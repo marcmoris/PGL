@@ -1,0 +1,627 @@
+;/T/ Liste de vérification des réceptions
+;
+;/P/ Programmeur...: Nancy Marceau
+;    Date Création.: 24 mai 1994
+;
+;    Description...: Pour faire la vérification des lots de réceptions.  Cette
+;                    liste peut être lancée pour les lots journlaisés ou non.
+;
+;    Paramètres....: Compagnie          (Compagnie du menu)
+;                    Période comptable  (Obligatoire)
+;                    No lot             (Un, Plusieurs ou tous)
+;
+;
+;    Particularités: Pour faire la vérification des lots non journalisés, il
+;                    faut donner en paramètre le numéro de lot (0000). Ainsi,
+;                    toutes les réceptions approuvées apparaîtront dans la
+;                    liste de vérification.
+;
+;/M/ Programmeur.......: Francois Richard
+;    Date modification.: 15 Juin 1999
+;    Description.......: Migration Achat/Réception/Inventaire de l'environnement
+;                        BOC
+;***********************************************************************************************************************************
+;
+;/M/ Modifié par.......: Marc Poulin     
+;    Date modification.: 16 février 2000
+;    Description.......: Refonte du rapport selon les spécifications du clients
+;                        Rapporter: (1) les réceptions transférées aux comptes payables ;
+;                                   (2) les réceptions non transferées (si demandé) ;
+;                                   (3) Soustraire des réceptions, si demandé, les montants et quantités consolidés.
+;
+;    Référence.........: Stabilisation du module Achat/Réception Inventaire (point 2).
+;    
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+ USE ussetqzs NOLIST   ; permet de faire les SET REPORT DEV....
+ SET NOBLANK           ; Empêche l'impression de ligne blanche
+
+
+;===============================================================================
+;  Rapport Vérification des réceptions
+;===============================================================================
+
+ACCESS *WAR301 &
+    ;
+    ; Accéder au montant total et au nombre d'items par réception
+    ;
+  LINK CIECLE OF WAR301  , &
+       RECCLE OF WAR301    &
+    TO CIECLE            , &
+       RECCLE OF *WAR301Z  &
+
+    ;
+    ; On va chercher l'entrepôt pour afficher les infos de l'entrepôt.
+    ;
+  LINK CIECLE OF WAR301, &
+       ENTCLE OF WAR301  &
+    TO CIECLE, &
+       ENTCLE OF ARENTREPOT &
+
+    ;
+    ; On va chercher la commande pour afficher les infos de la commande.
+    ;
+  LINK CIECLE    OF WAR301, &
+       CMDCLE    OF WAR301, &
+       CMDAJT    OF WAR301  &
+    TO CIECLE, &
+       CMDCLE, &
+       CMDAJT OF ARCOMMANDE &
+
+
+  LINK FOUCIECLE OF WAR301, &
+       REFCLETYP OF WAR301, &
+       FOUCLE    OF WAR301, &
+       RADCLE    OF WAR301  &
+    TO REFCIECLE          , &
+       REFCLETYP          , &
+       REFCLENUM          , &
+       RADCLE             OF MCREF_ADRESSE OPTIONAL &
+
+  LINK FOUCIECLE OF WAR301, &
+       FOUCLE    OF WAR301, &
+       CIECLE    OF WAR301  &
+    TO FOUCIECLE, &
+       FOUCLE,    &
+       FOCCIECLE OF VFOC_FOU  &
+
+  LINK CPTCLE   OF WAR301   &
+    TO CPTCLE             OF VCPT_DSC    OPTIONAL &
+
+  LINK CIECLE   OF WAR301 , &
+       UNACLE   OF WAR301   &
+    TO CIECLE             , &
+       UNACLE             OF MCUNITE_ADM OPTIONAL &
+
+  LINK CIECLE OF WAR301   , &
+       PRJCLE OF WAR301     &
+    TO CIECLE             , &
+       PRJCLE             OF GPPROJETS    OPTIONAL &
+
+  LINK CIECLE OF WAR301   , &
+       PRJCLE OF WAR301   , &
+       PRACLE OF WAR301     &
+    TO CIECLE             , &
+       PRJCLE             , &
+       PRACLE             OF GPPRO_ACTIVITE  OPTIONAL &
+
+  LINK CIECLE OF WAR301  , &
+       IMMCLE OF WAR301    &
+    TO CIECLE             , &
+       IMMCLE OF IMIMMOBILISATION OPTIONAL &
+
+
+   ;
+   ; Statut de la réception
+   ;
+  LINK ("RECSTU",                   &
+         RECSTU OF WAR301)          &
+    TO XELNOM,                      &
+       CBICLE OF VCBI_DSC  OPTIONAL &
+
+   ;
+   ; Devise du consolidé
+   ;
+  LINK ("1") &
+    TO CIENMC OF MCHOLDING
+
+
+ DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = & ; titre1  du rapport
+@IF FRANCAIS
+                   "Liste de vérification des réceptions"
+@ELSE
+                   "%%%Liste de vérification des réceptions"
+@ENDIF
+ DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = " " ; titre2  du rapport
+
+ DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "AR301ZA"       ; numéro du rapport
+ DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM            ; nom de la compagnie
+
+
+USE usflgdet NOLIST                    ;Flag Bilingue (O/N)
+DEFINE D_HRSBLC    CHARACTER SIZE 3 =  DZ_FLGAFFO IF 0 <> LARNBRTRSERR OF WAR301 &
+                                       ELSE DZ_FLGAFFN IF LARNBRTRSERR OF WAR301 = 0
+
+;***********************
+; Pour le rendre à 20 caractères.
+;
+DEFINE D_PRJTIT    CHARACTER SIZE 20 = PRJDSC1 OF GPPROJETS
+
+DEFINE D_PRATIT    CHARACTER SIZE 20 = PRADSC1 OF GPPRO_ACTIVITE
+
+DEFINE D_IMMTIT    CHARACTER SIZE 18 = IMMDSC  OF IMIMMOBILISATION
+;***********************
+; Statut de réception (15 caractères)
+
+DEFINE D_CBIDSC CHARACTER SIZE 15 = CBIDSC OF VCBI_DSC
+
+; Numéro de réception
+DEFINE D_RECCLE CHARACTER SIZE 3 = RECCLE OF WAR301[10:3]
+
+
+DEFINE D_LARNBRTRSDIF INTEGER SIZE 4 = LARNBRTRSVER OF WAR301 - &
+                                       LARNBRTRS    OF WAR301     ;Différence nbre transactions réel et nbre transactions évalué
+DEFINE D_LARCUMMNTDIF FLOAT SIZE 8   = LARCUMMNTVER OF WAR301 - &
+                                       LARCUMMNT    OF WAR301     ;Différence Montant transaction réel et Montant transaction évalué
+;
+; Vérification si montant entré par l'usager balance avec le total imputation si
+; ne balance imprimer un "*"
+;
+DEFINE D_BALANCE  CHARACTER SIZE 1 = "*" IF T_RECMNTTOT OF WAR301Z <> &
+                                            RECCUMMNT OF WAR301 ELSE " "
+
+DEFINE    D_DEVCLE    CHARACTER SIZE 04 = " " &
+          IF DEVCLE OF VFOC_FOU = DEVCLE OF MCHOLDING OR &
+             0 = SIZE(TRUNCATE(FOUCLE OF WAR301)) &
+          ELSE "/" + DEVCLE OF VFOC_FOU
+
+;Indique si transférée aux comptes payables.
+
+DEFINE D_TRANSFEREE CHAR SIZE 12 = &
+@IF FRANCAIS
+                            "transférée" &
+@ELSE
+                            "posted" &
+@ENDIF
+                            IF LARDATJOU OF WAR301 <> 0 ELSE " "
+
+
+DEFINE D_LABEL_REC CHARACTER SIZE 50 = PACK(LARDSC OF WAR301 + D_TRANSFEREE)
+
+SORT ON CIECLE OF WAR301 &
+     ON D_PECCLE_REC     &
+     ON LARCLE OF WAR301 &
+     ON FOUCLE OF WAR301 &
+     ON RECCLE OF WAR301 &
+     ON CPTCLE OF WAR301 &
+     ON UNACLE OF WAR301 &
+     ON PRJCLE OF WAR301 &
+     ON PRACLE OF WAR301 &
+     ON IMMCLE OF WAR301
+
+ USE ustit220 NOLIST  ; Titre standard pour l'application à 220
+SKIP 2&
+@IF FRANCAIS
+ TAB 001 "Lot....: "   &
+@ELSE
+ TAB 001 "Batch..: "   &
+@ENDIF
+ TAB 011 LARCLE OF WAR301 &
+ TAB 016 D_LABEL_REC      &
+ SKIP &
+@IF FRANCAIS
+ TAB 001 "Période: " &
+@ELSE
+ TAB 001 "Period.: " &
+@ENDIF
+ TAB 011 PECCLE OF WAR301 &
+SKIP 2 &
+  TAB 001 " Commande  No.                                                                       ------------ Dates -----------                                                  Nombre        Montant" &
+ SKIP &
+  TAB 001 "  d'achat  réception Fournisseur                                     Statut          Réquisition Commande Réception  Entrepôt                                       d'items           brut" &
+ SKIP &
+  TAB 001 " --------- --------- ----------------------------------------------- --------------- ----------- -------- ---------  ---------------------------------------------- ------- ---------------" &
+ SKIP
+
+
+HEADING AT RECCLE                                           &
+  TAB 001  D_BALANCE                                        &
+  TAB 003  CMDCLE      OF WAR301                            &
+  TAB 016  D_RECCLE                                         &
+  TAB 023  FOUCLE      OF WAR301                            &
+  TAB 030  RADNOM      OF MCREF_ADRESSE                     &
+  TAB 071  D_CBIDSC                                         &
+  TAB 089  CMDDAT      OF ARCOMMANDE                        &
+  TAB 099  RECDAT      OF WAR301                            &
+  TAB 109  ENTCLE      OF WAR301                            &
+  TAB 115  ENTNOM      OF ARENTREPOT                        &
+  TAB 168  T_RECNBRITE OF WAR301Z                           &
+           PICTURE "^^^^"                                   &
+           SIGNIFICANCE 1                                   &
+  TAB 174  T_RECMNTTOT OF WAR301Z                           &
+           PICTURE "^^^,^^^,^^^.^^ "                        &
+           SIGNIFICANCE 5                                   &
+           TRAILING SIGN "-"                                &
+  TAB 189  D_DEVCLE                                         &
+ SKIP 2 &
+@IF FRANCAIS
+  TAB 010 "----------Compte-----------  ----Unité administrative-----  -----------Projet------------  -------Activité--------- -------Immobilisation---------- -------Montant  -----------TPS  -----------TVQ" &
+@ELSE
+  TAB 010 "%%%----------Compte-----------  ----Unité administrative-----  -----------Projet------------  -------Activité--------- -------Equipement-------------- -------Montant  -----------TPS  -----------TVQ" &
+@ENDIF
+ SKIP
+
+
+FOOTING AT IMMCLE                       &
+  TAB 010 CPTCLE       OF WAR301        &
+  TAB 017 CPTDSCABR    OF VCPT_DSC      &
+  TAB 039 UNACLE       OF WAR301        &
+  TAB 048 UNANOMABR    OF MCUNITE_ADM   &
+  TAB 070 PRJCLE       OF WAR301        &
+  TAB 079 D_PRJTIT                      &
+  TAB 101 PRACLE       OF WAR301        &
+  TAB 105 D_PRATIT                      &
+  TAB 126 IMMCLE       OF WAR301        &
+  TAB 139 D_IMMTIT                      &
+  TAB 158 T_REDMNTNET  OF WAR301        &
+          SUBTOTAL                      &
+          PICTURE "^^^,^^^,^^^.^^ "     &
+          SIGNIFICANCE 5                &
+          TRAILING SIGN "-"             &
+  TAB 174 REDTAXCODTPS OF WAR301        &
+  TAB 177 T_REDMNTTPS  OF WAR301        &
+          SUBTOTAL                      &
+          PICTURE "^^^^,^^^.^^ "        &
+          SIGNIFICANCE 5                &
+          TRAILING SIGN "-"             &
+  TAB 190 REDTAXCODTVQ OF WAR301        &
+  TAB 193 T_REDMNTTVQ  OF WAR301        &
+          SUBTOTAL                      &
+          PICTURE "^^^^,^^^.^^ "        &
+          SIGNIFICANCE 5                &
+          TRAILING SIGN "-"             
+
+
+FOOTING AT RECCLE                       &
+  TAB 158 "---------------"             &
+  TAB 174 "---------------"             &
+  TAB 190 "---------------"             &
+SKIP                                    &
+  TAB 158 T_REDMNTNET OF WAR301         &
+          SUBTOTAL                      &
+          PICTURE "^^^,^^^,^^^.^^ "     &
+          SIGNIFICANCE 5                &
+          TRAILING SIGN "-"             &
+  TAB 177 T_REDMNTTPS OF WAR301         &
+          SUBTOTAL                      &
+          PICTURE "^^^^,^^^.^^ "        &
+          SIGNIFICANCE 5                &
+          TRAILING SIGN "-"             &
+  TAB 193 T_REDMNTTVQ  OF WAR301        &
+          SUBTOTAL                      &
+          PICTURE "^^^^,^^^.^^ "        &
+          SIGNIFICANCE 5                &
+          TRAILING SIGN "-"             &
+ SKIP &
+  TAB 001  "------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------" &
+ SKIP
+
+
+FOOTING AT LARCLE                       &
+  TAB 158 "--------------- --------------- ---------------" &
+ SKIP                                   &
+@IF FRANCAIS
+  TAB 143 "Total du Lot:"               &
+@ELSE
+  TAB 143 "Batch Total :"               &
+@ENDIF
+  TAB 158 T_REDMNTNET OF WAR301         &
+          SUBTOTAL                      &
+          PICTURE "^^^,^^^,^^^.^^ "     &
+          SIGNIFICANCE 5                &
+          TRAILING SIGN "-"             &
+  TAB 174 T_REDMNTTPS OF WAR301         &
+          SUBTOTAL                      &
+          PICTURE "^^^,^^^,^^^.^^ "     &
+          SIGNIFICANCE 5                &
+          TRAILING SIGN "-"             &
+  TAB 190 T_REDMNTTVQ OF WAR301         &
+          SUBTOTAL                      &
+          PICTURE "^^^,^^^,^^^.^^ "     &
+          SIGNIFICANCE 5                &
+          TRAILING SIGN "-"             &
+ SKIP &
+  TAB 158 "=============== =============== ===============" &
+ SKIP &
+  TAB 001 "------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------" &
+ SKIP 1 &
+@IF FRANCAIS
+  TAB 049 "    Vérifiés         Cumulés             Ecart        Hors balance(*)" &
+@ELSE
+  TAB 049 "%%%    Vérifiés         Cumulés             Ecart        Hors balance(*)" &
+@ENDIF
+ SKIP 1 &
+  TAB 049 "--------------    --------------    --------------    ---------------" &
+ SKIP &
+@IF FRANCAIS
+  TAB 023   "Nombre de transactions:" &
+@ELSE
+  TAB 023   "%%%bre de transactions:" &
+@ENDIF
+  TAB 055 LARNBRTRSVER   OF WAR301 PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+  TAB 073 LARNBRTRS      OF WAR301 PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+  TAB 091 D_LARNBRTRSDIF           PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+  TAB 109 D_HRSBLC &
+SKIP &
+@IF FRANCAIS
+  TAB 023   "Montant total.........:" &
+@ELSE
+  TAB 023   "%%%tant total.........:" &
+@ENDIF
+  TAB 049 LARCUMMNTVER OF WAR301   PICTURE "^^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5 &
+  TAB 067 LARCUMMNT    OF WAR301   PICTURE "^^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5 &
+  TAB 085 D_LARCUMMNTDIF           PICTURE "^^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5 &
+SKIP 1 &
+  TAB 001  "------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------" &
+SKIP PAGE
+
+BUILD ar301za
+
+@IF FORMAT
+AR301ZA                                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                                          Page: 9999
+99/99/99 HH:MM xxxxxxxxxxxx                    Liste de vérification des réceptions
+                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+Lot....: xxxx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxx
+Période: xx-xx
+
+ Commande  No.                                                                       ------------ Dates -----------                                                  Nombre        Montant
+  d'achat  réception Fournisseur                                     Statut          Réquisition Commande Réception  Entrepôt                                       d'items           brut
+ --------- --------- ----------------------------------------------- --------------- ----------- -------- ---------  ---------------------------------------------- ------- ---------------
+ xxxxxxxxx    xxx    xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxx  xx/xx/xx   xx/xx/xx  xx/xx/xx  xxxx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   999   999,999,999.99-/xxx
+
+         ----------Compte-----------  ----Unité administrative-----  -----------Projet------------  -------Activité--------- -------Equipement-------------- -------Montant  -----------TPS  -----------TVQ
+         123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  123 xxxxxxxxxxxxxxxxxxxx 1234567890 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx 9999,999.99- xx 9999,999.99-
+         123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  123 xxxxxxxxxxxxxxxxxxxx 1234567890 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx 9999,999.99- xx 9999,999.99-
+         123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  123 xxxxxxxxxxxxxxxxxxxx 1234567890 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx 9999,999.99- xx 9999,999.99-
+                                                                                                                                                             --------------- --------------- ---------------
+                                                                                                                                                             999,999,999.99-    9999,999.99-    9999,999.99-
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  xxxxxxxxx    xxx    xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxx  xx/xx/xx   xx/xx/xx  xx/xx/xx  xxxx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   999   999,999,999.99-/xxx
+
+         ----------Compte-----------  ----Unité administrative-----  -----------Projet------------  -------Activité--------- -------Equipement-------------- -------Montant  -----------TPS  -----------TVQ
+         123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  123 xxxxxxxxxxxxxxxxxxxx 1234567890 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx 9999,999.99- xx 9999,999.99-
+         123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  123 xxxxxxxxxxxxxxxxxxxx 1234567890 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx 9999,999.99- xx 9999,999.99-
+         123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  123 xxxxxxxxxxxxxxxxxxxx 1234567890 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx 9999,999.99- xx 9999,999.99-
+                                                                                                                                                             --------------- --------------- ---------------
+                                                                                                                                                             999,999,999.99-    9999,999.99-    9999,999.99-
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                                                                             --------------- --------------- ---------------
+                                                                                                                                              Total du lot:  999,999,999.99  999,999,999.99- 999,999,999.99-
+                                                                                                                                                             =============== =============== ===============
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                    Vérifiés         Cumulés             Ecart        Hors balance(*)
+                                                --------------    --------------    --------------    ---------------
+                      Nombre de transactions:         9,999             9,999             9,999-            xxx
+                      Montant total.........:   999,999,999.99    999,999,999.99    999,999,999.99-
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+@ENDIF
+
+; ****************************************
+
+
+;/T/ Liste de vérification des réceptions - Cumul par compte et unité administrative
+;
+;-------------------------------------------------------------------------------
+
+ USE ussetqzs NOLIST   ; permet de faire les SET REPORT DEV....
+ SET NOBLANK           ; Empêche l'impression de ligne blanche
+
+
+;===============================================================================
+;  Rapport Vérification des réceptions
+;===============================================================================
+
+ACCESS *WAR301              &
+
+  LINK CPTCLE   OF WAR301   &
+    TO CPTCLE   OF VCPT_DSC    OPTIONAL &
+
+  LINK CIECLE   OF WAR301 , &
+       UNACLE   OF WAR301   &
+    TO CIECLE             , &
+       UNACLE   OF MCUNITE_ADM OPTIONAL &
+
+  LINK CIECLE OF WAR301   , &
+       PRJCLE OF WAR301     &
+    TO CIECLE             , &
+       PRJCLE OF GPPROJETS    OPTIONAL &
+
+  LINK CIECLE OF WAR301   , &
+       PRJCLE OF WAR301   , &
+       PRACLE OF WAR301     &
+    TO CIECLE             , &
+       PRJCLE             , &
+       PRACLE OF GPPRO_ACTIVITE  OPTIONAL &
+
+  LINK CIECLE OF WAR301  , &
+       IMMCLE OF WAR301    &
+    TO CIECLE            , &
+       IMMCLE OF IMIMMOBILISATION OPTIONAL
+
+
+ DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = & ; titre1  du rapport
+                   "Liste de vérification des réceptions"
+ DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = "Cumul par compte et unité administrative " ; titre2  du rapport
+
+ DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "AR301ZB"       ; numéro du rapport
+ DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM            ; nom de la compagnie
+
+
+USE usflgdet NOLIST                    ;Flag Bilingue (O/N)
+
+;***********************
+; Pour le rendre à 20 caractères.
+;
+DEFINE D_PRJTIT    CHARACTER SIZE 20 = PRJDSC1 OF GPPROJETS
+
+DEFINE D_PRATIT    CHARACTER SIZE 20 = PRADSC1 OF GPPRO_ACTIVITE
+
+DEFINE D_IMMTIT    CHARACTER SIZE 18 = IMMDSC  OF IMIMMOBILISATION
+;***********************
+
+; Numéro de réception
+DEFINE D_RECCLE CHARACTER SIZE 3 = RECCLE OF WAR301[10:3]
+
+;Indique si transférée aux comptes payables.
+
+DEFINE D_TRANSFEREE CHAR SIZE 12 = "transférée" &
+                                IF LARDATJOU OF WAR301 <> 0 ELSE " "
+
+DEFINE D_LABEL_REC CHARACTER SIZE 50 = PACK(LARDSC OF WAR301 + D_TRANSFEREE)
+
+SORT ON CIECLE OF WAR301 &
+     ON D_PECCLE_REC     &
+     ON LARCLE OF WAR301 &
+     ON CPTCLE OF WAR301 &
+     ON UNACLE OF WAR301
+
+ USE ustit220 NOLIST  ; Titre standard pour l'application à 220
+SKIP 2                    &
+@IF FRANCAIS
+ TAB 001 "Lot....: "      &
+@ELSE
+ TAB 001 "Batch..: "      &
+@ENDIF
+ TAB 011 LARCLE OF WAR301 &
+ TAB 016 D_LABEL_REC      &
+ SKIP                     &
+@IF FRANCAIS
+ TAB 001 "Période: "      &
+@ELSE
+ TAB 001 "Period.: "      &
+@ENDIF
+ TAB 011 PECCLE OF WAR301 &
+SKIP 2 &
+ TAB 010 "----------Compte-----------  ----Unité administrative-----  -----------Projet------------  -------Activité--------- -------Immobilisation---------- -------Montant  -----------TPS  -----------TVQ" &
+ SKIP
+
+
+FOOTING AT UNACLE                       &
+  TAB 010 CPTCLE       OF WAR301        &
+  TAB 017 CPTDSCABR    OF VCPT_DSC      &
+  TAB 039 UNACLE       OF WAR301        &
+  TAB 048 UNANOMABR    OF MCUNITE_ADM   &
+  TAB 070 PRJCLE       OF WAR301        &
+  TAB 079 D_PRJTIT                      &
+  TAB 101 PRACLE       OF WAR301        &
+  TAB 105 D_PRATIT                      &
+  TAB 126 IMMCLE       OF WAR301        &
+  TAB 139 D_IMMTIT                      &
+  TAB 158 T_REDMNTNET  OF WAR301        &
+          SUBTOTAL                      &
+          PICTURE "^^^,^^^,^^^.^^ "     &
+          SIGNIFICANCE 5                &
+          TRAILING SIGN "-"             &
+  TAB 174 REDTAXCODTPS OF WAR301        &
+  TAB 177 T_REDMNTTPS  OF WAR301        &
+          SUBTOTAL                      &
+          PICTURE "^^^^,^^^.^^ "        &
+          SIGNIFICANCE 5                &
+          TRAILING SIGN "-"             &
+  TAB 190 REDTAXCODTVQ OF WAR301        &
+  TAB 193 T_REDMNTTVQ  OF WAR301        &
+          SUBTOTAL                      &
+          PICTURE "^^^^,^^^.^^ "        &
+          SIGNIFICANCE 5                &
+          TRAILING SIGN "-"             &
+ RESERVE 3 LINES
+
+
+FOOTING AT LARCLE                       &
+ SKIP 2                                 &
+  TAB 158 "--------------  --------------  --------------" &
+ SKIP 1                                 &
+  TAB 158 T_REDMNTNET  OF WAR301        &
+          SUBTOTAL                      &
+          PICTURE "^^^,^^^,^^^.^^ "     &
+          SIGNIFICANCE 5                &
+          TRAILING SIGN "-"             &
+  TAB 177 T_REDMNTTPS  OF WAR301        &
+          SUBTOTAL                      &
+          PICTURE "^^^^,^^^.^^ "        &
+          SIGNIFICANCE 5                &
+          TRAILING SIGN "-"             &
+  TAB 193 T_REDMNTTVQ  OF WAR301        &
+          SUBTOTAL                      &
+          PICTURE "^^^^,^^^.^^ "        &
+          SIGNIFICANCE 5                &
+          TRAILING SIGN "-"             &
+ SKIP PAGE
+
+FINAL FOOTING                           &
+  TAB 001 DZ_NUMRAP                     &
+  TAB 101 DZ_CIENOM                     &
+  TAB 168 "PAGE:"                       &
+  TAB 174 SYSPAGE                       &
+ SKIP 1                                 &
+  TAB 001 SYSDATE                       &
+  TAB 009 SYSTIME                       &
+  TAB 016 LOGONID                       &
+  TAB 91 DZ_ENTCTR1                     &
+ SKIP 1                                 &
+  TAB 91 DZ_ENTCTR2                     &
+ SKIP 3                                 &
+ TAB 158 "-------Montant  -----------TPS  -----------TVQ" &
+ SKIP 2                                 &
+  TAB 142 "Grand total:"                &
+  TAB 158 T_REDMNTNET  OF WAR301        &
+          SUBTOTAL                      &
+          PICTURE "^^^,^^^,^^^.^^ "     &
+          SIGNIFICANCE 5                &
+          TRAILING SIGN "-"             &
+  TAB 177 T_REDMNTTPS  OF WAR301        &
+          SUBTOTAL                      &
+          PICTURE "^^^^,^^^.^^ "        &
+          SIGNIFICANCE 5                &
+          TRAILING SIGN "-"             &
+  TAB 193 T_REDMNTTVQ  OF WAR301        &
+          SUBTOTAL                      &
+          PICTURE "^^^^,^^^.^^ "        &
+          SIGNIFICANCE 5                &
+          TRAILING SIGN "-"             &
+ SKIP 1                                 &
+  TAB 158 "==============  ==============  =============="
+
+BUILD ar301zb
+
+
+@IF FORMAT
+AR301ZB                                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                                          Page: 9999
+99/99/99 HH:MM xxxxxxxxxxxx                    Liste de vérification des réceptions
+                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+Lot....: xxxx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxx
+Période: xx-xx
+
+         ----------Compte-----------  ----Unité administrative-----  -----------Projet------------  -------Activité--------- -------Equipement-------------- -------Montant  -----------TPS  -----------TVQ
+         123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  123 xxxxxxxxxxxxxxxxxxxx 1234567890 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx 9999,999.99- xx 9999,999.99-
+         123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  123 xxxxxxxxxxxxxxxxxxxx 1234567890 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx 9999,999.99- xx 9999,999.99-
+         123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  123 xxxxxxxxxxxxxxxxxxxx 1234567890 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx 9999,999.99- xx 9999,999.99-
+
+                                                                                                                                                             --------------  --------------  --------------
+                                                                                                                                                             999,999,999.99-    9999,999.99-    9999,999.99-
+
+                                                                                                                                                                                                            
+AR301ZB                                      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                                          Page: 9999
+99/99/99 HH:MM xxxxxxxxxxxx                    Liste de vérification des réceptions
+                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+
+                                                                                                                                                             -------Montant  -----------TPS  -----------TVQ
+
+                                                                                                                                             Grand total:    999,999,999.99-    9999,999.99-    9999,999.99-
+                                                                                                                                                             ==============  ==============  ==============
+@ENDIF

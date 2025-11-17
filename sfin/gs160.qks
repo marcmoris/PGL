@@ -1,0 +1,364 @@
+;/T/ Gestion des État des traitements en lot
+;
+;/P/ Programmeur..: Patrick Langlois
+;    Date Création: 25 Septembre 1997
+;
+;    Description..: Visualisation et modification des travaux en lots.
+;
+;** A MODIFIER **
+;       Les messages. Recherchez MES???.
+;
+;-------------------------------------------------------------------------------
+
+SCREEN gs160 ACTIONBAR                       &
+             NOMODE                          &
+             NOACTION                        &
+             FIELDMARK RETAIN STARTUP        &
+             HELP POPUP FROM 4,1 TO 20,80    &
+             ACTIVITIES FIND, CHANGE, DELETE
+
+USE ussectmp  NOLIST
+    "GS160"
+
+;
+; Documentation de l'écran.
+;
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+ACTIONMENU LABEL "Sous-Ecrans"
+  MENUITEM LABEL "Historique des traitements en lot" ACTION DESIGNER D001
+
+;------------------------------------------------------------------------------
+;
+; Table des traitements en lot créer dans gs090 --> usunix.qks.
+; exécuter par programme C ($PG_EXE/prosig_batch)
+; source : $PG_L3G/prosig_batch.pc
+; Table dans environnement bth  " to public "
+;
+FILE GSTRAITEMENT PRIMARY OCCURS 14 NOITEMS NOAPPEND
+  ACCESS SEQUENTIAL         &
+         ORDERBY TRTQUE   , &
+                 TRTDATTRT, &
+                 TRTHRETRT, &
+                 TRTPRI   , &
+                 TRTDATDEM, &
+                 TRTHREDEM
+
+;------------------------------------------------------------------------------
+;
+; Queue de traitement
+;
+FILE GSQUEUE_BATCH REFERENCE
+  ACCESS VIA   XQBNAM &
+         USING TRTQUE
+
+
+;------------------------------------------------------------------------------
+;
+; Retrouve l'usager
+;
+FILE GSUSAGER DESIGNER
+  ACCESS VIA USRCLE USING LOGONID
+
+;-------------------------------------------------------------------------------
+;
+; Temporaires de travail
+;
+TEMPORARY T_CHGDAT CHARACTER SIZE 1 OCCURS WITH GSTRAITEMENT
+TEMPORARY T_CHGHRE CHARACTER SIZE 1 OCCURS WITH GSTRAITEMENT
+TEMPORARY T_CMD    CHARACTER SIZE 300 ; desctruction fichier de lancement
+TEMPORARY T_DSC    CHARACTER SIZE 71 ; Affichage description rapport/procédure
+TEMPORARY T_XQBCLE CHARACTER SIZE 4 ; Consultation des queues de traitement
+TEMPORARY T_FLGQUE CHARACTER SIZE 1 ; Consultation des queues de traitement
+TEMPORARY T_GPFSECMAN CHARACTER SIZE 1 RESET AT STARTUP ; Indicateur administrateur de système
+
+
+DRAW 2,1 TO 23,80
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+TITLE " État des traitements en lot " CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP 1
+TITLE "--- Exécution ---  ---- Demandé ----" AT ,42
+SKIP
+TITLE "Queue Priorité Usager        Nom        Date      Heure     Date     Heure" &
+  AT ,4
+
+SKIP 1
+
+CLUSTER OCCURS WITH GSTRAITEMENT ID BASE 10
+
+ALIGN (4,2,4) (,,12) (,,19) (,,33) (,,42) (,,54) (,,61) (,,73)
+
+FIELD TRTQUE OF GSTRAITEMENT    &
+      HELP "Nom de la file d'attente" &
+      HIDDEN                    &
+      LABEL " "                 &
+      HILITE DISPLAY INVERSE IF TRTSTU OF GSTRAITEMENT = "E" &
+      LOOKUP ON GSQUEUE_BATCH   &
+      MESSAGE 39 ; Cette queue de traitememt est inexistante
+
+FIELD TRTPRI OF GSTRAITEMENT    &
+      HELP "Traitement date/heure identique: diminué le chiffre pour augmenter la priorité" &
+      VALUE 1 TO 999            &
+      SIZE 3                    &
+      PICTURE "^^^"             &
+      HILITE DISPLAY INVERSE IF TRTSTU OF GSTRAITEMENT = "E"
+
+FIELD USRCLE OF GSTRAITEMENT &
+      DISPLAY                   &
+      HILITE DISPLAY INVERSE IF TRTSTU OF GSTRAITEMENT = "E"
+
+FIELD XPRNOM OF GSTRAITEMENT    &
+      DISPLAY                   &
+      HILITE DISPLAY INVERSE IF TRTSTU OF GSTRAITEMENT = "E"
+
+FIELD TRTDATTRT OF GSTRAITEMENT &
+      HELP "Pour exécuter immédiatement mettre la date à zéro" &
+      FORMAT YYYYMMDD           &
+      HILITE DISPLAY INVERSE IF TRTSTU OF GSTRAITEMENT = "E"
+
+FIELD TRTHRETRT OF GSTRAITEMENT &
+       BWZ                      &
+       SIZE 5                   &
+       INPUT SCALE 2            &
+       OUTPUT SCALE -2          &
+       PICTURE "^^h^^"          &
+       SIGNIFICANCE 4           &
+       HILITE DISPLAY INVERSE IF TRTSTU OF GSTRAITEMENT = "E"
+
+FIELD TRTDATDEM OF GSTRAITEMENT &
+      DISPLAY                   &
+      FORMAT YYYYMMDD           &
+      HILITE DISPLAY INVERSE IF TRTSTU OF GSTRAITEMENT = "E"
+
+FIELD TRTHREDEM OF GSTRAITEMENT &
+      DISPLAY                   &
+      OUTPUT SCALE -2           &
+      PICTURE "^^h^^"           &
+      HILITE DISPLAY INVERSE IF TRTSTU OF GSTRAITEMENT = "E"
+
+CLUSTER
+
+SKIP
+HILITE DISPLAY OFF
+
+FIELD T_DSC                     &
+      HIDDEN                    &
+      LABEL " "                 &
+      HILITE DISPLAY HALFTONE
+
+;-------------------------------------------------------------------------------
+;
+; Pour retrouver le flag d'administrateur système
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+
+  GET GSUSAGER OPTIONAL
+  LET T_GPFSECMAN = USRSECMAN OF GSUSAGER
+END
+;------------------------------------------------------------------------------
+;
+; Modification de la date pour le millénaire
+;
+;
+PROCEDURE INPUT TRTDATDEM
+BEGIN
+  ;    Ajout automatique du siècle dans la date
+  ;
+  ; Francois Déry, 24 Avril 1996
+  ;
+  IF 6 = SIZE( FIELDTEXT )
+  THEN BEGIN
+    IF "20" >= FIELDTEXT[1:2]
+    THEN LET FIELDTEXT = "20" + FIELDTEXT
+    ELSE LET FIELDTEXT = "19" + FIELDTEXT
+  END
+END
+;------------------------------------------------------------------------------
+;
+; Modification de la date pour le millénaire
+;
+;
+PROCEDURE INPUT TRTDATTRT
+BEGIN
+  ;    Ajout automatique du siècle dans la date
+  ;
+  ; Francois Déry, 24 Avril 1996
+  ;
+  IF 6 = SIZE( FIELDTEXT )
+  THEN BEGIN
+    IF "20" >= FIELDTEXT[1:2]
+    THEN LET FIELDTEXT = "20" + FIELDTEXT
+    ELSE LET FIELDTEXT = "19" + FIELDTEXT
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Sous-écran de consultation des queues de traitement.
+;
+PROCEDURE INPUT TRTQUE
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_FLGQUE  = "1"
+    LET T_XQBCLE  = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gs110 MODE F PASSING T_XQBCLE, T_FLGQUE
+    LET FIELDTEXT = TRUNC(T_XQBCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Contrôle l'accès à l'usager
+;
+PROCEDURE DESIGNER 10
+BEGIN
+  ;
+  ; l'usager n'a pas les privilèges de l'administrateur
+  ;
+  IF T_GPFSECMAN <> "1"
+  THEN BEGIN
+    IF    TRTSTU OF GSTRAITEMENT = "E"       &
+       OR USRCLE OF GSTRAITEMENT <> UPSHIFT( LOGONID )
+    THEN INFO 40 ; Vous n'êtes pas autorisé à modifier cette information
+    ELSE BEGIN
+      LET T_DSC = TRTDSC OF GSTRAITEMENT
+      DISPLAY T_DSC
+      ACCEPT TRTPRI    OF GSTRAITEMENT
+      ACCEPT TRTDATTRT OF GSTRAITEMENT
+      ACCEPT TRTHRETRT OF GSTRAITEMENT
+      LET T_DSC =  ""
+      DISPLAY T_DSC
+    END
+  END
+  ;
+  ; L'administrateur peut modifier toutes les valeurs même les traitements
+  ; qui ne lui appartiennent pas
+  ;
+  ELSE BEGIN
+    IF TRTSTU OF GSTRAITEMENT = "E"
+    THEN INFO 41 ; Impossible de modifier un traitement en exécution,
+                 ; possible de détruire seulement
+    ELSE BEGIN
+      LET T_DSC = TRTDSC OF GSTRAITEMENT
+      DISPLAY T_DSC
+      ACCEPT TRTQUE    OF GSTRAITEMENT
+      ACCEPT TRTPRI    OF GSTRAITEMENT
+      ACCEPT TRTDATTRT OF GSTRAITEMENT
+      ACCEPT TRTHRETRT OF GSTRAITEMENT
+      LET T_DSC =  ""
+      DISPLAY T_DSC
+    END
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Historique des traitements en lot
+;
+PROCEDURE DESIGNER D001 NODATA
+BEGIN
+  RUN SCREEN gs160a MODE F
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR GSTRAITEMENT
+  BEGIN
+    ;
+    ; Destruction du fichier séquentiel de lancement de procédure
+    ;
+    IF DELETEDRECORD OF GSTRAITEMENT
+    THEN BEGIN
+      LET T_CMD = "rm " + TRTFIC OF GSTRAITEMENT
+      RUN COMMAND T_CMD NOWARN ON ERROR CONTINUE
+    END
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Traitement spécifique destruction
+;
+PROCEDURE DELETE
+BEGIN
+  IF TRTSTU OF GSTRAITEMENT = "E"
+  THEN BEGIN
+    ;
+    ; Le traitement est en cours d'exécution
+    ; on affiche le numéro du process pour permettre à l'usager de
+    ; killer la job si il le désire.
+    ;
+    LET T_CMD = "echo ' ' "
+    RUN COMMAND T_CMD CLEAR ALL
+
+    LET T_CMD = "echo ' Destruction par commande UNIX seulement !' "
+    RUN COMMAND T_CMD
+
+    LET T_CMD = "echo ' Numéro de Process (PID) pour détruire le traitement :' "
+    RUN COMMAND T_CMD
+
+    LET T_CMD = "echo ' ' "
+    RUN COMMAND T_CMD
+
+    LET T_CMD = "ps -ef | grep " + TRUNC(TRTFIC OF GSTRAITEMENT) + &
+                " | grep " + TRUNC(TRTFICLOG OF GSTRAITEMENT) + &
+                " | grep '  1 ' " + " | awk " + "'{print $2}'"
+    RUN COMMAND T_CMD REFRESH ALL RESPONSE NOWARN ON ERROR CONTINUE
+  END
+  ;
+  ; La Job appartient à l'usager ou a l'administrateur de système
+  ; et elle n'est pas en exécution
+  ;
+  ELSE BEGIN
+    IF    USRCLE OF GSTRAITEMENT = UPSHIFT( LOGONID ) &
+       OR T_GPFSECMAN = "1"
+    THEN DELETE GSTRAITEMENT
+    ELSE INFO 40 ; Vous n'êtes pas autorisé à modifier cette information
+  END
+END
+
+
+;
+; Documentation d'aide de l'écran et des champs
+;
+USE gs160.hlp NOLIST
+
+BUILD
+@IF FORMAT
+************************* État des traitements en lot **************************
+*                                                                              *
+*                                        --- Exécution ---  ---- Demandé ----  *
+*  Queue Priorité Usager        Nom        Date      Heure     Date     Heure  *
+*                                                                              *
+*  xxxx    xxx    xxxxxxxxxxxx  xxxxxxx  xxxxxxxxxx  xxxxx  xxxxxxxxxx  xxxxx  *
+*  xxxx    xxx    xxxxxxxxxxxx  xxxxxxx  xxxxxxxxxx  xxxxx  xxxxxxxxxx  xxxxx  *
+*  xxxx    xxx    xxxxxxxxxxxx  xxxxxxx  xxxxxxxxxx  xxxxx  xxxxxxxxxx  xxxxx  *
+*  xxxx    xxx    xxxxxxxxxxxx  xxxxxxx  xxxxxxxxxx  xxxxx  xxxxxxxxxx  xxxxx  *
+*  xxxx    xxx    xxxxxxxxxxxx  xxxxxxx  xxxxxxxxxx  xxxxx  xxxxxxxxxx  xxxxx  *
+*  xxxx    xxx    xxxxxxxxxxxx  xxxxxxx  xxxxxxxxxx  xxxxx  xxxxxxxxxx  xxxxx  *
+*  xxxx    xxx    xxxxxxxxxxxx  xxxxxxx  xxxxxxxxxx  xxxxx  xxxxxxxxxx  xxxxx  *
+*  xxxx    xxx    xxxxxxxxxxxx  xxxxxxx  xxxxxxxxxx  xxxxx  xxxxxxxxxx  xxxxx  *
+*  xxxx    xxx    xxxxxxxxxxxx  xxxxxxx  xxxxxxxxxx  xxxxx  xxxxxxxxxx  xxxxx  *
+*  xxxx    xxx    xxxxxxxxxxxx  xxxxxxx  xxxxxxxxxx  xxxxx  xxxxxxxxxx  xxxxx  *
+*  xxxx    xxx    xxxxxxxxxxxx  xxxxxxx  xxxxxxxxxx  xxxxx  xxxxxxxxxx  xxxxx  *
+*  xxxx    xxx    xxxxxxxxxxxx  xxxxxxx  xxxxxxxxxx  xxxxx  xxxxxxxxxx  xxxxx  *
+*  xxxx    xxx    xxxxxxxxxxxx  xxxxxxx  xxxxxxxxxx  xxxxx  xxxxxxxxxx  xxxxx  *
+*  xxxx    xxx    xxxxxxxxxxxx  xxxxxxx  xxxxxxxxxx  xxxxx  xxxxxxxxxx  xxxxx  *
+*                                                                              *
+*  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     *
+********************************************************************************
+@ENDIF

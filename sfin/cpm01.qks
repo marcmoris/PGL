@@ -1,0 +1,657 @@
+;/T/ Menu Comptes à Payer
+;
+;/P/ Programmeur..: Thomas BRENNEUR
+;    Date Création: 18 Mai 1993
+;
+;    Description..: Menu principal du module Compte à Payer.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+;
+SCREEN cpm01 MENU &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             NOMODE NOACTION FIELDMARK RETAIN STARTUP &
+             ACTIVITIES CHANGE &
+             RECEIVING T_FLGHLDOK
+
+USE ussectmp NOLIST     
+    "CPM01"                 
+
+USE cpm01.hlp NOLIST
+
+TEMPORARY T_FLGHLDOK CHARACTER SIZE 1 ; Si le holding est présent.
+
+;
+; Validation de la compagnie.
+;
+FILE MCCOMPAGNIE      DESIGNER &
+                      OPEN READ
+
+;
+; Pour valider la periode comptable.
+;
+FILE MCPERIODE_CIE    DESIGNER &
+                      OPEN READ
+
+;
+; Pour afficher les dates de la période courante au grand livre.
+;
+FILE MCPERIODE_CTB    DESIGNER &
+                      OPEN READ
+
+;
+; Pour la securite sur les compagnies.
+;
+FILE VSEC_USR         DESIGNER &
+                      OPEN READ
+
+;
+; Pour voir s'il y a une charte de fournisseur
+;
+FILE MCHOLDING        DESIGNER &
+                      OPEN READ
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+TEMPORARY T_PECCLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Période du menu
+TEMPORARY T_PECDATDEB DATE          RESET AT STARTUP ; Date de début de période
+TEMPORARY T_PECDATFIN DATE          RESET AT STARTUP ; Date de fin de période
+;
+TEMPORARY T_PECCLECOU CHARACTER SIZE 4  RESET AT STARTUP ; Période courante
+
+TEMPORARY T_PECCLE    CHARACTER SIZE 4 ; Popup sur les périodes
+TEMPORARY T_MOD       CHARACTER SIZE 2 ; Code de module, pour le Popup sur
+                                       ; les périodes
+
+TEMPORARY T_CIECLE    CHARACTER SIZE 4 ; Popup sur les compagnies
+
+;
+; Variables passées en paramètres aux sous-écrans
+;
+TEMPORARY T_FOUCIECLE    CHARACTER SIZE 4  &
+                           RESET AT STARTUP  ; Cie du fournisseur
+TEMPORARY T_EMPCIECLE    CHARACTER SIZE 4  &
+                           RESET AT STARTUP  ; Cie de l'employé
+TEMPORARY T_FOUCLEFND    CHARACTER SIZE 6    ; F.sseur à chercher
+TEMPORARY T_CAPCLEFND    CHARACTER SIZE 15   ; C.A.P à chercher
+TEMPORARY T_FACCLEFND    CHARACTER SIZE 12   ; Facture d'achat
+TEMPORARY T_PECCLEFND    CHARACTER SIZE 4    ; Période a rechercher
+TEMPORARY T_LCPCLEFND    CHARACTER SIZE 4    ; Lot a rechercher
+TEMPORARY T_LBQCPTENCFND CHARACTER SIZE 6    ; Cpt encaisse à chercher
+TEMPORARY T_PAMCLEFND    CHARACTER SIZE 7    ; no chèque à chercher
+
+;
+; Variables pour l'écran des menus Rapports et Procédures
+;
+DEFINE D_XMOCOD_L CHARACTER SIZE 4 = "CPL@" ; Code pour les listes et rapports 
+DEFINE D_XMOCOD_P CHARACTER SIZE 4 = "CPP@" ; Code pour les procédures
+
+
+;-------------------------------------------------------------------------------
+;
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+DRAW 1,20 TO 3,61
+DRAW 2,1  TO 2,20
+DRAW 2,61 TO 2,80
+
+DRAW 2,1  TO 7,1
+DRAW 7,1  TO 7,80
+DRAW 2,80 TO 7,80
+
+DRAW 5,1  TO 5,80
+
+DRAW 7,40 TO 19,40
+DRAW 19,1 TO 19,80
+
+TITLE &
+@IF FRANCAIS
+      "C O M P T E S   À   P A Y E R" &
+@ELSE
+      "A C C O U N T S   P A Y A B L E" &
+@ENDIF
+      CENTERED AT 2,1
+
+USE ustitoff NOLIST
+
+SKIP TO 4
+
+ALIGN(4,4,20) (,,26)
+FIELD T_CIECLEMNU HIDDEN ID 05 &
+        FIXED                  &
+        UPSHIFT REQUIRED &
+        PATTERN "((^|#)>)|!0" &
+@IF FRANCAIS
+        LABEL "Compagnie.....:" &
+@ELSE
+        LABEL "Company......:"  &
+@ENDIF
+        LOOKUP ON MCCOMPAGNIE &
+          VIA CIECLE &
+          USING T_CIECLEMNU &
+          MESSAGE 402, & ; Cette compagnie est inexistante
+
+          ON VSEC_USR &
+          VIA CIECLE &
+          USING T_CIECLEMNU &
+          MESSAGE 424 ; Vous n'êtes pas autorisé a utiliser cette compagnie.
+
+FIELD T_CIENOM &
+        FIXED
+
+SKIP 1
+
+ALIGN(4,4,13)(,30,42)(,58,68)
+FIELD T_PECCLEMNU ID SAME &
+        FIXED             &
+@IF FRANCAIS
+        LABEL "Période:" &
+@ELSE
+        LABEL "Period.:" &
+@ENDIF
+        PICTURE "^^-^^" &
+        LOOKUP ON MCPERIODE_CIE &
+          VIA CIECLE, &
+              PECCLE &
+          USING T_CIECLEMNU, &
+                T_PECCLEMNU  &
+          MESSAGE 405 ; Cette période est inexistante
+
+
+FIELD T_PECDATDEB FIXED   FORMAT YYYYMMDD PATTERN "####/##/##" & 
+@IF FRANCAIS
+        LABEL "Date début:"
+@ELSE
+        LABEL "Start Date:"
+@ENDIF
+
+FIELD T_PECDATFIN FIXED   FORMAT YYYYMMDD PATTERN "####/##/##" &
+@IF FRANCAIS
+        LABEL "Date fin:"
+@ELSE
+        LABEL "End Date:"
+@ENDIF
+
+
+SKIP TO 9
+
+ALIGN (2,2)
+SUBSCREEN cp001 HIDDEN &
+                PASSING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        T_PECCLEMNU, &
+                        T_PECCLECOU, &
+                        T_FOUCIECLE, &
+                        T_EMPCIECLE  &
+@IF FRANCAIS
+                LABEL "Gestion des fournisseurs  "
+@ELSE
+                LABEL "Supplyer management       "
+@ENDIF
+
+SUBSCREEN cp014 HIDDEN &
+                PASSING T_FOUCIECLE, &
+                        T_FOUCLEFND, &
+                        T_CIECLEMNU, &
+                        T_CIENOM     &
+@IF FRANCAIS
+                LABEL "Gestion des mémos         "
+@ELSE
+                LABEL "Memo management           "
+@ENDIF
+
+SKIP 1
+
+SUBSCREEN cp020 HIDDEN &
+                PASSING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        T_PECCLEMNU, &
+                        T_PECCLECOU, &
+                        T_PECCLEFND, &
+                        T_LCPCLEFND  &
+@IF FRANCAIS
+                LABEL "Gestion des lots          "
+@ELSE
+                LABEL "Batch management          "
+@ENDIF
+
+
+SUBSCREEN cp002 HIDDEN &
+                PASSING T_CIECLEMNU, &
+                        T_CIENOM     &
+@IF FRANCAIS
+                LABEL "Autorisation des lots     "
+@ELSE
+                LABEL "Batch autorisation        "
+@ENDIF
+
+SKIP 1
+
+SUBSCREEN cp003 HIDDEN &
+                PASSING T_FOUCIECLE, &
+                        T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        T_PECCLEMNU, &
+                        T_PECCLECOU, &
+                        T_FOUCLEFND, &
+                        T_CAPCLEFND  &
+@IF FRANCAIS
+                LABEL "Factures / Notes de crédit."
+@ELSE
+                LABEL "Invoice / Credit notes.    "
+@ENDIF
+
+SUBSCREEN ar011 HIDDEN  &
+                PASSING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        T_PECCLEMNU, &
+                        T_FOUCIECLE, &
+                        T_FOUCLEFND, &
+                        T_FACCLEFND  &
+@IF FRANCAIS
+                LABEL "Consolidation de facture d'achat"
+@ELSE
+                LABEL "%%%                             "
+@ENDIF
+
+SUBSCREEN cp005 HIDDEN &
+                PASSING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        T_PECCLEMNU, &
+                        T_PECCLECOU, &
+                        T_FOUCIECLE, &
+                        T_EMPCIECLE, &
+                        T_CAPCLEFND  &
+@IF FRANCAIS
+                LABEL "Rapports de dépenses      "
+@ELSE
+                LABEL "Expenses reports          "
+@ENDIF
+
+SKIP TO 9
+
+
+ALIGN (42,42)
+
+SUBSCREEN cp006 HIDDEN &
+                PASSING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        T_FOUCIECLE  &
+@IF FRANCAIS
+                LABEL "Paiements automatiques           "
+@ELSE
+                LABEL "Automatic payments               "
+@ENDIF
+
+
+SKIP 1
+
+SUBSCREEN cp007 HIDDEN &
+                PASSING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        T_PECCLEMNU, &
+                        T_PECCLECOU, &
+                        T_FOUCIECLE, &
+                        T_EMPCIECLE  &
+@IF FRANCAIS
+                LABEL "Gestion des paiements à effectuer"
+@ELSE
+                LABEL "Payable management               "
+@ENDIF
+
+SUBSCREEN cp008 HIDDEN  &
+                PASSING T_CIECLEMNU   , &
+                        T_CIENOM      , &
+                        T_PECCLEMNU   , &
+                        T_PECCLECOU   , &
+                        T_FOUCIECLE   , &
+                        T_EMPCIECLE   , &
+                        T_LBQCPTENCFND, &
+                        T_PAMCLEFND     &
+@IF FRANCAIS
+                LABEL "Paiements                        "
+@ELSE
+                LABEL "Payments                         "
+@ENDIF
+
+SUBSCREEN cp009 HIDDEN  &
+                PASSING T_CIECLEMNU   , &
+                        T_CIENOM      , &
+                        T_PECCLEMNU   , &
+                        T_PECCLECOU   , &
+                        T_FOUCIECLE   , &
+                        T_EMPCIECLE   , &
+                        T_LBQCPTENCFND, &
+                        T_PAMCLEFND     &
+@IF FRANCAIS
+                LABEL "Annulation de paiements          "
+@ELSE
+                LABEL "Payments cancellation            "
+@ENDIF
+
+SKIP 1
+
+SUBSCREEN cp011 HIDDEN &
+                PASSING T_CIECLEMNU, &
+                        T_CIENOM     &
+@IF FRANCAIS
+                LABEL "Conciliation                     "
+@ELSE
+                LABEL "Reconciliation                   "
+@ENDIF
+
+SUBSCREEN cp012 HIDDEN &
+                PASSING T_CIECLEMNU, &
+                        T_CIENOM     &
+@IF FRANCAIS
+                LABEL "Numérotation des chèques         "
+@ELSE
+                LABEL "Check Numbering                  "
+@ENDIF
+
+
+SKIP TO 20
+
+ALIGN(31,31)
+SUBSCREEN cpm03 HIDDEN &
+                MODE F &
+                PASSING D_XMOCOD_L, &
+                        T_CIECLEMNU, &
+                        T_FOUCIECLE, &
+                        T_PECCLEMNU, &
+                        T_CIENOM   , &
+                        T_PECDATDEB, &
+                        T_PECDATFIN  &
+@IF FRANCAIS
+                LABEL " Listes et rapports "
+@ELSE
+                LABEL " Lists and Reports  "
+@ENDIF    
+
+SUBSCREEN cpm03 HIDDEN &
+                MODE F &
+                PASSING D_XMOCOD_P, &
+                        T_CIECLEMNU, &
+                        T_FOUCIECLE, &
+                        T_PECCLEMNU, &
+                        T_CIENOM   , &
+                        T_PECDATDEB, &
+                        T_PECDATFIN  &
+@IF FRANCAIS
+                LABEL "    Procédures      "
+@ELSE
+                LABEL "    Procedures      "
+@ENDIF
+
+SUBSCREEN cpm02 HIDDEN &
+                PASSING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        T_PECCLEMNU, &
+                        T_PECDATDEB, &
+                        T_PECDATFIN, &
+                        T_EMPCIECLE  &
+@IF FRANCAIS
+                LABEL "Informations de base"
+@ELSE
+                LABEL " Basic Information  "
+@ENDIF
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  ;
+  ; Si le holding n'est pas défini on retourne l'usager au menu
+  ; principal.
+  ;
+  IF T_FLGHLDOK = "0"
+  THEN RETURN
+
+  USE ussececr NOLIST
+
+  ;
+  ; On accède au Holding pour voir s'il y a une charte de fournisseur
+  ; par compagnies et/ou une charte d'employés par compagnie. Si non, on
+  ; remplace les clés compagnie du fournisseur et/ou compagnie de l'employé
+  ; par les caractères de remplacements contenus dans le Holding. (Voir
+  ; la procédure PROCESS du champs T_CIECLEMNU)
+  ;
+  GET MCHOLDING VIA   CIENMC &
+                USING "1"
+
+  IF "sylvboiv" <> LOGONID or "0" = GETSYSTEMVAL("OPTMNU")
+  THEN BEGIN
+  ;
+  ; Lecture de la compagnie et de la période comptable
+  ;
+    ACCEPT T_CIECLEMNU
+    ACCEPT T_PECCLEMNU
+  END
+  ELSE BEGIN
+    IF "2" = GETSYSTEMVAL("OPTMNU")
+    THEN BEGIN
+      ;
+      ; Lecture automatique de la compagnie et de la période comptable
+      ; et accès automatique à l'écran des fournisseurs
+      ;
+      LET T_CIECLEMNU = "2000"
+
+      GET MCPERIODE_CIE VIA   CIECLE, &
+                            PCCSTUCP &
+                      USING T_CIECLEMNU, &
+                            "C" &
+                      OPTIONAL
+      IF NOT ACCESSOK
+      THEN ERROR 497 ; La période courante n'est pas définie
+      ELSE BEGIN
+        LET T_PECCLECOU = PECCLE OF MCPERIODE_CIE
+        LET T_PECCLEMNU = PECCLE OF MCPERIODE_CIE
+      END
+
+      IF HLDCHTFOU OF MCHOLDING = "1"
+      THEN LET T_FOUCIECLE = T_CIECLEMNU
+      ELSE LET T_FOUCIECLE = HLDCHRSUB OF MCHOLDING
+
+      IF HLDCHTEMP OF MCHOLDING = "1"
+      THEN LET T_EMPCIECLE = T_CIECLEMNU
+      ELSE LET T_EMPCIECLE = HLDCHRSUB OF MCHOLDING
+
+      DISPLAY T_CIECLEMNU
+      DISPLAY T_PECCLEMNU
+
+      GET MCCOMPAGNIE VIA CIECLE &
+                    USING T_CIECLEMNU OPTIONAL
+      IF NOT ACCESSOK
+      THEN ERROR 402 ; Cette compagnie est inexistante
+
+      LET T_CIENOM = CIENOM OF MCCOMPAGNIE
+      DISPLAY T_CIENOM
+
+      GET MCPERIODE_CTB VIA PECCLE      &
+                      USING T_PECCLEMNU OPTIONAL
+      LET T_PECDATDEB = PECDATDEB OF MCPERIODE_CTB
+      LET T_PECDATFIN = PECDATFIN OF MCPERIODE_CTB
+      DISPLAY T_PECDATDEB
+      DISPLAY T_PECDATFIN
+
+      RUN SCREEN cp001 MODE F          &
+                  PASSING T_CIECLEMNU, &
+                          T_CIENOM   , &
+                          T_PECCLEMNU, &
+                          T_PECCLECOU, &
+                          T_FOUCIECLE, &
+                          T_EMPCIECLE  
+
+      IF SETSYSTEMVAL("OPTMNU", "0")
+      THEN NULL
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les compagnies.
+;
+;
+PROCEDURE INPUT T_CIECLEMNU
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc106 PASSING T_CIECLE MODE F
+    LET FIELDTEXT = TRUNC(T_CIECLE)
+  END
+  ;
+  ; A cause de l'option requis, si l'usager fait un retour et qu'il y a
+  ; une valeur on remet la même.
+  ;
+  IF 0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(T_CIECLEMNU))
+  THEN LET FIELDTEXT = T_CIECLEMNU
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; On conserve le nom de la compagnie du menu.
+;
+;
+PROCEDURE PROCESS T_CIECLEMNU
+BEGIN
+  LET T_CIENOM = CIENOM OF MCCOMPAGNIE
+  DISPLAY T_CIENOM
+  ;
+  ; On va chercher la periode courante du module C/P.
+  ;
+  GET MCPERIODE_CIE VIA   CIECLE, &
+                          PCCSTUCP &
+                    USING T_CIECLEMNU, &
+                          "C" &
+                    OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 497 ; La période courante n'est pas définie
+  ELSE LET T_PECCLECOU = PECCLE OF MCPERIODE_CIE
+
+  IF HLDCHTFOU OF MCHOLDING = "1"
+  THEN LET T_FOUCIECLE = T_CIECLEMNU
+  ELSE LET T_FOUCIECLE = HLDCHRSUB OF MCHOLDING
+
+  IF HLDCHTEMP OF MCHOLDING = "1"
+  THEN LET T_EMPCIECLE = T_CIECLEMNU
+  ELSE LET T_EMPCIECLE = HLDCHRSUB OF MCHOLDING
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT T_PECCLEMNU
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_MOD = "CP"
+    LET T_PECCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN  mc109 PASSING T_CIECLEMNU, T_PECCLE, T_MOD  MODE F
+    LET FIELDTEXT = TRUNC(T_PECCLE)
+  END
+  ;
+  ; Si l'usager ne saisie pas de periode alors on prend la période courante
+  ; par défaut.
+  ;
+  IF 0 = SIZE(TRUNCATE(FIELDTEXT)) AND &
+     0 = SIZE(TRUNCATE(T_PECCLEMNU))
+  THEN LET FIELDTEXT = T_PECCLECOU
+  ;
+  ; On forme la validation de la période.
+  ;
+  IF 0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(T_PECCLEMNU))
+  THEN LET FIELDTEXT = T_PECCLEMNU
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du statut de la période.
+;
+;
+PROCEDURE EDIT T_PECCLEMNU
+BEGIN
+  ;
+  IF PCCSTUCP OF MCPERIODE_CIE = "F"
+  THEN ERROR 406 ; Cette période est fermée.
+  ;
+  IF PCCSTUCP OF MCPERIODE_CIE <> "C"
+  THEN WARNING 407 ; Cette période diffère de la période courante
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Conserve les dates de la période et les affiches.
+;
+;
+PROCEDURE PROCESS T_PECCLEMNU
+BEGIN
+  GET MCPERIODE_CTB VIA PECCLE &
+                    USING T_PECCLEMNU
+  LET T_PECDATDEB = PECDATDEB OF MCPERIODE_CTB
+  LET T_PECDATFIN = PECDATFIN OF MCPERIODE_CTB
+  DISPLAY T_PECDATDEB
+  DISPLAY T_PECDATFIN
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; On demande la compagnie et la période, il faut une procédure designer sur
+; ces champs car l'option FIXED nous empèche par defaut de modifier les champs.
+; L'option FIXED est due à un bug de POWERHOUSE sur Unix.
+;
+;
+PROCEDURE DESIGNER 5
+BEGIN
+  ACCEPT T_CIECLEMNU
+  ACCEPT T_PECCLEMNU
+END
+
+BUILD
+@IF FORMAT
+
+                   ******************************************                   
+********************     C O M P T E S   À   P A Y E R      ********************
+*                  ******************************************                  *
+*  Compagnie.....: xxxx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              *
+********************************************************************************
+*  Période: xxxxx            Date début: xxxxxxxx          Date fin: xxxxxxxx  *
+********************************************************************************
+                                       *                                        
+ Gestion des fournisseurs              * Paiements automatiques                 
+ Gestion des mémos                     *                                        
+                                       * Gestion des paiements à effectuer      
+ Gestion des lots                      * Paiements                              
+ Autorisation des lots                 * Annulation de paiements                
+                                       *                                        
+ Factures / Notes de crédit.           * Conciliation                           
+ Rapports de dépenses                  * Renumérotation des chèques             
+                                       *                                        
+                                       *                                        
+********************************************************************************
+                               Listes et rapports                               
+                                  Procédures                                    
+                              Informations de base                              
+
+@ENDIF

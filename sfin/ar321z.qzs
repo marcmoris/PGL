@@ -1,0 +1,278 @@
+;/T/ Liste des commandes d'achat / Sommaire
+;
+;/P/ Programmeur...: Nancy Marceau
+;    Date Création.: 3 mai 1994
+;
+;    Description...: Cette liste permet l'impression des commandes d'achat
+;                    selon les paramètres demandés.
+;
+;    Paramètres....: Compagnie 
+;                    Entrepôt           (Un, plusieurs ou tous)
+;                    Devise             (Une ou toutes)
+;                    Numéro commande    (Borne de début, <retour>=tous)
+;                    Numéro commande    (Borne de fin)
+;                    Statut             (P=préliminaire, A=approuvée, 
+;                                        S=sélectionnée,C=complète,<retour>=tous)    
+;
+;/M/ Francois Richard 1999-07-08            
+;    Ajustement pour le changement de siècle
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST
+
+ACCESS ARCOMMANDE   &
+   ;
+   ; Pour afficher le nom de l'entrepôt
+   ; 
+  LINK CIECLE OF ARCOMMANDE, &
+       ENTCLE OF ARCOMMANDE  &
+    TO CIECLE, &
+       ENTCLE OF ARENTREPOT    & 
+   ;
+   ; Pour sélectionner la devise du fournisseur.
+   ;
+  LINK FOUCIECLE OF ARCOMMANDE, &
+       FOUCLE    OF ARCOMMANDE, &
+       CIECLE    OF ARCOMMANDE  &
+    TO FOUCIECLE, &
+       FOUCLE,    &
+       FOCCIECLE OF VFOC_FOU     &
+   
+   ; 
+   ; Pour afficher le nom du fournisseur divers
+   ;
+  LINK FOUCIECLE OF ARCOMMANDE, &
+       REFCLETYP OF ARCOMMANDE, &
+       FOUCLE    OF ARCOMMANDE, &
+       RADCLE    OF ARCOMMANDE  &
+    TO REFCIECLE, &
+       REFCLETYP, &
+       REFCLENUM, &
+       RADCLE OF MCREF_ADRESSE    &
+ 
+
+   ;
+   ; Statut de la commande
+   ;
+  LINK ("CMDSTU",                 &
+         CMDSTU OF ARCOMMANDE)       &
+    TO XELNOM,                    &
+       CBICLE OF VCBI_DSC   OPTIONAL & 
+ 
+   ;
+   ; Devise du consolidé
+   ;
+  LINK ("1") &
+    TO CIENMC OF MCHOLDING   
+
+CHOOSE CIECLE       PARM,       &  ; Compagnie du menu
+       ENTCLE       PARM,       &  ; Code d'entrepôt
+       CMDCLE       PARM RANGE     ; Numéro de commande
+
+DEFINE D_CMDSTU CHARACTER SIZE 6 = PARM UPSHIFT  ; Statut de la commande
+
+DEFINE D_DEVCLE CHARACTER SIZE 3 = PARM          ; Devise
+
+SELECT ARCOMMANDE IF (0 <> INDEX(D_CMDSTU,CMDSTU)) OR (D_CMDSTU = "") 
+
+SELECT VFOC_FOU IF D_DEVCLE = DEVCLE OF VFOC_FOU OR D_DEVCLE = ""
+
+
+; Variables obligatoires pour les en-têtes standards.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+       "Liste des commandes d'achat / Sommaire"
+@ELSE
+       "%%%Liste des commandes d'achat / Sommaire"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+       ""
+@ELSE
+       "%%%"
+@ENDIF
+
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE  7 = "AR321Z"
+;
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM 
+
+
+USE usflgdet NOLIST ;Flag Bilingue (O/N)
+
+;
+;Indique si la commande d'achat est imprimée.
+;
+DEFINE D_CMDFLGIMP CHARACTER SIZE 3 &
+        = DZ_FLGAFFO IF CMDFLGIMP OF ARCOMMANDE <> "0" ELSE &
+          DZ_FLGAFFN 
+
+ ; Statuts de commande demandés
+ ;
+DEFINE D_CBIDSC1 CHARACTER SIZE 15 = "Approuvée " &
+  IF 0 <> INDEX (D_CMDSTU,"A") OR  D_CMDSTU = "" &
+    ELSE ""
+
+DEFINE D_CBIDSC2 CHARACTER SIZE 15 = "Complète "&
+  IF 0 <> INDEX (D_CMDSTU,"C") OR  D_CMDSTU = "" &
+    ELSE ""
+
+DEFINE D_CBIDSC3 CHARACTER SIZE 15 = "Préliminaire " &
+  IF 0 <> INDEX (D_CMDSTU,"P") OR  D_CMDSTU = "" &
+    ELSE ""
+
+DEFINE D_CBIDSC4 CHARACTER SIZE 15 = "Sélectionnée " &
+  IF 0 <> INDEX (D_CMDSTU,"S") OR  D_CMDSTU = "" &
+    ELSE ""
+
+DEFINE D_CBIDSCDEM CHARACTER SIZE 70 = &
+  PACK (TRUNCATE(D_CBIDSC1) + " " + &
+        TRUNCATE(D_CBIDSC2) + " " + &
+        TRUNCATE(D_CBIDSC3) + " " + &
+        TRUNCATE(D_CBIDSC4))
+
+
+DEFINE D_CBIDSC CHARACTER SIZE 15 = CBIDSC OF VCBI_DSC
+
+
+DEFINE    D_DEVCLEIMP   CHARACTER SIZE 04 = " " &
+          IF DEVCLE OF VFOC_FOU = DEVCLE OF MCHOLDING OR &
+             0 = SIZE(TRUNCATE(FOUCLE OF ARCOMMANDE)) &
+          ELSE "/" + DEVCLE OF VFOC_FOU
+
+DEFINE D_RADNOM CHARACTER SIZE 40 = RADNOM OF MCREF_ADRESSE[1:40]
+
+; Ajustement pour le changement de siècle
+DEFINE D_CMDCLE_TRI CHARACTER SIZE 10 = "1" + CMDCLE OF ARCOMMANDE &
+      IF CMDCLE OF ARCOMMANDE[1:1] < "8" &
+      ELSE "0" + CMDCLE OF ARCOMMANDE
+
+SORT ON CIECLE OF ARCOMMANDE & ; Compagnie
+     ON ENTCLE OF ARCOMMANDE & ; Entrepôt
+     ON DEVCLE OF VFOC_FOU   & ; Devise
+     ON CMDSTU OF ARCOMMANDE & ; Statut de la commande
+     ON D_CMDCLE_TRI         & ; Numéro de commande
+     ON CMDAJT OF ARCOMMANDE   ; Ajustement
+
+
+USE ustit175 NOLIST
+  SKIP 2 &
+@IF FRANCAIS
+TAB 001 "Devise............:" &
+@ELSE
+TAB 001 "%%%Devise............:" &
+@ENDIF
+
+TAB 021 DEVCLE OF VFOC_FOU    &
+  SKIP &
+@IF FRANCAIS
+TAB 001 "Entrepôt..........:" &
+@ELSE
+TAB 001 "%%%Entrepôt..........:" &
+@ENDIF
+
+TAB 021 ENTCLE OF ARCOMMANDE &
+TAB 027 ENTNOM OF ARENTREPOT &
+  SKIP  &
+@IF FRANCAIS
+TAB 001 "Statuts demandés..:" &
+@ELSE
+TAB 001 "%%%Statuts demandés..:" &
+@ENDIF
+
+TAB 021 D_CBIDSCDEM &
+  SKIP 2 &
+@IF FRANCAIS
+TAB 001 " Commande       Période                                                                        Date                       Nombre         Montant" &
+@ELSE
+TAB 001 "%%% Commande   Période                                                                        Date                       Nombre         Montant" &
+@ENDIF
+
+  SKIP &
+@IF FRANCAIS
+TAB 001 "  d'achat       comptable   Fournisseur                                     Statut           Commande            Imprimée d'items           brut  " &
+@ELSE
+TAB 001 "%%%  d'achat   comptable   Fournisseur                                     Statut           Commande            Imprimée d'items           brut  " &
+@ENDIF
+  SKIP &
+TAB 001 "                                                                                             aa/mm/jj" &
+  SKIP &
+TAB 001 " ------------- ----------- ----------------------------------------------- ---------------   --------           --------- -------- ---------------" &
+  SKIP 1
+
+
+REPORT &
+TAB 002 CMDCLE OF ARCOMMANDE &
+TAB 012 CMDAJT OF ARCOMMANDE &
+TAB 019 PECCLE OF ARCOMMANDE &
+  PICTURE "^^-^^"            &
+TAB 028 FOUCLE OF ARCOMMANDE &
+TAB 035 D_RADNOM             &
+TAB 076 D_CBIDSC             &
+TAB 094 CMDDAT    OF ARCOMMANDE    &
+;TAB 104 CMDDATLIVPRE OF ARCOMMANDE &
+TAB 116 D_CMDFLGIMP &
+TAB 127 CMDNBRITE OF ARCOMMANDE &
+TAB 132 CMDMNTTOT OF ARCOMMANDE PICTURE "^^,^^^,^^^.^^ " &
+TAB 146 D_DEVCLEIMP
+
+
+FOOT AT DEVCLE &
+  SKIP 1 &
+TAB 131 "---------------" &
+  SKIP &
+@IF FRANCAIS
+TAB 030 "Total pour l'entrepôt " &
+@ELSE
+TAB 030 "%%%Total pour l'entrepôt " &
+@ENDIF
+
+TAB 042 ENTCLE OF ARCOMMANDE &
+@IF FRANCAIS
+TAB 045 " en devise " &
+@ELSE
+TAB 045 "%%% en devise " &
+@ENDIF
+
+TAB 056 DEVCLE OF VFOC_FOU &
+TAB 131 CMDMNTTOT OF ARCOMMANDE SUBTOTAL &
+TAB 146 D_DEVCLEIMP &
+  SKIP &
+TAB 131 "---------------" &
+  SKIP PAGE
+
+
+
+BUILD ar321z
+
+
+
+@IF FORMAT
+         1         2         3         4         5         6         7         8         9        10        11        12        13        14        15        16        17        18        19        20
+12345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+AR321                                        xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                  Page: 9999
+99/99/99 HH:MM xxxxxxxxxxxx                   Liste des commandes d'achat / Sommaire      
+                                    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+
+Devise............: xxx
+Entrepôt..........: xxxx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+Statuts demandés..: xxxxxxxxxxxxxxx xxxxxxxxxxxxxxx xxxxxxxxxxxxxxx xxxxxxxxxxxxxxx
+
+ Commande       Période                                                                    ------- Dates ------           Nombre         Montant
+  d'achat       comptable   Fournisseur                                   
+  Statut          Commande  Livraison  Imprimée d'items           brut  
+ ------------- ----------- ----------------------------------------------- ---------------  -------- ----------  -------- ------- ---------------
+ xxxxxxxxx xxx    xx-xx    xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxx   xx/xx/xx   xx/xx/xx    xxx      999    999,999,999.99-/xxx
+ xxxxxxxxx xxx    xx-xx    xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxx   xx/xx/xx   xx/xx/xx    xxx      999    999,999,999.99-/xxx
+ xxxxxxxxx xxx    xx-xx    xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxxxxx   xx/xx/xx   xx/xx/xx    xxx      999    999,999,999.99-/xxx
+                                                                                                                                    ---------------
+                             Total pour l'entrepôt xxxx en devise xxx                                                               999,999,999.99-/xxx
+                                                                                                                                    ---------------     
+@ENDIF

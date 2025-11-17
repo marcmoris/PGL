@@ -1,0 +1,171 @@
+; Calcul des taxes fédérale et provinciale.
+;
+; Description: Traitement pour le calcul des taxes.
+;
+; Utilisation: Ce USEFILE doit être utilisé à l'intérieure d'une procédure
+;              PROCESS ou INTERNAL.
+;
+;
+;              Il faut utiliser le USEFILE "USTAXTMP" pour déclarer les
+;              variables nécessaire au calcul.
+;
+;
+; exemple:   SCREEN ...
+;
+;            FILE MCTAXE      REFERENCE ALIAS A_TAX_TPS
+;              ACCESS VIA TAXCLETYP, TAXCLECOD &
+;                     USING ...
+;            FILE MCTAXE      REFERENCE ALIAS A_TAX_TVP
+;              ACCESS VIA TAXCLETYP, TAXCLECOD &
+;                     USING ...
+;
+;            USE ustaxtmp NOLIST
+;
+;            ;
+;            PROCEDURE PROCESS toto
+;            BEGIN
+;              LET TZ_MNTTXB = montant du calcul, ex: cpimnt
+;              USE ustaxexe
+;              LET mnt de tps = TZ_MNTTPS
+;              LET mnt de tvp = TZ_MNTTVP
+;            END
+;
+;-------------------------------------------------------------------------
+;
+
+LET TZ_MNTTPS = 0
+LET TZ_MNTTVP = 0
+
+; ***************************
+;     Federal      Provincial
+;     --------     ----------
+;     En sus *      En sus
+;     Incluse*      En sus
+;
+IF ( TAXMOD OF A_TAX_TPS = "S" AND TAXMOD OF A_TAX_TVP = "S" ) OR &
+   ( TAXMOD OF A_TAX_TPS = "I" AND TAXMOD OF A_TAX_TVP = "S" )
+THEN BEGIN
+  ;
+  ; Fédéral inclus.
+  ;
+  IF TAXMOD OF A_TAX_TPS = "I"
+  THEN BEGIN
+    ;
+    ; Sur le net.
+    ;
+    IF TAXFLGNET OF A_TAX_TPS = "1"
+    THEN LET TZ_MNTTPS = TZ_MNTTXB - &
+                         ROUND( TZ_MNTTXB / (1 + TAXPCT OF A_TAX_TPS) )
+    ;
+    ; Sur le brut.
+    ;
+    IF TAXFLGNET OF A_TAX_TPS = "3"
+    THEN LET TZ_MNTTPS = TZ_MNTTXB &
+                         - ROUND (  TZ_MNTTXB / (1+TAXPCT OF A_TAX_TPS) )
+    ;
+    LET TZ_MNTTXB = TZ_MNTTXB - TZ_MNTTPS
+  END
+  ;
+  ; Fédéral en sus.
+  ;
+  IF TAXMOD OF A_TAX_TPS = "S"
+  THEN BEGIN
+    LET TZ_MNTTPS = ROUND( TZ_MNTTXB * TAXPCT OF A_TAX_TPS )
+  END
+  ;
+  ; Provincial en sus.
+  ;
+  ; Il faut ajouter la taxe fédéral au net, si la taxe provincial s'applique
+  ; sur la TPS.
+  ;
+  IF TAXFLGNET OF A_TAX_TVP = "2"
+  THEN LET TZ_MNTTXB = TZ_MNTTXB + TZ_MNTTPS
+  ;
+  LET TZ_MNTTVP = ROUND(TZ_MNTTXB * TAXPCT OF A_TAX_TVP )
+END
+ELSE BEGIN
+  ;
+  ;
+  ;************************
+  ; Federal      Provincial
+  ; --------     ----------
+  ; En sus        Incluse
+  ; En sus        Exempt
+  ; Incluse       Incluse
+  ; Incluse       Exempt
+  ; Exempt        En sus
+  ; Exempt        Incluse
+  ; Exempt        Exempt
+  ;
+  ;
+  ; Calcul de la taxe provincial incluse, on ne peut pas avoir "en sus"
+  ; sur le fédéral et taxe incluse au provincial, cela est validé dans la
+  ; saisie des codes de taxe (province de quebec seulement).
+  ;
+  ;
+  ; Provincial en sus.
+  ;
+  IF TAXMOD OF A_TAX_TVP = "S"
+  THEN BEGIN
+    LET TZ_MNTTVP = ROUND(TZ_MNTTXB * TAXPCT OF A_TAX_TVP )
+  END
+  ;
+  ; Provincial incluse.
+  ;
+  IF TAXMOD OF A_TAX_TVP = "I"
+  THEN BEGIN
+    IF TAXFLGNET OF A_TAX_TVP = "1" AND &
+       TAXMOD OF A_TAX_TPS = "I"
+    THEN BEGIN
+      ;
+      ; Calcul sur le net. Le montant taxable contient la TPS et la TVP.
+      ;
+      LET TZ_MNTTVP = ROUND( &
+                ROUND( TZ_MNTTXB / (1 + TAXPCT OF A_TAX_TVP &
+                                     + TAXPCT OF A_TAX_TPS) ) &
+                * TAXPCT OF A_TAX_TVP)
+    END
+    ELSE BEGIN
+      ;
+      ; - Calcul sur le net  si le fédéral est en sus.
+      ; - Calcul sur le net + TPS si le fédéral est inclus.
+      ;
+      LET TZ_MNTTVP = TZ_MNTTXB - &
+                ROUND( TZ_MNTTXB / (1 + TAXPCT OF A_TAX_TVP) )
+    END
+  END
+  ;
+  ; Taxe fédérale en sus. Le montant taxable est au Net.
+  ;
+  IF TAXMOD OF A_TAX_TPS = "S"
+  THEN BEGIN
+    ;
+    ; On enlève la taxe proviciale incluse du montant pour la calcul du
+    ; fédéral.
+    ;
+    IF TAXMOD OF A_TAX_TVP = "I"
+    THEN LET TZ_MNTTXB = TZ_MNTTXB - TZ_MNTTVP
+    ;
+    LET TZ_MNTTPS = ROUND(TZ_MNTTXB *  TAXPCT OF A_TAX_TPS)
+  END
+  ;
+  ; Calcul de la taxe incluse
+  ;
+  IF TAXMOD OF A_TAX_TPS = "I"
+  THEN BEGIN
+    IF TAXFLGNET OF A_TAX_TPS = "1"
+    THEN BEGIN
+      ;
+      ; On enlève la taxe proviciale incluse du montant pour le calcul du
+      ; fédéral.
+      ;
+      IF TAXMOD OF A_TAX_TVP = "I"
+      THEN LET TZ_MNTTXB = TZ_MNTTXB - TZ_MNTTVP
+
+      LET TZ_MNTTPS = TZ_MNTTXB - &
+                         ROUND( TZ_MNTTXB / (1 + TAXPCT OF A_TAX_TPS) )
+    END
+    ELSE LET TZ_MNTTPS = TZ_MNTTXB &
+                        - ROUND (  TZ_MNTTXB / (1 + TAXPCT OF A_TAX_TPS) )
+  END
+END

@@ -1,0 +1,408 @@
+;/T/ 2.5.7 Facturation commande interne. (Charges diverses)
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1995-03-22
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   les charges diverses pour la facturation des commandes
+;                   internes.
+;
+;/M/ François Déry, 12 mai 1999
+;       Ajout du in dict sur la transaction des séquences.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date..............: 05 avril 2000
+;    Description.......: Incrémentation du numéro de facture par compagnie.
+;
+;    Référence.........: Stabilisation du module Gestion de blocs (point 2).
+;
+;    Signet............: MP-00-04-05_S02.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd213h ACTIONBAR                     &
+              MODE LABEL "" AT 2,80         &
+              NOACTION                      &
+              FIELDMARK RETAIN STARTUP      &
+              HELP POPUP FROM 4,9 TO 20,72  &
+              RECEIVING T_CIECLEMNU,        &
+                        T_CIENOM,           &
+                        PDFACTURE
+
+
+;-------------------------------------------------------------------------------
+;
+; Déclaration de la transaction pour donner un numéro séquentiel
+;
+
+TRANSACTION NO_SEQ READ WRITE &
+                   RESERVING FOR PROTECTED WRITE PDSEQ_FACTURE IN DICT
+
+
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD213H"
+
+
+;-------------------------------------------------------------------------------
+; Documentation de l'écran.
+;
+USE pd213h.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable temporaire du programme pour les pop-up
+;
+
+TEMPORARY T_CDICODCHR        CHARACTER SIZE 05
+
+
+;-------------------------------------------------------------------------------
+;
+; Facture
+;
+
+FILE PDFACTURE MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Facture bloc
+;
+
+FILE PDTRANP_DOU_ECT PRIMARY &
+                     NOITEM &
+                     OCCURS 11 TIMES
+
+
+  ACCESS VIA     CIECLE,           &
+                 FTRNUMFAC         &
+         USING   T_CIECLEMNU,                           &
+                 FTRNUMFAC         OF PDFACTURE         &
+         ORDERBY CIECLE,           &
+                 FTRNUMFAC,        &
+                 CDICODCHR
+
+
+  ITEM CIECLE    OF PDTRANP_DOU_ECT INITIAL T_CIECLEMNU
+  ITEM FTRNUMFAC OF PDTRANP_DOU_ECT INITIAL  FTRNUMFAC OF PDFACTURE
+
+  ITEM TDEPRI    OF PDTRANP_DOU_ECT SUM INTO FTRMNTBRU OF PDFACTURE
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro séquentiel pour les factures
+;
+
+FILE PDSEQ_FACTURE DESIGNER TRANSACTION NO_SEQ
+  ACCESS VIA CIECLE USING T_CIECLEMNU ; MP-00-04-05_S02.
+
+;-------------------------------------------------------------------------------
+;
+; Charges diverses
+;
+
+FILE PDCHARGES_DIVERS REFERENCE OCCURS WITH PDTRANP_DOU_ECT
+
+  ACCESS VIA     CIECLE,          &
+                 CDICODCHR        &
+         USING   T_CIECLEMNU,     &
+                 CDICODCHR        OF PDTRANP_DOU_ECT
+
+
+;-------------------------------------------------------------------------------
+;
+; Client
+;
+
+FILE VCLC_CLI        REFERENCE
+
+  ACCESS VIA     CLICIECLE,        &
+                 CLICLE,           &
+                 CIECLE            &
+         USING   "----",                                &
+                 CLICLE            OF PDFACTURE,        &
+                 T_CIECLEMNU
+
+
+;-------------------------------------------------------------------------------
+FILE PDLOT_TRANSFERT DESIGNER
+;-------------------------------------------------------------------------------
+FILE PDLOT_FACTURE DESIGNER
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+
+SKIP
+
+
+TITLE &
+@IF FRANCAIS
+      " Facturation vente direct " &
+@ELSE
+      " %%%Facturation vente direct " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+
+ALIGN (,3,19)
+
+
+FIELD FTRNUMFAC        OF PDFACTURE        &
+        DISPLAY                            &
+        FIXED
+
+
+ALIGN (,3,19) (,,28)
+
+
+FIELD CLICLE           OF PDFACTURE        &
+        DISPLAY                            &
+        FIXED
+
+
+FIELD CLINOM           OF VCLC_CLI         &
+        DISPLAY                            &
+        FIXED
+
+
+DRAW 8,2 TO 8,79
+
+
+SKIP TO LINE 8
+
+
+TITLE &
+@IF FRANCAIS
+      " Charges diverses " &
+@ELSE
+      " %%%Charge diverses " &
+@ENDIF
+      CENTERED AT ,1
+
+
+SKIP TO LINE 10
+
+
+TITLE &
+@IF FRANCAIS
+      "   Code     Description                                         Montant " &
+@ELSE
+      "%%%Code     Description                                         Montant " &
+@ENDIF
+      AT ,3
+
+ALIGN (05,05,06) (,,15) (,,59)
+
+
+CLUSTER OCCURS WITH PDTRANP_DOU_ECT ID BASE 90
+
+
+FIELD CDICODCHR        OF PDTRANP_DOU_ECT  &
+        HIDDEN                             &
+        LABEL " "                          &
+        REQUIRED                           &
+        LOOKUP ON PDCHARGES_DIVERS         &
+          MESSAGE 2033 ; Ce code de charges diverses n'existe pas
+
+
+FIELD CDIDSCFRA        OF PDCHARGES_DIVERS &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD TDEPRI           OF PDTRANP_DOU_ECT  &
+        PIC "^^^^^,^^^.^^ "  SIGNIF 5   &
+        HIDDEN                             &
+        REQUIRED
+
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel dépisteur No bloc (attemtion cet appel est particulier)
+;
+
+PROCEDURE INPUT CDICODCHR
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CDICODCHR = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd131 MODE F &
+                     PASSING T_CDICODCHR, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_CDICODCHR )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Saisie d'une ligne de détail
+;
+
+PROCEDURE DESIGNER 90
+BEGIN
+  ACCEPT CDICODCHR        OF PDTRANP_DOU_ECT
+  ACCEPT TDEPRI           OF PDTRANP_DOU_ECT
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDTRANP_DOU_ECT &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDTRANP_DOU_ECT &
+     AND NOT NEWRECORD     OF PDTRANP_DOU_ECT &
+     AND NOT DELETEDRECORD OF PDTRANP_DOU_ECT &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+
+
+;-------------------------------------------------------------------------------
+;
+ ;--validation du status du lot
+ ;
+  GET PDLOT_FACTURE OPTIONAL &
+    VIA   CIECLE,          &
+          FTRNUMFAC        &
+    USING T_CIECLEMNU,     &
+          FTRNUMFAC        OF PDFACTURE
+  IF ACCESSOK
+  THEN BEGIN
+   GET PDLOT_TRANSFERT OPTIONAL &
+    VIA   CIECLE,          &
+          LTRNUMLOT        &
+    USING CIECLE,     &
+          LTRNUMLOT        OF PDLOT_FACTURE
+    IF ACCESSOK
+    THEN BEGIN
+     IF LTRSTU OF PDLOT_TRANSFERT = "T"
+      THEN ERROR 2
+
+   END
+  END
+
+  ;
+  ; Incrémentation du numéro de séquence
+  ;
+  IF 0 = FTRNUMFAC OF PDFACTURE
+  THEN BEGIN
+    START TRANSACTION NO_SEQ
+    GET PDSEQ_FACTURE OPTIONAL                      ; MP-00-04-05_S02.
+    LET CIECLE        OF PDSEQ_FACTURE = T_CIECLEMNU; MP-00-04-05_S02.
+    LET SEFNUMRAP     OF PDSEQ_FACTURE = SEFNUMRAP OF PDSEQ_FACTURE + 1
+    LET FTRNUMFAC     OF PDFACTURE     = SEFNUMRAP OF PDSEQ_FACTURE
+    PUT PDSEQ_FACTURE
+    DISPLAY FTRNUMFAC OF PDFACTURE
+  END
+
+END
+
+
+BUILD
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+************************* Facturation commande interne *************************
+*                                                                              *
+* No. facture...: xxxxxxxxx                                                    *
+* Client........: xxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            *
+*                                                                              *
+******************************* Charges diverses *******************************
+*                                                                              *
+*    Code     Description                                         Montant      *
+*    xxxxx    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    xxxxxxxxxxxxxxx      *
+*    xxxxx    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    xxxxxxxxxxxxxxx      *
+*    xxxxx    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    xxxxxxxxxxxxxxx      *
+*    xxxxx    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    xxxxxxxxxxxxxxx      *
+*    xxxxx    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    xxxxxxxxxxxxxxx      *
+*    xxxxx    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    xxxxxxxxxxxxxxx      *
+*    xxxxx    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    xxxxxxxxxxxxxxx      *
+*    xxxxx    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    xxxxxxxxxxxxxxx      *
+*    xxxxx    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    xxxxxxxxxxxxxxx      *
+*    xxxxx    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    xxxxxxxxxxxxxxx      *
+*    xxxxx    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    xxxxxxxxxxxxxxx      *
+*                                                                              *
+********************************************************************************
+@ENDIF

@@ -1,0 +1,793 @@
+;/T/ 2.3.2 Enregistrer les diagrammes. (Unité de travail)
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1995-02-09
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   les unités de travail pour les diagrammes.
+;
+;/M/ programmeure..: Claudie Doyon
+;    Date..........: 1999-05-06
+;    Etat..........: TERMINER
+;    Description...: Ajout du use pour les transactions.
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd211a ACTIONBAR                     &
+              MODE LABEL "" AT 2,80         &
+              NOACTION                      &
+              FIELDMARK RETAIN STARTUP      &
+              HELP POPUP FROM 4,9 TO 20,72  &
+              RECEIVING T_CIECLEMNU,        &
+                        T_CIENOM,           &
+                        PDDIAGRAMME,        &
+                        T_NEWREC,           &
+                        T_QTECMD,           &
+                        T_QTEANCIENNE
+
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables passées en paramêtre
+;
+
+TEMPORARY T_NEWREC       CHARACTER SIZE 01
+TEMPORARY T_QTECMD       INTEGER SIGNED SIZE 08
+TEMPORARY T_QTEANCIENNE  INTEGER SIGNED SIZE 08
+
+TEMPORARY T_COMNUMCOM    CHAR SIZE 7
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+
+USE ussectmp  NOLIST
+    "PD211A"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+
+USE pd211a.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable temporaire du programme pour l'appel des dépisteurs (pop-up)
+;
+
+TEMPORARY T_UTRNUMUNITRV CHARACTER SIZE 04 ; Unité de travail
+TEMPORARY T_UNMCODUNM    CHARACTER SIZE 04 ; Unité de mesure
+
+TEMPORARY T_CONDITION CHAR SIZE 1 RESET AT STARTUP
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du volume d'une pièce de granit
+;
+use usvarvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Diagramme
+;
+
+FILE PDDIAGRAMME MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Unité de travail - diagramme
+;
+
+FILE PDUNI_TRAV_DIA PRIMARY &
+                    NOITEM &
+                    OCCURS 11
+
+  ACCESS VIA     CIECLE,          &
+                 DIANUM002        &
+         USING   T_CIECLEMNU,                         &
+                 DIANUM002        OF PDDIAGRAMME      &
+         ORDERBY CIECLE,          &
+                 DIANUM002,       &
+                 UTRNUMUNITRV
+
+
+  ITEM CIECLE           OF PDUNI_TRAV_DIA INITIAL T_CIECLEMNU
+  ITEM UTDQTEPRD        OF PDUNI_TRAV_DIA INITIAL 0
+  ITEM DIANUM002        OF PDUNI_TRAV_DIA INITIAL DIANUM002        OF PDDIAGRAMME
+  ITEM PJTABR           OF PDUNI_TRAV_DIA INITIAL PJTABR           OF PDDIAGRAMME
+  ITEM DIANUMDIA002     OF PDUNI_TRAV_DIA INITIAL DIANUMDIA002     OF PDDIAGRAMME
+  ITEM COMNUMCOMINT     OF PDUNI_TRAV_DIA INITIAL COMNUMCOMINT     OF PDDIAGRAMME
+  ITEM PJTANN           OF PDUNI_TRAV_DIA INITIAL PJTANN           OF PDDIAGRAMME
+  ITEM COMNUMCOM        OF PDUNI_TRAV_DIA INITIAL COMNUMCOM        OF PDDIAGRAMME
+  ITEM PJTNUMSEQ        OF PDUNI_TRAV_DIA INITIAL PJTNUMSEQ        OF PDDIAGRAMME
+  ITEM PJTNUMPRO        OF PDUNI_TRAV_DIA INITIAL PJTNUMPRO        OF PDDIAGRAMME
+  ITEM UTDQTEUTRCMD     OF PDUNI_TRAV_DIA FINAL   DIAQTECMD        OF PDDIAGRAMME * UTDQTEPRD OF PDUNI_TRAV_DIA
+  ITEM UTDQTEUTRPRD     OF PDUNI_TRAV_DIA INITIAL 0
+
+;-------------------------------------------------------------------------------
+;
+; Unité de travail
+;
+
+FILE PDUNITE_TRAVAIL REFERENCE OCCURS WITH PDUNI_TRAV_DIA
+
+  ACCESS VIA     CIECLE,          &
+                 UTRNUMUNITRV     &
+         USING   T_CIECLEMNU,     &
+                 UTRNUMUNITRV     OF PDUNI_TRAV_DIA
+
+
+;-------------------------------------------------------------------------------
+;
+; Détail unité de travail
+;
+
+FILE PDDET_UNIT_TRAV REFERENCE OCCURS WITH PDUNI_TRAV_DIA
+
+  ACCESS VIA   CIECLE,          &
+               UTRNUMUNITRV,    &
+               DUTCODUNMVEN     &
+         USING T_CIECLEMNU,                        &
+               UTRNUMUNITRV     OF PDUNI_TRAV_DIA, &
+               UTDUNMVEN        OF PDUNI_TRAV_DIA
+
+
+;-------------------------------------------------------------------------------
+;
+; Unité de mesure (Production)
+;
+
+FILE PDUNITE_MESURE  REFERENCE ALIAS A_UNM_PRD OCCURS WITH PDUNI_TRAV_DIA
+
+  ACCESS VIA     CIECLE,          &
+                 UNMCODUNM        &
+         USING   T_CIECLEMNU,     &
+                 UTDUNMPRD        OF PDUNI_TRAV_DIA
+
+
+;-------------------------------------------------------------------------------
+;
+; Unité de mesure (Vente)
+;
+
+FILE PDUNITE_MESURE  REFERENCE ALIAS A_UNM_VEN OCCURS WITH PDUNI_TRAV_DIA
+
+  ACCESS VIA     CIECLE,          &
+                 UNMCODUNM        &
+         USING   T_CIECLEMNU,     &
+                 UTDUNMVEN        OF PDUNI_TRAV_DIA
+
+
+;-------------------------------------------------------------------------------
+;
+; Commande interne
+;
+
+FILE PDCOMMAN_INTERNE REFERENCE
+
+  ACCESS VIA     CIECLE,          &
+                 PJTABR,          &
+                 PJTANN,          &
+                 COMNUMCOMINT     &
+         USING   T_CIECLEMNU,                         &
+                 PJTABR           OF PDDIAGRAMME,     &
+                 PJTANN           OF PDDIAGRAMME,     &
+                 COMNUMCOMINT     OF PDDIAGRAMME
+
+FILE PDCOMMAN_INTERNE DESIGNER ALIAS COMMANDE
+
+;-------------------------------------------------------------------
+;
+; Détail de la commande (MAJ)
+;
+
+FILE PDDETAIL_C_I          DESIGNER ALIAS A_DCI_MAJ
+
+
+;-------------------------------------------------------------------------------
+;
+; Prix par détail - commande interne
+;
+
+FILE PDPRIX_DET_C_I        REFERENCE
+
+  ACCESS VIA     CIECLE,          &
+                 PJTABR,          &
+                 PJTANN,          &
+                 COMNUMCOMINT,    &
+                 UTRNUMUNITRV     &
+         USING   T_CIECLEMNU,                         &
+                 PJTABR           OF PDDIAGRAMME,     &
+                 PJTANN           OF PDDIAGRAMME,     &
+                 COMNUMCOMINT     OF PDDIAGRAMME,     &
+                 UTRNUMUNITRV     OF PDDET_UNIT_TRAV
+
+
+;-------------------------------------------------------------------------------
+;
+; Prix par détail - commande interne
+;
+
+FILE PDPRIX_DET_C_I        DESIGNER ALIAS A_PDC_VALIDE
+
+
+;-------------------------------------------------------------------------------
+;
+; Priorité diagramme
+;
+
+FILE PDPRIORITE_DIAG DESIGNER
+
+
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP
+
+
+TITLE &
+@IF FRANCAIS
+      " Diagramme " &
+@ELSE
+      " %%%Diagramme " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+
+ALIGN (,3,19)
+
+
+FIELD DIANUM002        OF PDDIAGRAMME      &
+        DISPLAY                            &
+        FIXED
+
+
+ALIGN (2,3,19) (27,28,44) (52,53,69)
+
+
+FIELD DIALON           OF PDDIAGRAMME      &
+        DISPLAY                            &
+        FIXED
+
+
+FIELD DIAHAU           OF PDDIAGRAMME      &
+        DISPLAY                            &
+        FIXED
+
+
+FIELD DIAEPA           OF PDDIAGRAMME      &
+        DISPLAY                            &
+        FIXED
+
+
+DRAW 8,2 TO 8,79
+
+
+SKIP TO LINE 8
+
+
+TITLE &
+@IF FRANCAIS
+      " Unité de travail " &
+@ELSE
+      " %%%Unité de travail " &
+@ENDIF
+      CENTERED AT ,1
+
+
+SKIP TO LINE 10
+
+TITLE &
+@IF FRANCAIS
+      " Cod Description                             Qte prod. UM     Qte Prix UM Dev " &
+@ELSE
+      " %%%Cod Description                             Qte prod. UM     Qte Prix UM Dev " &
+@ENDIF
+      AT ,2
+
+
+SKIP TO LINE 11
+
+
+ALIGN (02,02,03) (,,07) (,,44) (,,57) (,,60) (,,73) (,,76)
+
+
+CLUSTER OCCURS WITH PDUNI_TRAV_DIA ID BASE 30
+
+FIELD UTRNUMUNITRV     OF PDUNI_TRAV_DIA   &
+        HIDDEN                             &
+        LABEL " "                          &
+        REQUIRED                           &
+        LOOKUP ON PDUNITE_TRAVAIL          &
+          MESSAGE 1825 ; Cette unité n'existe pas
+
+FIELD UTRDSC001        OF PDUNITE_TRAVAIL  &
+        HIDDEN                             &
+        DISPLAY                            &
+        SIZE 36
+
+FIELD UTDQTEPRD        OF PDUNI_TRAV_DIA   &
+        HIDDEN                             &
+        REQUIRED
+
+FIELD UTDUNMPRD        OF PDUNI_TRAV_DIA   &
+        HIDDEN                             &
+        DISPLAY
+
+FIELD UTDQTEPRI        OF PDUNI_TRAV_DIA   &
+        HIDDEN                             &
+        REQUIRED                           &
+        IF T_CONDITION <> "0"
+
+FIELD UTDUNMVEN        OF PDUNI_TRAV_DIA   &
+        HIDDEN                             &
+        DISPLAY
+
+FIELD COMDEV           OF PDCOMMAN_INTERNE &
+        HIDDEN                             &
+        DISPLAY
+
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+  GET COMMANDE VIA     CIECLE,          &
+                       PJTABR,          &
+                       PJTANN,          &
+                       COMNUMCOMINT     &
+               USING   T_CIECLEMNU,                         &
+                       PJTABR           OF PDDIAGRAMME,     &
+                       PJTANN           OF PDDIAGRAMME,     &
+                       COMNUMCOMINT     OF PDDIAGRAMME   OPT
+  IF ACCESSOK
+  THEN BEGIN
+         LET T_CONDITION = COMPRIDET OF COMMANDE
+  END
+
+END
+
+PROCEDURE DESIGNER 30
+BEGIN
+
+ACCEPT  UTRNUMUNITRV     OF PDUNI_TRAV_DIA
+DISPLAY UTRDSC001        OF PDUNITE_TRAVAIL
+ACCEPT  UTDQTEPRD        OF PDUNI_TRAV_DIA
+DISPLAY UTDUNMPRD        OF PDUNI_TRAV_DIA
+IF T_CONDITION <> "0"
+THEN BEGIN
+       ACCEPT  UTDQTEPRI        OF PDUNI_TRAV_DIA
+     END
+DISPLAY COMDEV           OF PDCOMMAN_INTERNE
+END
+
+PROCEDURE PROCESS UTDQTEPRI
+BEGIN
+  IF COMPRIDET        OF PDCOMMAN_INTERNE = "1"
+  THEN BEGIN
+    GET A_PDC_VALIDE OPTIONAL &
+      VIA   CIECLE,          &
+            COMNUMCOM,       &
+            UTRNUMUNITRV     &
+      USING T_CIECLEMNU,                        &
+            COMNUMCOM        OF PDDIAGRAMME,    &
+            UTRNUMUNITRV     OF PDUNI_TRAV_DIA
+    IF ACCESSOK
+    THEN BEGIN
+           IF DUTCODUNMVEN OF A_PDC_VALIDE <> "PR" AND &
+              DUTCODUNMVEN OF A_PDC_VALIDE <> "PA" AND &
+              DUTCODUNMVEN OF A_PDC_VALIDE <> "PE"
+           THEN BEGIN
+             IF DUTCODUNMVEN OF A_PDC_VALIDE[1:1]="P"
+             THEN LET UTDUNMVEN OF PDUNI_TRAV_DIA = "M" + DUTCODUNMVEN OF &
+                                   A_PDC_VALIDE[2:1]
+             ELSE LET UTDUNMVEN OF PDUNI_TRAV_DIA = DUTCODUNMVEN OF A_PDC_VALIDE
+           END
+           ELSE LET UTDUNMVEN OF PDUNI_TRAV_DIA = DUTCODUNMVEN OF A_PDC_VALIDE
+         END
+  DISPLAY UTDUNMVEN OF PDUNI_TRAV_DIA
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur pour le champ
+;
+
+PROCEDURE INPUT UTRNUMUNITRV
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_UTRNUMUNITRV = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    IF 0 = SIZE(TRUNC(COMNUMCOM OF PDDIAGRAMME))
+    THEN BEGIN
+           RUN SCREEN pd102 MODE F &
+                            PASSING T_UTRNUMUNITRV, &
+                                    T_CIECLEMNU
+           LET FIELDTEXT = TRUNCATE( T_UTRNUMUNITRV )
+         END
+    ELSE BEGIN
+           GET A_PDC_VALIDE OPTIONAL &
+            VIA   CIECLE,          &
+                  COMNUMCOM        &
+           USING T_CIECLEMNU,      &
+            COMNUMCOM        OF PDDIAGRAMME
+           IF ACCESSOK
+           THEN BEGIN
+           LET T_COMNUMCOM = COMNUMCOM OF PDDIAGRAMME
+           RUN SCREEN pd139 MODE F &
+                            PASSING T_UTRNUMUNITRV, &
+                                    T_CIECLEMNU,    &
+                                    T_COMNUMCOM
+           LET FIELDTEXT = TRUNCATE( T_UTRNUMUNITRV )
+        END
+        ELSE BEGIN
+           RUN SCREEN pd102 MODE F &
+                            PASSING T_UTRNUMUNITRV, &
+                                    T_CIECLEMNU
+           LET FIELDTEXT = TRUNCATE( T_UTRNUMUNITRV )
+        END
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que les prix par détail on été saisie dans la commande
+;
+
+PROCEDURE EDIT UTRNUMUNITRV
+BEGIN
+  IF COMPRIDET OF PDCOMMAN_INTERNE = "1"
+  THEN BEGIN
+    GET PDPRIX_DET_C_I OPTIONAL
+    IF NOT ACCESSOK
+    THEN BEGIN
+      ERROR 3174 ; Cette unité de travail n'est pas définit pour cette commande
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Traitement pour le champ
+;
+
+PROCEDURE PROCESS UTRNUMUNITRV OF PDUNI_TRAV_DIA
+BEGIN
+  ;
+  ; Initialise le champ après le lookup
+  ;
+  LET UTDUNMPRD OF PDUNI_TRAV_DIA = UTRCODUNMPRD OF PDUNITE_TRAVAIL
+  DISPLAY UTDUNMPRD OF PDUNI_TRAV_DIA
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation pour le champ
+;
+
+PROCEDURE EDIT UTDUNMVEN
+BEGIN
+  ;
+  ; Valide que la combinaison unité de travail et unité de vente ont été définit
+  ; pour la commande interne si on utilise la facturation par prix par détail
+  ;
+  IF COMPRIDET        OF PDCOMMAN_INTERNE = "1"
+  THEN BEGIN
+    GET A_PDC_VALIDE OPTIONAL &
+      VIA   CIECLE,          &
+            COMNUMCOM,       &
+            UTRNUMUNITRV,    &
+            DUTCODUNMVEN     &
+      USING T_CIECLEMNU,                        &
+            COMNUMCOM        OF PDDIAGRAMME,    &
+            UTRNUMUNITRV     OF PDUNI_TRAV_DIA, &
+            UTDUNMVEN        OF PDUNI_TRAV_DIA
+    IF NOT ACCESSOK
+    THEN BEGIN
+      ERROR 3211 ; Aucun unité de travail ayant cette de vente pour cette commande
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul du volume d'une pièce de granit
+;
+
+USE uscalvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDUNI_TRAV_DIA &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDUNI_TRAV_DIA &
+     AND NOT NEWRECORD     OF PDUNI_TRAV_DIA &
+     AND NOT DELETEDRECORD OF PDUNI_TRAV_DIA &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+  ;
+  ; Mise à jour des informations sur la mise à jour
+  ;
+  IF NEWRECORD OF PDUNI_TRAV_DIA &
+     OR &
+     ALTEREDRECORD OF PDUNI_TRAV_DIA
+  THEN BEGIN
+    LET DIADATMAJ        OF PDDIAGRAMME = SYSDATE
+    LET DIAHREMAJ        OF PDDIAGRAMME = SYSTIME / 10000
+    LET DIAUSRMAJ        OF PDDIAGRAMME = LOGONID
+  END
+
+  ;
+  ; Calcul du volume et de la surface du diagramme
+  ;
+  LET TZ_LARGEUR                        = DIALON          OF PDDIAGRAMME
+  LET TZ_HAUTEUR                        = DIAHAU          OF PDDIAGRAMME
+  LET TZ_EPAISSEUR                      = DIAEPA          OF PDDIAGRAMME
+  DO  INTERNAL CALVOL
+  LET DIAVOLMC3        OF PDDIAGRAMME   = TZ_VOLUME
+  LET DIASURMC2        OF PDDIAGRAMME   = TZ_MC2
+
+  ;
+  ; Mise à jour de l'indicateur de liaison d'une ligne de détail et un diagramme
+  ;
+  IF NEWRECORD OF PDDIAGRAMME &
+     OR                       &
+     T_NEWREC = "1"
+  THEN BEGIN
+    GET A_DCI_MAJ              &
+      VIA     CIECLE,          &
+              PJTABR,          &
+              PJTANN,          &
+              COMNUMCOMINT,    &
+              DCINUMLIG        &
+      USING   T_CIECLEMNU,                     &
+              PJTABR           OF PDDIAGRAMME, &
+              PJTANN           OF PDDIAGRAMME, &
+              COMNUMCOMINT     OF PDDIAGRAMME, &
+              DCINUMLIG        OF PDDIAGRAMME
+    IF ACCESSOK
+    THEN BEGIN
+      LET DCILIADIA OF A_DCI_MAJ = "1"
+    END
+  END
+
+  ;
+  ; Création de la priorite diagramme
+  ;
+
+  IF NEWRECORD OF PDDIAGRAMME &
+     OR                       &
+     T_NEWREC = "1"
+  THEN BEGIN
+    GET PDPRIORITE_DIAG OPTIONAL   &
+      VIA   CIECLE,                &
+            PRICODPRI,             &
+            DIANUM002              &
+      USING T_CIECLEMNU,           &
+            "99" ,                 &
+            DIANUM002 OF PDDIAGRAMME
+
+    IF NOT ACCESSOK
+    THEN BEGIN
+
+      LET CIECLE           OF PDPRIORITE_DIAG = T_CIECLEMNU
+
+      LET PRICODPRI        OF PDPRIORITE_DIAG = "99"
+
+      LET PJTABR           OF PDPRIORITE_DIAG = PJTABR           OF PDDIAGRAMME
+
+      LET DIANUMDIA002     OF PDPRIORITE_DIAG = DIANUMDIA002     OF PDDIAGRAMME
+
+      LET DIANUM002        OF PDPRIORITE_DIAG = DIANUM002        OF PDDIAGRAMME
+
+      LET DCINUMLIG        OF PDPRIORITE_DIAG = DCINUMLIG        OF PDDIAGRAMME
+
+      LET PDGQTEPLACPEGRA  OF PDPRIORITE_DIAG = DIAQTECMD        OF PDDIAGRAMME
+
+      LET PDGQTEPLAFINGRA  OF PDPRIORITE_DIAG = DIAQTECMD        OF PDDIAGRAMME
+
+      LET PDGSTU           OF PDPRIORITE_DIAG = "A"
+
+      LET PJTANN           OF PDPRIORITE_DIAG = PJTANN           OF PDDIAGRAMME
+
+      LET COMNUMCOMINT     OF PDPRIORITE_DIAG = COMNUMCOMINT     OF PDDIAGRAMME
+
+      LET COMNUMCOM        OF PDPRIORITE_DIAG = COMNUMCOM        OF PDDIAGRAMME
+
+      LET PJTNUMSEQ        OF PDPRIORITE_DIAG = PJTNUMSEQ        OF PDDIAGRAMME
+
+      LET PJTNUMPRO        OF PDPRIORITE_DIAG = PJTNUMPRO        OF PDDIAGRAMME
+
+      PUT PDPRIORITE_DIAG
+
+      LET T_QTEANCIENNE = DIAQTECMD OF PDDIAGRAMME
+  END
+    ELSE BEGIN
+      ERROR "PROBLÈME TECHNIQUE 1"
+    END
+  END
+
+  ;
+  ; Modification de diagramme
+  ;
+
+  IF NOT NEWRECORD OF PDDIAGRAMME &
+     AND &
+     ALTEREDRECORD OF PDDIAGRAMME &
+     AND &
+     T_NEWREC <> "1"
+  THEN BEGIN
+
+    GET PDPRIORITE_DIAG OPTIONAL   &
+      VIA   CIECLE,                &
+            PRICODPRI,             &
+            DIANUM002              &
+      USING T_CIECLEMNU,           &
+            "99" ,                 &
+            DIANUM002 OF PDDIAGRAMME
+    ;
+    ; Si la quantité modifier est positive (on ajoute) on ajoute à la priorité
+    ; de diagramme "99" (celle par défaut du diagramme)
+    ; par contre si la quantité est négative (on en enlève) avant de diminuer
+    ; la quantité on doit s'assurer que la priorité par défaut à une quantité
+    ; suffisante pour procéder à la mise à jour le la quantité.
+    ;
+
+    IF ACCESSOK
+    THEN BEGIN
+      ;
+      ; Ajout d'une quantité
+      ;
+      IF 0 < T_QTECMD
+      THEN BEGIN
+
+        LET PDGQTEPLACPEGRA  OF PDPRIORITE_DIAG = PDGQTEPLACPEGRA  OF PDPRIORITE_DIAG + &
+                                                  T_QTECMD
+        LET PDGQTEPLAFINGRA  OF PDPRIORITE_DIAG = PDGQTEPLAFINGRA  OF PDPRIORITE_DIAG + &
+                                                  T_QTECMD
+        PUT PDPRIORITE_DIAG
+
+        LET T_QTEANCIENNE = DIAQTECMD OF PDDIAGRAMME
+      END
+      ELSE BEGIN
+        ;
+        ; Vérification de la quantité avant la mise à jour de la quantité
+        ;
+        IF T_QTECMD <= PDGQTEPLACPEGRA  OF PDPRIORITE_DIAG &
+           AND &
+           T_QTECMD <= PDGQTEPLAFINGRA  OF PDPRIORITE_DIAG
+        THEN BEGIN
+          LET PDGQTEPLACPEGRA  OF PDPRIORITE_DIAG = PDGQTEPLACPEGRA  OF PDPRIORITE_DIAG - &
+                                                    T_QTECMD
+          LET PDGQTEPLAFINGRA  OF PDPRIORITE_DIAG = PDGQTEPLAFINGRA  OF PDPRIORITE_DIAG - &
+                                                    T_QTECMD
+          PUT PDPRIORITE_DIAG
+
+          LET T_QTEANCIENNE = DIAQTECMD OF PDDIAGRAMME
+        END
+        ELSE BEGIN
+          ERROR 3147 ; Le diagramme ne peut être modifié, modifier la planification d'abors
+        END
+      END
+    END
+    ELSE BEGIN
+      ERROR 3147 ; Le diagramme ne peut être modifié, modifier la planification d'abors
+    END
+  END
+
+  ;
+  ; Destruction du diagramme
+  ;
+  IF DELETEDRECORD OF PDDIAGRAMME
+  THEN BEGIN
+    NULL
+  END
+
+  LET T_NEWREC = "0"
+
+END
+
+
+BUILD DETAIL LIST
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+********************************** Diagramme ***********************************
+*                                                                              *
+* No diagramme..: xxxxxxx                                                      *
+* Longueur......: xxxx     Hauteur.......: xxxx     Épaisseur.....: xxxx       *
+*                                                                              *
+******************************* Unité de travail *******************************
+*                                                                              *
+* Cod Description                             Qte prod. UM     Qte Prix UM Dev *
+* xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxx xx xxxxxxxxxxxx xx xxx *
+* xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxx xx xxxxxxxxxxxx xx xxx *
+* xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxx xx xxxxxxxxxxxx xx xxx *
+* xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxx xx xxxxxxxxxxxx xx xxx *
+* xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxx xx xxxxxxxxxxxx xx xxx *
+* xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxx xx xxxxxxxxxxxx xx xxx *
+* xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxx xx xxxxxxxxxxxx xx xxx *
+* xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxx xx xxxxxxxxxxxx xx xxx *
+* xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxx xx xxxxxxxxxxxx xx xxx *
+* xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxx xx xxxxxxxxxxxx xx xxx *
+* xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxx xx xxxxxxxxxxxx xx xxx *
+*                                                                              *
+********************************************************************************
+@ENDIF

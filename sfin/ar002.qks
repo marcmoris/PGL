@@ -1,0 +1,1466 @@
+;/T/ Gestion des produits
+;
+;/P/ Programmeur..: Nancy Marceau
+;    Date Création: 1er mars 1994
+;
+;    Description..: Cet écran permet de faire la gestion des produits. Il
+;                   permet de définir le type de produit et ses différentes
+;                   caractéristiques. De plus, on définit un poste comptable et
+;                   une unité administrative par défaut. La restriction de
+;                   format permet d'affecter le multiple des quantités.
+;
+;/M/ Francois Richard 1999-07-19
+;
+; Ajout d'un use facilitant la saisie du numéro de produit
+;
+;***********************************************************************************************************************************
+;
+;/M/ Modifié par.......: Marc Poulin     
+;    Date modification.: 28 février 2000
+;    Description.......: Ajouter la quantité en main par entrepôt.
+;
+;    Référence.........: Stabilisation du module Achat/Réception Inventaire (point 30).
+;
+;    Signet............: MP-00-02-23_S30.
+;    --------------------------------------------------------------------------------------------
+;    Date modification.: 01 mars 2000
+;    Description.......: Ajouter les sorties par entrepôt pour la dernière année.
+;
+;    Référence.........: Demande de changement 999999.
+;
+;    Signets...........: MP-00-03-01_D999999.
+;    --------------------------------------------------------------------------------------------
+;    Date modification.: 01 mars 2000
+;    Description.......: Ne plus afficher le coût moyen, le poids et le volume unitaire.        
+;
+;    Référence.........: Demande directe 000002 (En accord avec le client: Sylvain boivin).
+;
+;    Signets...........: MP-00-03-01_DD000002.
+;
+;    --------------------------------------------------------------------------------------------
+;    Date modification.: 12 mai 2000
+;    Description.......: Ajout des trois derniers fournisseurs associé au produit.
+;
+;    Référence.........: Demande de changement 000055.
+;
+;    Signets...........: MP-00-05-12_DD55.
+;
+;    --------------------------------------------------------------------------------------------
+;    Date modification.: 14 décembre 2001
+;    Description.......: Ajustement au traitement afin qu'un recherche (select) générique du 
+;                        type %@...@ associée à la description 1 soit automatiquement appliquée
+;                        au niveau des descriptions 2 et 3.
+;
+;    Référence.........: Demande de changement directe - Demandeur: Alain Vézina
+;
+;    Signets...........: MP-01-12-14_DD.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN ar002 ACTIONBAR                         &
+             MODE LABEL "" AT 2,80             &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72      &
+             RECEIVING T_CIECLEMNU           , &
+                       T_CIENOM              , &
+                       T_PECCLEMNU           , &
+                       T_FOUCIECLE
+
+USE ussectmp NOLIST     ; Variable pour la sécurité
+    "AR002"             ; Nom de l'écran
+
+USE ar002.hlp NOLIST  ; Use servant à la documentation de l'écran
+
+USE ustraecr NOLIST
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-écrans
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Inventaire                     "    ACTION DESIGNER D001
+  MENUITEM LABEL "Historique transaction         "    ACTION DESIGNER D002
+  MENUITEM LABEL "Catalogue                      "    ACTION DESIGNER D003
+  MENUITEM LABEL "Vérification                   "    ACTION DESIGNER D004
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%Inventaire                  "    ACTION DESIGNER D001
+  MENUITEM LABEL "%%%Historique transaction      "    ACTION DESIGNER D002
+  MENUITEM LABEL "%%%Catalogue                   "    ACTION DESIGNER D003
+  MENUITEM LABEL "%%%Vérification                "    ACTION DESIGNER D004
+@ENDIF
+
+;-------------------------------------------------------------------------------
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de la compagnie
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie
+TEMPORARY T_FOUCIECLE CHARACTER SIZE 4  ; Compagnie fournisseur
+TEMPORARY T_PECCLEMNU CHARACTER SIZE 4  ; Période du menu.
+;-------------------------------------------------------------------------------
+; MP-00-05-12_DD55.
+
+TEMPORARY T_DERNIER_FOUCLE_01 CHARACTER SIZE 06
+TEMPORARY T_DERNIER_FOUCLE_02 CHARACTER SIZE 06
+TEMPORARY T_DERNIER_FOUCLE_03 CHARACTER SIZE 06
+
+; ------------------------------------------------------------------------------
+
+temporary t_select_dsc varchar size 42 reset at mode    ; MP-01-12-14_DD.
+
+;-------------------------------------------------------------------------------
+;
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;
+; Produit
+;
+FILE ARPRODUIT         PRIMARY NOITEM
+  ACCESS VIA   CIECLE,               &
+               PRDCLE                &
+         USING T_CIECLEMNU,          &
+               PRDCLE OF ARPRODUIT   &
+         REQUEST PRDCLE    &
+         ORDERBY CIECLE,   &
+                 PRDCLE
+
+  ACCESS VIA   CIECLE,               &
+               PRDCAT                &
+         USING T_CIECLEMNU,          &
+               PRDCAT OF ARPRODUIT   &
+         REQUEST PRDCAT    &
+         ORDERBY CIECLE,   &
+                 PRDCLE
+
+  ACCESS VIA   CIECLE               &
+         USING T_CIECLEMNU          &
+         ORDERBY CIECLE,   &
+                 PRDCLE
+
+  ITEM CIECLE       OF ARPRODUIT INITIAL T_CIECLEMNU
+  ITEM PRDSTU       OF ARPRODUIT INITIAL "A"     ; Statut du produit actif
+  ITEM PRDFLGRESFOR OF ARPRODUIT INITIAL "0"     ; Pas de restriction de format
+  ITEM PRDDATCRE    OF ARPRODUIT INITIAL SYSDATE
+  ITEM PRDHRECRE    OF ARPRODUIT INITIAL SYSTIME / 10000
+  ITEM PRDUSRCRE    OF ARPRODUIT INITIAL TZ_LOGONID
+  ITEM PRDDATMOD    OF ARPRODUIT FINAL   SYSDATE        &
+                                           IF NOT NEWRECORD OF ARPRODUIT AND &
+                                              ALTEREDRECORD OF ARPRODUIT
+  ITEM PRDHREMOD    OF ARPRODUIT FINAL   SYSTIME / 10000 &
+                                           IF NOT NEWRECORD OF ARPRODUIT AND &
+                                              ALTEREDRECORD OF ARPRODUIT
+  ITEM PRDUSRMOD    OF ARPRODUIT FINAL   TZ_LOGONID         &
+                                           IF NOT NEWRECORD OF ARPRODUIT AND &
+                                              ALTEREDRECORD OF ARPRODUIT
+
+; -----------------
+; MP-01-12-14_DD.
+
+  select if t_select_dsc = "" or (0 <> index(prddsc1 of arproduit,t_select_dsc)  & 
+                              or  0 <> index(prddsc2 of arproduit,t_select_dsc)  & 
+                              or  0 <> index(prddsc3 of arproduit,t_select_dsc))  
+
+; -----------------
+
+; Fichier qui contient le total des quantités de produit pour toutes les
+; entrepôts.
+
+FILE VPRD_01           REFERENCE
+  ACCESS VIA   CIECLE, &
+               PRDCLE  &
+         USING CIECLE OF ARPRODUIT, &
+               PRDCLE OF ARPRODUIT
+
+
+; Pour valider l'unité d'inventaire
+FILE MCUNITE_ADM       REFERENCE
+  ACCESS VIA   CIECLE,  &
+               UNACLE   &
+         USING CIECLE    OF ARPRODUIT, &
+               PRDUNAINV OF ARPRODUIT
+
+
+
+; Pour valider l'unité d'inventaire
+FILE MCCHARTE_UNA      REFERENCE
+  ACCESS VIA   CPTCLE,  &
+               CIECLE,  &
+               UNACLE   &
+         USING PRDCPTINV OF ARPRODUIT, &
+               CIECLE    OF ARPRODUIT, &
+               PRDUNAINV OF ARPRODUIT
+
+
+
+; Pour le dépisteur du compte d'inventaire
+FILE VCPT_DSC          REFERENCE
+  ACCESS VIA   CPTCLE    &
+         USING PRDCPTINV OF ARPRODUIT
+
+
+;
+; Paramètres pour la compagnie consolidé(holding)
+;
+FILE MCHOLDING         REFERENCE
+  ACCESS VIA CIENMC USING "1"
+
+;
+; Sert à valider les codes bilingues et pour les sous-écrans de consultation
+;
+DEFINE    D_PRDTYP CHARACTER SIZE 16 = "PRDTYP"
+TEMPORARY T_PRDTYP CHARACTER SIZE 4
+
+FILE VCBI_DSC          REFERENCE ALIAS A_CBI_PRDTYP
+  ACCESS  VIA XELNOM, &
+              CBICLE &
+          USING D_PRDTYP, &
+                PRDTYP OF ARPRODUIT
+
+
+;
+; Sert à valider les codes bilingues et pour les sous-écrans de consultation
+;
+DEFINE    D_PRDCAT CHARACTER SIZE 16 = "PRDCAT"
+TEMPORARY T_PRDCAT CHARACTER SIZE 4
+
+FILE VCBI_DSC          REFERENCE ALIAS A_CBI_PRDCAT
+  ACCESS  VIA XELNOM, &
+              CBICLE &
+          USING D_PRDCAT, &
+                PRDCAT OF ARPRODUIT
+
+;
+; Sert à valider les codes bilingues et pour les sous-écrans de consultation
+;
+DEFINE    D_PRDSTU CHARACTER SIZE 16 = "PRDSTU"
+TEMPORARY T_PRDSTU CHARACTER SIZE 4
+
+FILE VCBI_DSC          REFERENCE ALIAS A_CBI_PRDSTU
+  ACCESS  VIA XELNOM, &
+              CBICLE &
+          USING D_PRDSTU, &
+                PRDSTU OF ARPRODUIT
+
+;
+; Sert à valider les codes bilingues et pour les sous-écrans de consultation
+;
+DEFINE    D_PRDUNI CHARACTER SIZE 16 = "PRDUNI"
+TEMPORARY T_PRDUNI CHARACTER SIZE 4
+
+FILE VCBI_DSC          REFERENCE ALIAS A_CBI_PRDUNI
+  ACCESS  VIA XELNOM, &
+              CBICLE &
+          USING D_PRDUNI, &
+                PRDUNI OF ARPRODUIT
+
+; ----------------------------------------------------------------------------------------------------------------------------------
+; MP-00-02-23_S30.
+;
+; Table des entrepôts - Utilisé dans le calcul des quantités en main par entrepôt.
+;
+FILE ARPRD_ENT DESIGNER
+  ACCESS VIA CIECLE             , &
+             PRDCLE               &
+       USING CIECLE OF ARPRODUIT, &
+             PRDCLE OF ARPRODUIT  &
+     ORDERBY ENTCLE 
+
+; ----------------------------------------------------------------------------------------------------------------------------------
+; MP-00-02-23_S30.
+;
+; Vue associée aux produits par entrepôt - Utilisé dans le calcul des quantités en main par entrepôt.
+;
+FILE VPRE_PRD DESIGNER
+  ACCESS VIA CIECLE             , &
+             PRDCLE             , &
+             ENTCLE               &
+       USING CIECLE OF ARPRD_ENT, &
+             PRDCLE OF ARPRD_ENT, &
+             ENTCLE OF ARPRD_ENT
+
+; ----------------------------------------------------------------------------------------------------------------------------------
+; MP-00-03-01_D999999.
+;
+; Table des entrepôts - Utilisé dans le calcul des quantités en main par entrepôt.
+;
+;
+TEMPORARY T_SYSDATE-1 INTEGER SIZE 8 INITIAL SYSDATE - 10000
+TEMPORARY T_SYSDATE   INTEGER SIZE 8 INITIAL SYSDATE 
+
+FILE ARPRD_HISTO DESIGNER
+  ACCESS VIA CIECLE             , &
+             PRDCLE             , &
+             ENTCLE             , &
+             PRHTYP               &
+       USING CIECLE OF ARPRD_ENT, &
+             PRDCLE OF ARPRD_ENT, &
+             ENTCLE OF ARPRD_ENT, &
+             "06"                 ; Code associé à la sortie de produit
+
+  SELECT IF  PRHDATREF OF ARPRD_HISTO >= T_SYSDATE-1 AND &  ; Sélection des sorties de la dernière année.
+             PRHDATREF OF ARPRD_HISTO <= T_SYSDATE
+
+;-------------------------------------------------------------------------------
+; Table des fournisseurs par produit
+
+FILE ARPRD_FOU DESIGNER
+  ACCESS VIA CIECLE             ,  &
+             PRDCLE                &   
+       USING CIECLE OF ARPRODUIT,  &
+             PRDCLE OF ARPRODUIT   &
+     ORDERBY CIECLE             ,  &
+             PRDCLE             ,  &
+             PDFDATDERACH DESCENDING     
+
+;-------------------------------------------------------------------------------
+TEMPORARY T_CPTCLE    CHARACTER SIZE 6 ; Popup sur les comptes.
+TEMPORARY T_PECCLE    CHARACTER SIZE 4 ; Popup sur les comptes.
+TEMPORARY T_CPTTYPPAT CHARACTER SIZE 1 ; Popup sur les comptes.
+TEMPORARY T_CPTCATPAT CHARACTER SIZE 8 ; Popup sur les comptes.
+TEMPORARY T_UNACLE    CHARACTER SIZE 8 ; Popup sur unité administrative.
+TEMPORARY T_FLGDEL    CHARACTER SIZE 1 ; Flag pour le sous-écran de destruction
+TEMPORARY T_ENTCLE    CHARACTER SIZE 4  ; Entrep\364t pour \351cran d\351pisteur
+TEMPORARY T_PRDCLE    CHARACTER SIZE 12 ; Produit pour \351cran d\351pisteur.
+
+; ----------------------------------------------------------------------------------------------------------------------------------
+; MP-00-02-23_S30 - MP-00-03-01_D999999.
+
+TEMPORARY T_ENT_NUM_1 CHARACTER SIZE 2  ; Numéro du premier entrepôt.
+TEMPORARY T_ENT_QTE_1 INTEGER   SIZE 8  ; Quantité associée au premier entrepôt.
+TEMPORARY T_ENT_SOR_1 INTEGER   SIZE 8  ; Sorties associées au premier entrepôt depuis 1 an.
+TEMPORARY T_ENT_NUM_2 CHARACTER SIZE 2  ; Numéro du second entrepôt.
+TEMPORARY T_ENT_QTE_2 INTEGER   SIZE 8  ; Quantité associée au second entrepôt.
+TEMPORARY T_ENT_SOR_2 INTEGER   SIZE 8  ; Sorties associées au second entrepôt depuis 1 an.
+TEMPORARY T_ENT_NUM_3 CHARACTER SIZE 2  ; Numéro du troisième entrepôt.
+TEMPORARY T_ENT_QTE_3 INTEGER   SIZE 8  ; Quantité associée au troisième entrepôt.
+TEMPORARY T_ENT_SOR_3 INTEGER   SIZE 8  ; Sorties associées au troisième entrepôt depuis 1 an.
+TEMPORARY T_ENT_NUM_4 CHARACTER SIZE 2  ; Numéro du quatrième entrepôt.
+TEMPORARY T_ENT_QTE_4 INTEGER   SIZE 8  ; Quantité associée au quatrième entrepôt.
+TEMPORARY T_ENT_SOR_4 INTEGER   SIZE 8  ; Sorties associées au quatrième entrepôt depuis 1 an.
+TEMPORARY T_ENT_NUM_5 CHARACTER SIZE 2  ; Numéro du cinquième entrepôt.
+TEMPORARY T_ENT_QTE_5 INTEGER   SIZE 8  ; Quantité associée au cinquième entrepôt.
+TEMPORARY T_ENT_SOR_5 INTEGER   SIZE 8  ; Sorties associées au cinquième entrepôt depuis 1 an.
+TEMPORARY T_ENT_NUM_6 CHARACTER SIZE 2  ; Numéro du sixième entrepôt.
+TEMPORARY T_ENT_QTE_6 INTEGER   SIZE 8  ; Quantité associée au sixième entrepôt.
+TEMPORARY T_ENT_SOR_6 INTEGER   SIZE 8  ; Sorties associées au sixième entrepôt depuis 1 an.
+
+TEMPORARY T_ENT_NUM_X CHARACTER SIZE 2  ; Indique qu'il y a plus le produit est réparti sur plus de six entrepôts.
+TEMPORARY T_ENT_SOR_X INTEGER   SIZE 8  ; Sorties associées aux entrepôts depuis 1 an.
+
+; ----------------------------------------------------------------------------------------------------------------------------------
+
+USE usvarprd NOLIST ; Variable servant à la saisie de prdcle
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST     ; Draw pour les écrans pleine page
+USE ustitstd NOLIST     ; En-tête pour les écrans pleine page
+USE ushilite NOLIST     ; Hilite pour tous les écrans
+
+SKIP
+
+TITLE " Gestion des produits "  CENTERED  AT ,01
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+DRAW 12,02 TO 19,46
+
+TITLE "Entr.   :              Sortie:"    AT 13,03
+TITLE "Entr.   :              Sortie:"    AT 14,03
+TITLE "Entr.   :              Sortie:"    AT 15,03
+TITLE "Entr.   :              Sortie:"    AT 16,03
+TITLE "Entr.   :              Sortie:"    AT 17,03
+TITLE "Entr.   :              Sortie:"    AT 18,03
+
+TITLE "<- Quantité en main par entrepôt"  AT 15,48
+TITLE "<- et sortie par entrepôt depuis"  AT 16,48
+TITLE "<- la dernière année            "  AT 17,48
+
+;-------------------------------------------------------------------------------
+
+SKIP TO 4
+
+ALIGN (3,3,20) (,33,49) (,,54)
+FIELD PRDCLE OF ARPRODUIT              &
+      HIDDEN ID 05                     &
+      LABEL "Code produit...:"         &
+      REQUIRED NOCHANGE                &
+      LOOKUP NOTON ARPRODUIT           &
+         VIA CIECLE          ,         &
+             PRDCLE                    &
+       USING T_CIECLEMNU     ,         &
+             PRDCLE                    &
+     MESSAGE 1327 ; Ce code de produit existe déjà
+
+FIELD PRDTYP OF ARPRODUIT              &
+      LABEL "Type..........:"          &
+      DEFAULT "I"                      &  ; Inventorié par défaut
+      NOCHANGE                         &
+      LOOKUP ON A_CBI_PRDTYP           &
+        MESSAGE 1328 ; Ce type de produit est invalide
+
+FIELD CBIDSC OF A_CBI_PRDTYP           &
+      DISPLAY                            
+                                         
+ALIGN (,33,49) (,,54)                    
+FIELD PRDCAT OF ARPRODUIT              &
+      LABEL "Catégorie.....:"            
+                                         
+FIELD CBIDSC OF A_CBI_PRDCAT           &
+      DISPLAY
+
+FIELD PRDSTU OF ARPRODUIT              &
+      LABEL "Statut........:"          &
+      NOENTRY                          &
+      LOOKUP ON A_CBI_PRDSTU           &
+        MESSAGE 1330 ; Ce statut de produit est invalide
+
+FIELD CBIDSC OF A_CBI_PRDSTU           &
+      DISPLAY
+
+ALIGN (2,3,20)
+FIELD PRDDSC1 OF ARPRODUIT             &
+      LABEL "Description....:"         & 
+      HIDDEN ID 25                     &
+      REQUIRED
+
+ALIGN (,,20)
+FIELD PRDDSC2 OF ARPRODUIT
+FIELD PRDDSC3 OF ARPRODUIT
+
+ALIGN (2,3,20) (,,25)
+FIELD PRDUNI OF ARPRODUIT              &
+      LABEL "Unité mesure...:"         &
+      HIDDEN ID 30                     
+                                       
+FIELD CBIDSC OF A_CBI_PRDUNI           &
+      DISPLAY                          
+                                       
+ALIGN (,48,68)                         
+FIELD V_PRDQTEDEM OF VPRD_01           &
+      LABEL "Qté demadée totale:"      &
+      DISPLAY                          &
+      PICTURE "^^^,^^^.^^^ "           &
+      SIGNIFICANCE 6                   &
+      TRAILING SIGN "-"                &
+      BWZ                              
+                                       
+FIELD V_PRDQTECOM OF VPRD_01           &
+      LABEL "Qté en cmd  totale:"      &
+      DISPLAY                          &
+      PICTURE "^^^,^^^.^^^ "           &
+      SIGNIFICANCE 6                   &
+      TRAILING SIGN "-"                &
+      BWZ                              
+                                       
+FIELD V_PRDQTEPHY OF VPRD_01           &
+      LABEL "Qté en main totale:"      &
+      DISPLAY                          &
+      PICTURE "^^^,^^^.^^^ "           &
+      SIGNIFICANCE 6                   &
+      TRAILING SIGN "-"                &
+      BWZ
+
+;-------------------------------------------------
+; MP-00-03-01_DD999999
+;
+; Le coût moyen, le poids unitaire et le volume ne 
+; sont plus affiché - en accord avec le client (Sylvain boivin)
+
+;FIELD V_PRDCOUMYN OF VPRD_01          &
+;      LABEL "Coût moyen........:"     &
+;      DISPLAY                         &
+;      PICTURE "^^^,^^^.^^^^"          &
+;      SIGNIFICANCE 6                  &
+;      BWZ
+
+;ALIGN (2,3,20)
+;FIELD PRDPDSUNI OF ARPRODUIT          &
+;      LABEL "Poids unitaire.:"        &
+;      HIDDEN ID 35
+
+;FIELD PRDVOLUNI OF ARPRODUIT          &
+;      LABEL "Volume unitaire:"        &
+;      HIDDEN ID 45
+;-------------------------------------------------
+
+SKIP TO 19
+
+ALIGN (,48,68)
+FIELD V_PRDDERCOU OF VPRD_01           &
+      LABEL "Dernier coût......:"      &
+      DISPLAY                          &
+      PICTURE "^^^,^^^.^^^^"           &
+      SIGNIFICANCE 6                   &
+      BWZ
+
+SKIP
+
+ALIGN (3,3,19) (,,26) (,48,68)
+FIELD PRDCPTINV OF ARPRODUIT           &
+      HIDDEN ID 60                     &
+      LABEL "Compte........:"          &
+      LOOKUP ON VCPT_DSC               &
+        MESSAGE 1313 ; Ce compte n'existe pas.
+
+FIELD CPTDSCABR OF VCPT_DSC            &
+      DISPLAY
+
+FIELD PRDUNAINV OF ARPRODUIT           &
+      LABEL "Unité.............:"
+
+SKIP
+
+ALIGN (3,3,19) (,26,43) (,48,68)
+FIELD PRDFLGRESFOR OF ARPRODUIT        &
+      HIDDEN ID 70                     &
+      LABEL "Rest. format..:"          &
+      NOENTRY                          &
+      SIZE 3
+
+FIELD PRDGRPINV    OF ARPRODUIT        &
+      LABEL "Groupe invent..:"         &
+      HIDDEN ID 80
+
+; Ce champ est demandé seulement s'il y a une restriction de format
+
+FIELD PRDMULACC    OF ARPRODUIT        &
+      LABEL "Multiple..........:"      &
+      REQUIRED IF PRDFLGRESFOR = "1"
+
+ALIGN (,03,26) (,,33) (,,40) (,48,68)    ; MP-00-05-12_DD55.
+FIELD T_DERNIER_FOUCLE_01              & ; MP-00-05-12_DD55.
+      LABEL "Derniers fournisseurs:"   & ; MP-00-05-12_DD55.
+      DISPLAY                            ; MP-00-05-12_DD55.
+
+FIELD T_DERNIER_FOUCLE_02              & ; MP-00-05-12_DD55.
+      DISPLAY                            ; MP-00-05-12_DD55.
+
+FIELD T_DERNIER_FOUCLE_03              & ; MP-00-05-12_DD55.
+      DISPLAY                            ; MP-00-05-12_DD55.
+
+FIELD PRDANCNUM OF ARPRODUIT           & ; MP-00-05-12_DD55.
+      LABEL "Anc. num. magasin.:"      & ; MP-00-05-12_DD55.
+      DISPLAY                            ; MP-00-05-12_DD55.
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+; MP-00-02-23_S30
+
+HILITE DISPLAY DEFAULT
+
+SKIP TO 13
+
+ALIGN (,,09)
+FIELD T_ENT_NUM_1                      &
+      DISPLAY                         
+FIELD T_ENT_NUM_2                      &
+      DISPLAY                         
+FIELD T_ENT_NUM_3                      &
+      DISPLAY                         
+FIELD T_ENT_NUM_4                      &
+      DISPLAY                         
+FIELD T_ENT_NUM_5                      &
+      DISPLAY                         
+FIELD T_ENT_NUM_6                      &
+      DISPLAY
+
+HILITE DISPLAY HALFTONE UNDERLINE
+
+SKIP TO 13
+
+ALIGN (,,12)
+FIELD T_ENT_QTE_1                      &
+      DISPLAY                          &
+      PICTURE "^^^,^^^.^^^ "           &
+      TRAILING SIGN "-"                &
+      SIGNIFICANCE 6                   &
+      BWZ                             
+FIELD T_ENT_QTE_2                      &
+      DISPLAY                          &
+      PICTURE "^^^,^^^.^^^ "           &
+      TRAILING SIGN "-"                &
+      SIGNIFICANCE 6                   &
+      BWZ                             
+FIELD T_ENT_QTE_3                      &
+      DISPLAY                          &
+      PICTURE "^^^,^^^.^^^ "           &
+      TRAILING SIGN "-"                &
+      SIGNIFICANCE 6                   &
+      BWZ                             
+FIELD T_ENT_QTE_4                      &
+      DISPLAY                          &
+      PICTURE "^^^,^^^.^^^ "           &
+      TRAILING SIGN "-"                &
+      SIGNIFICANCE 6                   &
+      BWZ                             
+FIELD T_ENT_QTE_5                      &
+      DISPLAY                          &
+      PICTURE "^^^,^^^.^^^ "           &
+      TRAILING SIGN "-"                &
+      SIGNIFICANCE 6                   &
+      BWZ                             
+FIELD T_ENT_QTE_6                      &
+      DISPLAY                          &
+      PICTURE "^^^,^^^.^^^ "           &
+      TRAILING SIGN "-"                &
+      SIGNIFICANCE 6                   &
+      BWZ                             
+                                      
+SKIP TO 13                            
+                                      
+ALIGN (,,33)                          
+FIELD T_ENT_SOR_1                      &
+      DISPLAY                          &
+      PICTURE "^,^^^,^^^.^^^"          &
+      SIGNIFICANCE 5                   &
+      BWZ                             
+FIELD T_ENT_SOR_2                      &
+      DISPLAY                          &
+      PICTURE "^,^^^,^^^.^^^"          &
+      SIGNIFICANCE 5                   &
+      BWZ                             
+FIELD T_ENT_SOR_3                      &
+      DISPLAY                          &
+      PICTURE "^,^^^,^^^.^^^"          &
+      SIGNIFICANCE 5                   &
+      BWZ                             
+FIELD T_ENT_SOR_4                      &
+      DISPLAY                          &
+      PICTURE "^,^^^,^^^.^^^"          &
+      SIGNIFICANCE 5                   &
+      BWZ                             
+FIELD T_ENT_SOR_5                      &
+      DISPLAY                          &
+      PICTURE "^,^^^,^^^.^^^"          &
+      SIGNIFICANCE 5                   &
+      BWZ                              
+FIELD T_ENT_SOR_6                      &
+      DISPLAY                          &
+      PICTURE "^,^^^,^^^.^^^"          &
+      SIGNIFICANCE 5                   &
+      BWZ                          
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+; MP-00-03-01_D999999.
+;
+; Procédure qui calcule et affiche les quantités en main par entrepôt. ; MP-00-02-23_S30
+;
+PROCEDURE INTERNAL I_CUMUL_SORTIES
+BEGIN
+  LET T_ENT_SOR_X = 0
+
+  WHILE RETRIEVING ARPRD_HISTO
+  BEGIN
+    LET T_ENT_SOR_X = T_ENT_SOR_X + (PRHQTETRS OF ARPRD_HISTO)
+  END
+END
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+; MP-00-02-23_S30.
+;
+; Procédure qui calcule et affiche les quantités en main par entrepôt. ; MP-00-02-23_S30
+;
+PROCEDURE INTERNAL I_AFF_QTE_ENT
+BEGIN
+  LET T_ENT_NUM_1 = " "
+  LET T_ENT_QTE_1 = 0
+  LET T_ENT_NUM_2 = " "
+  LET T_ENT_QTE_2 = 0
+  LET T_ENT_NUM_3 = " "
+  LET T_ENT_QTE_3 = 0
+  LET T_ENT_NUM_4 = " "
+  LET T_ENT_QTE_4 = 0
+  LET T_ENT_NUM_5 = " "
+  LET T_ENT_QTE_5 = 0
+  LET T_ENT_NUM_6 = " "
+  LET T_ENT_QTE_6 = 0
+
+  LET T_ENT_SOR_1 = 0
+  LET T_ENT_SOR_2 = 0
+  LET T_ENT_SOR_3 = 0
+  LET T_ENT_SOR_4 = 0
+  LET T_ENT_SOR_5 = 0
+  LET T_ENT_SOR_6 = 0
+
+  LET T_ENT_NUM_X = " "
+
+  WHILE RETRIEVING ARPRD_ENT
+  BEGIN
+    IF T_ENT_NUM_1 = " "
+    THEN BEGIN
+      LET T_ENT_NUM_1 = ENTCLE    OF ARPRD_ENT
+      GET VPRE_PRD OPTIONAL
+      LET T_ENT_QTE_1 = PREQTEPHY OF VPRE_PRD
+      DO INTERNAL I_CUMUL_SORTIES
+      LET T_ENT_SOR_1 = T_ENT_SOR_X
+    END
+    ELSE IF T_ENT_NUM_2 = " "
+         THEN BEGIN
+           LET T_ENT_NUM_2 = ENTCLE    OF ARPRD_ENT
+           GET VPRE_PRD OPTIONAL
+           LET T_ENT_QTE_2 = PREQTEPHY OF VPRE_PRD
+           DO INTERNAL I_CUMUL_SORTIES
+           LET T_ENT_SOR_2 = T_ENT_SOR_X
+         END
+         ELSE IF T_ENT_NUM_3 = " "
+              THEN BEGIN
+                LET T_ENT_NUM_3 = ENTCLE    OF ARPRD_ENT
+                GET VPRE_PRD OPTIONAL
+                LET T_ENT_QTE_3 = PREQTEPHY OF VPRE_PRD
+                DO INTERNAL I_CUMUL_SORTIES
+                LET T_ENT_SOR_3 = T_ENT_SOR_X
+              END
+              ELSE IF T_ENT_NUM_4 = " "
+                   THEN BEGIN
+                     LET T_ENT_NUM_4 = ENTCLE    OF ARPRD_ENT
+                     GET VPRE_PRD OPTIONAL
+                     LET T_ENT_QTE_4 = PREQTEPHY OF VPRE_PRD
+                     DO INTERNAL I_CUMUL_SORTIES
+                     LET T_ENT_SOR_4 = T_ENT_SOR_X
+                   END
+                   ELSE IF T_ENT_NUM_5 = " "
+                        THEN BEGIN
+                          LET T_ENT_NUM_5 = ENTCLE    OF ARPRD_ENT
+                          GET VPRE_PRD OPTIONAL
+                          LET T_ENT_QTE_5 = PREQTEPHY OF VPRE_PRD
+                          DO INTERNAL I_CUMUL_SORTIES
+                          LET T_ENT_SOR_5 = T_ENT_SOR_X
+                        END
+                        ELSE IF T_ENT_NUM_6 = " "
+                             THEN BEGIN
+                               LET T_ENT_NUM_6 = ENTCLE    OF ARPRD_ENT
+                               GET VPRE_PRD OPTIONAL
+                               LET T_ENT_QTE_6 = PREQTEPHY OF VPRE_PRD
+                               DO INTERNAL I_CUMUL_SORTIES
+                               LET T_ENT_SOR_6 = T_ENT_SOR_X
+                             END
+                             ELSE LET T_ENT_NUM_X = "X"
+  END
+  DISPLAY FIELD T_ENT_NUM_1
+  DISPLAY FIELD T_ENT_QTE_1
+  DISPLAY FIELD T_ENT_NUM_2
+  DISPLAY FIELD T_ENT_QTE_2
+  DISPLAY FIELD T_ENT_NUM_3
+  DISPLAY FIELD T_ENT_QTE_3
+  DISPLAY FIELD T_ENT_NUM_4
+  DISPLAY FIELD T_ENT_QTE_4
+  DISPLAY FIELD T_ENT_NUM_5
+  DISPLAY FIELD T_ENT_QTE_5
+  DISPLAY FIELD T_ENT_NUM_6
+  DISPLAY FIELD T_ENT_QTE_6
+
+  DISPLAY FIELD T_ENT_SOR_1
+  DISPLAY FIELD T_ENT_SOR_2
+  DISPLAY FIELD T_ENT_SOR_3
+  DISPLAY FIELD T_ENT_SOR_4
+  DISPLAY FIELD T_ENT_SOR_5
+  DISPLAY FIELD T_ENT_SOR_6
+
+  IF T_ENT_NUM_X = "X"
+  THEN WARNING "A12345 *A* Attention, ce produit est réparti sur plus de six entrepôts"
+END
+
+;-----------------------------------------------------------------------------
+;
+; Saisie de prdcle
+;
+PROCEDURE INPUT PRDCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_ENTCLE = "@"
+    LET T_PRDCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN ar103 MODE F PASSING T_CIECLEMNU, T_ENTCLE, T_PRDCLE  &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_PRDCLE)
+  END
+  ELSE BEGIN
+    USE usinpprd NOLIST
+  END
+END
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour les codes bilingues.
+;
+;
+PROCEDURE INPUT PRDTYP
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PRDTYP = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_PRDTYP, T_PRDTYP
+    LET FIELDTEXT = TRUNCATE(T_PRDTYP)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour les codes bilingues.
+;
+;
+PROCEDURE INPUT PRDCAT
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PRDCAT = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_PRDCAT, T_PRDCAT
+    LET FIELDTEXT = TRUNCATE(T_PRDCAT)
+  END
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de valider le code bilingue saisi et permet de
+; de l'effacer après coup puisque ce champ est optionnel.
+;
+PROCEDURE EDIT PRDCAT
+BEGIN
+  IF 0 <> SIZE (TRUNCATE (FIELDTEXT))
+  THEN BEGIN
+    GET A_CBI_PRDCAT OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 1329        ; Cette catégorie de produit est invalide
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour les codes bilingues.
+;
+;
+PROCEDURE INPUT PRDSTU
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PRDSTU = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_PRDSTU, T_PRDSTU
+    LET FIELDTEXT = TRUNCATE(T_PRDSTU)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour les codes bilingues.
+;
+;
+PROCEDURE INPUT PRDUNI
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PRDUNI = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_PRDUNI, T_PRDUNI
+    LET FIELDTEXT = TRUNCATE(T_PRDUNI)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de valider le code bilingue saisi et permet de
+; de l'effacer après coup puisque ce champ est optionnel.
+;
+PROCEDURE EDIT PRDUNI
+BEGIN
+  IF 0 <> SIZE (TRUNCATE (FIELDTEXT))
+  THEN BEGIN
+    GET A_CBI_PRDUNI OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 1331        ; Cette unité de mesure est invalide
+  END
+END
+
+;-------------------------------------------------------------------------------
+; Procédure pour le dépisteur du numéro de compte inventaire
+;
+PROCEDURE INPUT PRDCPTINV
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_PECCLE    = " "
+    LET T_CPTTYPPAT = "@"
+    LET T_CPTCATPAT = "@"
+    RUN SCREEN mc103 MODE F PASSING T_CPTCLE   , &
+                                    T_CPTTYPPAT, &
+                                    T_CPTCATPAT, &
+                                    T_PECCLE
+    LET FIELDTEXT = TRUNCATE(T_CPTCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;  Cette procédure permet de valider que la nature comptable du compte
+;  inventaire est de type actif.
+;
+PROCEDURE EDIT PRDCPTINV
+BEGIN
+  IF    NACCLE OF VCPT_DSC <> 1 &
+    AND NACCLE OF VCPT_DSC <> 5
+  THEN ERROR 1312  ; La nature comptable du compte inventaire doit être de
+                   ; type actif ou dépense.
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les unités administratives pour le compte inventaire
+;
+;
+PROCEDURE INPUT PRDUNAINV
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE = PRDCPTINV OF ARPRODUIT
+    LET T_PECCLE = " "
+    LET T_UNACLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    ;
+    ; Il y a trois popup possible:
+    ;  1) sur les unités administrative par compagnie(MCUNITE_ADM).
+    ;  2) sur les unités administrative d'une charte de compte(MCCHARTE_UNA).
+    ;  3) sur les unités administrative qui ne sont pas définis dans la charte
+    ;     de compte(MCUNITE_ADM, MCCHARTE_UNA).
+    ;
+    IF HLDCHTCPT OF MCHOLDING = "0"
+    THEN RUN SCREEN mc104 MODE F PASSING T_CIECLEMNU, T_UNACLE
+    ELSE BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN RUN SCREEN mc115 MODE F PASSING T_CIECLEMNU, T_CPTCLE, T_UNACLE, &
+                                           T_PECCLE
+      ELSE RUN SCREEN mc116 MODE F PASSING T_CIECLEMNU, T_CPTCLE, T_UNACLE, &
+                                           T_PECCLE
+    END
+    LET FIELDTEXT = TRUNCATE(T_UNACLE)
+  END
+  ;
+  ; Force le lookup de l'unité pour la charte.
+  ;
+  ;
+  ; Force le lookup de l'unité pour la charte.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(PRDUNAINV OF ARPRODUIT ))
+  THEN LET FIELDTEXT = PRDUNAINV OF ARPRODUIT
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de valider que lorsque l'unité administrative est
+; saisie, l'unité existe dans la table MCCHARTE_UNA.
+;
+PROCEDURE EDIT PRDUNAINV
+BEGIN
+  IF 0 <> SIZE (TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    GET MCUNITE_ADM OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 1317   ; Cette unité administrative n'existe pas.
+
+    IF HLDCHTCPT OF MCHOLDING = "1"
+    THEN BEGIN
+      GET MCCHARTE_UNA VIA   CPTCLE , &
+                             CIECLE , &
+                             UNACLE   &
+                       USING PRDCPTINV OF ARPRODUIT , &
+                             CIECLE    OF ARPRODUIT , &
+                             PRDUNAINV OF ARPRODUIT   &
+                       OPTIONAL
+      ;
+      ; Si la charte est incluse, le lien est obligatoire.
+      ;
+      IF NOT ACCESSOK
+      THEN BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "I"
+        THEN ERROR 1314 ; La combinaison compte/unité administrative n'existe pas.
+      END
+    END
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+PROCEDURE INPUT PRDFLGRESFOR
+BEGIN
+  USE usflginp NOLIST  ; Pour l'entrée d'un flag oui/non
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de mettre à zéro le multiple lorsqu'il n'y a pas
+; de restriction de format.
+;
+PROCEDURE PROCESS PRDFLGRESFOR
+BEGIN
+  IF PRDFLGRESFOR = "0"
+  THEN BEGIN
+    LET PRDMULACC OF ARPRODUIT = 0
+    DISPLAY PRDMULACC OF ARPRODUIT
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+PROCEDURE OUTPUT PRDFLGRESFOR
+BEGIN
+  USE usflgout3 NOLIST ; Pour afficher la valeur Oui/Non avec 3 caractères.
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de forcer l'entrée d'un multiple losrqu'il y a
+; une restriction de format.
+;
+PROCEDURE INPUT PRDMULACC
+BEGIN
+  IF NOT FINDMODE &
+     AND PRDFLGRESFOR OF ARPRODUIT = "1" &
+     AND 0 = SIZE(TRUNCATE(FIELDTEXT))
+  THEN LET FIELDTEXT = ASCII(PRDMULACC OF ARPRODUIT,8)[1:5] + "." + &
+                       ASCII(PRDMULACC OF ARPRODUIT,8)[6:8]
+END
+
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de valider que le multiple entré est différent de zéro.
+;
+PROCEDURE EDIT PRDMULACC
+BEGIN
+  IF 0 = FIELDVALUE
+  THEN ERROR 1332 ; Vous devez entrer un multiple différent de zéro
+END
+
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de saisir l'unité de mesure si le type de produit est
+; différent de "Frais".
+;
+PROCEDURE DESIGNER 30
+BEGIN
+  IF PRDTYP OF ARPRODUIT <> "F"
+  THEN ACCEPT PRDUNI OF ARPRODUIT
+END
+
+
+;-------------------------------------------------------------------------------
+; MP-00-03-01_DD999999
+;
+; Le coût moyen, le poids unitaire et le volume ne 
+; sont plus affiché - en accord avec le client (Sylvain boivin)
+; Cette procédure permet de saisir le poid unitaire si le type de produit est
+; différent de "Frais".
+;
+;PROCEDURE DESIGNER 35
+;BEGIN
+;  IF PRDTYP OF ARPRODUIT <> "F"
+;  THEN ACCEPT PRDPDSUNI OF ARPRODUIT
+;END
+
+;-------------------------------------------------------------------------------
+; MP-00-03-01_DD999999
+;
+; Le coût moyen, le poids unitaire et le volume ne 
+; sont plus affiché - en accord avec le client (Sylvain boivin)
+;
+; Cette procédure permet de saisir le volume unitaire si le type de produit est
+; différent de "Frais".
+;
+;PROCEDURE DESIGNER 45
+;BEGIN
+;  IF PRDTYP OF ARPRODUIT <> "F"
+;  THEN ACCEPT PRDVOLUNI OF ARPRODUIT
+;END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de saisir en mode de modification le
+; multiple s'il y a une restriction de format sinon on le met à nul. Ce champ
+; n'est pas saisi si le produit est de type Frais.
+;
+PROCEDURE DESIGNER 70
+BEGIN
+  IF PRDTYP OF ARPRODUIT <> "F"
+  THEN BEGIN
+    ACCEPT PRDFLGRESFOR   OF ARPRODUIT
+    ACCEPT PRDGRPINV      OF ARPRODUIT
+
+    IF PRDFLGRESFOR = "1"
+    THEN ACCEPT PRDMULACC OF ARPRODUIT
+    ELSE BEGIN
+      LET PRDMULACC OF ARPRODUIT = 0
+      DISPLAY PRDMULACC OF ARPRODUIT
+    END
+  END
+END
+
+;-------------------------------------------------------------------------------
+; Procédure d'appel du sous-écran des produits inventaire
+;
+PROCEDURE DESIGNER D001
+BEGIN
+  RUN SCREEN ar002a         &
+      PASSING T_CIECLEMNU,  &
+              T_CIENOM,     &
+              ARPRODUIT     &
+      MODE SAME
+
+
+; Appel de la procédure qui calcule et affiche les quantités en main par entrepôt.
+
+  DO INTERNAL I_AFF_QTE_ENT
+END
+
+
+;-------------------------------------------------------------------------------
+; Procédure d'appel du sous-écran de l'historique des transactions
+;
+PROCEDURE DESIGNER D002
+BEGIN
+  IF PRDTYP OF ARPRODUIT = "I" OR &
+     PRDTYP OF ARPRODUIT = "N"
+  THEN RUN SCREEN ar002b &
+               PASSING T_CIECLEMNU, &
+                       T_CIENOM,    &
+                       T_PECCLEMNU, &
+                       T_FOUCIECLE, &
+                       ARPRODUIT  &
+               MODE F
+END
+
+
+;-------------------------------------------------------------------------------
+; Procédure d'appel du sous-écran du catalogue
+;
+PROCEDURE DESIGNER D003
+BEGIN
+  IF PRDTYP OF ARPRODUIT = "I" OR &
+     PRDTYP OF ARPRODUIT = "N"
+  THEN RUN SCREEN ar002c &
+             PASSING ARPRODUIT,  &
+                     T_FOUCIECLE &
+             MODE F
+END
+
+
+;-------------------------------------------------------------------------------
+; Procédure d'appel du sous-écran de la piste de vérification
+;
+PROCEDURE DESIGNER D004
+BEGIN
+  RUN SCREEN ar002d &
+             PASSING ARPRODUIT  &
+             MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure est codée car lorsque le produit est de type Frais, certains
+; champs ne sont pas accessibles en saisie et ces champs ne sont pas
+; obligatoires pour les autres types de produit.
+;
+PROCEDURE ENTRY
+BEGIN
+  ACCEPT  PRDCLE OF ARPRODUIT
+  ACCEPT  PRDTYP OF ARPRODUIT
+
+  DISPLAY CBIDSC OF A_CBI_PRDTYP
+
+  ACCEPT  PRDCAT OF ARPRODUIT
+
+  DISPLAY CBIDSC OF A_CBI_PRDCAT
+  DISPLAY PRDSTU OF ARPRODUIT
+  DISPLAY CBIDSC OF A_CBI_PRDSTU
+
+  ACCEPT PRDDSC1 OF ARPRODUIT
+  ACCEPT PRDDSC2 OF ARPRODUIT
+  ACCEPT PRDDSC3 OF ARPRODUIT
+
+  ;
+  ; Ces champs ne sont pas saisis si le type de produit est Frais
+  ;
+  IF PRDTYP OF ARPRODUIT <> "F"
+  THEN BEGIN
+    ACCEPT  PRDUNI      OF ARPRODUIT
+    DISPLAY CBIDSC      OF A_CBI_PRDUNI
+
+;-------------------------------------------------
+; MP-00-03-01_DD999999
+;
+; Le coût moyen, le poids unitaire et le volume ne 
+; sont plus affiché - en accord avec le client (Sylvain boivin)
+;
+;   ACCEPT  PRDPDSUNI   OF ARPRODUIT
+;-------------------------------------------------
+
+    DISPLAY V_PRDQTEDEM OF VPRD_01
+
+;--------------------------------------------------------------
+; MP-00-03-01_DD999999
+;
+; Le coût moyen, le poids unitaire et le volume ne 
+; sont plus affiché - en accord avec le client (Sylvain boivin)
+
+;   ACCEPT  PRDVOLUNI   OF ARPRODUIT
+;--------------------------------------------------------------
+
+    DISPLAY V_PRDQTECOM OF VPRD_01
+    DISPLAY V_PRDQTEPHY OF VPRD_01
+  END
+
+  ACCEPT  PRDCPTINV OF ARPRODUIT
+  DISPLAY CPTDSCABR OF VCPT_DSC
+  ACCEPT  PRDUNAINV OF ARPRODUIT
+   ;
+   ; Ces champs ne sont pas saisis si le type de produit est Frais
+   ;
+  IF PRDTYP OF ARPRODUIT <> "F"
+  THEN BEGIN
+     DISPLAY PRDFLGRESFOR
+     IF PRDFLGRESFOR OF ARPRODUIT = "1"
+       THEN ACCEPT  PRDMULACC OF ARPRODUIT
+       ELSE DISPLAY PRDMULACC OF ARPRODUIT
+     ACCEPT PRDGRPINV OF ARPRODUIT
+  END
+
+  RUN SCREEN ar002a        &
+      PASSING T_CIECLEMNU, &
+              T_CIENOM,    &
+              ARPRODUIT    &
+         MODE SAME
+
+; Appel de la procédure qui calcule et affiche les quantités en main par entrepôt.
+
+  DO INTERNAL I_AFF_QTE_ENT
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF ARPRODUIT &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF ARPRODUIT &
+     AND NOT NEWRECORD     OF ARPRODUIT &
+     AND NOT DELETEDRECORD OF ARPRODUIT &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  ;
+  ; Destruction d'un produit
+  ;
+  IF DELETEDRECORD OF ARPRODUIT
+  THEN BEGIN
+    ;
+    ; On initialise le flag de retour pour savoir si le sous-écran a
+    ; bien fonctionné.
+    ;
+    LET T_FLGDEL = ""
+    ;
+    ; Appel du sous-écran qui valide si le prdouit est utilisé
+    ;
+    RUN SCREEN ar002x MODE SAME &
+                      PASSING ARPRODUIT, &
+                              T_FLGDEL
+    ;
+    ; Si la valeur de retour égale 1, cela indique que le sous-écran
+    ; n'a trouvé aucune référence pour l'identifiant demandé.
+    ;
+    IF T_FLGDEL = ""
+    THEN ERROR " "
+  END
+END
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+; MP-00-02-23_S30
+
+PROCEDURE OUTPUT T_ENT_QTE_1
+BEGIN
+  IF T_ENT_QTE_1 = 0 AND T_ENT_NUM_1 <> " "
+  THEN LET FIELDTEXT = "0000"
+END
+
+PROCEDURE OUTPUT T_ENT_QTE_2
+BEGIN
+  IF T_ENT_QTE_2 = 0 AND T_ENT_NUM_2 <> " "
+  THEN LET FIELDTEXT = "0000"
+END
+
+PROCEDURE OUTPUT T_ENT_QTE_3
+BEGIN
+  IF T_ENT_QTE_3 = 0 AND T_ENT_NUM_3 <> " "
+  THEN LET FIELDTEXT = "0000"
+END
+
+PROCEDURE OUTPUT T_ENT_QTE_4
+BEGIN
+  IF T_ENT_QTE_4 = 0 AND T_ENT_NUM_4 <> " "
+  THEN LET FIELDTEXT = "0000"
+END
+
+PROCEDURE OUTPUT T_ENT_QTE_5
+BEGIN
+  IF T_ENT_QTE_5 = 0 AND T_ENT_NUM_5 <> " "
+  THEN LET FIELDTEXT = "0000"
+END
+
+PROCEDURE OUTPUT T_ENT_QTE_6
+BEGIN
+  IF T_ENT_QTE_6 = 0 AND T_ENT_NUM_6 <> " "
+  THEN LET FIELDTEXT = "0000"
+END
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+; MP-00-03-01_D999999.
+
+PROCEDURE OUTPUT T_ENT_SOR_1
+BEGIN
+  IF T_ENT_SOR_1 = 0 AND T_ENT_NUM_1 <> " "
+  THEN LET FIELDTEXT = "0000"
+END
+
+PROCEDURE OUTPUT T_ENT_SOR_2
+BEGIN
+  IF T_ENT_SOR_2 = 0 AND T_ENT_NUM_2 <> " "
+  THEN LET FIELDTEXT = "0000"
+END
+
+PROCEDURE OUTPUT T_ENT_SOR_3
+BEGIN
+  IF T_ENT_SOR_3 = 0 AND T_ENT_NUM_3 <> " "
+  THEN LET FIELDTEXT = "0000"
+END
+
+PROCEDURE OUTPUT T_ENT_SOR_4
+BEGIN
+  IF T_ENT_SOR_4 = 0 AND T_ENT_NUM_4 <> " "
+  THEN LET FIELDTEXT = "0000"
+END
+
+PROCEDURE OUTPUT T_ENT_SOR_5
+BEGIN
+  IF T_ENT_SOR_5 = 0 AND T_ENT_NUM_5 <> " "
+  THEN LET FIELDTEXT = "0000"
+END
+
+PROCEDURE OUTPUT T_ENT_SOR_6
+BEGIN
+  IF T_ENT_SOR_6 = 0 AND T_ENT_NUM_6 <> " "
+  THEN LET FIELDTEXT = "0000"
+END
+
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+; MP-01-12-14_DD.
+
+PROCEDURE input prddsc1 of arproduit
+BEGIN
+  if selectmode and 0 <> index(fieldtext,"%@")
+  then begin
+    let t_select_dsc = fieldtext[3:(size(fieldtext) - 3)]
+    let fieldtext    = ""
+  end
+  else let t_select_dsc = ""
+
+  if 0 <> size(t_select_dsc)
+  then warning =  "La valeur de la description 1 sera recherchée dans les 3 descriptions" now resp
+END
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+; Appel de la procédure qui calcule et affiche les quantités en main par entrepôt. ; MP-00-02-23_S30
+;
+PROCEDURE POSTFIND
+BEGIN
+  DO INTERNAL I_AFF_QTE_ENT
+
+; ------------------------------
+; MP-00-05-12_DD55.
+
+  WHILE RETRIEVING ARPRD_FOU
+  BEGIN
+    IF T_DERNIER_FOUCLE_01 = " "
+    THEN LET T_DERNIER_FOUCLE_01 = FOUCLE OF ARPRD_FOU
+    ELSE IF T_DERNIER_FOUCLE_02 = " "
+         THEN LET T_DERNIER_FOUCLE_02 = FOUCLE OF ARPRD_FOU
+         ELSE IF T_DERNIER_FOUCLE_03 = " "
+              THEN BEGIN
+                LET T_DERNIER_FOUCLE_03 = FOUCLE OF ARPRD_FOU
+                BREAK
+              END
+  END
+END
+
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+BUILD list detail
+
+
+@IF FORMAT
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+***************************** Gestion des produits *****************************
+* Code produit...: xxxxxxxxxxxx Type..........: x    xxxxxxxxxxxxxxxxxxxxxxxxx *
+*                               Catégorie.....: xxxx xxxxxxxxxxxxxxxxxxxxxxxxx *
+*                               Statut........: x    xxxxxxxxxxxxxxxxxxxxxxxxx *
+* Description....: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    *
+*                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    *
+*                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                    *
+* Unité mesure...: xxxx xxxxxxxxxxxxxxxxxxxxxxxxx                              *
+*                                              Qté demadée totale: xxxxxxxxxxxx*
+********************************************** Qté en cmd  totale: xxxxxxxxxxxx*
+**Entr. xx: xxxxxxxxxxx Sortie: 9,999,999.999* Qté en main totale: xxxxxxxxxxxx*
+**Entr. xx: xxxxxxxxxxx Sortie: 9,999,999.999*                                 *
+**Entr. xx: xxxxxxxxxxx Sortie: 9,999,999.999* <- Quantité en main par entrepôt*
+**Entr. xx: xxxxxxxxxxx Sortie: 9,999,999.999* <- et sortie par entrepôt depuis*
+**Entr. xx: xxxxxxxxxxx Sortie: 9,999,999.999* <- la dernière année            *
+**Entr. xx: xxxxxxxxxxx Sortie: 9,999,999.999*                                 *
+********************************************** Dernier coût......: xxxxxxxxxxxx*
+* Compte........: xxxxxx xxxxxxxxxxxxxxxxxxxx  Unité.............: xxxxxxxx    *
+* Rest. format..: xxx    Groupe invent..: xxx  Multiple..........: xxxxxxxxxxx *
+* Derniers fournisseurs: xxxxxx xxxxxx xxxxxx  Anc. num. magasin.: xxxxxx      *
+********************************************************************************
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx 
+@ENDIF

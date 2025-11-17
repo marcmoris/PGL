@@ -1,0 +1,249 @@
+;/T/ Charte de numérotation de bloc
+;
+;/P/ Programmeur..: Francois Richard
+;    Date Création: 17 septembre 1999
+;
+;    Description..: Cet écran permet de saisir les informations de base
+;                   concernant la charte de numérotation des blocs
+;
+;
+;***********************************************************************************************************************************
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date..............: 24 janvier 2001
+;    Description.......: Modifier le tri de données afin que ces dernières soient présentées par ordre de date. Créer également
+;                        une proécédure de validation visant à interdire la suppression et/ou la modification (au niveau de la date)
+;                        des codes de numérotation. S'assurer ainsi qu'aucun bloc déjà existant n'est lié au code visé par la dite 
+;                        destruction ou modification.
+;
+;    Référence.........: Demande de changement 000121.
+;
+;    Signet............: MP-01-01-24_D121.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+
+SCREEN if155 ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLE, &
+                       T_CIENOM
+
+USE ussectmp  NOLIST
+    "IF155"
+
+;USE if155.hlp NOLIST
+
+USE usactecr  NOLIST
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_CIECLE CHARACTER SIZE 4  ; Numéro de cie
+TEMPORARY T_CIENOM CHARACTER SIZE 40 ; Nom de la compagnie
+
+;-------------------------------------------------------------------------------
+; Table des codes de numérotation.
+
+FILE IFCHARTE IN DICT PRIMARY NOITEM OCCURS 64 TIMES
+  ACCESS VIA CIECLE           , &
+             IFCCLE             &
+       USING T_CIECLE         , &
+             IFCCLE             &
+     REQUEST IFCCLE             &
+     ORDERBY ifcdat descending, & ; MP-01-01-24_D121.
+             IFCCLE
+
+  ACCESS VIA CIECLE             &
+       USING T_CIECLE           &
+     ORDERBY ifcdat descending, & ; MP-01-01-24_D121.
+             IFCCLE
+
+
+  ITEM CIECLE OF IFCHARTE INITIAL T_CIECLE
+
+;-----------------------------------------------------------------------------
+;
+; Validation sur le bloc.
+;
+
+file ifbloc designer alias al_ifbloc ; mp-01-01-24_d121.
+
+;-------------------------------------------------------------------------------
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4  = T_CIECLE
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+      " Charte de numérotation des blocs " &
+      CENTERED AT ,1
+
+SKIP 1
+
+USE ustitoff NOLIST
+
+
+TITLE "Code" AT ,4
+TITLE "Date" AT ,10
+TITLE "Code" AT ,23
+TITLE "Date" AT ,29
+TITLE "Code" AT ,42
+TITLE "Date" AT ,48
+TITLE "Code" AT ,61
+TITLE "Date" AT ,67
+
+SKIP
+
+ALIGN(2,3,5) (,,10) 
+CLUSTER OCCURS WITH IFCHARTE FOR 1,19 VERTICAL
+FIELD IFCCLE OF IFCHARTE &
+        HIDDEN &
+        LABEL " " &
+        NOCHANGE &
+        REQUIRED 
+
+FIELD IFCDAT OF IFCHARTE &
+      REQUIRED           &
+      FORMAT YYYYMM      &
+      PATTERN "####/##"  &
+      LOOKUP NOTON IFCHARTE &
+        VIA   CIECLE,       &
+              IFCDAT        &
+        USING T_CIECLE,     &
+              IFCDAT OF IFCHARTE &
+        MESSAGE 3240 ; PD340 Cette date est déjà inscrite 
+
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'acc\350s de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+; ----------------------------------------------------------------------------------
+; MP-01-01-24_D121
+;
+; Validation sur la date.
+;
+procedure edit ifcdat of ifcharte
+begin
+  get al_ifbloc via ciecle            , &
+                    ifccle              &
+              using ciecle of ifcharte, &
+                    ifccle of ifcharte  optional
+  if accessok
+  then error 2005 ; GS105 E Modification impossible. Des blocs sont déjà associés à cette date.
+end
+
+; ----------------------------------------------------------------------------------
+; MP-01-01-24_D121
+;
+; Validation sur la destruction de bloc.
+;
+procedure delete
+begin
+  get al_ifbloc via ciecle            , &
+                    ifccle              &
+              using ciecle of ifcharte, &
+                    ifccle of ifcharte  optional
+  if accessok
+  then error 2006 ; GS106 E Destruction impossible. Des blocs sont déjà associés à ce code.
+                else delete ifcharte
+end
+
+; ----------------------------------------------------------------------------------
+
+PROCEDURE PREUPDATE
+BEGIN
+
+                for ifcharte
+  begin
+        ;
+    ; Validation de la destruction
+    ;
+    IF      DELETEDRECORD OF IFCHARTE &
+        AND TZ_SECDEL = "0"
+    THEN ERROR 1
+   
+    ;
+    ; Validation de la modification
+    ;
+    IF     ALTEREDRECORD     OF IFCHARTE &
+       AND NOT NEWRECORD     OF IFCHARTE &
+       AND NOT DELETEDRECORD OF IFCHARTE &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+   
+   
+  ; --------------------------------------------
+  ; MP-01-01-24_D121.
+  ;
+  ; Validation sur la destruction de bloc.
+   
+    if deletedrecord of ifcharte and not newrecord of ifcharte
+    then begin
+                                  get al_ifbloc via ciecle            , &
+                        ifccle              &
+                  using ciecle of ifcharte, &
+                        ifccle of ifcharte  optional
+      if accessok
+      then error 2007 ; GS107 E Destruction refusée. Des blocs sont liés aux codes visés par la destruction.
+    end
+  ; --------------------------------------------
+
+  end
+END
+
+
+BUILD DETAIL LIST
+
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+*********************** Charte de numérotation des blocs ***********************
+*                                                                              *
+*  Code  Date         Code  Date         Code  Date         Code  Date         *
+*   xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx      *
+*   xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx      *
+*   xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx      *
+*   xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx      *
+*   xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx      *
+*   xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx      *
+*   xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx      *
+*   xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx      *
+*   xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx      *
+*   xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx      *
+*   xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx      *
+*   xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx      *
+*   xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx      *
+*   xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx      *
+*   xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx      *
+*   xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx       xx   xxxxxxx      *
+*                                                                              *
+********************************************************************************
+
+@ENDIF

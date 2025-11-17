@@ -1,0 +1,1333 @@
+;/T/ Clients
+;
+;/P/ Programmeur..: Alain Côté
+;    Date Création: 18 mai 1993
+;
+;    Description..: Ecran pour l'enregistrement des clients
+;
+;    Particularités:
+;
+;    Tenir compte du paramètre charte client (HLDCHTCLI) dans la table MCHOLDING
+;        universelle-----> - represente non à la charte client (HLDCHTCLI=0)
+;                          - CLICIECLE égale au caractère de substitution.
+;        par compagnie---> - represente oui à la charte client (HLDCHTCLI=1)
+;                          - CLICIECLE égale la compagnie du menu.
+;
+;
+;    Pour la charte universelle, vous avez accès à un écran CR001A pour
+;    déterminer sur quelle compagnie le client peut travailler.
+;    Cette gestion s'effectue par l'intermédiaire de la table CRCLI_CIE.
+;
+;/M/ Adatation....: Marc Morissette 10 Nov 1993
+;
+;    Description..: Ajout du numéro du client
+;                   Ajout du numéro de fournisseurs
+;                   Ajout du numéro de représentant
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cr001 ACTIONBAR &
+             AUTOUPDATE &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CLICIECLE, &
+                       T_CIECLEMNU, &
+                       T_CIENOM   , &
+                       T_PECCLEMNU, &
+                       T_PECCLECOU
+
+USE ussectmp  NOLIST
+    "CR001"
+
+USE cr001.hlp NOLIST
+
+USE usactecr NOLIST
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Informations par compagnies     " ACTION DESIGNER D001
+  MENUITEM LABEL "Consultation des factures       " ACTION DESIGNER D002
+  MENUITEM LABEL "Consultation des encaissements  " ACTION DESIGNER D003
+  MENUITEM LABEL "Solde par compagnie             " ACTION DESIGNER D004
+  MENUITEM LABEL "Gestion des mémos               " ACTION DESIGNER D005
+  MENUITEM LABEL "Adresses supplémentaires        " ACTION DESIGNER D006
+  MENUITEM LABEL "Contacts                        " ACTION DESIGNER D007
+  MENUITEM LABEL "Ventes par période              " ACTION DESIGNER D008
+  MENUITEM LABEL "Ventes toutes compagnies        " ACTION DESIGNER D009
+  MENUITEM LABEL "Vérification                    " ACTION DESIGNER D010
+@ELSE
+ACTIONMENU LABEL "Subscreens"
+  MENUITEM LABEL "Information by companies        " ACTION DESIGNER D001
+  MENUITEM LABEL "Invoices                        " ACTION DESIGNER D002
+  MENUITEM LABEL "Payments                        " ACTION DESIGNER D003
+  MENUITEM LABEL "Balances                        " ACTION DESIGNER D004
+  MENUITEM LABEL "Memo                            " ACTION DESIGNER CR05
+  MENUITEM LABEL "Addresses                       " ACTION DESIGNER D006
+  MENUITEM LABEL "%%%contacts                     " ACTION DESIGNER D007
+  MENUITEM LABEL "Sales by period                 " ACTION DESIGNER D008
+  MENUITEM LABEL "Sales all companies             " ACTION DESIGNER D009
+  MENUITEM LABEL "Vérification                    " ACTION DESIGNER D010
+@ENDIF
+
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_CLICIECLE CHARACTER SIZE  4  ; Compagnie du client.
+TEMPORARY T_CIECLEMNU CHARACTER SIZE  4  ; Compagnie du menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40  ; Nom de la compagnie du menu
+TEMPORARY T_PECCLEMNU CHARACTER SIZE  4  ; Période saisie au menu
+TEMPORARY T_PECCLECOU CHARACTER SIZE  4  ; Période courante
+
+;-------------------------------------------------------------------------------
+;
+;
+; Paramètres du holding.
+;
+FILE MCHOLDING REFERENCE
+  ACCESS VIA CIENMC &
+         USING "1"
+
+
+;
+FILE CRCLIENT PRIMARY
+  ACCESS REQUEST CLICLE &
+         VIA     CLICIECLE, &
+                 CLICLE     &
+         USING   T_CLICIECLE, &
+                 CLICLE OF CRCLIENT &
+         ORDERBY CLICIECLE , &
+                 CLICLE
+  ACCESS REQUEST CLICLEANC &
+         VIA     CLICIECLE, &
+                 CLICLEANC     &
+         USING   T_CLICIECLE, &
+                 CLICLEANC OF CRCLIENT &
+         ORDERBY CLICIECLE , &
+                 CLICLE
+
+  ACCESS VIA     CLICIECLE   &
+         USING   T_CLICIECLE &
+         ORDERBY CLICIECLE , &
+                 CLICLE
+
+  ITEM CLICIECLE OF CRCLIENT INITIAL T_CLICIECLE
+  ITEM FOUCLE    OF CRCLIENT INITIAL "      "
+  ITEM CLIDATOUV OF CRCLIENT INITIAL SYSDATE
+  ITEM CLIDATCRE OF CRCLIENT INITIAL SYSDATE
+  ITEM CLIHRECRE OF CRCLIENT INITIAL SYSTIME / 10000
+  ITEM CLIUSRCRE OF CRCLIENT INITIAL LOGONID
+
+;
+; Table pour les adresses (initialiser sauf pour les clients de type divers)
+;
+FILE MCREF_ADRESSE    SECONDARY &
+                      NOITEM &
+                      NODELETE
+ ACCESS VIA   REFCIECLE, &
+              REFCLETYP, &
+              REFCLENUM, &
+              RADCLE &
+        USING CLICIECLE OF CRCLIENT, &
+              CLIREFTYP OF CRCLIENT, &
+              CLICLE    OF CRCLIENT, &
+              1
+ ITEM REFCIECLE   OF MCREF_ADRESSE FINAL CLICIECLE OF CRCLIENT &
+                                           IF CLITYP OF CRCLIENT <> "D"
+ ITEM REFCLETYP   OF MCREF_ADRESSE FINAL CLIREFTYP OF CRCLIENT &
+                                           IF CLITYP OF CRCLIENT <> "D"
+ ITEM REFCLENUM   OF MCREF_ADRESSE FINAL CLICLE    OF CRCLIENT &
+                                           IF CLITYP OF CRCLIENT <> "D"
+ ITEM RADCLE      OF MCREF_ADRESSE FINAL 1 &
+                                           IF CLITYP OF CRCLIENT <> "D"
+ ITEM RADNOM      OF MCREF_ADRESSE FINAL CLINOM OF CRCLIENT &
+                                           IF CLITYP OF CRCLIENT <> "D"
+ ITEM RADNOMABR   OF MCREF_ADRESSE FINAL CLINOMABR OF CRCLIENT &
+                                           IF CLITYP OF CRCLIENT <> "D"
+;
+; Contact du client.
+;
+FILE CRCLI_CONTACT    SECONDARY &
+                      NOITEM    &
+                      NODELETE
+  ACCESS VIA CLICIECLE, &
+             CLICLE   , &
+             CCTCLE &
+         USING CLICIECLE OF CRCLIENT, &
+               CLICLE    OF CRCLIENT, &
+               1
+  ITEM CLICIECLE OF CRCLI_CONTACT FINAL CLICIECLE OF CRCLIENT
+  ITEM CLICLE    OF CRCLI_CONTACT FINAL CLICLE    OF CRCLIENT
+  ITEM CCTCLE    OF CRCLI_CONTACT FINAL 1
+
+;
+; Item du CLIENT, le timbre de modification est mis à jour si l'usager modifie
+; l'adresse ou le contact.
+;
+  ITEM CLIDATMOD OF CRCLIENT FINAL   SYSDATE        &
+                                        IF NOT NEWRECORD OF CRCLIENT AND &
+                                           ( ALTEREDRECORD OF CRCLIENT      OR &
+                                             ALTEREDRECORD OF CRCLI_CONTACT OR &
+                                             ALTEREDRECORD OF MCREF_ADRESSE )
+  ITEM CLIHREMOD OF CRCLIENT FINAL   SYSTIME / 10000 &
+                                        IF NOT NEWRECORD OF CRCLIENT AND &
+                                           ( ALTEREDRECORD OF CRCLIENT      OR &
+                                             ALTEREDRECORD OF CRCLI_CONTACT OR &
+                                             ALTEREDRECORD OF MCREF_ADRESSE )
+  ITEM CLIUSRMOD OF CRCLIENT FINAL   LOGONID         &
+                                        IF NOT NEWRECORD OF CRCLIENT AND &
+                                           ( ALTEREDRECORD OF CRCLIENT      OR &
+                                             ALTEREDRECORD OF CRCLI_CONTACT OR &
+                                             ALTEREDRECORD OF MCREF_ADRESSE )
+
+;
+; Maintenance de la table MCREFERENCE pour le client.
+;
+FILE MCREFERENCE      SECONDARY &
+                      NOITEM    &
+                      NEED 1    &
+                      NODELETE
+ ACCESS VIA   REFCIECLE, &
+              REFCLETYP, &
+              REFCLENUM  &
+        USING CLICIECLE OF CRCLIENT, &
+              CLIREFTYP OF CRCLIENT, &
+              CLICLE    OF CRCLIENT
+
+  ITEM REFCIECLE OF MCREFERENCE FINAL CLICIECLE OF CRCLIENT
+  ITEM REFCLETYP OF MCREFERENCE FINAL CLIREFTYP OF CRCLIENT
+  ITEM REFCLENUM OF MCREFERENCE FINAL CLICLE    OF CRCLIENT
+  ITEM REFNOM    OF MCREFERENCE FINAL CLINOM    OF CRCLIENT
+  ITEM REFNOMABR OF MCREFERENCE FINAL CLINOMABR OF CRCLIENT
+  ITEM REFADRPAM OF MCREFERENCE FINAL 0
+  ITEM DEVCLE    OF MCREFERENCE FINAL DEVCLE    OF CRCLIENT
+  ITEM REFSTU    OF MCREFERENCE FINAL CLISTU    OF CRCLIENT
+  ITEM REFCAT    OF MCREFERENCE FINAL CLICAT    OF CRCLIENT
+  ITEM REFFOURTU OF MCREFERENCE FINAL "0"
+
+;
+; Destruction des contacts.
+;
+FILE CRCLI_CONTACT    DELETE &
+                      ALIAS A_CCT_DELETE &
+                      NOITEM
+  ACCESS VIA CLICIECLE, &
+             CLICLE     &
+         USING CLICIECLE OF CRCLIENT, &
+               CLICLE    OF CRCLIENT
+
+TEMPORARY T_FOUCIECLE CHARACTER SIZE 4 RESET AT STARTUP ; Compagnie du client.
+
+TEMPORARY T_FOUCLE    CHARACTER SIZE  6
+TEMPORARY T_FOCCIECLE CHARACTER SIZE  4
+
+;-------------------------------------------------------------------------------
+;
+; FOURNISSEUR
+;
+;   Cette vue permet de récupérer les informations du fournisseur et ses
+;   informations spécifiques à la compagnie.
+;
+;
+FILE VFOC_FOU REFERENCE &
+              NOITEM
+
+  ACCESS  VIA   FOUCIECLE, &
+                FOUCLE   , &
+                FOCCIECLE  &
+          USING T_FOUCIECLE, &
+                FOUCLE OF CRCLIENT, &
+                T_CIECLEMNU
+
+
+;
+; Destruction des adresses du client.
+;
+FILE MCREF_ADRESSE    DELETE &
+                      ALIAS A_RAD_DELETE &
+                      NOITEM
+ ACCESS VIA   REFCIECLE , &
+              REFCLETYP , &
+              REFCLENUM   &
+        USING CLICIECLE OF CRCLIENT , &
+              CLIREFTYP OF CRCLIENT , &
+              CLICLE    OF CRCLIENT
+
+;
+; Validation du statut.
+;
+DEFINE    D_CLISTU CHARACTER SIZE 16 = "CLISTU"
+TEMPORARY T_CLISTU CHARACTER SIZE  4
+;
+FILE VCBI_DSC         REFERENCE &
+                      ALIAS A_CBI_CLISTU
+  ACCESS VIA XELNOM, &
+             CBICLE  &
+         USING D_CLISTU, &
+               CLISTU OF CRCLIENT
+
+;
+; Validation du code de langue.
+;
+DEFINE    D_CLILNG CHARACTER SIZE 16 = "CLILNG"
+TEMPORARY T_CLILNG CHARACTER SIZE  4
+;
+FILE VCBI_DSC         REFERENCE &
+                      ALIAS A_CBI_CLILNG
+  ACCESS VIA XELNOM, &
+             CBICLE  &
+         USING D_CLILNG, &
+               CLILNG OF CRCLIENT
+
+;
+; Validation du type de client.
+;
+DEFINE    D_CLITYP CHARACTER SIZE 16 = "CLITYP"
+TEMPORARY T_CLITYP CHARACTER SIZE  4
+;
+FILE VCBI_DSC         REFERENCE &
+                      ALIAS A_CBI_CLITYP
+  ACCESS VIA XELNOM, &
+             CBICLE  &
+         USING D_CLITYP, &
+               CLITYP OF CRCLIENT
+
+;
+; Validation de la catégorie.
+;
+DEFINE    D_CLICAT CHARACTER SIZE 16 = "CLICAT"
+TEMPORARY T_CLICAT CHARACTER SIZE  4
+;
+FILE VCBI_DSC         REFERENCE &
+                      ALIAS A_CBI_CLICAT
+  ACCESS VIA XELNOM, &
+             CBICLE  &
+         USING D_CLICAT, &
+               CLICAT OF CRCLIENT
+
+;
+; Validation de la devise.
+;
+FILE VDEV_DSC         REFERENCE
+  ACCESS VIA DEVCLE &
+         USING DEVCLE OF CRCLIENT
+
+;
+; Validation de la compagnie d'inter.
+;
+FILE MCCOMPAGNIE      REFERENCE
+ ACCESS VIA CIECLE &
+        USING CLICIEINT OF CRCLIENT
+
+
+;-------------------------------------------------------------------------------
+;
+; Recherche si le client est déjà référencé pour un autre fournisseur
+;
+FILE MCREF_SOLDE DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+; Pour mettre à jour le numéro de client dans le fournisseur et déclancher le
+; trigger TFOUMOD1 pour le solde client/fournisseur.
+;
+
+FILE CPFOURNISSEUR  DESIGNER
+
+TEMPORARY T_FOUNO CHARACTER SIZE 6
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_CIECLE    CHARACTER        SIZE 4 ; Popup sur les compagnies
+TEMPORARY T_DEVCLE    CHARACTER        SIZE 3 ; Popup sur les devises
+
+TEMPORARY T_CLICLE    CHARACTER        SIZE 6 ; Pour les mémos.
+
+TEMPORARY T_FLGDEL    CHARACTER        SIZE 1 ; Flag pour le sous-écran de
+                                              ; destruction
+TEMPORARY T_FLGREF    CHARACTER        SIZE 1 ; Flag pour le sous-écran de
+                                              ; destruction
+
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Gestion des clients " &
+@ELSE
+      " Clients management " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST
+
+SKIP
+
+
+ALIGN(3,3,19) (,39,55) (,,57)
+
+FIELD CLICLE    OF CRCLIENT HIDDEN ID 05 &
+label "Client........:" &
+        REQUIRED &
+        NOCHANGE &
+        LOOKUP NOTON CRCLIENT &
+          VIA CLICIECLE, &
+              CLICLE &
+          USING CLICIECLE OF CRCLIENT, &
+                CLICLE    OF CRCLIENT  &
+          MESSAGE 653 ; Ce client existe deja
+
+FIELD CLISTU    OF CRCLIENT &
+label "Statut........:"&
+        LOOKUP ON A_CBI_CLISTU &
+          MESSAGE 657; Ce statut est inexistante
+
+FIELD CBIDSC OF A_CBI_CLISTU &
+        SIZE 20 &
+        DISPLAY
+
+FIELD CLICLEANC OF CRCLIENT DISPLAY &
+label "Ancien client.:"
+
+FIELD CLILNG    OF CRCLIENT &
+label "Langue........:"&
+        LOOKUP ON A_CBI_CLILNG &
+          MESSAGE 682 ; Code invalide.
+
+FIELD CBIDSC OF A_CBI_CLILNG &
+        SIZE 20 &
+        DISPLAY
+
+
+ALIGN (3,3,19) (,,21) (,39,55) (,,60)
+
+FIELD CLITYP    OF CRCLIENT HIDDEN ID 10 &
+label "Type.........:"&
+        NOCHANGE &
+        LOOKUP ON A_CBI_CLITYP &
+          MESSAGE 656 ; Ce type de client n'existe pas
+
+FIELD CBIDSC OF A_CBI_CLITYP &
+        SIZE 17 &
+        DISPLAY
+
+FIELD CLICIEINT OF CRCLIENT &
+label "Cie inter.....:"&
+        REQUIRED &
+        NOCHANGE &
+        LOOKUP ON MCCOMPAGNIE &
+          VIA CIECLE &
+          USING CLICIEINT OF CRCLIENT &
+          MESSAGE 604 ; cette compagnie est inexistante
+
+FIELD CIENOMABR OF MCCOMPAGNIE &
+        DISPLAY
+
+ALIGN (,39,55)
+FIELD FOUCLE OF CRCLIENT &
+label "Fournisseur...:"
+
+
+
+ALIGN(3,3,19)
+
+FIELD CLINOM    OF CRCLIENT HIDDEN ID 20 &
+label "Nom..........:"&
+        REQUIRED
+
+FIELD CLINOMABR OF CRCLIENT HIDDEN ID 25 &
+label "Nom abrégé....:"&
+        DEFAULT CLINOM OF CRCLIENT
+
+SKIP 1
+
+ALIGN(3,3,19) (,,23) (,39,55) (,,60)
+
+FIELD DEVCLE    OF CRCLIENT HIDDEN ID 30 &
+label "Code devise...:" &
+        REQUIRED &
+        NOCHANGE &
+        LOOKUP ON VDEV_DSC &
+          VIA DEVCLE &
+          USING DEVCLE OF CRCLIENT &
+          MESSAGE 660; cette devise est inexistante
+
+FIELD DEVDSC    OF VDEV_DSC  &
+        DISPLAY
+
+FIELD CLICAT    OF CRCLIENT &
+label "Catégorie.....:"&
+        LOOKUP ON A_CBI_CLICAT &
+          MESSAGE 658 ; cette categorie est inexistante
+
+FIELD CBIDSC OF A_CBI_CLICAT &
+        SIZE 20 &
+        DISPLAY
+
+SKIP 1
+
+ALIGN(3,3,19)
+
+FIELD RADADR1   OF MCREF_ADRESSE HIDDEN ID 35 &
+label "Adresse.......:"&
+        REQUIRED
+FIELD RADADR2   OF MCREF_ADRESSE HIDDEN ID SAME NOLABEL
+FIELD RADADR3   OF MCREF_ADRESSE HIDDEN ID SAME NOLABEL
+
+ALIGN(,,19) (,62,67)
+FIELD RADADR4   OF MCREF_ADRESSE
+FIELD RADCP     OF MCREF_ADRESSE &
+@IF FRANCAIS
+        LABEL "CP.:"
+@ELSE
+        LABEL "PC.:"
+@ENDIF
+
+SKIP TO 13
+
+ALIGN(,62,67)
+
+FIELD RADTEL    OF MCREF_ADRESSE &
+@IF FRANCAIS
+        LABEL "Tél:"
+@ELSE
+        LABEL "Tel:"
+@ENDIF
+
+FIELD RADFAX    OF MCREF_ADRESSE &
+@IF FRANCAIS
+        LABEL "Fax:"
+@ELSE
+        LABEL "Fax:"
+@ENDIF
+
+SKIP TO 17
+
+ALIGN(3,3,19) (,41,46) (,60,67)
+
+FIELD CCTNOM OF CRCLI_CONTACT HIDDEN ID 40 &
+label "Contact....:"
+
+FIELD CCTTEL OF CRCLI_CONTACT &
+        DEFAULT RADTEL OF MCREF_ADRESSE &
+@IF FRANCAIS
+        LABEL "Tél:"
+@ELSE
+        LABEL "Tel:"
+@ENDIF
+
+FIELD CCTTELPOS OF CRCLI_CONTACT &
+@IF FRANCAIS
+        LABEL "Poste:"
+@ELSE
+        LABEL "%%%..:"
+@ENDIF
+
+FIELD CCTTIT OF CRCLI_CONTACT HIDDEN ID 45 &
+label "Titre contact.:"
+
+FIELD CCTFAX OF CRCLI_CONTACT &
+        DEFAULT RADFAX OF MCREF_ADRESSE &
+@IF FRANCAIS
+        LABEL "Fax:"
+@ELSE
+        LABEL "Fax:"
+@ENDIF
+
+FIELD CCTTELCEL OF CRCLI_CONTACT &
+@IF FRANCAIS
+        LABEL "Cell.:"
+@ELSE
+        LABEL "%%%..:"
+@ENDIF
+
+SKIP 1
+
+ALIGN(3,3,19)(,50,57)
+
+FIELD CLIDATOUV    OF CRCLIENT  FORMAT YYYYMMDD PATTERN "####/##/##" HIDDEN ID 50 &
+label "Date ouverture:"
+
+FIELD CLIINR       OF CRCLIENT HIDDEN ID 50 LABEL "# IRS: "
+
+ALIGN(3,3,19) (,41,57)
+
+FIELD CLIDATFER    OF CRCLIENT  FORMAT YYYYMMDD PATTERN "####/##/##" HIDDEN ID 55 &
+label "Date fermeture:"
+
+FIELD CLIETACPT    OF CRCLIENT HIDDEN ID 60 &
+label "Etat compte...:"&
+        SIZE 3
+
+ALIGN (2,3,19)(,22,38)(,51,67)
+FIELD COMATR OF CRCLIENT &
+HIDDEN ID 65
+
+FIELD COMDATMAJATR OF CRCLIENT FORMAT YYYYMMDD PATTERN "####/##/##"&
+HIDDEN ID 70 &
+DISPLAY
+
+FIELD COMUSRMAJATR OF CRCLIENT &
+HIDDEN ID 75 &
+DISPLAY
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+  IF HLDCHTFOU OF MCHOLDING = "1"
+  THEN LET T_FOUCIECLE = T_CIECLEMNU
+  ELSE LET T_FOUCIECLE = HLDCHRSUB OF MCHOLDING
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les statuts(bilingue).
+;
+;
+PROCEDURE INPUT CLISTU
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CLISTU = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_CLISTU, T_CLISTU
+    LET FIELDTEXT = TRUNC(T_CLISTU)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; On met une date de fermeture si l'usager rend inactif le client.
+;
+;
+PROCEDURE PROCESS CLISTU
+BEGIN
+  IF FIELDTEXT = "I"
+  THEN BEGIN
+    IF CLIDATFER OF CRCLIENT = 0
+    THEN LET CLIDATFER OF CRCLIENT = SYSDATE
+  END
+  ELSE LET CLIDATFER OF CRCLIENT = 0
+  DISPLAY CLIDATFER OF CRCLIENT
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les codes de langue(bilingue).
+;
+;
+PROCEDURE INPUT CLILNG
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CLILNG = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_CLILNG, T_CLILNG
+    LET FIELDTEXT = TRUNC(T_CLILNG)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur le type de client(bilingue).
+;
+;
+PROCEDURE INPUT CLITYP
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CLITYP = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_CLITYP, T_CLITYP
+    LET FIELDTEXT = TRUNC(T_CLITYP)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les compagnies.
+;
+;
+PROCEDURE INPUT CLICIEINT
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc106 MODE F PASSING T_CIECLE
+    LET FIELDTEXT = TRUNC(T_CIECLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION & VALIDATION DU FOURNISSEUR
+;
+;
+PROCEDURE INPUT FOUCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_FOUCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_FOCCIECLE = T_CIECLEMNU
+    RUN SCREEN cp104 MODE F PASSING T_FOUCIECLE, T_FOUCLE, T_FOCCIECLE
+
+    LET FIELDTEXT = TRUNCATE(T_FOUCLE)
+  END
+END
+
+;
+; Le fournisseur doit être Actif.
+;
+PROCEDURE EDIT FOUCLE
+BEGIN
+  IF 0 <> SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    GET VFOC_FOU OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 437 ; Ce numéro de fournisseur n'existe pas.
+
+    IF FOUSTU OF VFOC_FOU = "I"
+    THEN ERROR 446 ; Le fournisseur est inactif.
+
+    IF FOURTU OF VFOC_FOU = "1"
+    THEN WARNING 447 ; Le fournisseur est présentement retenu.
+
+    WHILE RETRIEVING MCREF_SOLDE VIA REFCIECLE, CIECLE, FOUCLE &
+                               USING CLICIECLE, T_CIECLEMNU, FIELDTEXT
+    BEGIN
+      IF CLICLE OF MCREF_SOLDE <> ""
+      THEN ERROR 799 ;Ce client est déjà référencé par un autre fournisseur.
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les devices.
+;
+;
+PROCEDURE INPUT DEVCLE
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_DEVCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc101 PASSING T_DEVCLE MODE F
+    LET FIELDTEXT = TRUNC(T_DEVCLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les catégories de client(bilingue).
+;
+;
+PROCEDURE INPUT CLICAT
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CLICAT = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_CLICAT, T_CLICAT
+    LET FIELDTEXT = TRUNC(T_CLICAT)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Numéro de téléphone du client.
+;
+;
+PROCEDURE INPUT RADTEL
+BEGIN
+  USE ustelfmt NOLIST ; Formate le numéro de téléphone nord américain.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Numéro de fax du client.
+;
+;
+PROCEDURE INPUT RADFAX
+BEGIN
+  USE ustelfmt NOLIST ; Formate le numéro de téléphone nord américain.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Code postal du client.
+;
+;
+PROCEDURE INPUT RADCP
+BEGIN
+  USE uscpfmt NOLIST ; Formate le code postal.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Numéro de téléphone du contact.
+;
+;
+PROCEDURE INPUT CCTTEL
+BEGIN
+  USE ustelfmt NOLIST ; Formate le numéro de téléphone nord américain.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Numéro de fax du contact.
+;
+;
+PROCEDURE INPUT CCTFAX
+BEGIN
+  USE ustelfmt NOLIST ; Formate le numéro de téléphone nord américain.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Numéro de cellulaire du contact.
+;
+;
+PROCEDURE INPUT CCTTELCEL
+BEGIN
+  USE ustelfmt NOLIST ; Formate le numéro de téléphone nord américain.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Traitement pour les indicateurs dont la valeur est Oui ou Non.
+; Le procédure INPUT transpose les valeurs sous un code universel soit 1 et 0.
+;
+;
+PROCEDURE INPUT CLIETACPT
+BEGIN
+  USE usflginp NOLIST
+END
+
+;
+; La procédure OUTPUT affiche les valeurs sous la forme O/N.
+;
+PROCEDURE OUTPUT CLIETACPT
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+
+PROCEDURE DESIGNER 10
+BEGIN
+  ACCEPT FOUCLE OF CRCLIENT
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; L'adresse n'est pas accessible pour les clients divers.
+;
+;
+PROCEDURE DESIGNER 35
+BEGIN
+  IF CLITYP OF CRCLIENT <> "D"
+  THEN BEGIN
+    ACCEPT RADADR1 OF MCREF_ADRESSE
+    ACCEPT RADADR2 OF MCREF_ADRESSE
+    ACCEPT RADADR3 OF MCREF_ADRESSE
+    ACCEPT RADADR4 OF MCREF_ADRESSE
+    ACCEPT RADCP   OF MCREF_ADRESSE
+    ;
+    ; les tel et fax ne sont que pour les clients autre que divers
+    ;
+    ACCEPT RADTEL OF MCREF_ADRESSE
+    ACCEPT RADFAX OF MCREF_ADRESSE
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Le contact n'est pas accessible pour les clients divers.
+;
+;
+PROCEDURE DESIGNER 40
+BEGIN
+  IF CLITYP OF CRCLIENT <> "D"
+  THEN BEGIN
+    ACCEPT CCTNOM    OF CRCLI_CONTACT
+    ACCEPT CCTTEL    OF CRCLI_CONTACT
+    ACCEPT CCTTELPOS OF CRCLI_CONTACT
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Le contact n'est pas accessible pour les clients divers.
+;
+;
+PROCEDURE DESIGNER 45
+BEGIN
+  IF CLITYP OF CRCLIENT <> "D"
+  THEN BEGIN
+    ACCEPT CCTTIT    OF CRCLI_CONTACT
+    ACCEPT CCTFAX    OF CRCLI_CONTACT
+    ACCEPT CCTTELCEL OF CRCLI_CONTACT
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Infor. complémentaires
+;
+;
+PROCEDURE DESIGNER D001
+BEGIN
+  RUN SCREEN cr001a PASSING T_CLICIECLE, &
+                            T_CIECLEMNU, &
+                            T_CIENOM   , &
+                            CRCLIENT     &
+                    MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Consultation des factures
+;
+;
+PROCEDURE DESIGNER D002
+BEGIN
+  RUN SCREEN cr001g PASSING T_CLICIECLE, &
+                            T_CIECLEMNU, &
+                            T_CIENOM   , &
+                            T_PECCLEMNU, &
+                            T_PECCLECOU, &
+                            CRCLIENT &
+                    MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Consultation des encaissements
+;
+;
+PROCEDURE DESIGNER D003
+BEGIN
+  RUN SCREEN cr001h PASSING T_CIECLEMNU, &
+                            T_CIENOM   , &
+                            CRCLIENT &
+                    MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Solde par compagnie
+;
+;
+PROCEDURE DESIGNER D004
+BEGIN
+  RUN SCREEN cr001c PASSING CRCLIENT &
+                    MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Mémos
+;
+;
+PROCEDURE DESIGNER D005
+BEGIN
+  LET T_CLICLE = CLICLE OF CRCLIENT
+  RUN SCREEN cr014 PASSING T_CLICIECLE, &
+                           T_CLICLE   , &
+                           T_CIECLEMNU, &
+                           T_CIENOM
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Adresses supplémentaires
+;
+;
+PROCEDURE DESIGNER D006
+BEGIN
+  RUN SCREEN cr001d PASSING CRCLIENT &
+                    MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Contacts
+;
+;
+PROCEDURE DESIGNER D007
+BEGIN
+  RUN SCREEN cr001i PASSING CRCLIENT &
+                    MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Ventes par période
+;
+;
+PROCEDURE DESIGNER D008
+BEGIN
+  RUN SCREEN cr001e PASSING T_CIECLEMNU, &
+                            T_CIENOM   , &
+                            CRCLIENT     &
+                   MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Ventes toutes compagnies
+;
+;
+PROCEDURE DESIGNER D009
+BEGIN
+  RUN SCREEN cr001f PASSING T_CIECLEMNU, &
+                            T_CIENOM   , &
+                            CRCLIENT     &
+                   MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran   Vérification
+;
+;
+PROCEDURE DESIGNER D010
+BEGIN
+  RUN SCREEN cr001j PASSING CRCLIENT &
+                    MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  ;
+  ; Numéro de client.
+  ;
+  ACCEPT  CLICLE OF CRCLIENT
+
+  DISPLAY CLICLEANC OF CRCLIENT
+  ;
+  ; Statut du client.
+  ;
+  DISPLAY CLISTU OF CRCLIENT
+  DISPLAY CBIDSC OF A_CBI_CLISTU
+  ;
+  ; Code de langue.
+  ;
+  ACCEPT  CLILNG OF CRCLIENT
+  DISPLAY CBIDSC OF A_CBI_CLILNG
+  ;
+  ; Type de client.
+  ;
+  ACCEPT  CLITYP OF CRCLIENT
+  DISPLAY CBIDSC OF A_CBI_CLITYP
+  ;
+  ; Si c'est un client interne, on demande la compagnie qu'il représente.
+  ;
+  IF CLITYP OF CRCLIENT = "I"
+  THEN BEGIN
+    ACCEPT  CLICIEINT OF CRCLIENT
+    DISPLAY CIENOMABR OF MCCOMPAGNIE
+  END
+  ELSE BEGIN
+    LET CLICIEINT OF CRCLIENT = " "
+    DISPLAY CLICIEINT OF CRCLIENT
+    DISPLAY CIENOMABR OF MCCOMPAGNIE
+  END
+
+  ACCEPT FOUCLE OF CRCLIENT
+
+  IF CLITYP OF CRCLIENT <> "D"
+  THEN BEGIN
+    ;
+    ; Lors de l'ajout d'un client l'adresse 1, est disponible pour tous les
+    ; type d'adresse.
+    ;
+    LET RADFACCR    OF MCREF_ADRESSE = "1"
+    LET RADLIVCR    OF MCREF_ADRESSE = "1"
+    LET RADETACPTCR OF MCREF_ADRESSE = "1"
+  END
+  ;
+  ; Nom du client.
+  ;
+  ACCEPT CLINOM    OF CRCLIENT
+  ACCEPT CLINOMABR OF CRCLIENT
+  ;
+  ; Code de devise.
+  ;
+  ACCEPT  DEVCLE    OF CRCLIENT
+  DISPLAY DEVDSC    OF VDEV_DSC
+  ;
+  ; Catégorie de client.
+  ;
+  ACCEPT  CLICAT OF CRCLIENT
+  DISPLAY CBIDSC OF A_CBI_CLICAT
+  ;
+  ; Adresse.
+  ;
+  IF CLITYP OF CRCLIENT <> "D"
+  THEN BEGIN
+    ACCEPT RADADR1   OF MCREF_ADRESSE
+    ACCEPT RADADR2   OF MCREF_ADRESSE
+    ACCEPT RADADR3   OF MCREF_ADRESSE
+    ACCEPT RADADR4   OF MCREF_ADRESSE
+    ACCEPT RADCP     OF MCREF_ADRESSE
+    ACCEPT RADTEL    OF MCREF_ADRESSE
+    ACCEPT RADFAX    OF MCREF_ADRESSE
+    ACCEPT CCTNOM    OF CRCLI_CONTACT
+    ACCEPT CCTTEL    OF CRCLI_CONTACT
+    ACCEPT CCTTELPOS OF CRCLI_CONTACT
+    ACCEPT CCTTIT    OF CRCLI_CONTACT
+    ACCEPT CCTFAX    OF CRCLI_CONTACT
+    ACCEPT CCTTELCEL OF CRCLI_CONTACT
+  END
+  ;
+  ; Date d'ouverture.
+  ;
+  DISPLAY CLIDATOUV OF CRCLIENT
+
+  ACCEPT CLIINR OF CRCLIENT
+
+  ;
+  ; Etat de compte Oui/Non?
+  ;
+  ACCEPT CLIETACPT OF CRCLIENT
+  ;
+  ; Sous-écran Info. complémentaires.
+  ;
+  RUN SCREEN cr001a PASSING T_CLICIECLE, &
+                            T_CIECLEMNU, &
+                            T_CIENOM   , &
+                            CRCLIENT     &
+                    MODE E
+END
+
+;-------------------------------------------------------------------------------
+; Sert de OLDVALUE pour le code fournisseur
+;
+PROCEDURE POSTFIND
+BEGIN
+  LET T_FOUNO = FOUCLE OF CRCLIENT
+END
+
+;-------------------------------------------------------------------------------
+; Sert de OLDVALUE pour le code fournisseur
+;
+PROCEDURE POSTUPDATE
+BEGIN
+  LET T_FOUNO = FOUCLE OF CRCLIENT
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF CRCLIENT &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF (    ALTEREDRECORD     OF CRCLIENT &
+       OR ALTEREDRECORD     OF CRCLI_CONTACT &
+       OR ALTEREDRECORD     OF MCREF_ADRESSE &
+     ) &
+     AND NOT NEWRECORD     OF CRCLIENT &
+     AND NOT DELETEDRECORD OF CRCLIENT &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+  ;
+  ; Un client de type divers ne doit pas avoir d'adresse ou de contact.
+  ;
+  IF     CLITYP OF CRCLIENT = "D"
+  THEN BEGIN
+
+    IF NOT DELETEDRECORD OF MCREF_ADRESSE
+    THEN DELETE MCREF_ADRESSE
+
+    IF NOT DELETEDRECORD OF CRCLI_CONTACT
+    THEN DELETE CRCLI_CONTACT
+  END
+  ;
+  ; Destruction du client.
+  ;
+  IF DELETEDRECORD OF CRCLIENT
+  THEN BEGIN
+    ;
+    ; On initialise le flag de retour pour savoir si le sous-écran a
+    ; bien fonctionné.
+    ;
+    LET T_FLGDEL = ""
+    ;
+    ; Flag pour savoir si la table MCREFERENCE du client est référée.
+    ;
+    LET T_FLGREF =  ""
+    ;
+    ; Appel du sous-écran qui valide si le client est référé.
+    ;
+    RUN SCREEN cr001x MODE SAME &
+                      PASSING CRCLIENT , &
+                              T_FLGDEL , &
+                              T_FLGREF
+    ;
+    ; Si la valeur de retour égale 1, cela indique que le sous-écran
+    ; n'a trouvé aucune référence pour l'identifiant demandé.
+    ;
+    IF T_FLGDEL = ""
+    THEN ERROR " "
+    ;
+    ; Si la valeur de retour égale 1, cela indique que la table MCREFERENCE
+    ; n'est pas référées pour ce client.
+    ;
+    IF T_FLGREF = "1"
+    THEN DELETE MCREFERENCE
+  END
+  IF T_FOUNO <> FOUCLE OF CRCLIENT
+  THEN BEGIN
+    GET CPFOURNISSEUR VIA FOUCIECLE, FOUCLE &
+                    USING CLICIECLE, FOUCLE OF CRCLIENT OPT
+    LET CLICLE OF CPFOURNISSEUR = CLICLE OF CRCLIENT
+    PUT CPFOURNISSEUR RESET
+  END
+END
+
+;-----------------------------------------------------------------------
+PROCEDURE INPUT COMATR
+BEGIN
+ USE usflginp NOLIST
+END
+
+PROCEDURE OUTPUT COMATR
+BEGIN
+ USE usflgout NOLIST
+END
+
+;---------------------------------------------------------
+PROCEDURE DESIGNER 65
+BEGIN
+  ACCEPT  COMATR           OF CRCLIENT
+  IF "1" = COMATR OF CRCLIENT
+   THEN BEGIN
+    LET     COMDATMAJATR     OF CRCLIENT = SYSDATE
+    LET     COMUSRMAJATR     OF CRCLIENT = LOGONID
+   END
+  DISPLAY COMDATMAJATR     OF CRCLIENT
+  DISPLAY COMUSRMAJATR     OF CRCLIENT
+END
+
+
+
+BUILD
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+***************************** Gestion des clients ******************************
+* Client........: xxxxxx              Statut........: x xxxxxxxxxxxxxxxxxxxx   *
+* Ancien Client.: xxxxxxxx            Langue........: x xxxxxxxxxxxxxxxxxxxx   *
+* Type..........: x xxxxxxxxxxxxxxxxx Cie inter.....: xxxx xxxxxxxxxxxxxxxxxxxx*
+*                                     Fournisseur...: xxxxxx                   *
+* Nom...........: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+* Nom abrégé....: xxxxxxxxxxxxxxxxxxxx                                         *
+*                                                                              *
+* Code devise...: xxx xxxxxxxxxxxxxxx Catégorie.....: xxxx xxxxxxxxxxxxxxxxxxxx*
+*                                                                              *
+* Adresse.......: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   Tél: xxxxxxxxxxxxx*
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   Fax: xxxxxxxxxxxxx*
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   CP.: xxxxxxx      *
+* Contact.......: xxxxxxxxxxxxxxxxxxxx  Tél: xxxxxxxxxxxxx Poste: xxxx         *
+* Titre Contact.: xxxxxxxxxxxxxxxxxxxx  Fax: xxxxxxxxxxxxx Cell.: xxxxxxxxxxxxx*
+*                                                                              *
+* Date ouverture: xxxxxxxx                        Numero IRS: xxxxxxxxxxxxxxxx *
+* Date fermeture: xxxxxxxx                                                     *
+* Etat compte...: xxx                                                          *
+********************************************************************************
+@ENDIF

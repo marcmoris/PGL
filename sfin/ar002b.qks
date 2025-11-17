@@ -1,0 +1,631 @@
+;/T/ Gestion des produits - Historique des transactions
+;
+;/P/ Programmeur..: Nancy Marceau
+;    Date Création: 3 mars 1994
+;
+;    Description..: Cet écran permet de consulter l'historique des transactions
+;                   pour les produits. On choisit le type de transaction, les
+;                   dates de début et de fin, l'entrepôt pour connaître les
+;                   informations relatives aux transactions du produit concerné.
+;
+;/M/ Pascal Tremblay, 98-01-29
+;
+;    Ajustement pour le changement de siècle
+;
+;/V/ Écran vérifier pour le passage à l'an 2000
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+;    Date modification.: 30 avril 2001
+;    Description.......: Ajout des informations relatives aux Sorties de produits (Compte et Unité administrative).
+;
+;    Référence.........: Demande de changement 000136.
+;
+;    Signets...........: MP-01-04-30_D136.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+
+SCREEN ar002b ACTIONBAR &
+             MODE LABEL "" AT 2,132 &
+             FROM 1,1 TO 23,132 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             ACTIVITIES FIND, CHANGE &
+             RECEIVING T_CIECLEMNU, &
+                       T_CIENOM,    &
+                       T_PECCLEMNU, &
+                       T_FOUCIECLE, &
+                       ARPRODUIT
+
+USE ustrasse NOLIST     ; Pour les sous-écrans
+
+USE ussectmp NOLIST     ; Variable pour la sécurité
+    "AR002B"             ; Nom de l'écran
+
+USE ar002b.hlp NOLIST  ; Use servant à la documentation de l'écran
+
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-écrans
+
+
+;-------------------------------------------------------------------------------
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de la compagnie
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie
+TEMPORARY T_PECCLEMNU CHARACTER SIZE 4  ; Période du menu
+TEMPORARY T_FOUCIECLE CHARACTER SIZE 4  ; Compagnie du fournisseur
+TEMPORARY T_DATDEB    DATE              ; Date de début transaction
+TEMPORARY T_DATFIN    DATE              ; Date de fin transaction
+TEMPORARY T_PRHTYPDEM CHARACTER SIZE 2  ; Type de transaction demande
+TEMPORARY T_ENTCLEDEM CHARACTER SIZE 4  ; Entrepôt demande
+
+TEMPORARY T_FOUCIEFND CHARACTER SIZE 4  ; Compagnie de recherche
+TEMPORARY T_FOUCLEFND CHARACTER SIZE 6  ; Fournisseur
+TEMPORARY T_FACCLEFND CHARACTER SIZE 12 ; Numéro de facture
+
+;-------------------------------------------------------------------------------
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;
+; Produit
+;
+FILE ARPRODUIT  MASTER
+
+;
+; Historique des modifications
+;
+FILE ARPRD_HISTO       PRIMARY NOITEM OCCURS 12
+
+
+
+; On sélectionne si la date de la transaction est comprise dans les bornes
+; demandées. On sélectionne toutes les transactions si aucune date n'est
+; spécifiée.
+
+  SELECT IF (PRHDATREF >= T_DATDEB AND PRHDATREF <= T_DATFIN) OR &
+            (T_DATDEB = 0 AND T_DATFIN = 0)                   OR &
+            (PRHDATREF >= T_DATDEB AND T_DATFIN = 0)          OR &
+            (PRHDATREF <= T_DATFIN AND T_DATDEB = 0)
+
+
+
+; Fichier permettant de faire un écran de consultation pour les entrepôts
+;
+FILE ARENTREPOT        REFERENCE
+  ACCESS VIA   CIECLE,      &
+               ENTCLE       &
+         USING T_CIECLEMNU, &
+               T_ENTCLEDEM
+
+
+;
+; Sert à valider les codes bilingues et pour les sous-écrans de consultation
+;
+DEFINE    D_PRHTYP CHARACTER SIZE 16 = "PRHTYP"
+TEMPORARY T_PRHTYP CHARACTER SIZE 4
+
+FILE VCBI_DSC          REFERENCE &
+                      ALIAS A_CBI_PRHTYP
+  ACCESS  VIA XELNOM, &
+              CBICLE &
+          USING D_PRHTYP, &
+                T_PRHTYPDEM
+
+;
+; Paramètres pour la compagnie consolidé(holding)
+;
+FILE MCHOLDING         REFERENCE
+  ACCESS VIA CIENMC USING "1"
+
+
+;-------------------------------------------------------------------------------
+; MP-01-04-30_D136.
+
+FILE ARMOU_DETAIL REFERENCE
+  ACCESS VIA CIECLE,                   &
+             MOUCLE,                   &
+             PRDCLE                    &
+       USING CIECLE    OF ARPRD_HISTO, &
+             PRHNUMREF OF ARPRD_HISTO, &
+             PRDCLE    OF ARPRD_HISTO
+
+;-------------------------------------------------------------------------------
+TEMPORARY T_CIECLE     CHARACTER SIZE 4 ; Compagnie pour écran dépisteur
+TEMPORARY T_ENTCLE     CHARACTER SIZE 4 ; Code d'entrepôt écran dépisteur
+TEMPORARY T_CMDCLEFND  CHARACTER SIZE 9 ; Numéro de commande pour référer pièce
+TEMPORARY T_CMDAJTFND  CHARACTER SIZE 3  ; Séquence d'ajustement
+TEMPORARY T_RECCLEFND  CHARACTER SIZE 12 ; Numéro de réception pour référer pièce
+TEMPORARY T_RETCLEFND  CHARACTER SIZE 9 ; Numéro de retour pour référer pièce.
+TEMPORARY T_MOUCLEFND  CHARACTER SIZE 9 ; Numéro de mouvement pour référer pièce.
+
+DEFINE D_PRHQTEINVAPR  FLOAT     SIZE 8 = & ; Quantité inventaire après transaction
+
+  PRHQTEINVAVA OF ARPRD_HISTO + PRHQTETRS OF ARPRD_HISTO &
+
+  IF    PRHTYP OF ARPRD_HISTO = "02" &  ; Réception
+     OR PRHTYP OF ARPRD_HISTO = "08" &  ; Transfert
+     OR PRHTYP OF ARPRD_HISTO = "05" &  ; Entrée
+     OR PRHTYP OF ARPRD_HISTO = "07" &
+
+  ELSE &  ; Ajustement
+
+    PRHQTEINVAVA OF ARPRD_HISTO - PRHQTETRS OF ARPRD_HISTO &
+
+  IF   PRHTYP OF ARPRD_HISTO = "03" &       ; Retour
+    OR PRHTYP OF ARPRD_HISTO = "06" &
+  ELSE & ; Sortie
+    PRHQTEINVAVA OF ARPRD_HISTO
+
+
+;-------------------------------------------------------------------------------
+;
+USE usdrw132    NOLIST     ; Draw pour les écrans pleine page      ; MP-01-04-30_D136.
+USE ustitstd132 NOLIST     ; En-tête pour les écrans pleine page   ; MP-01-04-30_D136.
+USE ushilite    NOLIST     ; Hilite pour tous les écrans           ; MP-01-04-30_D136.
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Historique " &
+@ELSE
+      " %%%Historique " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+;-------------------------------------------------------------------------------
+
+SKIP
+
+aLIGN (,3,19) (,,32)
+
+FIELD PRDCLE OF ARPRODUIT DISPLAY PREDISPLAY &
+@IF FRANCAIS
+        LABEL "Produit.......:"
+@ELSE
+        LABEL "%%%duit.......:"
+@ENDIF
+
+
+FIELD PRDDSC1 OF ARPRODUIT DISPLAY PREDISPLAY
+
+
+SKIP 1
+ALIGN (3,3,19) (,,22) (,40,53) (,66,72)
+
+FIELD T_PRHTYPDEM  &
+        HIDDEN ID 15 &
+        UPSHIFT      &
+        LOOKUP ON A_CBI_PRHTYP &
+          MESSAGE 1346 & ; Ce type de transaction est invalide
+@IF FRANCAIS
+        LABEL "Transaction...:"
+@ELSE
+        LABEL "%%%Transaction...:"
+@ENDIF
+
+
+FIELD CBIDSC OF A_CBI_PRHTYP DISPLAY &
+      SIZE 13
+
+
+FIELD T_DATDEB FORMAT YYYYMMDD              &
+@IF FRANCAIS
+        LABEL "Date déb.:"
+@ELSE
+        LABEL "%%%Date début.:"
+@ENDIF
+
+
+FIELD T_DATFIN FORMAT YYYYMMDD              &
+@IF FRANCAIS
+        LABEL "Fin.:"
+@ELSE
+        LABEL "%%%Fin.:"
+@ENDIF
+
+ALIGN (,3,19) (,,25)
+
+FIELD T_ENTCLEDEM  &
+        HIDDEN ID 30            &
+        UPSHIFT                 &
+        LOOKUP ON ARENTREPOT    &
+          MESSAGE 1337          & ; Ce code d'entrepôt n'existe pas.
+@IF FRANCAIS
+        LABEL "Entrepôt......:"
+@ELSE
+        LABEL "%%%Entrepôt......:"
+@ENDIF
+
+FIELD ENTNOMABR OF ARENTREPOT DISPLAY
+
+
+SKIP 1
+TITLE "         Date     Numéro      Date                Qté        Inventaire     Dernier                       " AT ,1  ; MP-01-04-30_D136.
+SKIP
+TITLE "  Entr création référence    transac.  Type     transac.       après        coûtant       Compte   Unité  " AT ,1  ; MP-01-04-30_D136.
+
+
+CLUSTER OCCURS WITH ARPRD_HISTO ID BASE 45
+
+ALIGN (3,3,3) (,,8) (,,17) (,,30) (,,39) (,,47) (,,61) (,,75) (,,91) (,,99) ; MP-01-04-30_D136.
+
+FIELD ENTCLE    OF ARPRD_HISTO DISPLAY &
+        HIDDEN                 &
+        LABEL " "
+
+FIELD PRHDATCRE OF ARPRD_HISTO FORMAT YYMMDD DISPLAY
+
+FIELD PRHNUMREF OF ARPRD_HISTO DISPLAY
+
+FIELD PRHDATREF OF ARPRD_HISTO FORMAT YYMMDD DISPLAY
+
+FIELD PRHTYP    OF ARPRD_HISTO DISPLAY SIZE 6
+
+FIELD PRHQTETRS OF ARPRD_HISTO DISPLAY &
+         PICTURE "^^^,^^^.^^^ " &
+         TRAILING SIGN "-"      &
+         BWZ
+
+FIELD D_PRHQTEINVAPR  DISPLAY   &
+         PICTURE "^^^,^^^.^^^ " &
+         TRAILING SIGN "-"      &
+         BWZ
+
+FIELD PRHDERCOU OF ARPRD_HISTO  DISPLAY  &
+        PICTURE "^^^,^^^.^^^^ " &
+        TRAILING SIGN "-"
+
+FIELD CPTCLE OF ARMOU_DETAIL DISPLAY ; MP-01-04-30_D136.
+
+FIELD UNACLE OF ARMOU_DETAIL DISPLAY ; MP-01-04-30_D136.
+
+CLUSTER
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour les codes bilingues.
+;
+;
+PROCEDURE INPUT T_PRHTYPDEM
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PRHTYP = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_PRHTYP, T_PRHTYP
+    LET FIELDTEXT = TRUNCATE(T_PRHTYP)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+PROCEDURE PROCESS T_PRHTYPDEM
+BEGIN
+  DISPLAY CBIDSC OF A_CBI_PRHTYP
+END
+
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de faire un écran dépisteur pour l'entrepôt
+;
+PROCEDURE INPUT T_ENTCLEDEM
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = T_CIECLEMNU
+    LET T_ENTCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN ar100 MODE F PASSING T_CIECLE, T_ENTCLE
+    LET FIELDTEXT = TRUNCATE(T_ENTCLE)
+  END
+END
+;
+;
+;
+;
+PROCEDURE OUTPUT PRHTYP
+BEGIN
+  IF PRHTYP = "01"
+  THEN LET FIELDTEXT = "Comman"
+  IF PRHTYP = "02"
+  THEN LET FIELDTEXT = "Récept"
+  IF PRHTYP = "03"
+  THEN LET FIELDTEXT = "Retour"
+  IF PRHTYP = "04"
+  THEN LET FIELDTEXT = "FacAch"
+  IF PRHTYP = "05"
+  THEN LET FIELDTEXT = "Entrée"
+  IF PRHTYP = "06"
+  THEN LET FIELDTEXT = "Sortie"
+  IF PRHTYP = "07"
+  THEN LET FIELDTEXT = "Ajuste"
+  IF PRHTYP = "08"
+  THEN LET FIELDTEXT = "Transf"
+  IF PRHTYP = "09"
+  THEN LET FIELDTEXT = "InvPhy"
+END
+
+;-------------------------------------------------------------------------------
+; Procédure codée afin de saisir en mode recherche le type de transaction,
+; les dates de début et de fin ainsi que l'entrepôt.
+;
+PROCEDURE PATH
+BEGIN
+  REQUEST T_PRHTYPDEM
+  IF PROMPTOK
+  THEN BEGIN
+    REQUEST T_DATDEB
+    REQUEST T_DATFIN
+    REQUEST T_ENTCLEDEM
+  END
+  IF PROMPTOK
+  THEN LET PATH = 1
+
+  IF PATH = 0
+  THEN BEGIN
+    REQUEST T_PRHTYPDEM
+    IF PROMPTOK
+    THEN BEGIN
+      REQUEST T_DATDEB
+      REQUEST T_DATFIN
+      LET PATH = 2
+    END
+  END
+
+  IF PATH = 0
+  THEN BEGIN
+    REQUEST T_DATDEB
+    REQUEST T_DATFIN
+    REQUEST T_ENTCLEDEM
+    IF PROMPTOK
+    THEN LET PATH = 3
+  END
+
+  IF PATH = 0
+  THEN BEGIN
+    LET PATH = 4
+  END
+
+END
+
+;-------------------------------------------------------------------------------
+; Procédure codée afin de saisir en mode recherche le type de transaction,
+; les dates de début et de fin ainsi que l'entrepôt.
+;
+PROCEDURE FIND
+BEGIN
+  FOR ARPRD_HISTO
+  BEGIN
+    IF PATH = 1
+    THEN GET ARPRD_HISTO     &
+           VIA   CIECLE ,    &
+                 PRDCLE ,    &
+                 PRHTYP ,    &
+                 ENTCLE      &
+           USING T_CIECLEMNU,&
+                 PRDCLE OF ARPRODUIT , &
+                 T_PRHTYPDEM , &
+                 T_ENTCLEDEM   &
+           ORDERBY CIECLE , &
+                   PRDCLE , &
+                   PRHTIMSTP DESC
+
+    IF PATH = 2
+    THEN GET ARPRD_HISTO &
+           VIA   CIECLE ,     &
+                 PRDCLE ,     &
+                 PRHTYP       &
+           USING T_CIECLEMNU ,&
+                 PRDCLE OF ARPRODUIT , &
+                 T_PRHTYPDEM           &
+           ORDERBY CIECLE , &
+                   PRDCLE , &
+                   PRHTIMSTP DESC
+
+    IF PATH = 3
+       THEN GET ARPRD_HISTO      &
+              VIA   CIECLE ,       &
+                    PRDCLE ,       &
+                    ENTCLE         &
+              USING T_CIECLEMNU ,  &
+                    PRDCLE OF ARPRODUIT , &
+                    T_ENTCLEDEM     &
+              ORDERBY CIECLE , &
+                      PRDCLE , &
+                      PRHTIMSTP DESC
+
+    IF PATH = 4
+    THEN GET ARPRD_HISTO       &
+           VIA   CIECLE ,      &
+                 PRDCLE        &
+           USING T_CIECLEMNU , &
+                 PRDCLE OF ARPRODUIT &
+           ORDERBY CIECLE , &
+                   PRDCLE , &
+                   PRHTIMSTP DESC
+
+  END
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet lors d'un retour de chariot sur la ligne correspondante
+; de référer à la pièce correspondante.
+;
+PROCEDURE DESIGNER 45
+BEGIN
+  IF PRHTYP OF ARPRD_HISTO = "01"  ; Commande d'achat
+  THEN BEGIN
+    LET T_CMDCLEFND = PRHNUMREF OF ARPRD_HISTO
+    LET T_CMDAJTFND = ""
+    RUN SCREEN ar007 &
+          PASSING T_CIECLEMNU, &
+                  T_CIENOM,    &
+                  T_PECCLEMNU, &
+                  T_FOUCIECLE, &
+                  T_CMDCLEFND, &
+                  T_CMDAJTFND  &
+          MODE F
+  END
+
+  IF PRHTYP OF ARPRD_HISTO = "02"  ; Réception de commande d'achat
+  THEN BEGIN
+    LET T_RECCLEFND = PRHNUMREF OF ARPRD_HISTO
+    RUN SCREEN ar009 &
+          PASSING T_CIECLEMNU, &
+                  T_CIENOM,    &
+                  T_PECCLEMNU, &
+                  T_FOUCIECLE, &
+                  T_RECCLEFND  &
+          MODE F
+  END
+
+  IF PRHTYP OF ARPRD_HISTO = "04" ; Facture.
+  THEN BEGIN
+    LET T_FOUCIEFND = FOUCIECLE OF ARPRD_HISTO
+    LET T_FOUCLEFND = FOUCLE    OF ARPRD_HISTO
+    LET T_FACCLEFND = PRHNUMREF OF ARPRD_HISTO
+    RUN SCREEN ar011 &
+        PASSING T_CIECLEMNU, &
+                T_CIENOM   , &
+                T_PECCLEMNU, &
+                T_FOUCIECLE, &
+                T_FOUCLEFND, &
+                T_FACCLEFND  &
+        MODE F
+
+  END
+
+  IF   PRHTYP OF ARPRD_HISTO = "05" & ; Entrée.
+    OR PRHTYP OF ARPRD_HISTO = "06" & ; Sortie.
+    OR PRHTYP OF ARPRD_HISTO = "07" & ; Ajustement.
+    OR PRHTYP OF ARPRD_HISTO = "08"   ; Transfert.
+  THEN BEGIN
+    LET T_MOUCLEFND = PRHNUMREF OF ARPRD_HISTO
+    RUN SCREEN ar014 &
+          PASSING T_CIECLEMNU, &
+                  T_CIENOM,    &
+                  T_PECCLEMNU, &
+                  T_FOUCIECLE, &
+                  T_MOUCLEFND  &
+          MODE F
+  END
+
+
+END
+
+;
+; Procédure servant à modifier la première ligne d'un occurrence
+; avec Powerhouse Client.
+;
+PROCEDURE DESIGNER PH01
+BEGIN
+  IF PRHTYP OF ARPRD_HISTO = "01"  ; Commande d'achat
+  THEN BEGIN
+    LET T_CMDCLEFND = PRHNUMREF OF ARPRD_HISTO
+    LET T_CMDAJTFND = ""
+    RUN SCREEN ar007 &
+          PASSING T_CIECLEMNU, &
+                  T_CIENOM,    &
+                  T_PECCLEMNU, &
+                  T_FOUCIECLE, &
+                  T_CMDCLEFND, &
+                  T_CMDAJTFND  &
+          MODE F
+  END
+
+  IF PRHTYP OF ARPRD_HISTO = "02"  ; Réception de commande d'achat
+  THEN BEGIN
+    LET T_RECCLEFND = PRHNUMREF OF ARPRD_HISTO
+    RUN SCREEN ar009 &
+          PASSING T_CIECLEMNU, &
+                  T_CIENOM,    &
+                  T_PECCLEMNU, &
+                  T_FOUCIECLE, &
+                  T_RECCLEFND  &
+          MODE F
+  END
+
+  IF PRHTYP OF ARPRD_HISTO = "04" ; Facture.
+  THEN BEGIN
+    LET T_FOUCIEFND = FOUCIECLE OF ARPRD_HISTO
+    LET T_FOUCLEFND = FOUCLE    OF ARPRD_HISTO
+    LET T_FACCLEFND = PRHNUMREF OF ARPRD_HISTO
+    RUN SCREEN ar011 &
+        PASSING T_CIECLEMNU, &
+                T_CIENOM   , &
+                T_PECCLEMNU, &
+                T_FOUCIECLE, &
+                T_FOUCLEFND, &
+                T_FACCLEFND  &
+        MODE F
+
+  END
+
+  IF   PRHTYP OF ARPRD_HISTO = "05" & ; Entrée.
+    OR PRHTYP OF ARPRD_HISTO = "06" & ; Sortie.
+    OR PRHTYP OF ARPRD_HISTO = "07" & ; Ajustement.
+    OR PRHTYP OF ARPRD_HISTO = "08"   ; Transfert.
+  THEN BEGIN
+    LET T_MOUCLEFND = PRHNUMREF OF ARPRD_HISTO
+    RUN SCREEN ar014 &
+          PASSING T_CIECLEMNU, &
+                  T_CIENOM,    &
+                  T_PECCLEMNU, &
+                  T_FOUCIECLE, &
+                  T_MOUCLEFND  &
+          MODE F
+  END
+
+
+END
+
+
+
+BUILD
+
+
+@IF FORMAT
+xxxx                                           xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                            x
+************************************************************ Historique ************************************************************
+* Produit.......: xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                            *
+*                                                                                                                                  *
+* Transaction...: xx xxxxxxxxxxxxx     Date déb.:   xxxxxxxxxx   Fin.: xxxxxxxxxx                                                  *
+* Entrepôt......: xxxx  xxxxxxxxxxxxxxxxxxxx                                                                                       *
+*                                                                                                                                  *
+         Date     Numéro      Date                Qté        Inventaire     Dernier                                                *
+  Entr création référence    transac.  Type     transac.       après        coûtant       Compte   Unité                           *
+* xxxx xxxxxxxx xxxxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxx  xxxxxxxxxxxx  xxxxxxxxxxxxx   xxxxxx  xxxxxxxx                         *
+* xxxx xxxxxxxx xxxxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxx  xxxxxxxxxxxx  xxxxxxxxxxxxx   xxxxxx  xxxxxxxx                         *
+* xxxx xxxxxxxx xxxxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxx  xxxxxxxxxxxx  xxxxxxxxxxxxx   xxxxxx  xxxxxxxx                         *
+* xxxx xxxxxxxx xxxxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxx  xxxxxxxxxxxx  xxxxxxxxxxxxx   xxxxxx  xxxxxxxx                         *
+* xxxx xxxxxxxx xxxxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxx  xxxxxxxxxxxx  xxxxxxxxxxxxx   xxxxxx  xxxxxxxx                         *
+* xxxx xxxxxxxx xxxxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxx  xxxxxxxxxxxx  xxxxxxxxxxxxx   xxxxxx  xxxxxxxx                         *
+* xxxx xxxxxxxx xxxxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxx  xxxxxxxxxxxx  xxxxxxxxxxxxx   xxxxxx  xxxxxxxx                         *
+* xxxx xxxxxxxx xxxxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxx  xxxxxxxxxxxx  xxxxxxxxxxxxx   xxxxxx  xxxxxxxx                         *
+* xxxx xxxxxxxx xxxxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxx  xxxxxxxxxxxx  xxxxxxxxxxxxx   xxxxxx  xxxxxxxx                         *
+* xxxx xxxxxxxx xxxxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxx  xxxxxxxxxxxx  xxxxxxxxxxxxx   xxxxxx  xxxxxxxx                         *
+* xxxx xxxxxxxx xxxxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxx  xxxxxxxxxxxx  xxxxxxxxxxxxx   xxxxxx  xxxxxxxx                         *
+* xxxx xxxxxxxx xxxxxxxxxxxx xxxxxxxx xxxxxx  xxxxxxxxxxxx  xxxxxxxxxxxx  xxxxxxxxxxxxx   xxxxxx  xxxxxxxx                         *
+************************************************************************************************************************************
+@ENDIF

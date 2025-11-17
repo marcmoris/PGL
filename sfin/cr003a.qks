@@ -1,0 +1,1447 @@
+;/T/ Factures / notes de crédit - Imputation
+;
+;//M/GRA01/Francois Richard/1999-06-18
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur..: Alain Côté
+;    Date Création: 1 juin 1993
+;
+;    Description..: Saisie de l'imputation pour un compte à recevoir.
+;
+;/M/ François Déry, 30 avril 1999
+;       Modifier l'accèss au fichier de séquence car il a
+;       été converti en format interbase au lieu d'indexé.
+;
+;/M/ Adatation....: Marc Morissette 22 Octobre 1993
+;
+;    Description..: Ajout du flg Facturable Oui/non et du numéro de client
+;                   Ajout du code d'équipement
+;                   Modification de l'ordre de saisie des champs
+;
+;/A/ Adaptation : Nancy Marceau, 24 mars 1994
+;
+;    Description: Afficher les valeurs par défaut du projet, du sous-projet et
+;                 de l'équipement qui ont été définis dans la maintenance des
+;                 paramètres du Prix de revient.
+;
+;/M/ Modifié par: Guy Chabot le 12 Avril 1994
+;    Impact.....: Prendre par défaut l'équipement mentionné dans la table
+;                 GPPROJETS selon le projet saisie.
+;-------------------------------------------------------------------------------
+;/V/ 3.00.02    Guy Chabot 12-mai-1994 (197).
+;
+;/M/ Marie-Josée Hamel, 96.02.19, remplacer élément par produit/élém. tarif.
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cr003a ACTIONBAR &
+              MODE LABEL "" AT 2,132 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              FROM 1,1 TO 23,132 &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        D_LCRATRJOU, &
+                        CRCPT_A_REC, &
+                        MCREF_ADRESSE, &
+                        CRCAR_HISTO  , &
+                        A_CRH_FACTURE
+
+TEMPORARY T_CPTPECDEBI_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CPTPECDEBA_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_PECCLE_SIE2 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CCUPECDEBI_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_CCUPECDEBA_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_PECCLE_SIE1 CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+USE ussectmp   NOLIST
+    "CR003A"
+
+USE cr003a.hlp NOLIST
+
+USE usactecr   NOLIST
+
+;
+; Ouverture d'une transaction QUERY indépendante de l'écran maitre.
+;
+USE ustrasse   NOLIST
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_RAD_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE MCRAD_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+
+;-------------------------------------------------------------------------------
+;
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de compagnie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie du menu.
+DEFINE    D_LCRATRJOU CHARACTER SIZE 1  ; Si le lot est autorisé.
+
+TEMPORARY T_CARMNT_ROUND FLOAT SIZE 8
+TEMPORARY T_CARCUMMNT_ROUND FLOAT SIZE 8
+
+;-------------------------------------------------------------------------------
+;
+
+FILE CRCPT_A_REC      MASTER
+
+FILE MCREF_ADRESSE    MASTER
+
+FILE CRCAR_HISTO      MASTER
+
+FILE CRCAR_HISTO      MASTER &
+                      ALIAS A_CRH_FACTURE
+
+;
+;
+FILE CRCAR_IMPUTATION PRIMARY &
+                      OCCURS 14 &
+                      NOITEMS
+  ACCESS VIA CIECLE, &
+             CARCLE  &
+         USING CIECLE OF CRCPT_A_REC, &
+               CARCLE OF CRCPT_A_REC  &
+         ORDERBY CIECLE, &
+                 CARCLE, &
+                 CRITIMSTP
+
+  ITEM CIECLE    OF CRCAR_IMPUTATION INITIAL CIECLE OF CRCPT_A_REC
+  ITEM CARCLE    OF CRCAR_IMPUTATION INITIAL CARCLE OF CRCPT_A_REC
+  ITEM CRITIMSTP OF CRCAR_IMPUTATION INITIAL SYSDATE * 1000000 + &
+                                             ROUND(SYSTIME / 100)
+
+;
+; Notion de charte de compte et pour avoir la devise du G/L.
+;
+FILE MCHOLDING        REFERENCE
+  ACCESS VIA CIENMC &
+         USING "1"
+
+;
+; Validation de la charte de compte.
+;
+FILE MCCHARTE_UNA     REFERENCE
+  ACCESS VIA CPTCLE, &
+             CIECLE, &
+             UNACLE &
+         USING CPTCLE OF CRCAR_IMPUTATION, &
+               CIECLE OF CRCAR_IMPUTATION, &
+               UNACLE OF CRCAR_IMPUTATION
+
+;
+; Validation de l'unité administrative.
+;
+FILE MCUNITE_ADM      REFERENCE &
+                      OCCURS WITH CRCAR_IMPUTATION
+  ACCESS VIA CIECLE, &
+             UNACLE &
+         USING CIECLE OF CRCAR_IMPUTATION, &
+               UNACLE OF CRCAR_IMPUTATION
+
+;-------------------------------
+; Validation des produits / trajets
+;
+FILE FATRAJET_PRODUIT REFERENCE &
+                      OCCURS WITH CRCAR_IMPUTATION
+
+  ACCESS  VIA   CIECLE,    &
+                TRPCLE     &
+          USING T_CIECLEMNU           ,  &
+                TRPCLE OF CRCAR_IMPUTATION
+
+
+;--------------------------------------
+; Validation des éléments de tarifications
+;
+FILE FAELEMENT_TARIF  REFERENCE &
+                      OCCURS WITH CRCAR_IMPUTATION
+
+  ACCESS  VIA   CIECLE,    &
+                ETACLE     &
+          USING T_CIECLEMNU           ,  &
+                ETACLE OF CRCAR_IMPUTATION
+
+
+;------------------------------------
+; Validation des grilles de tarification
+;
+FILE FAGRILLE_TARIF   DESIGNER OPEN READ
+
+
+;
+; Validation du compte comptable.
+;
+FILE VCPT_DSC         REFERENCE &
+                      OCCURS WITH CRCAR_IMPUTATION
+  ACCESS VIA CPTCLE &
+         USING CPTCLE OF CRCAR_IMPUTATION
+
+;
+; Validation des codes de taxes fédéral.
+;
+FILE MCTAXE           REFERENCE &
+                      ALIAS A_TAX_TPS
+  ACCESS VIA TAXCLETYP, &
+             TAXCLECOD &
+         USING CRITAXTYPTPS OF CRCAR_IMPUTATION, &
+               CRITAXCODTPS OF CRCAR_IMPUTATION
+
+;
+; Validation des codes de taxes provincial.
+;
+FILE MCTAXE           REFERENCE &
+                      ALIAS A_TAX_TVP
+  ACCESS VIA TAXCLETYP, &
+             TAXCLECOD &
+         USING CRITAXTYPTVP OF CRCAR_IMPUTATION, &
+               CRITAXCODTVP OF CRCAR_IMPUTATION
+
+;
+; Pour avoir les codes de taxes de défaut du client, le type de client
+; et la devise du client.
+;
+FILE VCLC_CLI         REFERENCE
+  ACCESS VIA CLICIECLE, &
+             CLICLE   , &
+             CIECLE     &
+         USING REFCIECLE OF CRCPT_A_REC, &
+               REFCLENUM OF CRCPT_A_REC, &
+               CIECLE    OF CRCPT_A_REC
+
+;
+; Validation du projet.
+;
+FILE GPPROJETS         REFERENCE &
+                      OCCURS WITH CRCAR_IMPUTATION
+  ACCESS VIA CIECLE, &
+             PRJCLE  &
+         USING CIECLE OF CRCAR_IMPUTATION, &
+               PRJCLE OF CRCAR_IMPUTATION
+
+;
+; Validation de l'activité.
+;
+FILE GPPRO_ACTIVITE       REFERENCE
+  ACCESS VIA CIECLE, &
+             PRJCLE, &
+             PRACLE  &
+         USING CIECLE OF CRCAR_IMPUTATION, &
+               PRJCLE OF CRCAR_IMPUTATION, &
+               PRACLE OF CRCAR_IMPUTATION
+
+
+;-------------------------------------------------------------------------------
+; Valeurs par défaut à utiliser pour le projet, sous-projet et équipement.
+;
+FILE GPPARAMETRE REFERENCE &
+                 OCCURS WITH CRCAR_IMPUTATION
+
+  ACCESS VIA   CIECLE &
+         USING T_CIECLEMNU
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide l'immobilisation et affiche la description.
+;
+TEMPORARY T_IMMCLE CHARACTER SIZE 12 ; Popup sur les immobilisations.
+
+FILE IMIMMOBILISATION REFERENCE
+
+  ACCESS  VIA   CIECLE, &
+                IMMCLE &
+          USING CIECLE OF CRCAR_IMPUTATION , &
+                IMMCLE OF CRCAR_IMPUTATION
+
+  SELECT IF IMMSTU OF IMIMMOBILISATION = "A"
+
+
+
+
+;
+; Numéro de séquence des adresses pour les clients divers.
+;
+FILE MCRAD_SEQ        DESIGNER &
+                      TRANSACTION GEN_RAD_SEQ
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul de l'écart entre le montant brut et la sommation de l'imputation.
+;
+DEFINE D_ECART FLOAT SIZE 8 = CARMNT    OF CRCPT_A_REC - &
+                              CARCUMMNT OF CRCPT_A_REC
+
+
+TEMPORARY T_CPTCLE    CHARACTER SIZE 6 ; Popup sur les comptes
+TEMPORARY T_PECCLE    CHARACTER SIZE 4 ; Popup sur les comptes et unité adm.
+TEMPORARY T_CPTTYPPAT CHARACTER SIZE 1 ; Popup sur les comptes
+TEMPORARY T_CPTCATPAT CHARACTER SIZE 8 ; Popup sur les comptes
+
+TEMPORARY T_UNACLE    CHARACTER SIZE 8 ; Popup sur les unités adm.
+
+TEMPORARY T_PRJCLE    CHARACTER SIZE 8 ; Popup sur les PRJjets.
+TEMPORARY T_PRJSTUPAT CHARACTER SIZE 8 ; Popup sur les projets.
+
+TEMPORARY T_PRACLE    CHARACTER SIZE 3 ; Popup sur les activités.
+TEMPORARY T_PRASTUPAT CHARACTER SIZE 5 ; Popup sur les activités.
+
+TEMPORARY T_TAXCLETYP CHARACTER SIZE 1 ; Popup sur les codes de taxes
+TEMPORARY T_TAXCLECOD CHARACTER SIZE 2 ; Popup sur les codes de taxes
+TEMPORARY T_TAXMODPAT CHARACTER SIZE 5 ; Popup sur les codes de taxes
+
+TEMPORARY T_CLICIECLE CHARACTER SIZE 4 ; Popup sur les Clients
+TEMPORARY T_CLICLE    CHARACTER SIZE  6 ; Popup sur les clients
+
+TEMPORARY T_TRPCLE    CHARACTER SIZE 3 ; Popup sur les produits
+TEMPORARY T_SEGMUL    CHARACTER SIZE 3 ; Popup sur les produits
+TEMPORARY T_TRPTYPPAT CHARACTER SIZE 5 ; Popup sur les produits
+
+TEMPORARY T_ETACLE    CHARACTER SIZE 4 ; Popup sur les elements de tarification
+
+;
+; Pour le calcul des taxes.
+;
+TEMPORARY T_FLGMOD       CHARACTER SIZE 1 OCCURS WITH CRCAR_IMPUTATION
+                                          ; Flag pour déceler s'il y eu modif.
+TEMPORARY T_TAXMODTPSOLD CHARACTER SIZE 1 OCCURS WITH CRCAR_IMPUTATION
+                                          ; Pour diminuer le bon cumul de taxe.
+TEMPORARY T_TAXMODTVQOLD CHARACTER SIZE 1 OCCURS WITH CRCAR_IMPUTATION
+                                          ; Pour diminuer le bon cumul de taxe.
+;
+; Temporaires necessaires au calcul des taxes
+;
+USE ustaxtmp NOLIST
+
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+
+USE usdrw132 NOLIST
+USE ustit132 NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Imputation " &
+@ELSE
+      " Charge " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST
+
+
+ALIGN(,3,19) (,93,114)
+
+FIELD CARCLE    OF CRCPT_A_REC &
+LABEL "Facture.......:"&
+        FIXED
+
+FIELD CARMNT    OF CRCPT_A_REC &
+        FIXED &
+@IF FRANCAIS
+        LABEL "Montant total.:"
+@ELSE
+        LABEL "Total amount..:"
+@ENDIF
+
+FIELD CARMNTTPS OF CRCPT_A_REC &
+LABEL "Montant de TPS:"&
+        DISPLAY &
+        PREDISPLAY
+
+FIELD CARCUMMNT OF CRCPT_A_REC &
+LABEL "Montant cumulé:"&
+        DISPLAY &
+        PREDISPLAY
+
+FIELD CARMNTTVP OF CRCPT_A_REC &
+LABEL "Montant de TVQ:"&
+        DISPLAY &
+        PREDISPLAY
+
+FIELD D_ECART &
+        DISPLAY &
+        PREDISPLAY &
+@IF FRANCAIS
+        LABEL "Solde à vent..:" &
+@ELSE
+        LABEL "Balance.......:" &
+@ENDIF
+        PICTURE "^^,^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5
+
+SKIP
+
+DRAW ,1 TO ,132
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+ "Projet  SSpro Immobilis.  Unité    Prod./Elém Compte       Montant  TF TP           TPS           TVQ "&
+@ENDIF
+  AT ,3
+
+ALIGN (3,2,3) (,,12) (,,16) (,,29) (,,39) (,,44) (,,49) (,,56) (,,71) (,,74) (,,77) (,,91)
+
+CLUSTER OCCURS WITH CRCAR_IMPUTATION ID BASE 05
+
+FIELD PRJCLE       OF CRCAR_IMPUTATION &
+      HIDDEN LABEL " "
+
+FIELD PRACLE       OF CRCAR_IMPUTATION
+
+FIELD IMMCLE       OF CRCAR_IMPUTATION &
+        LOOKUP ON IMIMMOBILISATION &
+            MESSAGE 491 ; Cette immobilisation n'existe pas ou est inactive.
+
+
+
+FIELD UNACLE       OF CRCAR_IMPUTATION &
+        REQUIRED &
+        DUPLICATE &
+        LOOKUP ON MCUNITE_ADM &
+          MESSAGE 666 ; Ce numéro d'unité adm. n'existe pas.
+
+
+FIELD TRPCLE       OF CRCAR_IMPUTATION  &
+        REQUIRED
+
+FIELD ETACLE       OF CRCAR_IMPUTATION  &
+        REQUIRED
+
+FIELD CPTCLE       OF CRCAR_IMPUTATION  &
+      REQUIRED
+
+
+FIELD CRIMNT       OF CRCAR_IMPUTATION &
+        REQUIRED
+
+FIELD CRITAXCODTPS OF CRCAR_IMPUTATION &
+        DUPLICATE
+
+FIELD CRITAXCODTVP OF CRCAR_IMPUTATION &
+        DUPLICATE
+
+FIELD CRIMNTTPS    OF CRCAR_IMPUTATION
+
+FIELD CRIMNTTVP    OF CRCAR_IMPUTATION
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Averti l'usager si l'écriture ne balance pas.
+;
+;
+PROCEDURE EXIT
+BEGIN
+ LET T_CARMNT_ROUND    = ROUND(CARMNT OF CRCPT_A_REC)
+ LET T_CARCUMMNT_ROUND = ROUND(CARCUMMNT OF CRCPT_A_REC)
+  IF T_CARMNT_ROUND <> T_CARCUMMNT_ROUND
+  THEN WARNING 649 ; L'imputation ne balance pas.
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour les trajets / produits.
+;
+;
+PROCEDURE INPUT TRPCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TRPCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_SEGMUL    = "0|1"
+    LET T_TRPTYPPAT = "T|P"
+    RUN SCREEN fa102 MODE F PASSING T_CIECLEMNU,T_TRPCLE,T_SEGMUL,T_TRPTYPPAT &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_TRPCLE)
+  END
+
+  IF 0 = SIZE(FIELDTEXT)
+  THEN LET FIELDTEXT = OLDVALUE(TRPCLE OF CRCAR_IMPUTATION)
+
+  IF FIELDTEXT <> " "
+  THEN BEGIN
+       GET FATRAJET_PRODUIT &
+           VIA   CIECLE,    &
+                 TRPCLE     &
+           USING T_CIECLEMNU, &
+                 FIELDTEXT OPTIONAL
+       IF NOT ACCESSOK
+       THEN ERROR 2722
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE EDIT TRPCLE OF CRCAR_IMPUTATION
+BEGIN
+  IF TRPSTU OF FATRAJET_PRODUIT <> "A"
+  THEN ERROR 2755 ; Ce produit n'est pas actif
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour l'élement de tarification
+;
+;
+PROCEDURE INPUT ETACLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TRPCLE = TRPCLE OF CRCAR_IMPUTATION
+    LET T_ETACLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN fa101 MODE F PASSING T_CIECLEMNU, T_TRPCLE, T_ETACLE &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_ETACLE)
+  END
+
+  IF 0 = SIZE(FIELDTEXT)
+  THEN LET FIELDTEXT = OLDVALUE(ETACLE OF CRCAR_IMPUTATION)
+
+  IF FIELDTEXT = " " AND TRPCLE OF CRCAR_IMPUTATION <> " "
+  THEN ERROR 2734
+
+  IF FIELDTEXT <> " " AND TRPCLE OF CRCAR_IMPUTATION = " "
+  THEN BEGIN
+       LET FIELDTEXT = " "
+       WARNING 2733
+  END
+
+  IF FIELDTEXT <> " "
+  THEN BEGIN
+       GET FAELEMENT_TARIF  &
+           VIA   CIECLE,    &
+                 ETACLE     &
+           USING T_CIECLEMNU, &
+                 FIELDTEXT OPTIONAL
+       IF NOT ACCESSOK
+       THEN ERROR 2719
+
+       GET FAGRILLE_TARIF   &
+           VIA   CIECLE,    &
+                 TRPCLE,    &
+                 ETACLE     &
+           USING T_CIECLEMNU,           &
+                 TRPCLE OF CRCAR_IMPUTATION , &
+                 FIELDTEXT OPTIONAL
+       IF NOT ACCESSOK
+       THEN ERROR 2729
+  END
+END
+
+
+;PROCEDURE PROCESS ETACLE
+;BEGIN
+;  LET CPTCLE OF CRCAR_IMPUTATION = ETACPTCLE OF FAELEMENT_TARIF
+;  DISPLAY CPTCLE
+;END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les comptes.
+;
+;
+PROCEDURE INPUT CPTCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_CPTTYPPAT = "R"
+    LET T_CPTCATPAT = "@"
+    LET T_PECCLE    = PECCLE OF CRCPT_A_REC
+    RUN SCREEN mc103 MODE F PASSING T_CPTCLE, &
+                                    T_CPTTYPPAT, &
+                                    T_CPTCATPAT, &
+                                    T_PECCLE &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNCATE(T_CPTCLE)
+  END
+  ;
+  ; Force l'éxécution du LOOKUP.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(CPTCLE OF CRCAR_IMPUTATION))
+  THEN LET FIELDTEXT = CPTCLE OF CRCAR_IMPUTATION
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation si le compte est actif.
+;
+;
+PROCEDURE EDIT CPTCLE
+BEGIN
+  ;
+  ; Note: La période de fin, est la première période d'inactivité.
+  ;
+
+  ; Ajustement pour le changement de siècle
+  IF PECCLE OF CRCPT_A_REC[1:1] < "8"
+  THEN LET T_PECCLE_SIE2 = "1" + PECCLE OF CRCPT_A_REC
+  ELSE LET T_PECCLE_SIE2 = "0" + PECCLE OF CRCPT_A_REC
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBA OF VCPT_DSC[1:1] < "8"
+  THEN LET T_CPTPECDEBA_SIE = "1" + CPTPECDEBA OF VCPT_DSC
+  ELSE LET T_CPTPECDEBA_SIE = "0" + CPTPECDEBA OF VCPT_DSC
+
+  ; Ajustement pour le changement de siècle
+  IF CPTPECDEBI OF VCPT_DSC[1:1] < "8"
+  THEN LET T_CPTPECDEBI_SIE = "1" + CPTPECDEBI OF VCPT_DSC
+  ELSE LET T_CPTPECDEBI_SIE = "0" + CPTPECDEBI OF VCPT_DSC
+
+  IF T_PECCLE_SIE2 >= T_CPTPECDEBA_SIE AND &
+     ( &
+       T_PECCLE_SIE2 < T_CPTPECDEBI_SIE OR &
+       CPTPECDEBI OF VCPT_DSC = "" &
+     )
+  THEN NULL
+  ELSE ERROR 667 ; Ce compte est inactif.
+
+  IF CPTTYP OF VCPT_DSC <> "R"
+  THEN ERROR 668 ; On ne peut pas utliser ce compte dans une imputation.
+
+  IF     DEVCLE OF VCPT_DSC <> DEVCLE OF VCLC_CLI  &
+     AND DEVCLE OF VCPT_DSC <> DEVCLE OF MCHOLDING
+  THEN ERROR 726 ; Compte interdit due à la devise du compte.
+
+  IF HLDCHTCPT OF MCHOLDING = "1"
+  THEN BEGIN
+    GET MCCHARTE_UNA OPTIONAL
+    ;
+    ; Si la charte est incluse, le lien est obligatoire.
+    ;
+    IF NOT ACCESSOK
+    THEN BEGIN
+      IF HLDCHTCPTRLT OF MCHOLDING = "I"
+      THEN ERROR 669 ; La combinaison compte/unité adm n'existe pas.
+    END
+    ELSE BEGIN
+      ;
+      ; Si la charte est Exclusive et que la période fait partie de
+      ; l'intervalle de période de la charte alors c'est une erreur.
+      ;
+      ; Si la charte est inclusive et que la période ne fait pas partie de
+      ; l'intervalle de période de la charte alors c'est une erreur.
+      ;
+
+      ; Ajustement pour le changement de siècle
+      IF PECCLE OF CRCPT_A_REC[1:1] < "8"
+      THEN LET T_PECCLE_SIE1 = "1" + PECCLE OF CRCPT_A_REC
+      ELSE LET T_PECCLE_SIE1 = "0" + PECCLE OF CRCPT_A_REC
+
+      ; Ajustement pour le changement de siècle
+      IF CCUPECDEBA OF MCCHARTE_UNA[1:1] < "8"
+      THEN LET T_CCUPECDEBA_SIE = "1" + CCUPECDEBA OF MCCHARTE_UNA
+      ELSE LET T_CCUPECDEBA_SIE = "0" + CCUPECDEBA OF MCCHARTE_UNA
+
+      ; Ajustement pour le changement de siècle
+      IF CCUPECDEBI OF MCCHARTE_UNA[1:1] < "8"
+      THEN LET T_CCUPECDEBI_SIE = "1" + CCUPECDEBI OF MCCHARTE_UNA
+      ELSE LET T_CCUPECDEBI_SIE = "0" + CCUPECDEBI OF MCCHARTE_UNA
+
+      IF ( &
+           T_PECCLE_SIE1 >= T_CCUPECDEBA_SIE AND &
+           ( &
+             T_PECCLE_SIE1 < T_CCUPECDEBI_SIE OR &
+             CCUPECDEBI OF MCCHARTE_UNA = " " &
+           ) &
+         )
+      THEN BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "E"
+        THEN ERROR 670 ; La combinaison compte/unité adm. est inactif.
+      END
+      ELSE BEGIN
+        IF HLDCHTCPTRLT OF MCHOLDING = "I"
+        THEN ERROR 670 ; La combinaison compte/unité adm. est inactif.
+      END
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT UNACLE
+BEGIN
+  ;
+  ; Popup sur les unités administrative.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE = CPTCLE OF CRCAR_IMPUTATION
+    LET T_PECCLE = PECCLE OF CRCPT_A_REC
+    LET T_UNACLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc104 MODE F PASSING T_CIECLEMNU, T_UNACLE &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNCATE(T_UNACLE)
+  END
+  ;
+  ; Force l'éxécution du LOOKUP.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(UNACLE OF CRCAR_IMPUTATION))
+  THEN LET FIELDTEXT = UNACLE OF CRCAR_IMPUTATION
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Mise à jour du cumulatif de l'imputation.
+;
+;
+PROCEDURE EDIT CRIMNT
+BEGIN
+  ;
+  ; Valide la partie décimale.
+  ;
+  USE usvaldec NOLIST
+
+  LET CARCUMMNT OF CRCPT_A_REC = CARCUMMNT OF CRCPT_A_REC - &
+                                 OLDVALUE(CRIMNT OF CRCAR_IMPUTATION) + &
+                                 FIELDVALUE
+  ;
+  ; Initialise le flag à Oui dans la procédure EDIT. Car si l'usager saisie
+  ; une valeur la procédure EDIT est exécuté.
+  ;
+  LET T_FLGMOD = "1"
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Affiche l'écart.
+;
+;
+PROCEDURE PROCESS CRIMNT
+BEGIN
+  DISPLAY CARCUMMNT OF CRCPT_A_REC
+  DISPLAY D_ECART
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran de consultation des codes de taxe.
+;
+;
+PROCEDURE INPUT CRITAXCODTPS
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TAXCLETYP = CRITAXTYPTPS OF CRCAR_IMPUTATION
+    LET T_TAXCLECOD = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    LET T_TAXMODPAT = "@"
+    RUN SCREEN mc111 MODE F PASSING T_TAXCLETYP, &
+                                    T_TAXCLECOD, &
+                                    T_TAXMODPAT &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNC(T_TAXCLECOD)
+  END
+  ;
+  ; Par defaut on utilise le code de taxe de TPS du client.
+  ;
+  IF     0 = SIZE( FIELDTEXT ) &
+     AND NEWRECORD OF CRCAR_IMPUTATION &
+     AND CRITAXCODTPS OF CRCAR_IMPUTATION = "" &
+     AND CLCTAXCODTPS OF VCLC_CLI <> ""
+  THEN LET FIELDTEXT = CLCTAXCODTPS OF VCLC_CLI
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du code de taxe fédéral.
+;
+;
+PROCEDURE EDIT CRITAXCODTPS
+BEGIN
+  IF 0 <> SIZE(TRUNC(FIELDTEXT))
+  THEN BEGIN
+    GET A_TAX_TPS OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 672 ; Ce code de taxe n'existe pas.
+
+    IF TAXCPTCAR OF A_TAX_TPS = ""
+    THEN ERROR 673 ; On ne peut pas utiliser ce code de taxe au recevable.
+  END
+  ;
+  ; Initialise le flag à Oui dans la procédure EDIT. Car si l'usager saisie
+  ; une valeur la procédure EDIT est exécuté.
+  ;
+  LET T_FLGMOD = "1"
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sous-écran de consultation des codes de taxe.
+;
+;
+PROCEDURE INPUT CRITAXCODTVP
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TAXCLETYP = CRITAXTYPTVP OF CRCAR_IMPUTATION
+    LET T_TAXCLECOD = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    LET T_TAXMODPAT = "@"
+    RUN SCREEN mc111 MODE F PASSING T_TAXCLETYP, &
+                                    T_TAXCLECOD, &
+                                    T_TAXMODPAT &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNC(T_TAXCLECOD)
+  END
+  ;
+  ; Par defaut on utilise le code de taxe de TVP du client.
+  ;
+  IF     0 = SIZE( FIELDTEXT ) &
+     AND NEWRECORD OF CRCAR_IMPUTATION &
+     AND CRITAXCODTVP OF CRCAR_IMPUTATION = "" &
+     AND CLCTAXCODTVP OF VCLC_CLI <> ""
+  THEN LET FIELDTEXT = CLCTAXCODTVP OF VCLC_CLI
+  ;
+  ; Force l'éxécution de la procédure edit, car il y a inter-relation entre
+  ; deux champs(taxe).
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     T_FLGMOD = "1"
+  THEN LET FIELDTEXT = CRITAXCODTVP OF CRCAR_IMPUTATION
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du code de taxe provincial
+;
+;
+PROCEDURE EDIT CRITAXCODTVP
+BEGIN
+  IF 0 <> SIZE(TRUNC(FIELDTEXT))
+  THEN BEGIN
+    GET A_TAX_TVP OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 672 ; Ce code de taxe n'existe pas.
+
+    IF TAXCPTCAR OF A_TAX_TVP = ""
+    THEN ERROR 673 ; On ne peut pas utiliser ce code de taxe au recevable.
+
+    IF TAXMOD    OF A_TAX_TVP = "I" AND &
+       TAXFLGNET OF A_TAX_TVP = "2" AND &
+       TAXMOD    OF A_TAX_TPS = "S"
+    THEN ERROR 674 ; TVP incluse et TPS ensus incompatible.
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul des taxes.
+;
+PROCEDURE PROCESS CRITAXCODTVP
+BEGIN
+  ;
+  ; Enlève les anciennes valeurs des totaux
+  ;
+  LET CARMNTTPS OF CRCPT_A_REC = CARMNTTPS OF CRCPT_A_REC - &
+                                 CRIMNTTPS OF CRCAR_IMPUTATION
+  LET CARMNTTVP OF CRCPT_A_REC = CARMNTTVP OF CRCPT_A_REC - &
+                                 CRIMNTTVP OF CRCAR_IMPUTATION
+  ;
+  ; Si le mode de taxation est ENSUS, il faut mettre à jour le cumulatif brut
+  ; de la ventilation.
+  ;
+  IF T_TAXMODTPSOLD = "S"
+  THEN LET CARCUMMNT OF CRCPT_A_REC   = CARCUMMNT OF CRCPT_A_REC   - &
+                                        CRIMNTTPS    OF CRCAR_IMPUTATION
+  IF T_TAXMODTVQOLD = "S"
+  THEN LET CARCUMMNT OF CRCPT_A_REC   = CARCUMMNT OF CRCPT_A_REC   - &
+                                        CRIMNTTVP    OF CRCAR_IMPUTATION
+  ;
+  LET CRIMNTTPS OF CRCAR_IMPUTATION = 0
+  LET CRIMNTTVP OF CRCAR_IMPUTATION = 0
+  ;
+  ; On prend le montant brut de l'imputation pour le calcul des taxes.
+  ;
+  LET TZ_MNTTXB = CRIMNT OF CRCAR_IMPUTATION
+  ;
+  ; Use standart pour le calcul des taxes
+  ;
+  USE ustaxcal NOLIST
+
+  LET CRIMNTTPS OF CRCAR_IMPUTATION = TZ_MNTTPS
+  LET CRIMNTTVP OF CRCAR_IMPUTATION = TZ_MNTTVP
+
+  ;
+  ; Si le mode de taxation est "EN SUS", il faut mettre à jour le cumulatif brut
+  ; de la ventilation.
+  ;
+  IF TAXMOD OF A_TAX_TPS = "S"
+  THEN LET CARCUMMNT OF CRCPT_A_REC   = CARCUMMNT OF CRCPT_A_REC   + &
+                                        CRIMNTTPS    OF CRCAR_IMPUTATION
+  IF TAXMOD OF A_TAX_TVP = "S"
+  THEN LET CARCUMMNT OF CRCPT_A_REC   = CARCUMMNT OF CRCPT_A_REC   + &
+                                        CRIMNTTVP    OF CRCAR_IMPUTATION
+  ;
+  ; Mise à jour des montants totaux
+  ;
+  LET CARMNTTPS OF CRCPT_A_REC = CARMNTTPS OF CRCPT_A_REC + &
+                                 CRIMNTTPS OF CRCAR_IMPUTATION
+  LET CARMNTTVP OF CRCPT_A_REC = CARMNTTVP OF CRCPT_A_REC + &
+                                 CRIMNTTVP OF CRCAR_IMPUTATION
+  ;
+  DISPLAY CRIMNTTPS OF CRCAR_IMPUTATION
+  DISPLAY CRIMNTTVP OF CRCAR_IMPUTATION
+  DISPLAY CARMNTTPS OF CRCPT_A_REC
+  DISPLAY CARMNTTVP OF CRCPT_A_REC
+  DISPLAY CARCUMMNT OF CRCPT_A_REC
+  DISPLAY D_ECART
+  ;
+  ; Ré-initialise le flag à non, ce flag nous indique si le montant de l'impu-
+  ; tation ou le code de tps a été modifié.
+  ;
+  LET T_FLGMOD = "0"
+  ;
+  ; Il faut conserver l'ancienne valeur qui a servi à incrémenter le cumul
+  ; des montants brut(incluant taxe). Il faut prendre les informations du
+  ; code de taxe précédemment saisie, c'est pour cette raison que le traitement
+  ; est fait dans cette procédure.
+  ;
+  LET T_TAXMODTPSOLD = TAXMOD OF A_TAX_TPS
+  LET T_TAXMODTVQOLD = TAXMOD OF A_TAX_TVP
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; L'usager peut modifier le montant de taxe.
+;
+;
+PROCEDURE EDIT CRIMNTTPS
+BEGIN
+  LET CARMNTTPS OF CRCPT_A_REC = CARMNTTPS OF CRCPT_A_REC - &
+                                 OLDVALUE(CRIMNTTPS OF CRCAR_IMPUTATION) + &
+                                 FIELDVALUE
+  ;
+  ; Si le mode de taxation est ENSUS, il faut mettre à jour le cumulatif brut
+  ; de la ventilation.
+  ;
+  IF TAXMOD OF A_TAX_TPS = "S"
+  THEN LET CARCUMMNT OF CRCPT_A_REC = CARCUMMNT OF CRCPT_A_REC - &
+                                      OLDVALUE(CRIMNTTPS OF CRCAR_IMPUTATION) + &
+                                      FIELDVALUE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; On affiche les cumulatifs situé en-tête.
+;
+;
+PROCEDURE PROCESS CRIMNTTPS
+BEGIN
+  DISPLAY CARMNTTPS OF CRCPT_A_REC
+  DISPLAY CARCUMMNT OF CRCPT_A_REC
+  DISPLAY D_ECART
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; L'usager peut modifier le montant de taxe.
+;
+;
+PROCEDURE EDIT CRIMNTTVP
+BEGIN
+  LET CARMNTTVP OF CRCPT_A_REC = CARMNTTVP OF CRCPT_A_REC - &
+                                 OLDVALUE(CRIMNTTVP OF CRCAR_IMPUTATION) + &
+                                 FIELDVALUE
+  ;
+  ; Si le mode de taxation est ENSUS, il faut mettre à jour le cumulatif brut
+  ; de la ventilation.
+  ;
+  IF TAXMOD OF A_TAX_TVP = "S"
+  THEN LET CARCUMMNT OF CRCPT_A_REC = CARCUMMNT OF CRCPT_A_REC - &
+                                      OLDVALUE(CRIMNTTVP OF CRCAR_IMPUTATION) + &
+                                      FIELDVALUE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; On affiche les cumulatifs situé en-tête.
+;
+;
+PROCEDURE PROCESS CRIMNTTVP
+BEGIN
+  DISPLAY CARMNTTVP OF CRCPT_A_REC
+  DISPLAY CARCUMMNT OF CRCPT_A_REC
+  DISPLAY D_ECART
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les projets.
+;
+;
+PROCEDURE INPUT PRJCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PRJSTUPAT = "A"
+    LET T_PRJCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gp104 MODE F PASSING T_CIECLEMNU, &
+                                    T_PRJCLE   , &
+                                    T_PRJSTUPAT &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNCATE(T_PRJCLE)
+  END
+
+  ;
+  ; Par défaut on utilise le projet défini dans GPPARAMETRE. S'il n'y en a pas
+  ; on force la validation.
+  ;
+  IF     0 = SIZE( FIELDTEXT ) &
+     AND PRJCLE    OF CRCAR_IMPUTATION = ""
+  THEN BEGIN
+    IF PROCLE    OF GPPARAMETRE <> ""
+    THEN LET FIELDTEXT = PROCLE OF GPPARAMETRE
+    ELSE LET FIELDTEXT = PRJCLE OF CRCAR_IMPUTATION
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du projet, le projet est optionel dans l'imputation.
+;
+;
+PROCEDURE EDIT PRJCLE
+BEGIN
+  GET GPPROJETS OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 686 ; Ce projet n'existe pas.
+
+  IF PRJSTU OF GPPROJETS <> "A"
+  THEN ERROR 698 ; Ce projet n'est pas actif.
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT PRACLE
+BEGIN
+  ;
+  ; Popup sur les activités.
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PRJCLE    = PRJCLE OF CRCAR_IMPUTATION
+    LET T_PRASTUPAT = "A"
+    LET T_PRACLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gp108 MODE F PASSING T_CIECLEMNU, &
+                                    T_PRJCLE   , &
+                                    T_PRACLE   , &
+                                    T_PRASTUPAT &
+                                    WINDOW WIDTH CONSTANT WHEN CALLING
+
+    LET FIELDTEXT = TRUNCATE(T_PRACLE)
+  END
+  ;
+  ; Par défaut on utilise le sous-projet défini dans GPPARAMETRE. S'il n'y en a pas
+  ; on force la validation.
+  ;
+  IF     0 = SIZE( FIELDTEXT ) &
+     AND PRACLE    OF CRCAR_IMPUTATION = ""
+  THEN BEGIN
+     IF ACTCLE    OF GPPARAMETRE <> ""
+     THEN LET FIELDTEXT = ACTCLE OF GPPARAMETRE
+     ELSE LET FIELDTEXT = PRACLE OF CRCAR_IMPUTATION
+  END
+
+
+  ;
+  ; Force la validation de l'activité, car l'usager peut modifier le numéro de
+  ; compagnie ou le numéro de projet sur le ligne.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(PRACLE OF CRCAR_IMPUTATION))
+  THEN LET FIELDTEXT = PRACLE OF CRCAR_IMPUTATION
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation de l'activité, l'activité est optionel dans l'imputation.
+;
+;
+PROCEDURE EDIT PRACLE
+BEGIN
+  GET GPPRO_ACTIVITE OPTIONAL
+  IF NOT ACCESSOK
+  THEN ERROR 704 ; Cette activité n'existe pas.
+
+  IF PRASTU OF GPPRO_ACTIVITE <> "A"
+  THEN ERROR 708 ; Cette activité n'est pas active.
+END
+
+PROCEDURE INPUT IMMCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_IMMCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN im102 MODE F &
+                     PASSING T_CIECLEMNU, &
+                             T_IMMCLE  WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE( T_IMMCLE )
+  END
+  ;
+  ; Par défaut on utilise la catégorie définie dans GPPARAMETRE. S'il n'y en a pas
+  ; on force la validation.
+  ;
+  IF     0 = SIZE( FIELDTEXT ) &
+     AND 0 = SIZE(TRUNCATE(IMMCLE OF CRCAR_IMPUTATION))
+  THEN BEGIN
+     IF 0 <> SIZE(TRUNCATE(PRAIMMCLE OF GPPRO_ACTIVITE))
+     THEN LET FIELDTEXT = PRAIMMCLE OF GPPRO_ACTIVITE
+     ELSE LET FIELDTEXT = IMMCLE OF CRCAR_IMPUTATION
+  END
+
+END
+
+
+PROCEDURE EDIT IMMCLE
+BEGIN
+   IF IMMTYP OF IMIMMOBILISATION <> "E"
+   THEN ERROR 1503
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE APPEND
+BEGIN
+
+  USE ussecent NOLIST
+
+  ;
+  ; Si notion de projet.
+  ;
+  IF HLDNTNPRO OF MCHOLDING = "1"
+  THEN BEGIN
+      ACCEPT PRJCLE    OF CRCAR_IMPUTATION
+      INFORMATION = PRJDSC1 OF GPPROJETS
+      ACCEPT PRACLE    OF CRCAR_IMPUTATION
+      INFORMATION = PRADSC1 OF GPPRO_ACTIVITE
+      ACCEPT IMMCLE    OF CRCAR_IMPUTATION
+      INFORMATION = IMMDSC  OF IMIMMOBILISATION
+  END
+  ELSE BEGIN
+    LET PRJCLE OF CRCAR_IMPUTATION = " "
+    LET PRACLE OF CRCAR_IMPUTATION = " "
+    LET IMMCLE OF CRCAR_IMPUTATION = " "
+  END
+
+
+
+  ACCEPT UNACLE    OF CRCAR_IMPUTATION
+  INFORMATION = UNANOM OF MCUNITE_ADM
+  EDIT UNACLE    OF CRCAR_IMPUTATION
+
+;  ACCEPT TRPCLE OF CRCAR_IMPUTATION
+;  INFORMATION = TRPDSCFRA OF FATRAJET_PRODUIT
+;  ACCEPT ETACLE OF CRCAR_IMPUTATION
+  ACCEPT CPTCLE OF CRCAR_IMPUTATION
+  INFORMATION = CPTDSC OF VCPT_DSC
+
+  ACCEPT CRIMNT       OF CRCAR_IMPUTATION
+  ACCEPT CRITAXCODTPS OF CRCAR_IMPUTATION
+  ACCEPT CRITAXCODTVP OF CRCAR_IMPUTATION
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; La procédure entry est généré car la procédure append est généré.
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  FOR CRCAR_IMPUTATION
+  BEGIN
+    PERFORM APPEND
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Cette procédure est idem à la procédure APPEND.
+;
+;
+PROCEDURE DESIGNER 05
+BEGIN
+  ;
+  ; Si notion de projet.
+  ;
+  IF HLDNTNPRO OF MCHOLDING = "1"
+  THEN BEGIN
+      ACCEPT PRJCLE    OF CRCAR_IMPUTATION
+      INFORMATION = PRJDSC1 OF GPPROJETS
+      ACCEPT PRACLE    OF CRCAR_IMPUTATION
+      INFORMATION = PRADSC1 OF GPPRO_ACTIVITE
+      ACCEPT IMMCLE    OF CRCAR_IMPUTATION
+      INFORMATION = IMMDSC  OF IMIMMOBILISATION
+  END
+  ELSE BEGIN
+    LET PRJCLE OF CRCAR_IMPUTATION = " "
+    LET PRACLE OF CRCAR_IMPUTATION = " "
+    LET IMMCLE OF CRCAR_IMPUTATION = " "
+  END
+
+  ACCEPT UNACLE    OF CRCAR_IMPUTATION
+  INFORMATION = UNANOM OF MCUNITE_ADM
+  EDIT UNACLE    OF CRCAR_IMPUTATION
+
+;  ACCEPT TRPCLE    OF CRCAR_IMPUTATION
+;  INFORMATION = TRPDSCFRA OF FATRAJET_PRODUIT
+;  ACCEPT ETACLE    OF CRCAR_IMPUTATION
+   ACCEPT CPTCLE    OF CRCAR_IMPUTATION
+  INFORMATION = CPTDSC OF VCPT_DSC
+
+  ACCEPT CRIMNT       OF CRCAR_IMPUTATION
+  ACCEPT CRITAXCODTPS OF CRCAR_IMPUTATION
+  ACCEPT CRITAXCODTVP OF CRCAR_IMPUTATION
+
+  IF CRITAXCODTPS OF CRCAR_IMPUTATION <> ""
+  THEN ACCEPT CRIMNTTPS    OF CRCAR_IMPUTATION
+
+  IF CRITAXCODTVP OF CRCAR_IMPUTATION <> ""
+  THEN ACCEPT CRIMNTTVP    OF CRCAR_IMPUTATION
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE POSTFIND
+BEGIN
+  FOR CRCAR_IMPUTATION
+  BEGIN
+    ;
+    ; Il faut conserver l'ancienne valeur qui a servi à incrémenter le cumul
+    ; des montants brut(incluant taxe). Il faut prendre les informations du
+    ; code de taxe précédemment saisie, c'est pour cette raison que le traitement
+    ; est fait dans cette procédure.
+    ;
+    LET T_TAXMODTPSOLD = TAXMOD OF A_TAX_TPS
+    LET T_TAXMODTVQOLD = TAXMOD OF A_TAX_TVP
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR CRCAR_IMPUTATION
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF CRCAR_IMPUTATION &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF CRCAR_IMPUTATION &
+       AND NOT NEWRECORD     OF CRCAR_IMPUTATION &
+       AND NOT DELETEDRECORD OF CRCAR_IMPUTATION &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+    ;
+    ; L'imputation est non modifiable aprés journalisation.
+    ;
+    IF (    NEWRECORD     OF CRCAR_IMPUTATION &
+         OR ALTEREDRECORD OF CRCAR_IMPUTATION &
+         OR DELETEDRECORD OF CRCAR_IMPUTATION &
+       ) &
+       AND CARDATJOU OF CRCPT_A_REC <> 0
+    THEN ERROR 614 ; Impossible de mettre à jour la transaction est journalisée.
+    ;
+    ; Le timbre de modification est mis à jour si l'usager modifie
+    ; la table CRCAR_IMPUTATION.
+    ;
+    IF        NEWRECORD OF CRCAR_IMPUTATION &
+       OR ALTEREDRECORD OF CRCAR_IMPUTATION &
+       OR DELETEDRECORD OF CRCAR_IMPUTATION
+    THEN BEGIN
+      LET CARDATMOD OF CRCPT_A_REC = SYSDATE
+      LET CARHREMOD OF CRCPT_A_REC = SYSTIME / 10000
+      LET CARUSRMOD OF CRCPT_A_REC = LOGONID
+    END
+  END
+  ;
+  ; L'imputation est non modifiable Si le lot est autorisé.
+  ;
+  IF     D_LCRATRJOU = "1" &
+     AND CARDATJOU OF CRCPT_A_REC = 0
+  THEN ERROR 713 ; Impossible de mettre à jour la transaction est autorisé.
+  ;
+  ; On incrémente le numéro d'adresse pour les clients divers.
+  ;
+  IF     CLITYP OF VCLC_CLI = "D" &
+     AND RADCLE OF CRCPT_A_REC = 0
+  THEN BEGIN
+    START TRANSACTION GEN_RAD_SEQ
+    GET MCRAD_SEQ VIA REFCIECLE, &
+                      REFCLETYP, &
+                      REFCLENUM  &
+                  USING REFCIECLE OF CRCPT_A_REC, &
+                        REFCLETYP OF CRCPT_A_REC, &
+                        REFCLENUM OF CRCPT_A_REC  &
+                  OPTIONAL
+    LET REFCIECLE OF MCRAD_SEQ = REFCIECLE OF CRCPT_A_REC
+    LET REFCLETYP OF MCRAD_SEQ = REFCLETYP OF CRCPT_A_REC
+    LET REFCLENUM OF MCRAD_SEQ = REFCLENUM OF CRCPT_A_REC
+    LET RASNUMSEQ OF MCRAD_SEQ = RASNUMSEQ OF MCRAD_SEQ + 1
+    LET RADCLE    OF CRCPT_A_REC = RASNUMSEQ OF MCRAD_SEQ
+    PUT MCRAD_SEQ
+    COMMIT TRANSACTION GEN_RAD_SEQ
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Met à jour les cumulatifs dans la facture.
+;
+;
+PROCEDURE DELETE
+BEGIN
+  IF NOT DELETEDRECORD OF CRCAR_IMPUTATION
+  THEN BEGIN
+    ;
+    ; Enlève les anciennes valeurs des totaux
+    ;
+    LET CARMNTTPS OF CRCPT_A_REC = CARMNTTPS OF CRCPT_A_REC - &
+                                   CRIMNTTPS OF CRCAR_IMPUTATION
+    LET CARMNTTVP OF CRCPT_A_REC = CARMNTTVP OF CRCPT_A_REC - &
+                                   CRIMNTTVP OF CRCAR_IMPUTATION
+    ;
+    LET CARCUMMNT OF CRCPT_A_REC = CARCUMMNT OF CRCPT_A_REC - &
+                                   CRIMNT OF CRCAR_IMPUTATION
+    IF TAXMOD OF A_TAX_TPS = "S"
+    THEN LET CARCUMMNT OF CRCPT_A_REC= CARCUMMNT OF CRCPT_A_REC - &
+                                       CRIMNTTPS OF CRCAR_IMPUTATION
+    IF TAXMOD OF A_TAX_TVP = "S"
+    THEN LET CARCUMMNT OF CRCPT_A_REC= CARCUMMNT OF CRCPT_A_REC - &
+                                       CRIMNTTVP OF CRCAR_IMPUTATION
+  END
+  DELETE CRCAR_IMPUTATION
+  DISPLAY CARMNTTPS OF CRCPT_A_REC
+  DISPLAY CARMNTTVP OF CRCPT_A_REC
+  DISPLAY CARCUMMNT OF CRCPT_A_REC
+  DISPLAY D_ECART
+END
+
+BUILD
+@IF FORMAT
+xxxx                                          xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                             x
+************************************************************ Imputation ************************************************************
+* Facture.......: xxxxxxxxxxxxxxx                                                           Montant total.:      xxxxxxxxxxxxxx    *
+* Montant de TPS: xxxxxxxxxxxxxx                                                            Montant cumulé:      xxxxxxxxxxxxxx    *
+* Montant de TVQ: xxxxxxxxxxxxxx                                                            Solde à vent..:      xxxxxxxxxxxxxx    *
+************************************************************************************************************************************
+* Projet  SSpro Immobilis.  Unité    Prod./Elém Compte       Montant  TF TP           TPS           TVQ                            *
+* xxxxxxxx xxx xxxxxxxxxxxx xxxxxxxx  xxx  xxxx xxxxxx xxxxxxxxxxxxxx xx xx xxxxxxxxxxxxx xxxxxxxxxxxxx                            *
+* xxxxxxxx xxx xxxxxxxxxxxx xxxxxxxx  xxx  xxxx xxxxxx xxxxxxxxxxxxxx xx xx xxxxxxxxxxxxx xxxxxxxxxxxxx                            *
+* xxxxxxxx xxx xxxxxxxxxxxx xxxxxxxx  xxx  xxxx xxxxxx xxxxxxxxxxxxxx xx xx xxxxxxxxxxxxx xxxxxxxxxxxxx                            *
+* xxxxxxxx xxx xxxxxxxxxxxx xxxxxxxx  xxx  xxxx xxxxxx xxxxxxxxxxxxxx xx xx xxxxxxxxxxxxx xxxxxxxxxxxxx                            *
+* xxxxxxxx xxx xxxxxxxxxxxx xxxxxxxx  xxx  xxxx xxxxxx xxxxxxxxxxxxxx xx xx xxxxxxxxxxxxx xxxxxxxxxxxxx                            *
+* xxxxxxxx xxx xxxxxxxxxxxx xxxxxxxx  xxx  xxxx xxxxxx xxxxxxxxxxxxxx xx xx xxxxxxxxxxxxx xxxxxxxxxxxxx                            *
+* xxxxxxxx xxx xxxxxxxxxxxx xxxxxxxx  xxx  xxxx xxxxxx xxxxxxxxxxxxxx xx xx xxxxxxxxxxxxx xxxxxxxxxxxxx                            *
+* xxxxxxxx xxx xxxxxxxxxxxx xxxxxxxx  xxx  xxxx xxxxxx xxxxxxxxxxxxxx xx xx xxxxxxxxxxxxx xxxxxxxxxxxxx                            *
+* xxxxxxxx xxx xxxxxxxxxxxx xxxxxxxx  xxx  xxxx xxxxxx xxxxxxxxxxxxxx xx xx xxxxxxxxxxxxx xxxxxxxxxxxxx                            *
+* xxxxxxxx xxx xxxxxxxxxxxx xxxxxxxx  xxx  xxxx xxxxxx xxxxxxxxxxxxxx xx xx xxxxxxxxxxxxx xxxxxxxxxxxxx                            *
+* xxxxxxxx xxx xxxxxxxxxxxx xxxxxxxx  xxx  xxxx xxxxxx xxxxxxxxxxxxxx xx xx xxxxxxxxxxxxx xxxxxxxxxxxxx                            *
+* xxxxxxxx xxx xxxxxxxxxxxx xxxxxxxx  xxx  xxxx xxxxxx xxxxxxxxxxxxxx xx xx xxxxxxxxxxxxx xxxxxxxxxxxxx                            *
+* xxxxxxxx xxx xxxxxxxxxxxx xxxxxxxx  xxx  xxxx xxxxxx xxxxxxxxxxxxxx xx xx xxxxxxxxxxxxx xxxxxxxxxxxxx                            *
+* xxxxxxxx xxx xxxxxxxxxxxx xxxxxxxx  xxx  xxxx xxxxxx xxxxxxxxxxxxxx xx xx xxxxxxxxxxxxx xxxxxxxxxxxxx                            *
+************************************************************************************************************************************
+@ENDIF

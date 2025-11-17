@@ -1,0 +1,857 @@
+;/T/ Transfert des réceptions aux comptes payables (pour consolidation). ; MP-00-02-23_S02.
+;
+;/M/ Martin Perron / Modifier la MAJ de T_HENCLE_ANN avec T_HENCLE_TMP;
+;                    et T_HISCLE_ANN avec T_HISCLE_TMP
+;    Date de modification....: 29 novembre 1999
+;
+;/P/ Programmeur...: Guy Chabot
+;    Date création.: 29-avril-1994
+;
+;    Description...: Programme de journalisation des réceptions approuvées
+;                    pour une période donnée.
+;
+;    Paramètres....: Compagnie     1 fois  Compagnie du menu
+;                    Periode CTB   1 fois
+;
+;    Particularité.: La partie spécifique au grand-livre se trouve dans un
+;                    "USE" commun pour toutes les journalisations (US900T.QTS).
+;
+;    Programmeur..: Josée Bédard
+;    Date modif...: 27-Mai-94
+;
+;    Description..: Adaptation pour ajouter le couru à recevoir sur les taxes
+;                   lors de l'enregistrement de la dépense (Reception)
+;
+;/M/ Modifié par...: Steeve Duguay
+;            but...: Changer la notion d'engagement pour gestion projet.
+;
+;/M/ Modifié par...: Guy Chabot le 1 mars 1995
+;            but...: Ajouter le taux dans la réception pour la génération du couru
+;
+;/M/ Programmeur.......: Francois Richard
+;    Date modification.: 15 Juin 1999
+;    Description.......: Migration Achat/Réception/Inventaire de l'environnement
+;                        BOC
+;
+;/M/ Francois Richard, 99-07-09
+;
+;    Ajustement pour le changement de siècle
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par...: Marc Poulin
+;    Date..........: 25 février 2000.
+;    Description...: Modifier le libellé "Journalsé le" par "Transférée le".
+;
+;    Référence.....: Stabilisation du module Achat/Réception Inventaire (point 2).
+;
+;    Signet........: MP-00-02-23_S02.
+;
+;    ---------------------------------------------------------------------------
+;
+;/M/ Modifié par...: Marc Poulin
+;    Date..........: 07 mars 2000.
+;    Description...: Éliminer les écritures associées à des commandes créées avant le 30 août 1999, date de démarrage du
+;                    module Achats/Réception Inventaire (Magasin) sous unix (Topaz).
+;
+;    Référence.....: Demande de changement 000015.
+;
+;    Signet........: MP-00-03-07_D15.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+USE ussetqts NOLIST   ; permet de faire les SET PROCESS NOLIMIT....
+
+RUN ar700t
+
+GLOBAL TEMPORARY G_ERREUR CHARACTER SIZE 05 ; Termine la procédure en erreur.
+GLOBAL TEMPORARY G_PECCLE CHARACTER SIZE 04 ; Conserve la période de transfert. ; MP-00-02-23_S02.
+GLOBAL TEMPORARY G_DATJOU DATE ; DATE       ; Permet d'avoir la même date et
+GLOBAL TEMPORARY G_HREJOU INTEGER   SIZE 04 ; heure de transfert                ; MP-00-02-23_S02.
+GLOBAL TEMPORARY G_ANN    CHARACTER SIZE 02 ; Permet d'avoir l'année de la date
+                                            ; du jour pour le # de séquence.
+GLOBAL TEMPORARY G_CODMOD CHARACTER SIZE 02 ; Pour identifier le module.
+
+GLOBAL TEMPORARY G_HLDCHTCPTRLT CHARACTER SIZE 01
+                                            ; Pour savoir si la relation de
+                                            ; la charte du consolidé est incluse.
+GLOBAL TEMPORARY G_HLDNTNPRO CHARACTER SIZE 01
+                                            ; Valide si on utilise la notion de
+                                            ; projet.
+GLOBAL TEMPORARY G_DEVCLE CHARACTER SIZE 03 ; Devise de consolidé.
+GLOBAL TEMPORARY G_FLGDEV CHARACTER SIZE 01 ; Permet de savoir s'il y a eu une
+                                            ; convertion de montant lors de
+                                            ; devise étrangère.
+;-------------------------------------------------------------------------------
+;
+; Affectation des variables globales selon les paramètres du consolidé.
+;
+REQUEST TRAITE_GENERAL
+
+ACCESS MCHOLDING
+
+SELECT IF CIENMC OF MCHOLDING = "1"
+
+ITEM G_CODMOD       = "AR"
+ITEM G_HLDCHTCPTRLT = HLDCHTCPTRLT OF MCHOLDING
+ITEM G_HLDNTNPRO    = HLDNTNPRO    OF MCHOLDING
+ITEM G_DEVCLE       = DEVCLE       OF MCHOLDING
+ITEM G_FLGDEV       = "0"
+
+ITEM G_DATJOU RESET AT INITIAL TO SYSDATE
+ITEM G_HREJOU RESET AT INITIAL TO SYSTIME
+ITEM G_ANN    RESET AT INITIAL TO ASCII(MOD(FLOOR(G_DATJOU / 10000), 100),2)
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+REQUEST SELECTION_PIECE
+
+
+ACCESS ARRECEPTION   &
+
+  LINK FOUCIECLE OF ARRECEPTION, &      ;
+       FOUCLE    OF ARRECEPTION, &      ; Pour l'information du fournisseur.
+       CIECLE    OF ARRECEPTION  &      ;
+    TO FOUCIECLE, &
+       FOUCLE   , &
+       FOCCIECLE OF VFOC_FOU   &
+
+  LINK FOUCIECLE OF ARRECEPTION, &      ;
+       REFCLETYP OF ARRECEPTION, &      ; Pour le fournisseur divers.
+       FOUCLE    OF ARRECEPTION, &      ;
+       RADCLE    OF ARRECEPTION  &
+    TO REFCIECLE, &
+       REFCLETYP, &
+       REFCLENUM, &
+       RADCLE    OF MCREF_ADRESSE    &
+                                        ;
+  LINK CIECLE OF ARRECEPTION, &         ; Pour avoir les imputations.
+       RECCLE OF ARRECEPTION  &         ;
+    TO CIECLE, &
+       RECCLE OF ARREC_IMPUTATION   OPTIONAL &
+
+  LINK "1", &                           ;
+       G_ANN &                          ; Pour le numéro d'écriture.
+    TO CIENMC, &                        ;
+       HSSCLEANN OF  MCHIS_SEQ   OPTIONAL &
+
+  LINK  CIECLE OF ARRECEPTION, &        ;
+        PECCLE OF ARRECEPTION  &        ; Pour obtenir le # de lot.
+    TO  CIECLE, &                       ;
+        PECCLE OF ARLAR_SEQ   OPTIONAL &
+
+  LINK  CIECLE OF ARRECEPTION, &        ;
+        ENTCLE OF ARRECEPTION  &        ; Pour avoir le poste de courus.
+    TO  CIECLE, &                       ;
+        ENTCLE OF ARENTREPOT   OPTIONAL
+
+CHOOSE  CIECLE PARM, &                  ;
+        ENTCLE PARM, &                  ; Pour les réceptions d'une période
+        PECCLE PARM, &                  ; quelquonque qui ne sont pas encore
+        RECDATJOU 0, &                  ; transférées et ont un statut A. ; MP-00-02-23_S02.
+        RECSTU "A"
+
+TEMPORARY T_NUMLOT    INTEGER   SIZE 02
+TEMPORARY T_NBRTRS    INTEGER   SIZE 02
+TEMPORARY T_NUMLOTCHR CHARACTER SIZE 04
+TEMPORARY T_MNTTRS    FLOAT     SIZE 08
+
+TEMPORARY T_MESERR CHARACTER SIZE 80 ; Pour les erreurs.
+TEMPORARY T_CPTCOU CHARACTER SIZE 06 ; Pour le compte de couru.
+TEMPORARY T_UNACOU CHARACTER SIZE 08 ; Pour l'unité du douru.
+TEMPORARY T_IMMCLE CHARACTER SIZE 12 ;
+
+;
+; Pour la génération des numéro d'historique.
+;
+TEMPORARY T_HISCLE_ANN INTEGER UNSIGNED SIZE 04
+TEMPORARY T_HISCLE_TMP CHARACTER SIZE 09
+TEMPORARY T_HISCLE INTEGER UNSIGNED SIZE 04
+TEMPORARY T_NUMSEQ INTEGER UNSIGNED SIZE 04
+
+TEMPORARY T_HECCIEINT  CHARACTER SIZE 04 ; Pour compagnie d'inter.
+TEMPORARY T_HECNUMDOC2 CHARACTER SIZE 06 ; Pour numéro de document-2(= BLANC).
+TEMPORARY T_HECFLGINT  CHARACTER SIZE 01 ; Pour flag d'inter compagnie.
+TEMPORARY T_HISDSCGEN  CHARACTER SIZE 40 ; Description générale.
+TEMPORARY T_HISCLE1    CHARACTER SIZE 04 ; Clé d'accès 1 pour l'historique.
+TEMPORARY T_HISCLE2    CHARACTER SIZE 15 ; Clé d'accès 2 pour l'historique.
+TEMPORARY T_HISCLE3    CHARACTER SIZE 15 ; Clé d'accès 3 pour l'historique.
+
+TEMPORARY T_DSC2       CHARACTER SIZE 40 ; Pour la deuxième description.
+
+SORTED ON CIECLE OF ARRECEPTION &
+       ON RECCLE OF ARRECEPTION
+
+ITEM T_MNTTRS SUBTOTAL  RECMNTTOT OF ARRECEPTION AT RECCLE
+ITEM T_NBRTRS COUNT                              AT RECCLE
+
+ITEM G_PECCLE = PECCLE OF ARRECEPTION ; On conserve la période traitée.
+
+ITEM T_NUMLOT    RESET AT INITIAL TO LASNUMSEQ OF ARLAR_SEQ + 1
+ITEM T_NUMLOTCHR RESET AT INITIAL TO ASCII((LASNUMSEQ OF ARLAR_SEQ + 1),4)
+;
+; Si il n'y a pas de journalisation (ici, transfert de réception) le numéro de ; MP-00-02-23_S02.
+; séquence du lot sera quand même utilisé car c'est un fichier RMS et pas de ROLLBACK.
+;
+OUTPUT ARLAR_SEQ  ADD UPDATE NOITEM AT FINAL
+
+  ITEM CIECLE    OF ARLAR_SEQ INITIAL CIECLE OF ARRECEPTION
+  ITEM PECCLE    OF ARLAR_SEQ INITIAL PECCLE OF ARRECEPTION
+  ITEM LASNUMSEQ OF ARLAR_SEQ FINAL   T_NUMLOT
+
+
+OUTPUT ARLOT  ADD NOITEM AT FINAL
+
+  ITEM CIECLE       OF ARLOT INITIAL CIECLE OF ARRECEPTION
+  ITEM PECCLE       OF ARLOT INITIAL PECCLE OF ARRECEPTION
+  ITEM LARCLE       OF ARLOT INITIAL ASCII(T_NUMLOT,LASLONNUM OF ARLAR_SEQ)
+  ITEM LARTYPECR    OF ARLOT INITIAL "RC"
+  ITEM LARDSC       OF ARLOT INITIAL "Réception"
+  ITEM LARUSR       OF ARLOT INITIAL LOGONID
+  ITEM LARUSRVAL    OF ARLOT INITIAL LOGONID
+  ITEM LARUSRJOU    OF ARLOT INITIAL LOGONID
+  ITEM LARUSRATR    OF ARLOT INITIAL LOGONID
+  ITEM LARUSRCRE    OF ARLOT INITIAL LOGONID
+  ITEM LARDATVAL    OF ARLOT INITIAL G_DATJOU
+  ITEM LARDATJOU    OF ARLOT INITIAL G_DATJOU
+  ITEM LARDATCRE    OF ARLOT INITIAL G_DATJOU
+  ITEM LARHREJOU    OF ARLOT INITIAL G_HREJOU
+  ITEM LARHRECRE    OF ARLOT INITIAL G_HREJOU / 10000
+  ITEM LARATRJOU    OF ARLOT INITIAL "1"
+  ITEM LARCUMMNT    OF ARLOT FINAL T_MNTTRS
+  ITEM LARNBRTRS    OF ARLOT FINAL T_NBRTRS
+  ITEM LARCUMMNTVER OF ARLOT FINAL T_MNTTRS
+  ITEM LARNBRTRSVER OF ARLOT FINAL T_NBRTRS
+  ITEM LARNBRTRSERR OF ARLOT INITIAL 0
+
+;
+; On vérifie que le compte couru balance avec l'imputation.
+;
+ITEM T_MESERR = &
+@IF FRANCAIS
+  "Ventilation hors balance; Document: " + RECCLE OF ARRECEPTION + &
+                    " ,référence: " + FOUCLE OF ARRECEPTION + "(" + &
+                                      CIECLE OF ARRECEPTION + "-" + &
+                                      ENTCLE OF ARRECEPTION + ")" &
+@ELSE
+  "%%%tilation hors balance; Document: " + RECCLE OF ARRECEPTION + &
+                    " ,référence: " + FOUCLE OF ARRECEPTION + "(" + &
+                                      CIECLE OF ARRECEPTION + "-" + &
+                                      ENTCLE OF ARRECEPTION + ")" &
+@ENDIF
+  IF RECCUMMNT OF ARRECEPTION <> RECMNTTOT OF ARRECEPTION AT RECCLE &
+     RESET AT RECCLE
+
+ITEM G_ERREUR = "ARRET" IF T_MESERR <> "" AT RECCLE
+
+;
+; affectation du numéro d'historique
+;
+ITEM T_NUMSEQ INITIAL 0 & ;NCONVERT( G_ANN ) * 10000000 &
+                        IF NOT RECORD MCHIS_SEQ EXIST &
+                 ELSE HSSNUMSEQ OF MCHIS_SEQ
+
+ITEM T_HISCLE RESET AT INITIAL TO (T_NUMSEQ + 1)
+
+;
+; On incr\351mente le num\351ro d'historique \340 chaque transaction(r\351ception).
+;
+ITEM T_HISCLE COUNT AT RECCLE
+
+ITEM T_HISCLE_TMP = ASCII(T_HISCLE,9)
+ITEM T_HISCLE_ANN = NCONVERT((G_ANN + T_HISCLE_TMP[3:7]))
+
+ITEM T_CPTCOU RESET AT INITIAL TO ENTCPTCOU OF ARENTREPOT
+ITEM T_UNACOU RESET AT INITIAL TO ENTUNACOU OF ARENTREPOT
+
+;
+; Compagnie d'inter, si c'est un fournisseur interne, on prend la compagnie
+; définie dans le fournisseur, sinon on prend la compagnie de la transaction.
+;
+ITEM T_HECCIEINT = CIECLE OF ARRECEPTION IF FOUTYP OF VFOC_FOU <> "I" &
+                   ELSE FOUCIEINT OF VFOC_FOU
+;
+; Identifie si c'est une transaction d'inter.
+;
+ITEM T_HECFLGINT = "0" IF FOUTYP OF VFOC_FOU <> "I" &
+              ELSE "1"
+
+;
+; Description générale, on prend le nom dans l'adresse de la pièce si c'est
+; un fournisseur divers, sinon on la laisse à blanc.
+;
+ITEM T_HISDSCGEN = " " IF FOUTYP OF VFOC_FOU <> "D" &
+              ELSE RADNOM OF MCREF_ADRESSE
+
+;
+; On assigne la clé du compte couru l'historique.
+;
+ITEM T_HISCLE1 = CIECLE OF ARRECEPTION
+ITEM T_HISCLE2 = RECCLE OF ARRECEPTION
+ITEM T_HISCLE3 = " "
+
+;
+; Sous-fichier des erreurs
+;
+SUBFILE WUS900ER KEEP &
+                 AT RECCLE &
+                 IF T_MESERR <> "" &
+  INCLUDE CIECLE OF ARRECEPTION ALIAS CIECLE, &
+          G_PECCLE              ALIAS PECCLE, &
+          T_MESERR
+
+
+;
+; Sous fichier commun à toutes les journalisations (ici, transfert de réceptions),  ; MP-00-02-23_S02.
+; sert à mettre à jour la table MCHISTO.
+;
+SUBFILE WUS900H AT RECCLE &
+  INCLUDE T_HISCLE_ANN                     ALIAS HISCLE    , &
+          CIECLE      OF ARRECEPTION   ALIAS HISCIECLE , &
+          FOUCIECLE   OF ARRECEPTION   ALIAS REFCIECLE , &
+          REFCLETYP   OF ARRECEPTION                   , &
+          FOUCLE      OF ARRECEPTION   ALIAS REFCLENUM , &
+          RECCLE      OF ARRECEPTION   ALIAS HISNUMDOC , &
+          PECCLE      OF ARRECEPTION                   , &
+          T_NUMLOTCHR                  ALIAS HISNUMLOT , &
+          RECDAT      OF ARRECEPTION   ALIAS HISDAT    , &
+          G_DATJOU                     ALIAS HISDATJOU , &
+          RECTYPECR   OF ARRECEPTION   ALIAS HISTYPECR , &
+          T_HISDSCGEN                  ALIAS HISDSCGEN , &
+          RECCOM      OF ARRECEPTION   ALIAS HISDSCSAI , &
+          T_DSC2                       ALIAS HISDSCSAI2, &
+          RECUSRCRE   OF ARRECEPTION   ALIAS HISUSRCRE , &
+          DEVCLE      OF VFOC_FOU      ALIAS DEVCLE    , &
+          T_HISCLE1                    ALIAS HISCLE1   , &
+          T_HISCLE2                    ALIAS HISCLE2   , &
+          T_HISCLE3                    ALIAS HISCLE3
+
+
+; Sous-fichier des imputations comptables utilisé  tout au long du traitement
+; servant à générer les ventilations comptables complàtes.
+;
+SUBFILE WAR700VE &
+  INCLUDE FOUCIECLE    OF ARRECEPTION, &
+          FOUCLE       OF ARRECEPTION, &
+          RECCLE       OF ARRECEPTION, &
+          CIECLE       OF ARRECEPTION, &
+          RECTYPECR    OF ARRECEPTION, &
+          PECCLE       OF ARRECEPTION, &
+          T_NUMLOTCHR  ALIAS LARCLE  , &
+          REFCLETYP    OF ARRECEPTION, &
+          RECDAT       OF ARRECEPTION, &
+          DEVCLE       OF VFOC_FOU   , &
+          RECCOM       OF ARRECEPTION, &
+          T_DSC2       ALIAS RECCOM2 , &
+          T_HISCLE_ANN ALIAS T_HISCLE                   , &
+          PRJCLE       OF ARREC_IMPUTATION, &
+          PRACLE       OF ARREC_IMPUTATION, &
+          IMMCLE       OF ARREC_IMPUTATION, &
+          CPTCLE       OF ARREC_IMPUTATION, &
+          UNACLE       OF ARREC_IMPUTATION, &
+          REICODDC     OF ARREC_IMPUTATION, &
+          REIMNT       OF ARREC_IMPUTATION, &
+          REITAXTYPTPS OF ARREC_IMPUTATION, &
+          REITAXCODTPS OF ARREC_IMPUTATION, &
+          REITAXTYPTVQ OF ARREC_IMPUTATION, &
+          REITAXCODTVQ OF ARREC_IMPUTATION, &
+          REIMNTTPS    OF ARREC_IMPUTATION, &
+          REIMNTTVQ    OF ARREC_IMPUTATION, &
+          REIMNTCTI    OF ARREC_IMPUTATION, &
+          REIMNTRTI    OF ARREC_IMPUTATION, &
+          T_HECCIEINT                     , &
+          T_HECNUMDOC2                    , &
+          T_HECFLGINT                     , &
+          T_CPTCOU                        , &
+          T_UNACOU
+
+;
+; On enregistre la date & heure du transfert dans la réception. ; MP-00-02-23_S02.
+;
+OUTPUT ARRECEPTION  UPDATE AT RECCLE
+
+  ITEM RECDATJOU OF ARRECEPTION FINAL G_DATJOU
+  ITEM RECHREJOU OF ARRECEPTION FINAL G_HREJOU
+  ITEM LARCLE    OF ARRECEPTION FINAL LARCLE OF ARLOT
+  ITEM HISCLE    OF ARRECEPTION FINAL T_HISCLE_ANN
+
+
+
+;
+; mise a jour du fichier des num ro d'historique
+;
+OUTPUT MCHIS_SEQ  ADD UPDATE AT FINAL
+  ITEM CIENMC    OF MCHIS_SEQ INITIAL "1"
+  ITEM HSSCLEANN OF MCHIS_SEQ INITIAL G_ANN
+  ITEM HSSNUMSEQ OF MCHIS_SEQ FINAL   ( T_HISCLE  - 1 )
+
+;
+; Conserve les réceptions pour le désengagement.
+;
+SUBFILE WAR700EN AT RECCLE &
+        INCLUDE &
+                CIECLE    OF ARRECEPTION, &
+                RECCLE    OF ARRECEPTION, &
+                CMDCLE    OF ARRECEPTION, &
+                FOUCIECLE OF ARRECEPTION, &
+                REFCLETYP OF ARRECEPTION, &
+                RADCLE    OF ARRECEPTION, &
+                FOUCLE    OF ARRECEPTION, &
+                RECDAT    OF ARRECEPTION, &
+                PECCLE    OF ARRECEPTION, &
+                RECCOM    OF ARRECEPTION, &
+                ENTCLE    OF ARRECEPTION, &
+                DEVCLE    OF VFOC_FOU   , &
+                T_HISDSCGEN             , &
+                RECTYPECR OF ARRECEPTION
+
+;------------------------------------------------------------------------------
+;
+; Désengagement des commandes selon la réception.
+;
+REQUEST CALCULER_MONTANT_DESENGAGEMENT
+
+ACCESS *WAR700EN                     &
+
+  LINK  CIECLE OF WAR700EN         , &
+        RECCLE OF WAR700EN           &
+    TO  CIECLE                     , &
+        RECCLE OF ARREC_DETAIL       &
+
+  LINK  CIECLE OF ARREC_DETAIL     , &
+        RECCLE OF ARREC_DETAIL[1:9], &
+        REDCLE OF ARREC_DETAIL       &
+    TO  CIECLE                     , &
+        CMDCLE                     , &
+        CDECLE OF ARCMD_DETAIL       &
+
+  LINK  CIECLE OF ARCMD_DETAIL     , & ; MP-00-03-07_D15.
+        CMDCLE OF ARCMD_DETAIL     , & ; MP-00-03-07_D15.
+        CMDAJT OF ARCMD_DETAIL       & ; MP-00-03-07_D15.
+    TO  CIECLE                     , & ; MP-00-03-07_D15.
+        CMDCLE                     , & ; MP-00-03-07_D15.
+        CMDAJT OF ARCOMMANDE           ; MP-00-03-07_D15.
+
+
+SELECT IF CMDDATCRE OF ARCOMMANDE > 19990829 ; MP-00-03-07_D15.
+
+TEMPORARY T_MNTDES FLOAT SIZE 08
+TEMPORARY T_SLDDES FLOAT SIZE 08
+
+; Ajustement pour le changement de siècle
+DEFINE D_CMDCLE_TRI CHARACTER SIZE 10 = "1" + CMDCLE OF ARCMD_DETAIL &
+     IF CMDCLE OF ARCMD_DETAIL[1:1] < "8" &
+     ELSE "0" + CMDCLE OF ARCMD_DETAIL
+
+SORT    ON CIECLE    OF WAR700EN     &
+        ON D_CMDCLE_TRI              &
+        ON CDECLE    OF ARCMD_DETAIL &
+        ON REDFLGCOM OF ARREC_DETAIL
+
+ITEM T_SLDDES = T_SLDDES + T_MNTDES &
+     RESET AT CDECLE TO CDEMNTDES OF ARCMD_DETAIL
+
+ITEM T_MNTDES = CDEMNTENG OF ARCMD_DETAIL - T_SLDDES &
+
+        IF REDFLGCOM OF ARREC_DETAIL = "1" &
+
+  ELSE  REDMNTDES OF ARREC_DETAIL &
+
+        IF CDEMNTENG OF ARCMD_DETAIL >= (T_SLDDES + &
+                                         REDMNTDES OF ARREC_DETAIL)  &
+
+  ELSE  CDEMNTENG OF ARCMD_DETAIL - T_SLDDES &
+        RESET AT CDECLE
+
+
+OUTPUT ARCMD_DETAIL  UPDATE AT CDECLE
+
+  ITEM CDEMNTDES OF ARCMD_DETAIL  = CDEMNTDES OF ARCMD_DETAIL + &
+                                    T_MNTDES + T_SLDDES
+
+;
+;
+; Pour l'affectation du désengagement.
+;
+SUBFILE WAR700CP KEEP &
+        INCLUDE &
+                CIECLE    OF WAR700EN , &
+                RECCLE    OF WAR700EN , &
+                CMDCLE    OF WAR700EN , &
+                FOUCIECLE OF WAR700EN , &
+                REFCLETYP OF WAR700EN , &
+                FOUCLE    OF WAR700EN , &
+                RADCLE    OF WAR700EN , &
+                RECDAT    OF WAR700EN , &
+                RECTYPECR OF WAR700EN , &
+                PECCLE    OF WAR700EN , &
+                CPTCLE    OF ARCMD_DETAIL, &
+                UNACLE    OF ARCMD_DETAIL, &
+                PRJCLE    OF ARCMD_DETAIL, &
+                PRACLE    OF ARCMD_DETAIL, &
+                IMMCLE    OF ARCMD_DETAIL, &
+                DEVCLE    OF WAR700EN    , &
+                RECCOM    OF WAR700EN    , &
+                ENTCLE    OF WAR700EN    , &
+                T_HISDSCGEN OF WAR700EN  , &
+                T_MNTDES
+
+;------------------------------------------------------------------------------
+;
+; Cette étape permet de faire l'écriture dans la table MCHIS_ECR_ENG afin
+; de faire la mise à jour de MCSOLDE_ANNUEL
+
+REQUEST MAJ_ENGAGEMENT
+
+ACCESS *WAR700CP  &
+  LINK "1", &                           ;
+       G_ANN &                          ; Pour le numéro d'écriture.
+    TO CIENMC, &                        ;
+       HSECLEANN OF  MCHIS_SEQ_ENG   OPTIONAL
+
+TEMPORARY T_MNTDESTOT  FLOAT SIZE 08
+TEMPORARY T_MNTDESTOT2 FLOAT SIZE 08
+
+SORT   ON CIECLE OF WAR700CP & ; Compagnie
+       ON RECCLE OF WAR700CP & ; Numéro de réception
+       ON CPTCLE OF WAR700CP & ; Compte
+       ON UNACLE OF WAR700CP & ; Unité
+       ON PRJCLE OF WAR700CP & ; Projet
+       ON PRACLE OF WAR700CP   ; Sous-projet
+
+TEMPORARY T_HENCLE_ANN  INTEGER UNSIGNED SIZE 04
+TEMPORARY T_HENCLE_TMP CHARACTER SIZE 09
+TEMPORARY T_HENCLE  INTEGER UNSIGNED SIZE 04
+TEMPORARY T_NUMSEQ2 INTEGER UNSIGNED SIZE 04
+TEMPORARY T_CPTLIG  INTEGER UNSIGNED SIZE 02
+
+; Ajustement pour le changement de siècle
+ITEM T_NUMSEQ2 INITIAL 0 & ;NCONVERT( G_ANN ) * 10000000 &
+                        IF NOT RECORD MCHIS_SEQ_ENG EXIST &
+                 ELSE HSENUMSEQ OF MCHIS_SEQ_ENG
+
+ITEM T_HENCLE RESET AT INITIAL TO (T_NUMSEQ2 + 1)
+
+ITEM T_HENCLE COUNT AT RECCLE
+
+; Ajustement pour le changement de siècle
+ITEM T_HENCLE_TMP = ASCII(T_HENCLE,9)
+ITEM T_HENCLE_ANN = NCONVERT((G_ANN + T_HENCLE_TMP[3:7]))
+
+ITEM T_CPTLIG = T_CPTLIG + 1 RESET AT RECCLE TO 0
+
+ITEM T_MNTDESTOT  SUBTOTAL T_MNTDES RESET AT UNACLE
+ITEM T_MNTDESTOT2 SUBTOTAL T_MNTDES RESET AT PRACLE
+
+
+OUTPUT MCHISTO_ENG  ADD AT RECCLE
+  ITEM HENCLE      OF MCHISTO_ENG = T_HENCLE_ANN
+  ITEM HENCIECLE   OF MCHISTO_ENG INITIAL CIECLE      OF WAR700CP
+  ITEM REFCIECLE   OF MCHISTO_ENG INITIAL FOUCIECLE   OF WAR700CP
+  ITEM REFCLETYP   OF MCHISTO_ENG INITIAL "F"
+  ITEM REFCLENUM   OF MCHISTO_ENG INITIAL FOUCLE      OF WAR700CP
+  ITEM HENNUMDOC   OF MCHISTO_ENG INITIAL RECCLE      OF WAR700CP
+  ITEM SANANN      OF MCHISTO_ENG INITIAL PECCLE      OF WAR700CP[1:2]
+  ITEM PECCLE      OF MCHISTO_ENG INITIAL PECCLE      OF WAR700CP
+  ITEM HENDAT      OF MCHISTO_ENG INITIAL SYSDATE
+  ITEM HENDATJOU   OF MCHISTO_ENG INITIAL SYSDATE
+  ITEM HENCODMOD   OF MCHISTO_ENG INITIAL "AR"
+  ITEM HENTYPECR   OF MCHISTO_ENG INITIAL RECTYPECR   OF WAR700CP
+  ITEM HENDSCGEN   OF MCHISTO_ENG INITIAL T_HISDSCGEN
+  ITEM HENDSCSAI   OF MCHISTO_ENG INITIAL RECCOM      OF WAR700CP
+  ITEM HENDSCSAI2  OF MCHISTO_ENG INITIAL " "
+  ITEM DEVCLE      OF MCHISTO_ENG INITIAL DEVCLE      OF WAR700CP
+  ITEM HENCLE1     OF MCHISTO_ENG INITIAL CIECLE      OF WAR700CP
+  ITEM HENCLE2     OF MCHISTO_ENG INITIAL RECCLE      OF WAR700CP
+  ITEM HENCLE3     OF MCHISTO_ENG INITIAL " "
+
+OUTPUT MCHIS_ECR_ENG  ADD AT UNACLE
+  ITEM HENCLE       OF MCHIS_ECR_ENG = T_HENCLE_ANN
+  ITEM CPTCLE       OF MCHIS_ECR_ENG INITIAL CPTCLE      OF WAR700CP
+  ITEM HEECIEINT    OF MCHIS_ECR_ENG INITIAL CIECLE      OF WAR700CP
+  ITEM HEEUNAINT    OF MCHIS_ECR_ENG INITIAL UNACLE      OF WAR700CP
+  ITEM CIECLE       OF MCHIS_ECR_ENG INITIAL CIECLE      OF WAR700CP
+  ITEM UNACLE       OF MCHIS_ECR_ENG INITIAL UNACLE      OF WAR700CP
+  ITEM PECCLE       OF MCHIS_ECR_ENG INITIAL PECCLE      OF WAR700CP
+  ITEM HEENUMDOC2   OF MCHIS_ECR_ENG INITIAL " "
+
+  ITEM HEEMNTCRT    OF MCHIS_ECR_ENG   =   T_MNTDESTOT      &
+                                          IF T_MNTDESTOT >= 0 &
+                                        ELSE 0
+
+  ITEM HEEMNTDBT    OF MCHIS_ECR_ENG   =   0                &
+                                          IF T_MNTDESTOT >= 0 &
+                                        ELSE ABSOLUTE(T_MNTDESTOT)
+
+  ITEM HEEMNTCRTORI OF MCHIS_ECR_ENG   =   T_MNTDESTOT      &
+                                          IF T_MNTDESTOT >= 0 &
+                                        ELSE 0
+
+  ITEM HEEMNTDBTORI OF MCHIS_ECR_ENG   =   0                &
+                                          IF T_MNTDESTOT >= 0 &
+                                        ELSE ABSOLUTE(T_MNTDESTOT)
+
+  ITEM HEEFLGINT    OF MCHIS_ECR_ENG INITIAL "0"
+
+OUTPUT MCHIS_PROJET_ENG  ADD AT PRACLE
+  ITEM HENCLE    OF MCHIS_PROJET_ENG = T_HENCLE_ANN
+  ITEM HPENUMLIG OF MCHIS_PROJET_ENG INITIAL T_CPTLIG
+  ITEM CIECLE    OF MCHIS_PROJET_ENG INITIAL CIECLE      OF WAR700CP
+  ITEM CPTCLE    OF MCHIS_PROJET_ENG INITIAL CPTCLE      OF WAR700CP
+  ITEM PRJCLE    OF MCHIS_PROJET_ENG INITIAL PRJCLE      OF WAR700CP
+  ITEM PRACLE    OF MCHIS_PROJET_ENG INITIAL PRACLE      OF WAR700CP
+  ITEM IMMCLE    OF MCHIS_PROJET_ENG INITIAL IMMCLE      OF WAR700CP
+  ITEM UNACLE    OF MCHIS_PROJET_ENG INITIAL UNACLE      OF WAR700CP
+  ITEM PECCLE    OF MCHIS_PROJET_ENG INITIAL PECCLE      OF WAR700CP
+
+  ITEM HPEMNTCRT OF MCHIS_PROJET_ENG   =   T_MNTDESTOT2      &
+                                          IF T_MNTDESTOT2 >= 0 &
+                                        ELSE 0
+
+  ITEM HPEMNTDBT OF MCHIS_PROJET_ENG   =   0                 &
+                                          IF T_MNTDESTOT2 >= 0 &
+                                        ELSE ABSOLUTE(T_MNTDESTOT2)
+
+  ITEM HPEMNTCRTORI OF MCHIS_PROJET_ENG=   T_MNTDESTOT2      &
+                                          IF T_MNTDESTOT2 >= 0 &
+                                        ELSE 0
+
+  ITEM HPEMNTDBTORI OF MCHIS_PROJET_ENG=   0                 &
+                                          IF T_MNTDESTOT2 >= 0 &
+                                        ELSE ABSOLUTE(T_MNTDESTOT2)
+
+OUTPUT ARRECEPTION  UPDATE AT RECCLE &
+       VIA CIECLE, RECCLE USING CIECLE OF WAR700CP, RECCLE OF WAR700CP
+   ITEM HENCLE    OF ARRECEPTION  =  T_HENCLE_ANN
+
+
+OUTPUT MCHIS_SEQ_ENG  ADD UPDATE AT FINAL
+  ITEM CIENMC    OF MCHIS_SEQ_ENG INITIAL "1"
+  ITEM HSECLEANN OF MCHIS_SEQ_ENG INITIAL G_ANN
+  ITEM HSENUMSEQ OF MCHIS_SEQ_ENG FINAL   ( T_HENCLE  - 1 )
+
+
+
+;-------------------------------------------------------------------------------
+;
+; On relis toutes les lignes d'imputations de tous les réception traiter.
+; Et chaque ligne est traitée de facon idépendante.
+;
+; Chaque ligne d'imputation est composée de :
+;
+;         Un compte/unité   = compte/unité imputée par l'usager.
+;         Un montant net    = Montant de l'imputation moins les taxes
+;                             remboursables (CTI & RTI)
+;         Un montant de CTI = Montant remboursable de la taxe fédérale
+;         Un montant de RTI = Montant remboursable de la taxe provinciale
+;
+; Et chaque ligne d'imputation est "éclatée" en plusieurs lignes
+; d'écritures qui contiennent chacune un compte/unité  et un montant :
+;
+;         Compte                              Montant           Débit/Crédit
+;         ------                              -------           ------------
+;        -Compte/unité imputé par l'usager    Montant net            D
+;
+;        -Compte de taxe fédérale à recevoir  Montant CTI            D
+;         (unité de bilan)
+;        -Compte de taxe provinciale          Montant RTI            D
+;         recevoir (unité de bilan)
+;        -Compte de compte couru de           Montant brut           C
+;         l'entrepôt (unité de bilan)
+;
+;
+REQUEST ECLATEMENT_IMPUTATION     TERMINATE IF G_ERREUR = "ARRET"
+
+ACCESS *WAR700VE  &
+  LINK REITAXTYPTPS OF WAR700VE, &
+       REITAXCODTPS OF WAR700VE &
+    TO TAXCLETYP, &
+       TAXCLECOD OF MCTAXE   ALIAS A_TAX_TPS OPTIONAL &
+
+  LINK REITAXTYPTVQ OF WAR700VE, &
+       REITAXCODTVQ OF WAR700VE &
+    TO TAXCLETYP, &
+       TAXCLECOD OF MCTAXE   ALIAS A_TAX_TVP OPTIONAL &
+
+  LINK CIECLE    OF WAR700VE, &
+       UNACLE    OF WAR700VE &
+    TO CIECLE, &
+       UNACLE OF MCUNITE_ADM   OPTIONAL &
+
+  LINK CIECLE    OF WAR700VE &
+    TO CIECLE    OF MCCOMPAGNIE   &
+
+  LINK DEVCLE    OF WAR700VE &
+    TO DEVCLE    OF MCDEVISE   &
+
+  LINK T_HECCIEINT OF WAR700VE &
+    TO CIECLE OF MCCOMPAGNIE    ALIAS A_MCCIE_INTER &
+
+  LINK CIECLE    OF WAR700VE, &
+       RECCLE    OF WAR700VE  &
+    TO CIECLE, &
+       RECCLE OF ARRECEPTION
+
+
+TEMPORARY T_REIMNT    FLOAT     SIZE 08 ; Calcul du montant brut de l'imputation
+TEMPORARY T_MNTDEP    FLOAT     SIZE 08 ; pour les montants de dépenses ou
+                                        ; d'inventaire.
+TEMPORARY T_MNTCTI    FLOAT     SIZE 08 ; Pour les montants de CTI
+TEMPORARY T_MNTRTI    FLOAT     SIZE 08 ; pour les montants de RTI
+TEMPORARY T_MNTCOU    FLOAT     SIZE 08 ; pour les montants payable
+TEMPORARY T_MNTCOUREC FLOAT     SIZE 08 ; Montant courus pour la réception.
+TEMPORARY T_CODDCD    CHARACTER SIZE 01 ; pour le code crédit pour le couru.
+TEMPORARY T_PRJCLE    CHARACTER SIZE 08 ; Projet de l'imputation.
+TEMPORARY T_PRACLE    CHARACTER SIZE 03 ; Activité de l'imputation.
+TEMPORARY T_DEVTAU    FLOAT     SIZE 8
+TEMPORARY T_IMMCLE    CHARACTER SIZE 12
+
+SORTED ON CIECLE OF WAR700VE &
+       ON RECCLE OF WAR700VE
+
+;
+; Calcul du montant brut (avec taxe) pour le compte couru.
+;
+ITEM T_MNTCOU = REIMNT OF WAR700VE
+ITEM T_MNTCOU = T_MNTCOU + REIMNTTPS OF WAR700VE IF TAXMOD OF A_TAX_TPS = "S"
+ITEM T_MNTCOU = T_MNTCOU + REIMNTTVQ OF WAR700VE IF TAXMOD OF A_TAX_TVP = "S"
+
+ITEM T_MNTCOUREC SUBTOTAL T_MNTCOU RESET AT RECCLE
+
+;
+; Le compte de dépense ou d'inventaire est comptabilisé sans les taxes
+; remboursables.
+;
+ITEM T_MNTDEP = T_MNTCOU - REIMNTCTI OF WAR700VE &
+                         - REIMNTRTI OF WAR700VE
+
+ITEM T_CODDCD    RESET AT INITIAL TO "C"
+
+;
+; Sous fichier utilisé dans le traitement général des journalisations (ici, transfert ; MP-00-02-23_S02.
+; des réceptions) et servant a mettre a jour GLHIS_ECR.
+;
+
+;
+; Ajout du couru.
+;
+SUBFILE WUS900HE KEEP IF T_MNTCOU <> 0 &
+  INCLUDE T_HISCLE     OF WAR700VE      ALIAS HISCLE    , &
+          CIECLE       OF WAR700VE      ALIAS HISCIECLE , &
+          T_CPTCOU     OF WAR700VE      ALIAS CPTCLE    , &
+          T_HECCIEINT  OF WAR700VE      ALIAS HECCIEINT , &
+          CIEUNABIL    OF A_MCCIE_INTER ALIAS HECUNAINT , &
+          CIECLE       OF WAR700VE      ALIAS CIECLE    , &
+          T_UNACOU                      ALIAS UNACLE    , &
+          T_PRJCLE                      ALIAS PRJCLE    , &
+          T_PRACLE                      ALIAS PRACLE    , &
+          T_IMMCLE                      ALIAS IMMCLE    , &
+          PECCLE       OF WAR700VE                      , &
+          T_HECNUMDOC2 OF WAR700VE      ALIAS HECNUMDOC2, &
+          T_CODDCD                      ALIAS T_CODDC   , &
+          T_MNTCOU                      ALIAS T_MNTGL   , &
+          T_MNTCOU                      ALIAS T_MNTORI  , &
+          T_HECFLGINT  OF WAR700VE      ALIAS HECFLGINT , &
+          DEVCLE       OF WAR700VE                      , &
+          G_CODMOD                      ALIAS HISCODMOD , &
+          RECTYPECR    OF WAR700VE      ALIAS HISTYPECR , &
+          LARCLE       OF WAR700VE      ALIAS HISNUMLOT , &
+          T_DEVTAU
+
+;
+; Ajout du montant de TPS À recevoir.
+;
+OUTPUT *WUS900HE ALIAS A_WUS900HE_TPS ADD IF REIMNTCTI OF WAR700VE <> 0
+  ITEM HISCLE     OF A_WUS900HE_TPS FINAL T_HISCLE     OF WAR700VE
+  ITEM HISCIECLE  OF A_WUS900HE_TPS FINAL CIECLE       OF WAR700VE
+  ITEM CPTCLE     OF A_WUS900HE_TPS FINAL TAXCPTCOUCAR OF A_TAX_TPS
+  ITEM HECCIEINT  OF A_WUS900HE_TPS FINAL T_HECCIEINT  OF WAR700VE
+  ITEM HECUNAINT  OF A_WUS900HE_TPS FINAL CIEUNABIL    OF A_MCCIE_INTER
+  ITEM CIECLE     OF A_WUS900HE_TPS FINAL CIECLE       OF WAR700VE
+  ITEM UNACLE     OF A_WUS900HE_TPS FINAL CIEUNABIL    OF MCCOMPAGNIE
+  ITEM PRJCLE     OF A_WUS900HE_TPS FINAL " "
+  ITEM PRACLE     OF A_WUS900HE_TPS FINAL " "
+  ITEM IMMCLE     OF A_WUS900HE_TPS FINAL " "
+  ITEM PECCLE     OF A_WUS900HE_TPS FINAL PECCLE       OF WAR700VE
+  ITEM HECNUMDOC2 OF A_WUS900HE_TPS FINAL T_HECNUMDOC2 OF WAR700VE
+  ITEM T_CODDC    OF A_WUS900HE_TPS FINAL "D"
+  ITEM T_MNTGL    OF A_WUS900HE_TPS FINAL REIMNTCTI    OF WAR700VE
+  ITEM T_MNTORI   OF A_WUS900HE_TPS FINAL REIMNTCTI    OF WAR700VE
+  ITEM HECFLGINT  OF A_WUS900HE_TPS FINAL T_HECFLGINT  OF WAR700VE
+  ITEM DEVCLE     OF A_WUS900HE_TPS FINAL DEVCLE       OF WAR700VE
+  ITEM HISCODMOD  OF A_WUS900HE_TPS FINAL G_CODMOD
+  ITEM HISTYPECR  OF A_WUS900HE_TPS FINAL RECTYPECR    OF WAR700VE
+  ITEM HISNUMLOT  OF A_WUS900HE_TPS FINAL LARCLE       OF WAR700VE
+  ITEM T_DEVTAU   OF A_WUS900HE_TPS FINAL 0
+
+;
+; Ajout du montant de TVP à recevoir.
+;
+OUTPUT *WUS900HE ALIAS A_WUS900HE_TVP ADD IF REIMNTRTI OF WAR700VE <> 0
+  ITEM HISCLE     OF A_WUS900HE_TVP FINAL T_HISCLE     OF WAR700VE
+  ITEM HISCIECLE  OF A_WUS900HE_TVP FINAL CIECLE       OF WAR700VE
+  ITEM CPTCLE     OF A_WUS900HE_TVP FINAL TAXCPTCOUCAR OF A_TAX_TVP
+  ITEM HECCIEINT  OF A_WUS900HE_TVP FINAL T_HECCIEINT  OF WAR700VE
+  ITEM HECUNAINT  OF A_WUS900HE_TVP FINAL CIEUNABIL    OF A_MCCIE_INTER
+  ITEM CIECLE     OF A_WUS900HE_TVP FINAL CIECLE       OF WAR700VE
+  ITEM UNACLE     OF A_WUS900HE_TVP FINAL CIEUNABIL    OF MCCOMPAGNIE
+  ITEM PRJCLE     OF A_WUS900HE_TVP FINAL " "
+  ITEM PRACLE     OF A_WUS900HE_TVP FINAL " "
+  ITEM IMMCLE     OF A_WUS900HE_TVP FINAL IMMCLE       OF WAR700VE
+  ITEM PECCLE     OF A_WUS900HE_TVP FINAL PECCLE       OF WAR700VE
+  ITEM HECNUMDOC2 OF A_WUS900HE_TVP FINAL T_HECNUMDOC2 OF WAR700VE
+  ITEM T_CODDC    OF A_WUS900HE_TVP FINAL "D"
+  ITEM T_MNTGL    OF A_WUS900HE_TVP FINAL REIMNTRTI    OF WAR700VE
+  ITEM T_MNTORI   OF A_WUS900HE_TVP FINAL REIMNTRTI    OF WAR700VE
+  ITEM HECFLGINT  OF A_WUS900HE_TVP FINAL T_HECFLGINT  OF WAR700VE
+  ITEM DEVCLE     OF A_WUS900HE_TVP FINAL DEVCLE       OF WAR700VE
+  ITEM HISCODMOD  OF A_WUS900HE_TVP FINAL G_CODMOD
+  ITEM HISTYPECR  OF A_WUS900HE_TVP FINAL RECTYPECR    OF WAR700VE
+  ITEM HISNUMLOT  OF A_WUS900HE_TVP FINAL LARCLE       OF WAR700VE
+  ITEM T_DEVTAU   OF A_WUS900HE_TVP FINAL 0
+
+
+;
+; Ajout du compte de DÉPENSE. ou INVENTAIRE.
+;
+OUTPUT *WUS900HE ALIAS A_WUS900HE_REV ADD IF T_MNTDEP <> 0
+  ITEM HISCLE     OF A_WUS900HE_REV FINAL T_HISCLE     OF WAR700VE
+  ITEM HISCIECLE  OF A_WUS900HE_REV FINAL CIECLE       OF WAR700VE
+  ITEM CPTCLE     OF A_WUS900HE_REV FINAL CPTCLE       OF WAR700VE
+  ITEM HECCIEINT  OF A_WUS900HE_REV FINAL T_HECCIEINT  OF WAR700VE
+  ITEM HECUNAINT  OF A_WUS900HE_REV FINAL CIEUNABIL    OF A_MCCIE_INTER
+  ITEM CIECLE     OF A_WUS900HE_REV FINAL CIECLE       OF WAR700VE
+  ITEM UNACLE     OF A_WUS900HE_REV FINAL UNACLE       OF WAR700VE
+  ITEM PRJCLE     OF A_WUS900HE_REV FINAL PRJCLE       OF WAR700VE
+  ITEM PRACLE     OF A_WUS900HE_REV FINAL PRACLE       OF WAR700VE
+  ITEM PECCLE     OF A_WUS900HE_REV FINAL PECCLE       OF WAR700VE
+  ITEM HECNUMDOC2 OF A_WUS900HE_REV FINAL T_HECNUMDOC2 OF WAR700VE
+  ITEM T_CODDC    OF A_WUS900HE_REV FINAL REICODDC     OF WAR700VE
+  ITEM T_MNTGL    OF A_WUS900HE_REV FINAL T_MNTDEP
+  ITEM T_MNTORI   OF A_WUS900HE_REV FINAL T_MNTDEP
+  ITEM HECFLGINT  OF A_WUS900HE_REV FINAL T_HECFLGINT  OF WAR700VE
+  ITEM DEVCLE     OF A_WUS900HE_REV FINAL DEVCLE       OF WAR700VE
+  ITEM HISCODMOD  OF A_WUS900HE_REV FINAL G_CODMOD
+  ITEM HISTYPECR  OF A_WUS900HE_REV FINAL RECTYPECR    OF WAR700VE
+  ITEM HISNUMLOT  OF A_WUS900HE_REV FINAL LARCLE       OF WAR700VE
+  ITEM T_DEVTAU   OF A_WUS900HE_REV FINAL 0
+
+
+;
+; Mise à jour de la réception pour le montant de courus généré.
+;
+OUTPUT ARRECEPTION  UPDATE AT RECCLE
+
+  ITEM RECMNTCOU OF ARRECEPTION = ROUND(T_MNTCOUREC * DEVTAU OF MCDEVISE)
+  ITEM DEVTAU    OF ARRECEPTION = DEVTAU OF MCDEVISE
+
+;-------------------------------------------------------------------------------
+;
+; TRAITEMENTS GENERAUX A TOUTES LES JOURNALISATION (ici, transfert de réceptions) ; MP-00-02-23_S02.
+;
+
+USE us-900t NOLIST
+
+BUILD

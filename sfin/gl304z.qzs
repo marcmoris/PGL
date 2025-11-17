@@ -1,0 +1,596 @@
+;/T/ Grand livre
+;
+;//M/GRA01/Francois Richard/1999-06-17
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur...: Chantal Martineau
+;    Date Création.: 04 mai 1993
+;
+;/V3.00.02/ Alain Côté, 8 mars 1994, 224
+;
+;    Description...: Ce rapport présente l'analyse des transactions
+;                    ayant affectées les soldes au grand livre.
+;
+;
+;    Particularités:
+;
+;
+;***********************************************************************************************************************************
+;
+;/M/ Modifié par.......: Marc Poulin     
+;    Date..............: 14 mars 2000
+;    Description.......: Ajuster l'impression de la description générale.
+;
+;    Référence.........: Stabilisation du module Achat/Réception Inventaire (point 22).
+;
+;    Signet............: MP-00-03-14_S22.
+;
+;    ----------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin     
+;    Date..............: 6 février 2001
+;    Description.......: Augmenter la capacité d'affichage des montants "Débit, Crédit et Variation".
+;
+;    Référence.........: Demande de changement 000126.
+;
+;    Signet............: MP-01-02-06_D126.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+ USE ussetqzs NOLIST   ; permet de faire les SET REPORT DEV....
+ SET NOBLANK           ; Empêche l'impression de ligne blanche
+
+
+;==============================================================================
+; Grand-Livre par compte par unité adm. (par compagnie - par holding)
+; prendre note que GL304B est une copie de GL304A la difféerence est
+; seulement le tri.
+;==============================================================================
+
+
+ACCESS *WGL304B &
+
+  LINK CIECLE OF WGL304B &
+    TO CIECLE OF MCCOMPAGNIE OPTIONAL &
+
+  LINK CIECLE OF WGL304B , &
+       UNACLE OF WGL304B   &
+    TO CIECLE                 , &
+       UNACLE OF MCUNITE_ADM  OPTIONAL &
+
+  LINK REFCIECLE OF WGL304B , &
+       REFCLETYP OF WGL304B , &
+       REFCLENUM OF WGL304B   &
+    TO REFCIECLE , &
+       REFCLETYP , &
+       REFCLENUM            OF MCREFERENCE OPTIONAL
+
+
+;MIT EN COMMENTAIRE LE 8-11-99
+;ATTENDRE LA SUITE
+;SELECT WGL304B IF D_TYPTRS OF WGL304B <> 'ARRC' AND D_TYPTRS OF WGL304B <> 'CPFR' ; DEMANDÉ PAR LE CLIENT
+
+ DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &        ; titre1  du rapport
+@IF FRANCAIS
+                "Grand livre par compte par unité administrative"
+@ELSE
+                "General Ledger by Account by Unit"
+@ENDIF
+ DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = " "      ; titre2  du rapport
+ DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "GL304A"                    ; numéro du rapport
+ DEFINE DZ_CIENOM  CHARACTER SIZE 40 = CENTER(CIENOM OF MCCOMPAGNIE)[1:40]; Nom de la compagnie
+
+
+
+DEFINE D_ANNUL_LIGN VARCHAR SIZE 181 = &                          ;Pour empêcher l'impression de certaine ligne
+"                                                                  " + &
+"                                                                  " + &
+"                                               "  &
+ IF T_FLGDETHIS OF WGL304B = "0" ELSE ""
+
+DEFINE D_SOLDE    FLOAT SIZE 8 &                                  ; Pour calculer la variation
+       = HECMNTDBT OF WGL304B - HECMNTCRT OF WGL304B
+
+;
+; Losque la description général est absente on imprime le nom de la référence
+;
+DEFINE D_HISDSCGEN CHARACTER SIZE 40 = REFNOM    OF MCREFERENCE  & ; MP-00-03-14_S22.
+                                    IF HISDSCGEN OF WGL304B = "" &
+                                  ELSE HISDSCGEN OF WGL304B
+
+
+DEFINE D_REFCLENUM CHAR SIZE 6 = REFCLENUM OF WGL304B
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE CHARACTER SIZE 5 = "1" + PECCLE OF WGL304B &
+         IF PECCLE OF WGL304B[1:1] < "8" &
+         ELSE "0" + PECCLE OF WGL304B
+
+SORT   ON  CIECLE OF WGL304B , &                       ; Compagnie
+           CPTCLE OF WGL304B , &                       ; Compte
+           UNACLE OF WGL304B , &                       ; Unité
+           D_PECCLE_SIE , &                       ; Période
+;           D_REFCLENUM , &
+           HISDAT OF WGL304B , &                       ; Date de transaction
+           HISNUMLOT OF WGL304B, &                     ; No Lot
+           D_TYPTRS  OF WGL304B;,&                        ; Type de transaction
+;           HISNUMDOC OF WGL304B
+
+
+
+USE ustit180 NOLIST  ; Titre standard pour l'application
+SKIP 2 &
+@IF FRANCAIS
+ TAB 001 "Période Début : "  &
+ TAB 017  G_SELANNFIN OF WGL304B PICTURE "^^" &
+ TAB 019 "-" &
+ TAB 020  G_SELPECDEB OF WGL304B PICTURE "^^" &
+SKIP 1 &
+ TAB 001 "Période Fin   : "  &
+ TAB 017  G_SELANNFIN OF WGL304B PICTURE "^^" &
+ TAB 019 "-" &
+ TAB 020  G_SELPECFIN OF WGL304B PICTURE "^^" &
+SKIP 2 &
+@IF FRANCAIS
+ TAB 001 "                  Compte                           Unité administrative     " &
+@ELSE
+ TAB 001 "%%%               Compte                           Unité administrative     " &
+@ENDIF
+SKIP &
+ TAB 001 "------------------------------------------    ----------------------------- " &
+SKIP 1
+
+
+
+
+HEADING AT UNACLE &
+        TAB 001 CPTCLE    OF WGL304B   &
+        TAB 008 CPTDSC    OF WGL304B   &
+        TAB 047 UNACLE    OF WGL304B   &
+        TAB 056 UNANOMABR OF MCUNITE_ADM &
+@IF FRANCAIS
+        TAB 140 "Solde de début....:" &
+@ELSE
+        TAB 140 "Starting Balance..:" &
+@ENDIF
+        TAB 161 T_OUV_SANCUMANN_DC OF WGL304B &
+        PICTURE " ^^^,^^^,^^^.^^ "  TRAILING SIGN ">" LEADING SIGN "<" SIGNIFICANCE 5 &
+        SKIP 2 &
+        RESERVE 8 LINES
+
+
+
+
+REPORT &
+@IF FRANCAIS
+    TAB 008 "Période   Lot      Date     Type      Document  "   PRINT AT UNACLE &
+    TAB 061 "              Référence            "                PRINT AT UNACLE &
+    TAB 111 "      Débit       "                                 PRINT AT UNACLE & ; MP-01-02-06_D126.
+    TAB 131 "     Crédit       "                                 PRINT AT UNACLE & ; MP-01-02-06_D126.
+    TAB 151 "      Variation     "                               PRINT AT UNACLE & ; MP-01-02-06_D126.
+@ELSE
+    TAB 008 "%%%iode   Lot      Date     Type      Document  "   PRINT AT UNACLE &
+    TAB 061 "              Référence            "                PRINT AT UNACLE &
+    TAB 111 "      Débit       "                                 PRINT AT UNACLE & ; MP-01-02-06_D126.
+    TAB 131 "     Crédit       "                                 PRINT AT UNACLE & ; MP-01-02-06_D126.
+    TAB 151 "      Variation     "                               PRINT AT UNACLE & ; MP-01-02-06_D126.
+@ENDIF
+    TAB 001 D_ANNUL_LIGN  &
+  SKIP 1 &
+    TAB 008 "-------   ----   --------   ----   ---------------" PRINT AT UNACLE &
+    TAB 061 "-----------------------------------------------"    PRINT AT UNACLE &
+    TAB 111 "------------------"                                 PRINT AT UNACLE & ; MP-01-02-06_D126.
+    TAB 131 "------------------"                                 PRINT AT UNACLE & ; MP-01-02-06_D126.
+    TAB 151 "--------------------"                               PRINT AT UNACLE & ; MP-01-02-06_D126.
+    TAB 001 D_ANNUL_LIGN  &
+  SKIP 1 &
+    TAB 009 PECCLE    OF WGL304B &
+    TAB 018 HISNUMLOT OF WGL304B &
+    TAB 025 HISDAT    OF WGL304B &
+    TAB 036 D_TYPTRS  OF WGL304B &
+    TAB 043 HISNUMDOC OF WGL304B &
+    TAB 061 REFCLENUM OF WGL304B &
+    TAB 068 D_HISDSCGEN          &
+    TAB 111 HECMNTDBT OF WGL304B  PICTURE "^^^,^^^,^^^,^^^.^^" BWZ & ; MP-01-02-06_D126.
+    TAB 131 HECMNTCRT OF WGL304B  PICTURE "^^^,^^^,^^^,^^^.^^" BWZ & ; MP-01-02-06_D126.
+    TAB 001 D_ANNUL_LIGN   &
+  SKIP &
+    TAB 61 HISDSCSAI OF WGL304B  &
+  SKIP &
+    TAB 61 HISDSCSAI2 OF WGL304B
+
+
+;FOOTING AT D_REFCLENUM  &
+;        SKIP 1 &
+;        TAB 079 "Total du fournisseur" &
+;        TAB 111 HECMNTDBT OF WGL304B SUBTOTAL BWZ          &
+;             PICTURE "^^,^^^,^^^.^^" SIGNIFICANCE 4  &
+;        TAB 127 HECMNTCRT OF WGL304B SUBTOTAL BWZ          &
+;             PICTURE "^^,^^^,^^^.^^" SIGNIFICANCE 4  &
+;        TAB 143 D_SOLDE SUBTOTAL &
+;        PICTURE " ^^^,^^^,^^^.^^ "  TRAILING SIGN ">" LEADING SIGN "<" SIGNIFICANCE 5 &
+;        TAB 001 D_ANNUL_LIGN &
+;        SKIP 2
+
+
+
+FOOTING AT D_PECCLE_SIE &
+        SKIP 2 &
+@IF FRANCAIS
+        TAB 079 "Total de la periode" &
+@ELSE
+        TAB 079 "--------Period Total" &
+@ENDIF
+        PECCLE ":" &
+        TAB 111 HECMNTDBT OF WGL304B SUBTOTAL BWZ             & ; MP-01-02-06_D126.
+             PICTURE "^^^,^^^,^^^,^^^.^^" SIGNIFICANCE 4      & ; MP-01-02-06_D126.
+        TAB 131 HECMNTCRT OF WGL304B SUBTOTAL BWZ             & ; MP-01-02-06_D126.
+             PICTURE "^^^,^^^,^^^,^^^.^^" SIGNIFICANCE 4      & ; MP-01-02-06_D126.
+        TAB 151 D_SOLDE SUBTOTAL                              & ; MP-01-02-06_D126.
+             PICTURE " ^^^,^^^,^^^,^^^.^^ " TRAILING SIGN ">" & ; MP-01-02-06_D126.
+             LEADING SIGN "<" SIGNIFICANCE 5 &
+        TAB 001 D_ANNUL_LIGN &
+        SKIP 2
+
+
+
+FOOTING AT UNACLE &
+@IF FRANCAIS
+        TAB 140 "Solde de fermeture:" &
+@ELSE
+        TAB 140 "Closing Balance...:" &
+@ENDIF
+        TAB 161 D_SOLDE SUBTOTAL INITIAL VALUE T_OUV_SANCUMANN_DC &
+        PICTURE " ^^^,^^^,^^^.^^ "  TRAILING SIGN ">" LEADING SIGN "<" SIGNIFICANCE 5 &
+        SKIP 1 &
+TAB 001 "-------------------------------------------------------------------------------------------------------------------------"&
+TAB 121 "-----------------------------------------------------------"&
+        SKIP 2
+
+
+FOOTING AT CIECLE &
+@IF FRANCAIS
+    TAB 111 "   Total débit    "                              & ; MP-01-02-06_D126.
+    TAB 131 "  Total crédit    "                              & ; MP-01-02-06_D126.
+    TAB 151 "    Variation       "                            & ; MP-01-02-06_D126.
+@ELSE
+    TAB 111 "   Debit total    "                              & ; MP-01-02-06_D126.
+    TAB 131 "  Credit total    "                              & ; MP-01-02-06_D126.
+    TAB 151 "    Variation       "                            & ; MP-01-02-06_D126.
+@ENDIF
+  SKIP  &
+    TAB 111 "------------------"                              & ; MP-01-02-06_D126.
+    TAB 131 "------------------"                              & ; MP-01-02-06_D126.
+    TAB 151 "--------------------"                            & ; MP-01-02-06_D126.
+  SKIP &
+    TAB 111 HECMNTDBT OF WGL304B SUBTOTAL BWZ                 & ; MP-01-02-06_D126.
+            PICTURE "^^^,^^^,^^^,^^^.^^" SIGNIFICANCE 4       & ; MP-01-02-06_D126.
+    TAB 131 HECMNTCRT OF WGL304B SUBTOTAL BWZ                 & ; MP-01-02-06_D126.
+            PICTURE "^^^,^^^,^^^,^^^.^^" SIGNIFICANCE 4       & ; MP-01-02-06_D126.
+    TAB 151 D_SOLDE SUBTOTAL                                  & ; MP-01-02-06_D126.
+            PICTURE " ^^^,^^^,^^^,^^^.^^ "  TRAILING SIGN ">" & ; MP-01-02-06_D126.
+            LEADING SIGN "<" SIGNIFICANCE 5 &
+  SKIP  &
+    TAB 111 "=================="                              & ; MP-01-02-06_D126.
+    TAB 131 "=================="                              & ; MP-01-02-06_D126.
+    TAB 151 "===================="                            & ; MP-01-02-06_D126.
+  SKIP PAGE
+
+BUILD gl304za
+
+
+
+
+;==============================================================================
+; Grand-Livre par unité adm. par compte (par compagnie - par holding)
+; prendre note que GL304B est une copie de GL304A la différence est
+; seulement le tri.
+;==============================================================================
+
+ACCESS *WGL304B &
+
+  LINK CIECLE OF WGL304B &
+    TO CIECLE OF MCCOMPAGNIE OPTIONAL &
+
+  LINK CIECLE OF WGL304B , &
+       UNACLE OF WGL304B   &
+    TO CIECLE                 , &
+       UNACLE OF MCUNITE_ADM  OPTIONAL &
+
+  LINK REFCIECLE OF WGL304B , &
+       REFCLETYP OF WGL304B , &
+       REFCLENUM OF WGL304B   &
+    TO REFCIECLE , &
+       REFCLETYP , &
+       REFCLENUM            OF MCREFERENCE OPTIONAL
+
+
+SELECT WGL304B IF D_TYPTRS OF WGL304B <> 'ARRC' AND D_TYPTRS OF WGL304B <> 'CPFR' ; DEMANDÉ PAR LE CLIENT
+
+ DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &        ; titre1  du rapport
+@IF FRANCAIS
+                "Grand livre par unité administrative par compte"
+@ELSE
+                "%%%Grand livre par unité administrative par compte"
+@ENDIF
+ DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = " "      ; titre2  du rapport
+ DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "GL304B"                    ; numéro du rapport
+ DEFINE DZ_CIENOM  CHARACTER SIZE 40 = CENTER(CIENOM OF MCCOMPAGNIE)[1:40]; Nom de la compagnie
+
+
+
+DEFINE D_ANNUL_LIGN VARCHAR SIZE 181 = &                          ;Pour empêcher l'impression de certaine ligne
+"                                                                  " + &
+"                                                                  " + &
+"                                               "  &
+ IF T_FLGDETHIS OF WGL304B = "0" ELSE ""
+
+DEFINE D_SOLDE    FLOAT SIZE 8 &                                  ; Pour calculer la variation
+       = HECMNTDBT OF WGL304B - HECMNTCRT OF WGL304B
+
+;
+; Losque la description général est absente on imprime le nom de la référence
+;
+DEFINE D_HISDSCGEN CHARACTER SIZE 40 = REFNOM    OF MCREFERENCE  & ; MP-00-03-14_S22.
+                                    IF HISDSCGEN OF WGL304B = "" &
+                                  ELSE HISDSCGEN OF WGL304B
+
+; Ajustement pour le changement de siècle
+DEFINE D_PECCLE_SIE2 CHARACTER SIZE 5 = "1" + PECCLE OF WGL304B &
+         IF PECCLE OF WGL304B[1:1] < "8" &
+         ELSE "0" + PECCLE OF WGL304B
+
+SORT   ON  CIECLE OF WGL304B , &                       ; Compagnie
+           UNACLE OF WGL304B , &                       ; Unité
+           CPTCLE OF WGL304B , &                       ; Compte
+           D_PECCLE_SIE2 , &                       ; Période
+           HISDAT OF WGL304B , &                       ; Date de transaction
+           HISNUMLOT OF WGL304B, &                     ; No Lot
+           D_TYPTRS  OF WGL304B;,&                        ; Type de transaction
+
+
+
+USE ustit180 NOLIST  ; Titre standard pour l'application
+SKIP 2 &
+@IF FRANCAIS
+ TAB 001 "Période Début : "  &
+ TAB 017  G_SELANNFIN OF WGL304B PICTURE "^^" &
+ TAB 019 "-" &
+ TAB 020  G_SELPECDEB OF WGL304B PICTURE "^^" &
+SKIP 1 &
+ TAB 001 "Période Fin   : "  &
+ TAB 017  G_SELANNFIN OF WGL304B PICTURE "^^" &
+ TAB 019 "-" &
+ TAB 020  G_SELPECFIN OF WGL304B PICTURE "^^" &
+SKIP 2 &
+@IF FRANCAIS
+ TAB 001 "     Unité administrative                          Compte  " &
+@ELSE
+ TAB 001 "%%%  Unité administrative                          Compte  " &
+@ENDIF
+SKIP &
+ TAB 001 "-----------------------------    ------------------------------------------ " &
+SKIP 1
+
+
+
+HEADING AT CPTCLE &
+        TAB 001 UNACLE    OF WGL304B   &
+        TAB 010 UNANOMABR OF MCUNITE_ADM &
+        TAB 034 CPTCLE    OF WGL304B   &
+        TAB 041 CPTDSC    OF WGL304B   &
+@IF FRANCAIS
+        TAB 140 "Solde de début....:" &
+@ELSE
+        TAB 140 "Starting Balance..:" &
+@ENDIF
+        TAB 161 T_OUV_SANCUMANN_DC OF WGL304B &
+        PICTURE " ^^^,^^^,^^^.^^ "  TRAILING SIGN ">" LEADING SIGN "<" SIGNIFICANCE 5 &
+        SKIP 2 &
+        RESERVE 8 LINES
+
+
+
+
+REPORT &
+@IF FRANCAIS
+    TAB 008 "Période   Lot      Date     Type      Document  "   PRINT AT CPTCLE &
+    TAB 061 "              Référence            "                PRINT AT CPTCLE &
+    TAB 111 "       Débit      "                                 PRINT AT CPTCLE & ; MP-01-02-06_D126.
+    TAB 131 "      Crédit      "                                 PRINT AT CPTCLE & ; MP-01-02-06_D126.
+    TAB 151 "     Variation      "                               PRINT AT CPTCLE & ; MP-01-02-06_D126.
+@ELSE
+    TAB 008 "%%%iode   Lot      Date     Type      Document  "   PRINT AT CPTCLE &
+    TAB 061 "              Référence            "                PRINT AT CPTCLE &
+    TAB 111 "       Débit      "                                 PRINT AT CPTCLE & ; MP-01-02-06_D126.
+    TAB 131 "      Crédit      "                                 PRINT AT CPTCLE & ; MP-01-02-06_D126.
+    TAB 151 "     Variation      "                               PRINT AT CPTCLE & ; MP-01-02-06_D126.
+@ENDIF
+    TAB 001 D_ANNUL_LIGN  &
+  SKIP 1 &
+    TAB 008 "-------   ----   --------   ----   ---------------" PRINT AT CPTCLE &
+    TAB 061 "-----------------------------------------------"    PRINT AT CPTCLE &
+    TAB 111 "------------------"                                 PRINT AT CPTCLE & ; MP-01-02-06_D126.
+    TAB 131 "------------------"                                 PRINT AT CPTCLE & ; MP-01-02-06_D126.
+    TAB 151 "--------------------"                               PRINT AT CPTCLE & ; MP-01-02-06_D126.
+    TAB 001 D_ANNUL_LIGN  &
+  SKIP 1 &
+    TAB 009 PECCLE    OF WGL304B &
+    TAB 018 HISNUMLOT OF WGL304B &
+    TAB 025 HISDAT    OF WGL304B &
+    TAB 036 D_TYPTRS  OF WGL304B &
+    TAB 043 HISNUMDOC OF WGL304B &
+    TAB 061 REFCLENUM OF WGL304B &
+    TAB 068 D_HISDSCGEN          &
+    TAB 111 HECMNTDBT OF WGL304B  PICTURE "^^^,^^^,^^^,^^^,^^" BWZ & ; MP-01-02-06_D126.
+    TAB 131 HECMNTCRT OF WGL304B  PICTURE "^^^,^^^,^^^,^^^,^^" BWZ & ; MP-01-02-06_D126.
+    TAB 001 D_ANNUL_LIGN   &
+  SKIP &
+    TAB 61 HISDSCSAI OF WGL304B  &
+  SKIP &
+    TAB 61 HISDSCSAI2 OF WGL304B
+
+
+
+FOOTING AT D_PECCLE_SIE2 &
+        SKIP 2 &
+@IF FRANCAIS
+        TAB 079 "Total de la periode" &
+@ELSE
+        TAB 079 "--------Period Total" &
+@ENDIF
+        PECCLE ":" &
+        TAB 111 HECMNTDBT OF WGL304B SUBTOTAL BWZ              & ; MP-01-02-06_D126.
+             PICTURE "^^^,^^^,^^^,^^^,^^" SIGNIFICANCE 4       & ; MP-01-02-06_D126.
+        TAB 131 HECMNTCRT OF WGL304B SUBTOTAL BWZ              & ; MP-01-02-06_D126.
+             PICTURE "^^^,^^^,^^^,^^^,^^" SIGNIFICANCE 4       & ; MP-01-02-06_D126.
+        TAB 151 D_SOLDE SUBTOTAL                               & ; MP-01-02-06_D126.
+             PICTURE " ^^^,^^^,^^^,^^^.^^ " TRAILING SIGN ">"  & ; MP-01-02-06_D126.
+             LEADING SIGN "<" SIGNIFICANCE 5 &
+        TAB 001 D_ANNUL_LIGN &
+        SKIP 2
+
+
+
+FOOTING AT CPTCLE &
+@IF FRANCAIS
+        TAB 140 "Solde de fermeture:" &
+@ELSE
+        TAB 140 "Closing Balance...:" &
+@ENDIF
+        TAB 161 D_SOLDE SUBTOTAL INITIAL VALUE T_OUV_SANCUMANN_DC &
+        PICTURE " ^^^,^^^,^^^.^^ "  TRAILING SIGN ">" LEADING SIGN "<" SIGNIFICANCE 5 &
+        SKIP 1 &
+TAB 001 "-------------------------------------------------------------------------------------------------------------------------"&
+TAB 121 "-----------------------------------------------------------"&
+        SKIP 2
+
+
+
+FOOTING AT CIECLE &
+@IF FRANCAIS
+    TAB 111 "   Total débit    "                              & ; MP-01-02-06_D126.
+    TAB 131 "  Total crédit    "                              & ; MP-01-02-06_D126.
+    TAB 151 "    Variation       "                            & ; MP-01-02-06_D126.
+@ELSE
+    TAB 111 "   Debit total    "                              & ; MP-01-02-06_D126.
+    TAB 131 "  Credit total    "                              & ; MP-01-02-06_D126.
+    TAB 151 "    Variation       "                            & ; MP-01-02-06_D126.
+@ENDIF
+  SKIP  &
+    TAB 111 "------------------"                              & ; MP-01-02-06_D126.
+    TAB 131 "------------------"                              & ; MP-01-02-06_D126.
+    TAB 151 "--------------------"                            & ; MP-01-02-06_D126.
+  SKIP &
+    TAB 111 HECMNTDBT OF WGL304B SUBTOTAL BWZ                 & ; MP-01-02-06_D126.
+            PICTURE "^^^,^^^,^^^,^^^,^^" SIGNIFICANCE 4       & ; MP-01-02-06_D126.
+    TAB 131 HECMNTCRT OF WGL304B SUBTOTAL BWZ                 & ; MP-01-02-06_D126.
+            PICTURE "^^^,^^^,^^^,^^^,^^" SIGNIFICANCE 4       & ; MP-01-02-06_D126.
+    TAB 151 D_SOLDE SUBTOTAL                                  & ; MP-01-02-06_D126.
+            PICTURE " ^^^,^^^,^^^,^^^.^^ "  TRAILING SIGN ">" & ; MP-01-02-06_D126.
+            LEADING SIGN "<" SIGNIFICANCE 5 &
+  SKIP  &
+    TAB 111 "=================="                              & ; MP-01-02-06_D126.
+    TAB 131 "=================="                              & ; MP-01-02-06_D126.
+    TAB 151 "===================="                            & ; MP-01-02-06_D126.
+  SKIP PAGE
+
+BUILD gl304zb
+@IF FORMAT180
+
+GL304A                                                                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                             Page:9999
+99/99/99 HH:MM xxxxxxxxxxxx                                       Grand Livre par compte par unité administrative
+                                                            xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+Période Début : 99-99
+Période Fin   : 99-99
+
+                  Compte                           Unité administrative
+------------------------------------------    -----------------------------
+123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    12345678 xxxxxxxxxxxxxxxxxxxx                                                                Solde de début....:  <999,999,999.99>
+
+       Période   Lot      Date     Type      Document                    Référence                                Débit           Crédit         Variation
+       -------   ----   --------   ----   ---------------   -----------------------------------------------   -------------   -------------    --------------
+        99-99    xxxx   99/99/99   xxxx   xxxxxxxxxxxxxxx   xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   99,999,999.99   99,999,999.99
+                                                                   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+                                                                   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+        99-99    xxxx   99/99/99   xxxx   xxxxxxxxxxxxxxx   xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   99,999,999.99   99,999,999.99
+                                                                               Total de la periode  99-99 :   99,999,999.99   99,999,999.99   <999,999,999.99>
+
+        99-99    xxxx   99/99/99   xxxx   xxxxxxxxxxxxxxx   xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   99,999,999.99   99,999,999.99
+        99-99    xxxx   99/99/99   xxxx   xxxxxxxxxxxxxxx   xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   99,999,999.99   99,999,999.99
+                                                                               Total de la periode  99-99 :   99,999,999.99   99,999,999.99   <999,999,999.99>
+
+                                                                                                                                           Solde de fermeture:  <999,999,999.99>
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    12345678 xxxxxxxxxxxxxxxxxxxx                                                                Solde de début....:  <999,999,999.99>
+
+       Période   Lot      Date     Type      Document                    Référence                                Débit           Crédit         Variation
+       -------   ----   --------   ----   ---------------   -----------------------------------------------   -------------   -------------    --------------
+        99-99    xxxx   99/99/99   xxxx   xxxxxxxxxxxxxxx   xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   99,999,999.99   99,999,999.99
+                                                                   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+                                                                               Total de la periode  99-99 :   99,999,999.99   99,999,999.99   <999,999,999.99>
+
+        99-99    xxxx   99/99/99   xxxx   xxxxxxxxxxxxxxx   xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   99,999,999.99   99,999,999.99
+        99-99    xxxx   99/99/99   xxxx   xxxxxxxxxxxxxxx   xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   99,999,999.99   99,999,999.99
+                                                                               Total de la periode  99-99 :   99,999,999.99   99,999,999.99   <999,999,999.99>
+
+                                                                                                                                           Solde de fermeture:  <999,999,999.99>
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+                                                                                                               Total débit    Total crédit       Variation
+                                                                                                             --------------  --------------   --------------
+                                                                                                             999,999,999.99  999,999,999.99  <999,999,999.99>
+                                                                                                             ==============  ==============   ==============
+
+GL304B                                                                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                             Page:9999
+99/99/99 HH:MM xxxxxxxxxxxx                                       Grand Livre par unité administrative par compte
+                                                            xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+Période Début : 99-99
+Période Fin   : 99-99
+
+     Unité administrative                         Compte
+-----------------------------   ------------------------------------------
+12345678 xxxxxxxxxxxxxxxxxxxx   123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                                 Solde de début....:  <999,999,999.99>
+
+       Période   Lot      Date     Type      Document                    Référence                                Débit           Crédit         Variation
+       -------   ----   --------   ----   ---------------   -----------------------------------------------   -------------   -------------    --------------
+        99-99    xxxx   99/99/99   xxxx   xxxxxxxxxxxxxxx   xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   99,999,999.99   99,999,999.99
+                                                                   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+                                                                   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+                                                                               Total de la periode  99-99 :   99,999,999.99   99,999,999.99   <999,999,999.99>
+
+        99-99    xxxx   99/99/99   xxxx   xxxxxxxxxxxxxxx   xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   99,999,999.99   99,999,999.99
+        99-99    xxxx   99/99/99   xxxx   xxxxxxxxxxxxxxx   xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   99,999,999.99   99,999,999.99
+                                                                               Total de la periode  99-99 :   99,999,999.99   99,999,999.99   <999,999,999.99>
+
+                                                                                                                                           Solde de fermeture:  <999,999,999.99>
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+12345678 xxxxxxxxxxxxxxxxxxxx   123456 xxxxxxxxxxxxxxxxxxxx                                                                                Solde de début....:  <999,999,999.99>
+
+       Période   Lot      Date     Type      Document                    Référence                                Débit           Crédit         Variation
+       -------   ----   --------   ----   ---------------   -----------------------------------------------   -------------   -------------    --------------
+        99-99    xxxx   99/99/99   xxxx   xxxxxxxxxxxxxxx   xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   99,999,999.99   99,999,999.99
+                                                                   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+        99-99    xxxx   99/99/99   xxxx   xxxxxxxxxxxxxxx   xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   99,999,999.99   99,999,999.99
+                                                                               Total de la periode  99-99 :   99,999,999.99   99,999,999.99   <999,999,999.99>
+
+        99-99    xxxx   99/99/99   xxxx   xxxxxxxxxxxxxxx   xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   99,999,999.99   99,999,999.99
+        99-99    xxxx   99/99/99   xxxx   xxxxxxxxxxxxxxx   xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   99,999,999.99   99,999,999.99
+                                                                               Total de la periode  99-99 :   99,999,999.99   99,999,999.99   <999,999,999.99>
+
+                                                                                                                                           Solde de fermeture:  <999,999,999.99>
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+                                                                                                               Total débit    Total crédit       Variation
+                                                                                                             --------------  --------------   --------------
+                                                                                                             999,999,999.99  999,999,999.99  <999,999,999.99>
+                                                                                                             ==============  ==============   ==============
+@ENDIF

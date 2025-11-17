@@ -1,0 +1,839 @@
+;/T/ 2.5.7 Facturation commande interne. (Produit dimension)
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1995-03-21
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   la facturation des commandes internes.
+;
+;/M/François Déry, 12 mai 1999
+;       Ajout du in dict sur la transaction pour unix.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date..............: 05 avril 2000
+;    Description.......: Incrémentation du numéro de facture par compagnie.
+;
+;    Référence.........: Stabilisation du module Achat/Réception Inventaire (point 2).
+;
+;    Signet............: MP-00-04-05_S02.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd215c ACTIONBAR                     &
+              MODE LABEL "" AT 2,80         &
+              NOACTION                      &
+              FIELDMARK RETAIN STARTUP      &
+              HELP POPUP FROM 4,9 TO 20,72  &
+              RECEIVING T_CIECLEMNU,        &
+                        T_CIENOM,           &
+                        PDFACTURE
+
+
+;-------------------------------------------------------------------------------
+;
+; Déclaration de la transaction pour donner un numéro séquentiel
+;
+
+TRANSACTION NO_SEQ READ WRITE &
+                   RESERVING FOR PROTECTED WRITE PDSEQ_FACTURE IN DICT
+
+
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+
+USE ussectmp  NOLIST
+    "PD215C"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+
+USE pd215c.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+
+USE usactecr  NOLIST
+
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Commentaire produit dimension   " ACTION DESIGNER D001 MARK
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%Commentaire produit dimension" ACTION DESIGNER D001 MARK
+@ENDIF
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire au traitement
+;
+
+TEMPORARY T_TYPE_PROD CHARACTER SIZE 02 INITIAL "PD" RESET AT STARTUP ; Type de produit traiter par l'écran
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable temporaire du programme pour les pop-up
+;
+
+TEMPORARY T_TGRCODGRA        CHARACTER SIZE 03 ; Type de granit
+TEMPORARY T_TYFCODFIN        CHARACTER SIZE 02 ; Type de fini
+TEMPORARY T_PDILON           INTEGER UNSIGNED  &
+                                       SIZE 04 ; Longueur
+TEMPORARY T_PDILAR           INTEGER UNSIGNED  &
+                                       SIZE 04 ; Largeur
+TEMPORARY T_PDIEPA           INTEGER UNSIGNED  &
+                                       SIZE 04 ; Épaisseur
+
+TEMPORARY T_TPDTYPPRD        CHARACTER SIZE 04 ; Type de produit
+TEMPORARY T_UNMCODUNM        CHARACTER SIZE 04 ; Unité de mesure
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire au traitement
+;
+
+TEMPORARY T_SILENT           CHARACTER SIZE 01
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du volume d'une pièce de granit
+;
+
+USE usvarvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du prix d'une ligne de détail bon de commande
+;
+USE usvarprigra NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Facture
+;
+
+FILE PDFACTURE MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Facture produit de dimension
+;
+
+FILE PDPROD_FACTURE PRIMARY &
+                    NOITEM &
+                    OCCURS 11 TIMES
+
+  ACCESS VIA     CIECLE,           &
+                 FTRNUMFAC         &
+         USING   T_CIECLEMNU,                           &
+                 FTRNUMFAC         OF PDFACTURE         &
+         ORDERBY CIECLE,           &
+                 FTRNUMFAC,        &
+                 PDILON,           &
+                 PDIHAU,           &
+                 PDIEPA,           &
+                 TGRCODGRA,        &
+                 TYFCODFIN
+
+  ITEM CIECLE    OF PDPROD_FACTURE INITIAL  T_CIECLEMNU
+  ITEM FTRNUMFAC OF PDPROD_FACTURE INITIAL  FTRNUMFAC OF PDFACTURE FIXED
+  ITEM PFAMNT    OF PDPROD_FACTURE SUM INTO FTRMNT OF PDFACTURE
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro séquentiel pour les factures
+;
+
+FILE PDSEQ_FACTURE DESIGNER TRANSACTION NO_SEQ
+  ACCESS VIA CIECLE USING T_CIECLEMNU ; MP-00-04-05_S02.
+
+;-------------------------------------------------------------------------------
+;
+; Produit de dimension
+;
+
+FILE PDPROD_DIMENSION SECONDARY &
+                      NOITEM &
+                      NODELETE &
+                      OCCURS WITH PDPROD_FACTURE
+
+  ACCESS VIA     CIECLE,          &
+                 PDILON,          &
+                 PDIHAU,          &
+                 PDIEPA,          &
+                 TGRCODGRA,       &
+                 TYFCODFIN        &
+         USING   T_CIECLEMNU,                        &
+                 PDILON           OF PDPROD_FACTURE, &
+                 PDIHAU           OF PDPROD_FACTURE, &
+                 PDIEPA           OF PDPROD_FACTURE, &
+                 TGRCODGRA        OF PDPROD_FACTURE, &
+                 TYFCODFIN        OF PDPROD_FACTURE
+
+  ITEM CIECLE    OF PDPROD_DIMENSION INITIAL T_CIECLEMNU
+  ITEM PDILON    OF PDPROD_DIMENSION INITIAL PDILON OF PDPROD_FACTURE
+  ITEM PDIHAU    OF PDPROD_DIMENSION INITIAL PDIHAU OF PDPROD_FACTURE
+  ITEM PDIEPA    OF PDPROD_DIMENSION INITIAL PDIEPA OF PDPROD_FACTURE
+  ITEM TGRCODGRA OF PDPROD_DIMENSION INITIAL TGRCODGRA OF PDPROD_FACTURE
+  ITEM TYFCODFIN OF PDPROD_DIMENSION INITIAL TYFCODFIN OF PDPROD_FACTURE
+
+
+;-------------------------------------------------------------------------------
+;
+; Client
+;
+
+FILE VCLC_CLI        REFERENCE
+
+  ACCESS VIA     CLICIECLE,        &
+                 CLICLE,           &
+                 CIECLE            &
+         USING   "----",                                &
+                 CLICLE            OF PDFACTURE,        &
+                 T_CIECLEMNU
+
+
+;-------------------------------------------------------------------------------
+;
+; Unité de mesure (Vente)
+;
+
+FILE PDUNITE_MESURE REFERENCE &
+                    ALIAS UNM_VENTE &
+                    OCCURS WITH PDPROD_FACTURE
+
+  ACCESS VIA     CIECLE,          &
+                 UNMCODUNM        &
+         USING   T_CIECLEMNU,     &
+                 PFAUNMVEN        OF PDPROD_FACTURE
+
+
+;-------------------------------------------------------------------------------
+;
+; Type de produit
+;
+
+FILE PDTYPE_PRODUIT DESIGNER
+
+  ACCESS VIA     CIECLE,          &
+                 TPDTYPPRD        &
+         USING   T_CIECLEMNU,     &
+                 T_TYPE_PROD
+
+
+;-------------------------------------------------------------------------------
+;
+; Conversion unité mesure de commande à unité mesure production
+;
+
+FILE PDCONVERT_UN_M DESIGNER
+
+
+;-------------------------------------------------------------------------------
+;-------------------------------------------------------------------------------
+;
+;
+
+FILE PDLOT_TRANSFERT DESIGNER
+
+;-------------------------------------------------------------------------------
+;-------------------------------------------------------------------------------
+;
+;
+
+FILE PDLOT_FACTURE DESIGNER
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+
+SKIP
+
+
+TITLE &
+@IF FRANCAIS
+      " Facturation commande interne " &
+@ELSE
+      " %%%Facturation commande interne " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+
+ALIGN (,3,19)
+
+
+FIELD FTRNUMFAC        OF PDFACTURE        &
+        DISPLAY                            &
+        FIXED
+
+
+ALIGN (,3,19) (,,28)
+
+
+FIELD CLICLE           OF PDFACTURE        &
+        DISPLAY                            &
+        FIXED
+
+
+FIELD CLINOM           OF VCLC_CLI         &
+        FIXED
+
+
+DRAW 8,2 TO 8,79
+
+
+SKIP TO LINE 8
+
+
+TITLE &
+@IF FRANCAIS
+      " Produit dimension " &
+@ELSE
+      " %%%Produit dimension " &
+@ENDIF
+      CENTERED AT ,1
+
+
+SKIP TO LINE 10
+
+
+TITLE &
+@IF FRANCAIS
+      "    Quantité Gra Fi Long Haut Épais   Surface   Prix vente U/M     Montant C"  &
+@ELSE
+      "%%% Quantité Gra Fi Long Haut Épais   Surface   Prix vente U/M     Montant C"  &
+@ENDIF
+      AT ,3
+
+ALIGN (02,02,03) (,,16) (,,20) (,,23) (,,28) (,,33) (,,38) (,,49) (,,62) (,,65) (,,78)
+
+
+CLUSTER OCCURS WITH PDPROD_FACTURE ID BASE 90
+
+
+FIELD PFAQTE           OF PDPROD_FACTURE   &
+        HIDDEN                             &
+        LABEL " "                          &
+        PICTURE " ^,^^^.^^^^ "             &
+        LEADING SIGN "-"                   &
+        REQUIRED
+
+
+FIELD TGRCODGRA        OF PDPROD_FACTURE   &
+        HIDDEN                             &
+        NUMERIC                            &
+        REQUIRED
+
+
+FIELD TYFCODFIN        OF PDPROD_FACTURE   &
+        HIDDEN                             &
+        NUMERIC                            &
+        REQUIRED
+
+
+FIELD PDILON           OF PDPROD_FACTURE   &
+        HIDDEN                             &
+        REQUIRED
+
+
+FIELD PDIHAU           OF PDPROD_FACTURE   &
+        HIDDEN                             &
+        REQUIRED
+
+
+FIELD PDIEPA           OF PDPROD_FACTURE   &
+        HIDDEN                             &
+        REQUIRED
+
+FIELD T_SILENT                             &
+        SILENT                             &
+        LOOKUP ON PDPROD_DIMENSION         &
+          VIA     CIECLE,                  &
+                  PDILON,                  &
+                  PDIHAU,                  &
+                  PDIEPA,                  &
+                  TGRCODGRA,               &
+                  TYFCODFIN                &
+          USING   T_CIECLEMNU,                        &
+                  PDILON           OF PDPROD_FACTURE, &
+                  PDIHAU           OF PDPROD_FACTURE, &
+                  PDIEPA           OF PDPROD_FACTURE, &
+                  TGRCODGRA        OF PDPROD_FACTURE, &
+                  TYFCODFIN        OF PDPROD_FACTURE  &
+          MESSAGE  1818 ; Ce produit n'existe pas
+
+
+FIELD PDISURMC2        OF PDPROD_DIMENSION &
+        HIDDEN                             &
+        DISPLAY
+
+
+FIELD PFAPRIVEN        OF PDPROD_FACTURE   &
+        HIDDEN                             &
+        PICTURE " ^^^,^^^.^^ "              &
+        LEADING SIGN "-"                   &
+        REQUIRED
+
+
+FIELD PFAUNMVEN        OF PDPROD_FACTURE   &
+        HIDDEN                             &
+        ID SAME                            &
+        DEFAULT UNMCODUNM OF PDTYPE_PRODUIT &
+        LOOKUP ON UNM_VENTE                &
+          MESSAGE 1928 ; Cette unité de mesure n'existe pas
+
+
+FIELD PFAMNT           OF PDPROD_FACTURE   &
+        HIDDEN                             &
+        PICTURE " ^^^,^^^.^^ "             &
+        LEADING SIGN "-"                   &
+        DISPLAY
+
+
+FIELD PFACOM           OF PDPROD_FACTURE   &
+        HIDDEN                             &
+        ID SAME
+
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul du volume d'une pièce de granit
+;
+
+USE uscalvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul du prix d'une ligne de détail bon commande
+;
+
+USE uscalprigra NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la qte
+;
+
+PROCEDURE EDIT PFAQTE
+BEGIN
+  ;
+  ; Valide la partie décimale.
+  ;
+  USE usvaldec4 NOLIST
+
+  LET PDIQTE      OF PDPROD_DIMENSION = PDIQTE      OF PDPROD_DIMENSION + &
+                                        OLDVALUE(PFAQTE      OF PDPROD_FACTURE) - &
+                                        FIELDVALUE
+
+  LET FTRSURMC2PD OF PDFACTURE        = FTRSURMC2PD OF PDFACTURE - &
+                                        OLDVALUE(PFAQTE OF PDPROD_FACTURE) * PDISURMC2 OF PDPROD_DIMENSION + &
+                                        FIELDVALUE * PDISURMC2 OF PDPROD_DIMENSION
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide le format du champ
+;
+
+PROCEDURE EDIT PFAPRIVEN
+BEGIN
+  ;
+  ; Valide la partie décimale.
+  ;
+  USE usvaldec NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul du prix
+;
+
+PROCEDURE PROCESS PFAPRIVEN
+BEGIN
+  ;
+  ; Recherche l'unité de mesuse par défaut pour le type de produit
+  ;
+  GET PDTYPE_PRODUIT OPTIONAL &
+    VIA     CIECLE,           &
+            TPDTYPPRD         &
+    USING   T_CIECLEMNU,      &
+            T_TYPE_PROD
+  IF NOT ACCESSOK
+  THEN BEGIN
+    ERROR 1863 ; Ce code de produit n'existe pas
+  END
+
+  ;
+  ; Recherche une occurence contenant le facteur par défaut et le facteur
+  ; saisie au panorama
+  ;
+  GET PDCONVERT_UN_M OPTIONAL &
+    VIA    CIECLE,           &
+           CUMCODUNMINT,     &
+           CUMCODUNMEXT      &
+    USING  T_CIECLEMNU,                         &
+           UNMCODUNM         OF PDTYPE_PRODUIT, &
+           PFAUNMVEN         OF PDPROD_FACTURE
+  IF NOT ACCESSOK &
+     AND &
+     0 <> SIZE (TRUNCATE ( PFAUNMVEN ) )
+  THEN BEGIN
+    ERROR 2004 ; Le facteur de conversion n'existe pas pour cette combinaison
+  END
+
+  ;
+  ; Calcul du prix total précédant pour la ligne de détail
+  ;
+  LET TZ_CPG_COD_PRD          = TPDTYPPRD         OF PDTYPE_PRODUIT
+  LET TZ_CPG_FAC_CON          = CUMFACCON         OF PDCONVERT_UN_M
+  LET TZ_CPG_PRI_UNI          = PFAPRIVEN         OF PDPROD_FACTURE
+  LET TZ_CPG_UNM              = UNMCODUNM         OF PDTYPE_PRODUIT
+  LET TZ_CPG_VOL_MC3          = 0
+  LET TZ_CPG_VOL_MC2          = PDISURMC2
+  LET TZ_CPG_QTE              = PFAQTE
+  DO INTERNAL CALPRIGRA
+  LET     PFAMNT OF PDPROD_FACTURE = TZ_CPG_PRI_TOT
+  DISPLAY PFAMNT OF PDPROD_FACTURE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour le champ.
+;
+
+PROCEDURE INPUT PFAUNMVEN
+BEGIN
+  ;
+  ; Appel du dépisteur
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_UNMCODUNM = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd113 MODE F &
+                     PASSING T_UNMCODUNM, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_UNMCODUNM )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que l'unité de mesure saisie peut être utiliser pour le calcul du prix
+;
+
+PROCEDURE PROCESS PFAUNMVEN
+BEGIN
+  ;
+  ; Recherche l'unité de mesuse par défaut pour le type de produit
+  ;
+  GET PDTYPE_PRODUIT OPTIONAL &
+    VIA     CIECLE,           &
+            TPDTYPPRD         &
+    USING   T_CIECLEMNU,      &
+            T_TYPE_PROD
+  IF NOT ACCESSOK
+  THEN BEGIN
+    ERROR 1863 ; Ce code de produit n'existe pas
+  END
+
+  ;
+  ; Recherche une occurence contenant le facteur par défaut et le facteur
+  ; saisie au panorama
+  ;
+  GET PDCONVERT_UN_M OPTIONAL &
+    VIA    CIECLE,           &
+           CUMCODUNMINT,     &
+           CUMCODUNMEXT      &
+    USING  T_CIECLEMNU,                         &
+           UNMCODUNM         OF PDTYPE_PRODUIT, &
+           PFAUNMVEN         OF PDPROD_FACTURE
+  IF NOT ACCESSOK
+  THEN BEGIN
+    ERROR 2004 ; Le facteur de conversion n'existe pas pour cette combinaison
+  END
+
+
+  ;
+  ; Calcul du prix total précédant pour la ligne de détail
+  ;
+  LET TZ_CPG_COD_PRD          = TPDTYPPRD         OF PDTYPE_PRODUIT
+  LET TZ_CPG_FAC_CON          = CUMFACCON         OF PDCONVERT_UN_M
+  LET TZ_CPG_PRI_UNI          = PFAPRIVEN         OF PDPROD_FACTURE
+  LET TZ_CPG_UNM              = UNMCODUNM         OF PDTYPE_PRODUIT
+  LET TZ_CPG_VOL_MC3          = 0
+  LET TZ_CPG_VOL_MC2          = PDISURMC2
+  LET TZ_CPG_QTE              = PFAQTE
+  DO INTERNAL CALPRIGRA
+  LET     PFAMNT OF PDPROD_FACTURE = TZ_CPG_PRI_TOT
+  DISPLAY PFAMNT OF PDPROD_FACTURE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour convertir OUI,NON en 1,0
+;
+
+PROCEDURE INPUT PFACOM
+BEGIN
+  USE usflginp NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour convertir 1,0 en OUI,NON
+;
+PROCEDURE OUTPUT PFACOM
+BEGIN
+  USE usflgout NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du sous-écran de commentaire pour le produit de dimension
+;
+
+PROCEDURE PROCESS PFACOM
+BEGIN
+  IF "0" <> PFACOM OF PDPROD_FACTURE
+  THEN BEGIN
+    RUN SCREEN  pd213g &
+                PASSING T_CIECLEMNU,        &
+                        T_CIENOM,           &
+                        PDFACTURE,          &
+                        PDPROD_FACTURE      &
+                MODE SAME
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Saisie d'une ligne de détail
+;
+
+PROCEDURE DESIGNER 90
+BEGIN
+  ACCEPT PFAQTE           OF PDPROD_FACTURE
+  ACCEPT TGRCODGRA        OF PDPROD_FACTURE
+  ACCEPT TYFCODFIN        OF PDPROD_FACTURE
+  ACCEPT PDILON           OF PDPROD_FACTURE
+  ACCEPT PDIHAU           OF PDPROD_FACTURE
+  ACCEPT PDIEPA           OF PDPROD_FACTURE
+  ACCEPT PFAPRIVEN        OF PDPROD_FACTURE
+  ACCEPT PFAUNMVEN        OF PDPROD_FACTURE
+  ACCEPT PFACOM           OF PDPROD_FACTURE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Commentaire produit dimension
+;
+
+PROCEDURE DESIGNER D001
+BEGIN
+  RUN SCREEN  pd215e &
+              PASSING T_CIECLEMNU,        &
+                      T_CIENOM,           &
+                      PDFACTURE,          &
+                      PDPROD_FACTURE      &
+              MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDPROD_FACTURE &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDPROD_FACTURE &
+     AND NOT NEWRECORD     OF PDPROD_FACTURE &
+     AND NOT DELETEDRECORD OF PDPROD_FACTURE &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+
+  ;
+ ;--validation du status du lot
+ ;
+  GET PDLOT_FACTURE OPTIONAL &
+    VIA   CIECLE,          &
+          FTRNUMFAC        &
+    USING T_CIECLEMNU,     &
+          FTRNUMFAC        OF PDFACTURE
+  IF ACCESSOK
+  THEN BEGIN
+   GET PDLOT_TRANSFERT OPTIONAL &
+    VIA   CIECLE,          &
+          LTRNUMLOT        &
+    USING CIECLE,     &
+          LTRNUMLOT        OF PDLOT_FACTURE
+    IF ACCESSOK
+    THEN BEGIN
+     IF LTRSTU OF PDLOT_TRANSFERT = "T"
+      THEN ERROR 2
+
+     END
+   END
+
+
+
+;
+  ; Mise à jour des qte vendue
+  ;
+
+;;;  FOR PDPROD_FACTURE
+;;;  BEGIN
+;;;    IF NEWRECORD     OF PDPROD_FACTURE
+;;;    THEN BEGIN
+;;;      LET PDIQTE      OF PDPROD_DIMENSION = PDIQTE      OF PDPROD_DIMENSION - &
+;;;                                            PFAQTE      OF PDPROD_FACTURE
+;;;      LET FTRSURMC2PD OF PDFACTURE        = FTRSURMC2PD OF PDFACTURE + &
+;;;                                            PDISURMC2   OF PDPROD_DIMENSION * PFAQTE OF PDPROD_FACTURE
+;;;    END
+;;;    IF DELETEDRECORD OF PDPROD_FACTURE
+;;;    THEN BEGIN
+;;;      LET PDIQTE      OF PDPROD_DIMENSION = PDIQTE      OF PDPROD_DIMENSION + &
+;;;                                            PFAQTE      OF PDPROD_FACTURE
+;;;      LET FACSURMC2PD OF PDFACTURE        = FACSURMC2PD OF PDFACTURE - &
+;;;                                            PDISURMC2   OF PDPROD_DIMENSION * PFAQTE OF PDPROD_FACTURE
+;;;    END
+;;;  END
+
+  ;
+  ; Incrémentation du numéro de séquence
+  ;
+  IF 0 = FTRNUMFAC OF PDFACTURE
+  THEN BEGIN
+    START TRANSACTION NO_SEQ
+    GET PDSEQ_FACTURE OPTIONAL                      ; MP-00-04-05_S02.
+    LET CIECLE        OF PDSEQ_FACTURE = T_CIECLEMNU; MP-00-04-05_S02.
+    LET SEFNUMRAP     OF PDSEQ_FACTURE = SEFNUMRAP OF PDSEQ_FACTURE + 1
+    LET FTRNUMFAC     OF PDFACTURE     = SEFNUMRAP OF PDSEQ_FACTURE
+    PUT PDSEQ_FACTURE
+    DISPLAY FTRNUMFAC OF PDFACTURE
+  END
+
+END
+
+
+BUILD
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+************************* Facturation commande interne *************************
+*                                                                              *
+* No. facture...: xxxxxxxxx                                                    *
+* Client........: xxxxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx            *
+*                                                                              *
+****************************** Produit dimension *******************************
+*                                                                              *
+*     Quantité Gra Fi Long Haut Épais   Surface   Prix vente U/M     Montant C *
+* xxxxxxxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxx  xxxxxxxxxxxx xx xxxxxxxxxxxx x *
+* xxxxxxxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxx  xxxxxxxxxxxx xx xxxxxxxxxxxx x *
+* xxxxxxxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxx  xxxxxxxxxxxx xx xxxxxxxxxxxx x *
+* xxxxxxxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxx  xxxxxxxxxxxx xx xxxxxxxxxxxx x *
+* xxxxxxxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxx  xxxxxxxxxxxx xx xxxxxxxxxxxx x *
+* xxxxxxxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxx  xxxxxxxxxxxx xx xxxxxxxxxxxx x *
+* xxxxxxxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxx  xxxxxxxxxxxx xx xxxxxxxxxxxx x *
+* xxxxxxxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxx  xxxxxxxxxxxx xx xxxxxxxxxxxx x *
+* xxxxxxxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxx  xxxxxxxxxxxx xx xxxxxxxxxxxx x *
+* xxxxxxxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxx  xxxxxxxxxxxx xx xxxxxxxxxxxx x *
+* xxxxxxxxxxxx xxx xx xxxx xxxx xxxx xxxxxxxxx  xxxxxxxxxxxx xx xxxxxxxxxxxx x *
+*                                                                              *
+********************************************************************************
+@ENDIF

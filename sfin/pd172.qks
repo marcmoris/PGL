@@ -1,0 +1,265 @@
+;/T/ Condition de livraison (Pilotage)
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date création: 1994-08-16
+;
+;    Description..: Ce panorama permet de saisir les conditions de livraison.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd172 ACTIONBAR                    &
+             MODE LABEL "" AT 2,80        &
+             NOACTION                     &
+             FIELDMARK RETAIN STARTUP     &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU ,      &
+                       T_CIENOM
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+
+USE ussectmp  NOLIST
+    "PD172"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+
+USE pd172.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables
+;
+
+TEMPORARY T_PLVCODLIV CHAR SIZE 16 INIT "PLVCODLIV" RESET AT STARTUP
+
+
+;-------------------------------------------------------------------------------
+;
+; Recherche de la valeur du code bilingue
+;
+
+FILE MCCODE_BILINGUE  PRIMARY &
+                      OCCURS 16 &
+                      NOITEMS
+
+  ACCESS  VIA     XELNOM, &
+                  CBICLE &
+          USING   T_PLVCODLIV, &
+                  CBICLE OF MCCODE_BILINGUE &
+          REQUEST CBICLE &
+          ORDERBY CBICLE
+
+  ACCESS  VIA     XELNOM &
+          USING   T_PLVCODLIV &
+          ORDERBY CBICLE
+
+  ITEM XELNOM OF MCCODE_BILINGUE INITIAL T_PLVCODLIV
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire au traitement
+;
+
+TEMPORARY T_FLGDEL CHARACTER SIZE 1 ; Flag pour le sous-écran de destruction
+
+
+;-------------------------------------------------------------------------------
+;
+;
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Condition de livraison " &
+@ELSE
+      " %%%Condition de livraison " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+
+TITLE &
+@IF FRANCAIS
+    "Code  Description française         Description anglaise" &
+@ELSE
+    "Cod   French description            English description " &
+@ENDIF
+  AT 5,8
+
+
+SKIP TO 6
+
+
+ALIGN(8,6,8)(,,13)(,,44)
+
+
+CLUSTER OCCUR WITH MCCODE_BILINGUE ID BASE 10
+
+
+FIELD CBICLE OF MCCODE_BILINGUE &
+        LABEL " " HIDDEN &
+        REQUIRED NOCHANGE &
+        LOOKUP NOTON MCCODE_BILINGUE &
+          VIA   XELNOM, CBICLE &
+          USING XELNOM OF MCCODE_BILINGUE, &
+                CBICLE OF MCCODE_BILINGUE &
+          MESSAGE 2923 ; Cette condition de livraison existe déjà.
+
+
+FIELD CBIDSCFRA    OF MCCODE_BILINGUE
+
+
+FIELD CBIDSCANG    OF MCCODE_BILINGUE &
+      DEFAULT CBIDSCFRA OF MCCODE_BILINGUE
+
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  FOR MCCODE_BILINGUE
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF DELETEDRECORD OF MCCODE_BILINGUE &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification
+    ;
+    IF    ALTEREDRECORD     OF MCCODE_BILINGUE &
+      AND NOT NEWRECORD     OF MCCODE_BILINGUE &
+      AND NOT DELETEDRECORD OF MCCODE_BILINGUE &
+      AND TZ_SECMOD = "0"
+    THEN ERROR 2
+    ;
+    ; Destruction d'une condition de livraison.
+    ;
+    IF DELETEDRECORD OF MCCODE_BILINGUE AND ALTEREDRECORD
+    THEN BEGIN
+      ;
+      ; On initialise le flag de retour pour savoir si le sous-écran a
+      ; bien fonctionné.
+      ;
+      LET T_FLGDEL = ""
+      ;
+      ; Appel du sous-écran qui valide si la catégorie est référée.
+      ;
+      RUN SCREEN pd172x MODE SAME &
+                        PASSING MCCODE_BILINGUE, &
+                                T_FLGDEL,&
+                                T_CIECLEMNU
+      ;
+      ; Si la valeur de retour égale 1, cela indique que le sous-écran
+      ; n'a trouvé aucune référence pour l'identifiant demandé.
+      ;
+      IF T_FLGDEL = ""
+      THEN ERROR " "
+    END
+  END
+END
+
+BUILD
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+****************************** Couleur de granit *******************************
+*                                                                              *
+*      Code  Description française         Description anglaise                *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*      xxxx xxxxxxxxxxxxxxxxxxxxxxxxx      xxxxxxxxxxxxxxxxxxxxxxxxx           *
+*                                                                              *
+********************************************************************************
+@ENDIF

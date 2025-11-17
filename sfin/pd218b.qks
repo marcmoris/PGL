@@ -1,0 +1,644 @@
+;/T/ 2.4.2 Enregistrer le sciage (Arrêt de sciage)
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1994-05-16
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   les feuilles de temps pour le sciage
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd218b ACTIONBAR                     &
+              MODE LABEL "" AT 2,80         &
+              NOACTION                      &
+              FIELDMARK RETAIN STARTUP      &
+              HELP POPUP FROM 4,9 TO 20,72  &
+              RECEIVING T_CIECLEMNU,        &
+                        T_CIENOM,           &
+                        PDRAP_SCIAGE,       &
+                        PDDET_RAP_SCIAGE
+
+
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "PD218B"
+
+
+;-------------------------------------------------------------------------------
+; Documentation de l'écran.
+;
+USE pd218b.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Sert à valider les codes bilingue et pour les sous-écrans de consultation
+;
+
+DEFINE    D_QRTCODQRT CHARACTER SIZE 16 = "QRTCODQRT"
+TEMPORARY T_QRTCODQRT CHARACTER SIZE 04
+
+
+;-------------------------------------------------------------------------------
+;
+; Clés de recherche pour les popup de consultations et les sous écrans
+;
+
+TEMPORARY T_RAACODARR   CHARACTER SIZE 04
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables nécessaire au traitement
+;
+
+TEMPORARY T_SILENT     CHARACTER SIZE 01
+TEMPORARY T_OLDHREDEB  INTEGER   SIZE 04
+TEMPORARY T_OLDHREFIN  INTEGER   SIZE 04
+TEMPORARY T_OLDDURSEC  FLOAT     SIZE 08
+TEMPORARY T_NEWDURSEC  FLOAT     SIZE 08
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire pour le calcul d'un intervalle de temps
+;
+
+USE usdiftim NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire pour le calcul de l'heure à partir d'un nombre de seconde
+;
+
+USE uscaltim NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Rapport de sciage
+;
+
+FILE PDRAP_SCIAGE MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Détail arrêt sciage
+;
+
+FILE PDDET_RAP_SCIAGE MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Opérateur sciage
+;
+
+FILE PDARRET_SCIAGE   PRIMARY &
+                      NOITEM &
+                      OCCURS 11 TIMES
+
+  ACCESS VIA     CIECLE,          &
+                 RSCDATPRD,       &
+                 QRTCODQRT        &
+         USING   T_CIECLEMNU,                         &
+                 RSCDATPRD        OF PDRAP_SCIAGE,    &
+                 QRTCODQRT        OF PDRAP_SCIAGE     &
+         ORDERBY CIECLE,          &
+                 RSCDATPRD,       &
+                 QRTCODQRT,       &
+                 ARSHREDEB,       &
+                 ARSHREFIN
+
+  ITEM CIECLE    OF PDARRET_SCIAGE INITIAL T_CIECLEMNU
+  ITEM RSCDATPRD OF PDARRET_SCIAGE INITIAL RSCDATPRD OF PDRAP_SCIAGE FIXED
+  ITEM QRTCODQRT OF PDARRET_SCIAGE INITIAL QRTCODQRT OF PDRAP_SCIAGE FIXED
+  ITEM RMSNUMSEQ OF PDARRET_SCIAGE INITIAL RMSNUMSEQ OF PDDET_RAP_SCIAGE FIXED
+
+  ITEM ARSDURSEC OF PDARRET_SCIAGE SUM INTO RSCDURARR OF PDRAP_SCIAGE
+
+
+;-------------------------------------------------------------------------------
+;
+; Arrêt sciage validation des plages horraire pour le rapport
+;
+
+FILE PDARRET_SCIAGE DESIGNER ALIAS ARS_FIC
+
+  ACCESS VIA     CIECLE,          &
+                 RSCDATPRD,       &
+                 QRTCODQRT,       &
+                 RMSNUMSEQ        &
+         USING   T_CIECLEMNU,                          &
+                 RSCDATPRD        OF PDARRET_SCIAGE,   &
+                 QRTCODQRT        OF PDARRET_SCIAGE,   &
+                 RMSNUMSEQ        OF PDARRET_SCIAGE
+
+  ;
+  ; Sélectionne si une des deux bornes du nouvel enregistrement se retrouve
+  ; parmis l'intervale déjà enregistré.
+  ;
+
+  SELECT IF (ARSHREDEB OF PDARRET_SCIAGE >= ARSHREDEB OF ARS_FIC  &
+             AND                                                  &
+             ARSHREDEB OF PDARRET_SCIAGE <= ARSHREFIN OF ARS_FIC) &
+            OR                                                    &
+            (ARSHREDEB OF PDARRET_SCIAGE >= ARSHREDEB OF ARS_FIC  &
+             AND                                                  &
+             ARSHREDEB OF PDARRET_SCIAGE <= ARSHREDEB OF ARS_FIC) &
+            OR                                                    &
+            (ARSHREDEB OF PDARRET_SCIAGE <= ARSHREDEB OF ARS_FIC  &
+             AND                                                  &
+             ARSHREDEB OF PDARRET_SCIAGE >= ARSHREDEB OF ARS_FIC)
+
+
+;-------------------------------------------------------------------------------
+;
+; Opérateur
+;
+
+FILE PDRAP_MONTAGE REFERENCE OCCURS WITH PDARRET_SCIAGE
+
+  ACCESS VIA     CIECLE,          &
+                 RMSNUMSEQ        &
+         USING   T_CIECLEMNU,     &
+                 RMSNUMSEQ        OF PDARRET_SCIAGE
+
+
+;-------------------------------------------------------------------------------
+;
+; Raison arret
+;
+
+FILE PDRAISON_ARRET REFERENCE OCCURS WITH PDARRET_SCIAGE
+
+  ACCESS VIA   CIECLE,          &
+               RAACODARR        &
+         USING T_CIECLEMNU,     &
+               RAACODARR        OF PDARRET_SCIAGE
+
+
+;-------------------------------------------------------------------------------
+;
+; Code bilingue (quart de travail)
+;
+
+FILE VCBI_DSC  REFERENCE &
+               ALIAS A_CBI_QRTCODQRT
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_QRTCODQRT,                          &
+               QRTCODQRT        OF PDRAP_SCIAGE
+
+
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+
+SKIP
+
+
+TITLE &
+@IF FRANCAIS
+      " Gérer le sciage " &
+@ELSE
+      " %%%Gérer le sciage " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 4
+
+
+ALIGN (,3,19)
+
+
+FIELD RSCDATPRD        OF PDRAP_SCIAGE      FORMAT YYYYMMDD &
+PATTERN "####/##/##"&
+label "Date..........:"&
+        DISPLAY                            &
+        FIXED
+
+
+ALIGN (,3,19) (,,21)
+
+
+FIELD QRTCODQRT        OF PDRAP_SCIAGE     &
+label "Quart travail.:"&
+        DISPLAY                            &
+        FIXED
+
+
+FIELD CBIDSC           OF A_CBI_QRTCODQRT  &
+        DISPLAY                            &
+        FIXED
+
+
+ALIGN (,3,19)
+
+
+FIELD RSCHREDEB        OF PDRAP_SCIAGE     &
+label "Hre début....:"&
+        DISPLAY                            &
+        FIXED
+
+
+FIELD RSCHREFIN        OF PDRAP_SCIAGE     &
+label "Hre fin......:"&
+        DISPLAY                            &
+        FIXED
+
+
+ALIGN (,48,64)
+
+
+SKIP TO LINE 4
+
+
+FIELD RSCMC3PRD        OF PDRAP_SCIAGE     &
+label "M3............:"&
+        DISPLAY                            &
+        FIXED
+
+
+FIELD RSCHREPRD        OF PDRAP_SCIAGE     &
+label "Hre...........:"&
+        DISPLAY                            &
+        FIXED
+
+
+FIELD RSCPRD           OF PDRAP_SCIAGE     &
+label "Productivité..:"&
+        DISPLAY                            &
+        FIXED
+
+
+DRAW 08,2 TO 08,79
+
+
+SKIP TO LINE 8
+
+
+TITLE &
+@IF FRANCAIS
+      " Arrêt sciage " &
+@ELSE
+      " %%%Arrêt sciage " &
+@ENDIF
+      CENTERED AT ,1
+
+
+SKIP TO LINE 10
+
+
+TITLE &
+@IF FRANCAIS
+      "      Montage  Scie  Début     Fin   Raison   Description  " &
+@ELSE
+      "%%%   Montage  Scie  Début     Fin   Raison   Description  " &
+@ENDIF
+      AT ,2
+
+
+SKIP TO LINE 11
+
+
+ALIGN (04,05,06) (,,18) (,,23) (,,31) (,,39) (,,48)
+
+
+CLUSTER OCCURS WITH PDARRET_SCIAGE for 1,78 at 11,2
+
+
+FIELD RMSNUMSEQ        OF PDARRET_SCIAGE   &
+        HIDDEN                             &
+        ID NEXT                            &
+        LABEL " "                          &
+        DISPLAY
+
+
+FIELD SCINUMSCI        OF PDRAP_MONTAGE    &
+        ID SAME                            &
+        DISPLAY
+
+
+FIELD ARSHREDEB        OF PDARRET_SCIAGE   &
+        REQUIRED
+
+
+FIELD ARSHREFIN        OF PDARRET_SCIAGE   &
+        REQUIRED
+
+
+FIELD RAACODARR        OF PDARRET_SCIAGE   &
+        LOOKUP ON PDRAISON_ARRET           &
+          MESSAGE 2976 ; Cette raison n'existe pas
+
+
+FIELD T_SILENT                             &
+        SILENT
+
+
+FIELD ARSDSCARR        OF PDARRET_SCIAGE   &
+        FOR ,25
+
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que l'heure de début n'est pas dans un intervalle déjà enregistré
+;
+
+PROCEDURE EDIT ARSHREDEB OF PDARRET_SCIAGE
+BEGIN
+  ;
+  ; Garde en memoire l'ancienne valeur
+  ;
+  LET T_OLDHREDEB = OLDVALUE(ARSHREDEB OF PDARRET_SCIAGE)
+  ;
+  ; Valide que l'heure de début est compris dans l'intervalle du rapport
+  ;
+  IF ARSHREDEB OF PDARRET_SCIAGE < RSCHREDEB OF PDRAP_SCIAGE &
+     OR &
+     ARSHREDEB OF PDARRET_SCIAGE > RSCHREFIN OF PDRAP_SCIAGE
+  THEN BEGIN
+    ERROR 3010 ; L'heure de début n'est pas compris dans l'intervalle du rapport
+  END
+  ;
+  ; Fait le test seulement si l'heure de fin a déjà été saisie
+  ;
+  IF ARSHREDEB OF PDARRET_SCIAGE <> 0
+  THEN BEGIN
+    ;
+    ; Valide que la plage horraire n'a pas été déjà enregistré
+    ;
+    GET ARS_FIC OPTIONAL
+    IF ACCESSOK
+    THEN BEGIN
+      ERROR 3005 ; Cette plage horraire chevauche une plage déjà enregistrer
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que l'heure de début est plus petite que l'heure de fin
+;
+
+PROCEDURE EDIT ARSHREFIN OF PDARRET_SCIAGE
+BEGIN
+  ;
+  ; Garde en memoire l'ancienne valeur
+  ;
+  LET T_OLDHREFIN = OLDVALUE(ARSHREFIN OF PDARRET_SCIAGE)
+  ;
+  ; Valide que l'heure de début est compris dans l'intervalle du rapport
+  ;
+  IF ARSHREFIN OF PDARRET_SCIAGE < RSCHREDEB OF PDRAP_SCIAGE &
+     OR &
+     ARSHREFIN OF PDARRET_SCIAGE > RSCHREFIN OF PDRAP_SCIAGE
+  THEN BEGIN
+    ERROR 3011 ; L'heure de fin n'est pas compris dans l'intervalle du rapport
+  END
+  ;
+  ; Valide que l<heure de fin est plus grande que l'heure de d/but
+  ;
+  IF ARSHREFIN OF PDARRET_SCIAGE < ARSHREDEB OF PDARRET_SCIAGE
+  THEN BEGIN
+    ERROR 3007 ; L'heure de début doit être plus petite que l'heure de fin
+  END
+  ;
+  ; Valide que la plage horraire n'a pas été déjà enregistré
+  ;
+  GET ARS_FIC OPTIONAL
+  IF ACCESSOK
+  THEN BEGIN
+    ERROR 3005 ; Cette plage horraire chevauche une plage déjà enregistrer
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul la durée en seconde
+;
+
+PROCEDURE EDIT T_SILENT
+BEGIN
+  ;
+  ; Calcul de la durée de l'ancienne valeur
+  ;
+  LET TZ_DATDEB   = RSCDATPRD        OF PDRAP_SCIAGE
+  LET TZ_TMPDEB   = ASCII(T_OLDHREDEB,4) + "00"
+  LET TZ_DATFIN   = RSCDATPRD        OF PDRAP_SCIAGE
+  LET TZ_TMPFIN   = ASCII(T_OLDHREFIN,4) + "00"
+  LET T_OLDDURSEC = DZ_DIFSECTOT
+  ;
+  ; Calcul de la durée de la nouvelle valeur
+  ;
+  LET TZ_DATDEB   = RSCDATPRD        OF PDRAP_SCIAGE
+  LET TZ_TMPDEB   = ASCII(ARSHREDEB  OF PDARRET_SCIAGE,4) + "00"
+  LET TZ_DATFIN   = RSCDATPRD        OF PDRAP_SCIAGE
+  LET TZ_TMPFIN   = ASCII(ARSHREFIN  OF PDARRET_SCIAGE,4) + "00"
+  LET T_NEWDURSEC = DZ_DIFSECTOT
+
+  LET ARSDURSEC OF PDARRET_SCIAGE = T_NEWDURSEC
+
+  LET RSCDUR OF PDRAP_SCIAGE = RSCDUROPE OF PDRAP_SCIAGE - RSCDURARR OF PDRAP_SCIAGE
+  ;
+  ; Calcul des heures de production
+  ;
+  LET TZ_NBRSEC   = RSCDUR OF PDRAP_SCIAGE
+  LET RSCHREPRD OF PDRAP_SCIAGE = DZ_HEURE
+  DISPLAY RSCHREPRD OF PDRAP_SCIAGE
+  ;
+  ; Calcul de la prodictivité
+  ;
+  LET RSCPRD OF PDRAP_SCIAGE = (RSCMC3PRD OF PDRAP_SCIAGE / RSCHREPRD OF PDRAP_SCIAGE) / 100
+  DISPLAY RSCPRD OF PDRAP_SCIAGE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour le champs raison d'arret
+;
+
+PROCEDURE INPUT RAACODARR
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_RAACODARR = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd114 MODE F &
+                     PASSING T_RAACODARR, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_RAACODARR )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Assigne une valeur par défaut
+;
+
+PROCEDURE INPUT ARSDSCARR OF PDARRET_SCIAGE
+BEGIN
+  IF 0 = SIZE(FIELDTEXT) AND ENTRYMODE
+  THEN BEGIN
+    LET FIELDTEXT = RAADSCFRA        OF PDRAISON_ARRET
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  FOR PDARRET_SCIAGE
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF PDARRET_SCIAGE &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF PDARRET_SCIAGE &
+       AND NOT NEWRECORD     OF PDARRET_SCIAGE &
+       AND NOT DELETEDRECORD OF PDARRET_SCIAGE &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Mise à jour del la durée de sciage lors de la destruction d'un enregistrement
+;
+
+PROCEDURE DELETE
+BEGIN
+  DELETE PDARRET_SCIAGE
+  ;
+  ; Calcul de la durée réel
+  ;
+  LET RSCDUR OF PDRAP_SCIAGE = RSCDUROPE OF PDRAP_SCIAGE - RSCDURARR OF PDRAP_SCIAGE
+  ;
+  ; Calcul des heures de production
+  ;
+  LET TZ_NBRSEC   = RSCDUR OF PDRAP_SCIAGE
+  LET RSCHREPRD OF PDRAP_SCIAGE = DZ_HEURE
+  DISPLAY RSCHREPRD OF PDRAP_SCIAGE
+  ;
+  ; Calcul de la prodictivité
+  ;
+  LET RSCPRD OF PDRAP_SCIAGE = (RSCMC3PRD OF PDRAP_SCIAGE / RSCHREPRD OF PDRAP_SCIAGE) / 100
+  DISPLAY RSCPRD OF PDRAP_SCIAGE
+END
+
+
+BUILD
+
+@IF FORMAT
+
+2xxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+3****************************** Gérer le sciage ********************************
+4 Date..........: xxxxxxxx                     M3............: xxxxxxxxxx      *
+5 Quart travail.: x xxxxxxxxxxxxxxxxxxxxxxxxx  Hre...........: xxxxx           *
+6                                              Productivité..: xxxxxxxxxxx     *
+7******************************* Détail arrêt **********************************
+8                                                                              *
+9      Montage  Scie  Début     Fin   Raison   Description                     *
+0    xxxxxxxxx   xx   xxxxx   xxxxx   xxxx     xxxxxxxxxxxxxxxxxxxxxxxxx       *
+1    xxxxxxxxx   xx   xxxxx   xxxxx   xxxx     xxxxxxxxxxxxxxxxxxxxxxxxx       *
+2    xxxxxxxxx   xx   xxxxx   xxxxx   xxxx     xxxxxxxxxxxxxxxxxxxxxxxxx       *
+3    xxxxxxxxx   xx   xxxxx   xxxxx   xxxx     xxxxxxxxxxxxxxxxxxxxxxxxx       *
+4    xxxxxxxxx   xx   xxxxx   xxxxx   xxxx     xxxxxxxxxxxxxxxxxxxxxxxxx       *
+5    xxxxxxxxx   xx   xxxxx   xxxxx   xxxx     xxxxxxxxxxxxxxxxxxxxxxxxx       *
+6    xxxxxxxxx   xx   xxxxx   xxxxx   xxxx     xxxxxxxxxxxxxxxxxxxxxxxxx       *
+7    xxxxxxxxx   xx   xxxxx   xxxxx   xxxx     xxxxxxxxxxxxxxxxxxxxxxxxx       *
+8    xxxxxxxxx   xx   xxxxx   xxxxx   xxxx     xxxxxxxxxxxxxxxxxxxxxxxxx       *
+9    xxxxxxxxx   xx   xxxxx   xxxxx   xxxx     xxxxxxxxxxxxxxxxxxxxxxxxx       *
+0    xxxxxxxxx   xx   xxxxx   xxxxx   xxxx     xxxxxxxxxxxxxxxxxxxxxxxxx       *
+1                                                                              *
+2                                                                              *
+3*******************************************************************************
+@ENDIF

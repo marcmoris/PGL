@@ -1,0 +1,267 @@
+;/T/ Vérification des mauvaises créances
+;
+;/P/ Programmeur...: Alain Côté
+;    Date Création.: 26 juillet 1993
+;
+;    Description...: La liste de vérification des lots de mauvaise créances
+;                    non journalisé au Grand-Livre. Remarques que le rapport
+;                    peut être executé même si le lot a été journalisé.
+;
+;
+;    Paramètres....: Compagnie
+;                    Periode CTB (Une)
+;                    No Lot (Un, Plusieurs ou tous)
+;
+;    Particularités: Met à jour la date et l'usager de vérification du lot,
+;                    si le lot est non journalisé.
+;
+;                    Cette liste est similaire à CR331(Vérification des
+;                    encaissements).
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST
+
+RUN cr333t
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sélection des mauvaises créances à imprimer. Le but du traitement suivant est
+; de contruire un sous-fichier contenant l'information nécessaire pour
+; imprimer la M/C incluant l'imputation et la ventilation facture de
+; celui-ci. Un flag est nécessaire pour l'impression, pour distinguer si
+; l'encaissement a une imputation ou/et une ventilation facture.
+;
+; Mise à jour de la date et de l'usager de vérification si le lot n'est pas
+; journalisé.
+;
+;
+REQUEST MAJ_LOT_PREPARE_SOUS_FICHIER
+
+ACCESS CRLOT &
+
+ LINK CIECLE    OF CRLOT, &
+      PECCLE    OF CRLOT, &
+      LCRCLE    OF CRLOT  &
+   TO CIECLE              , &
+      PECCLE              , &
+      LCRCLE              OF CRDEPOT &
+
+ LINK CIECLE    OF CRDEPOT, &
+      DPOCLE    OF CRDEPOT  &
+   TO CIECLE              , &
+      DPOCLE              OF CRDPO_IMPUTATION OPTIONAL &
+
+ AND  CIECLE    OF CRDEPOT, &
+      DPOCLE    OF CRDEPOT, &
+      DPOTYPECR OF CRDEPOT, &
+      DPOTYPECR OF CRDEPOT  &
+   TO CRHCLE1             , &
+      CRHCLE2             , &
+      CRHTYPECR           , &
+      CRHTYPTRA           OF CRCAR_HISTO OPTIONAL &
+
+ LINK CIECLE    OF CRCAR_HISTO, &
+      CARCLE    OF CRCAR_HISTO, &
+      CCDCLELIG OF CRCAR_HISTO  &
+   TO CIECLE , &
+      CARCLE , &
+      CCDCLELIG OF VCAR_CCD OPTIONAL
+
+
+CHOOSE CIECLE    PARM, &                 ; Compagnie
+       PECCLE    PARM, &                 ; Période
+       LCRCLE    PARM, &                 ; Lot
+       LCRTYPECR "MC"                    ; Type de lot "Mauvaise créance"
+
+
+TEMPORARY T_TYPDET CHARACTER SIZE 1 ; Type de détail
+;
+; Temporaires définis ici pour reserver la place dans le subfile afin de
+; rajouter les imformations d'imputation.
+;
+TEMPORARY T_DPITIMSTP FLOAT     SIZE 8   ;Time stamp de l'imputation
+TEMPORARY T_CPTCLE    CHARACTER SIZE 6   ;Compte
+TEMPORARY T_UNACLE    CHARACTER SIZE 4   ;Unité adm.
+TEMPORARY T_PRJCLE    CHARACTER SIZE 8   ;Projet
+TEMPORARY T_PRACLE    CHARACTER SIZE 3   ;Activité
+TEMPORARY T_IMMCLE    CHARACTER SIZE 12
+TEMPORARY T_DPIMNT    FLOAT     SIZE 8   ;Montant Imputation
+TEMPORARY T_MNTCAR    FLOAT     SIZE 8   ;Montant du compte à recevoir
+
+
+;
+; Mauvaise créance avec ventilation facture.
+;
+ITEM T_TYPDET RESET AT INITIAL TO "2"
+
+
+
+SORTED ON LCRCLE OF CRLOT ; Numéro de lot
+
+
+;
+; Montant du compte à recevoir par cédule.
+;
+ITEM T_MNTCAR = CCDMNT OF VCAR_CCD + V_CCDMNTAUG OF VCAR_CCD
+
+;
+; On ajoute les lignes de ventilation factures.
+;
+SUBFILE WCR333B KEEP &
+                IF RECORD CRCAR_HISTO EXISTS &
+  INCLUDE CIECLE       OF CRLOT         , &
+          LCRCLE       OF CRLOT         , &
+          PECCLE       OF CRLOT         , &
+          LCRDATJOU    OF CRLOT         , &
+          LCRDSC       OF CRLOT         , &
+          LCRNBRTRS    OF CRLOT         , &
+          LCRNBRTRSVER OF CRLOT         , &
+          LCRCUMMNT    OF CRLOT         , &
+          LCRCUMMNTVER OF CRLOT         , &
+          LCRNBRTRSERR OF CRLOT         , &
+          DPOCLE       OF CRDEPOT       , &
+          REFCIECLE    OF CRDEPOT       , &
+          REFCLETYP    OF CRDEPOT       , &
+          REFCLENUM    OF CRDEPOT       , &
+          DPONOM       OF CRDEPOT       , &
+          DPODAT       OF CRDEPOT       , &
+          DPOCHQNUM    OF CRDEPOT       , &
+          DPODSC1      OF CRDEPOT       , &
+          DPODSC2      OF CRDEPOT       , &
+          LBQCPTENC    OF CRDEPOT       , &
+          DPOMNTPAM    OF CRDEPOT       , &
+          DPOMNTENC    OF CRDEPOT       , &
+          DPOCUMMNT    OF CRDEPOT       , &
+          DPOMNTFAC    OF CRDEPOT       , &
+          DPODATCRE    OF CRDEPOT       , &
+          DPOHRECRE    OF CRDEPOT       , &
+          DPOTYPMAC    OF CRDEPOT       , &
+          CARCLE       OF CRCAR_HISTO   , &
+          CCDCLELIG    OF CRCAR_HISTO   , &
+          T_MNTCAR                      , &
+          CRHMNTREC    OF CRCAR_HISTO   , &
+          T_TYPDET                      , &
+          T_DPITIMSTP ALIAS DPITIMSTP   , &
+          T_CPTCLE    ALIAS CPTCLE      , &
+          T_UNACLE    ALIAS UNACLE      , &
+          T_PRJCLE    ALIAS PRJCLE      , &
+          T_PRACLE    ALIAS PRACLE      , &
+          T_IMMCLE    ALIAS IMMCLE      , &
+          T_DPIMNT    ALIAS DPIMNT
+
+
+;
+; On ajout les lignes d'imputation.
+;
+OUTPUT *WCR333B ALIAS A_WCR333B_IMP &
+                ADD &
+                NOITEM &
+                IF RECORD CRDPO_IMPUTATION EXISTS
+
+  ITEM CIECLE       OF A_WCR333B_IMP FINAL CIECLE       OF CRLOT
+  ITEM LCRCLE       OF A_WCR333B_IMP FINAL LCRCLE       OF CRLOT
+  ITEM PECCLE       OF A_WCR333B_IMP FINAL PECCLE       OF CRLOT
+  ITEM LCRDATJOU    OF A_WCR333B_IMP FINAL LCRDATJOU    OF CRLOT
+  ITEM LCRDSC       OF A_WCR333B_IMP FINAL LCRDSC       OF CRLOT
+  ITEM LCRNBRTRS    OF A_WCR333B_IMP FINAL LCRNBRTRS    OF CRLOT
+  ITEM LCRNBRTRSVER OF A_WCR333B_IMP FINAL LCRNBRTRSVER OF CRLOT
+  ITEM LCRCUMMNT    OF A_WCR333B_IMP FINAL LCRCUMMNT    OF CRLOT
+  ITEM LCRCUMMNTVER OF A_WCR333B_IMP FINAL LCRCUMMNTVER OF CRLOT
+  ITEM LCRNBRTRSERR OF A_WCR333B_IMP FINAL LCRNBRTRSERR OF CRLOT
+  ITEM DPOCLE       OF A_WCR333B_IMP FINAL DPOCLE       OF CRDEPOT
+  ITEM REFCIECLE    OF A_WCR333B_IMP FINAL REFCIECLE    OF CRDEPOT
+  ITEM REFCLETYP    OF A_WCR333B_IMP FINAL REFCLETYP    OF CRDEPOT
+  ITEM REFCLENUM    OF A_WCR333B_IMP FINAL REFCLENUM    OF CRDEPOT
+  ITEM DPONOM       OF A_WCR333B_IMP FINAL DPONOM       OF CRDEPOT
+  ITEM DPODAT       OF A_WCR333B_IMP FINAL DPODAT       OF CRDEPOT
+  ITEM DPOCHQNUM    OF A_WCR333B_IMP FINAL DPOCHQNUM    OF CRDEPOT
+  ITEM DPODSC1      OF A_WCR333B_IMP FINAL DPODSC1      OF CRDEPOT
+  ITEM DPODSC2      OF A_WCR333B_IMP FINAL DPODSC2      OF CRDEPOT
+  ITEM LBQCPTENC    OF A_WCR333B_IMP FINAL LBQCPTENC    OF CRDEPOT
+  ITEM DPOMNTPAM    OF A_WCR333B_IMP FINAL DPOMNTPAM    OF CRDEPOT
+  ITEM DPOMNTENC    OF A_WCR333B_IMP FINAL DPOMNTENC    OF CRDEPOT
+  ITEM DPOCUMMNT    OF A_WCR333B_IMP FINAL DPOCUMMNT    OF CRDEPOT
+  ITEM DPOMNTFAC    OF A_WCR333B_IMP FINAL DPOMNTFAC    OF CRDEPOT
+  ITEM DPODATCRE    OF A_WCR333B_IMP FINAL DPODATCRE    OF CRDEPOT
+  ITEM DPOHRECRE    OF A_WCR333B_IMP FINAL DPOHRECRE    OF CRDEPOT
+  ITEM DPOTYPMAC    OF A_WCR333B_IMP FINAL DPOTYPMAC    OF CRDEPOT
+  ITEM T_TYPDET     OF A_WCR333B_IMP FINAL "1"
+  ITEM CARCLE       OF A_WCR333B_IMP FINAL " "
+  ITEM CCDCLELIG    OF A_WCR333B_IMP FINAL 0
+  ITEM T_MNTCAR     OF A_WCR333B_IMP FINAL 0
+  ITEM CRHMNTREC    OF A_WCR333B_IMP FINAL 0
+  ITEM DPITIMSTP    OF A_WCR333B_IMP FINAL DPITIMSTP    OF CRDPO_IMPUTATION
+  ITEM CPTCLE       OF A_WCR333B_IMP FINAL CPTCLE       OF CRDPO_IMPUTATION
+  ITEM UNACLE       OF A_WCR333B_IMP FINAL UNACLE       OF CRDPO_IMPUTATION
+  ITEM PRJCLE       OF A_WCR333B_IMP FINAL PRJCLE       OF CRDPO_IMPUTATION
+  ITEM PRACLE       OF A_WCR333B_IMP FINAL PRACLE       OF CRDPO_IMPUTATION
+  ITEM IMMCLE       OF A_WCR333B_IMP FINAL IMMCLE       OF CRDPO_IMPUTATION
+  ITEM DPIMNT       OF A_WCR333B_IMP FINAL DPIMNT       OF CRDPO_IMPUTATION
+
+
+;
+; Ajout des encaissements qui n'ont pas d'imputation et de ventilation factures.
+;
+OUTPUT *WCR333B ALIAS A_WCR333_1 &
+                ADD &
+                NOITEM &
+                IF    NOT RECORD CRCAR_HISTO EXISTS &
+                  AND NOT RECORD CRDPO_IMPUTATION EXISTS
+
+  ITEM CIECLE       OF A_WCR333_1 FINAL CIECLE       OF CRLOT
+  ITEM LCRCLE       OF A_WCR333_1 FINAL LCRCLE       OF CRLOT
+  ITEM PECCLE       OF A_WCR333_1 FINAL PECCLE       OF CRLOT
+  ITEM LCRDATJOU    OF A_WCR333_1 FINAL LCRDATJOU    OF CRLOT
+  ITEM LCRDSC       OF A_WCR333_1 FINAL LCRDSC       OF CRLOT
+  ITEM LCRNBRTRS    OF A_WCR333_1 FINAL LCRNBRTRS    OF CRLOT
+  ITEM LCRNBRTRSVER OF A_WCR333_1 FINAL LCRNBRTRSVER OF CRLOT
+  ITEM LCRCUMMNT    OF A_WCR333_1 FINAL LCRCUMMNT    OF CRLOT
+  ITEM LCRCUMMNTVER OF A_WCR333_1 FINAL LCRCUMMNTVER OF CRLOT
+  ITEM LCRNBRTRSERR OF A_WCR333_1 FINAL LCRNBRTRSERR OF CRLOT
+  ITEM DPOCLE       OF A_WCR333_1 FINAL DPOCLE       OF CRDEPOT
+  ITEM REFCIECLE    OF A_WCR333_1 FINAL REFCIECLE    OF CRDEPOT
+  ITEM REFCLETYP    OF A_WCR333_1 FINAL REFCLETYP    OF CRDEPOT
+  ITEM REFCLENUM    OF A_WCR333_1 FINAL REFCLENUM    OF CRDEPOT
+  ITEM DPONOM       OF A_WCR333_1 FINAL DPONOM       OF CRDEPOT
+  ITEM DPODAT       OF A_WCR333_1 FINAL DPODAT       OF CRDEPOT
+  ITEM DPOCHQNUM    OF A_WCR333_1 FINAL DPOCHQNUM    OF CRDEPOT
+  ITEM DPODSC1      OF A_WCR333_1 FINAL DPODSC1      OF CRDEPOT
+  ITEM DPODSC2      OF A_WCR333_1 FINAL DPODSC2      OF CRDEPOT
+  ITEM LBQCPTENC    OF A_WCR333_1 FINAL LBQCPTENC    OF CRDEPOT
+  ITEM DPOMNTPAM    OF A_WCR333_1 FINAL DPOMNTPAM    OF CRDEPOT
+  ITEM DPOMNTENC    OF A_WCR333_1 FINAL DPOMNTENC    OF CRDEPOT
+  ITEM DPOCUMMNT    OF A_WCR333_1 FINAL DPOCUMMNT    OF CRDEPOT
+  ITEM DPOMNTFAC    OF A_WCR333_1 FINAL DPOMNTFAC    OF CRDEPOT
+  ITEM DPODATCRE    OF A_WCR333_1 FINAL DPODATCRE    OF CRDEPOT
+  ITEM DPOHRECRE    OF A_WCR333_1 FINAL DPOHRECRE    OF CRDEPOT
+  ITEM DPOTYPMAC    OF A_WCR333_1 FINAL DPOTYPMAC    OF CRDEPOT
+  ITEM T_TYPDET     OF A_WCR333_1 FINAL "3"
+  ITEM CARCLE       OF A_WCR333_1 FINAL " "
+  ITEM CCDCLELIG    OF A_WCR333_1 FINAL 0
+  ITEM T_MNTCAR     OF A_WCR333_1 FINAL 0
+  ITEM CRHMNTREC    OF A_WCR333_1 FINAL 0
+  ITEM DPITIMSTP    OF A_WCR333_1 FINAL 0
+  ITEM CPTCLE       OF A_WCR333_1 FINAL " "
+  ITEM UNACLE       OF A_WCR333_1 FINAL " "
+  ITEM PRJCLE       OF A_WCR333_1 FINAL " "
+  ITEM PRACLE       OF A_WCR333_1 FINAL " "
+  ITEM IMMCLE       OF A_WCR333_1 FINAL " "
+  ITEM DPIMNT       OF A_WCR333_1 FINAL 0
+
+
+
+;
+; Mise à jour de la date de vérification dans le cas que le lot n'a
+; pas été journalisé.
+;
+OUTPUT CRLOT AT LCRCLE UPDATE &
+                       IF LCRDATJOU OF CRLOT = 0
+
+ ITEM LCRDATVAL OF CRLOT = SYSDATE
+ ITEM LCRUSRVAL OF CRLOT = LOGONID
+
+
+BUILD cr333t

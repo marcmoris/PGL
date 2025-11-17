@@ -1,0 +1,223 @@
+;/T/ Liste de débitage par commande interne
+;
+;/P/ Programmeur...: Martin Bruyère
+;    Date Création.: 1995-07-10
+;    Description...: Ce rapport permet d'imprimer de débitage des diagrammes
+;                    pour une commande interne.
+;
+;/M/ François Déry, 6 mai 1999
+;       Remplacer le subfile de paramètre à transmettre au quick par un fichier
+;       séquentiel du dictionnaire.
+;       Modification de la table des diagrammes pour enlever les champs compute
+;       qu'elle contenait et création d'une vue pour compenser.
+;
+;/M/ Programmeur...: Rémy Demers
+;    Description...: Ajout d'elements dans le subfile pour supprimer des liens
+;                    dans le quiz
+;
+;--------------------------------------------------------
+;
+;/M/ Modifié par...: Marc Poulin.
+;    Date..........: 2001-06-13.
+;    Description...: Ajout des information relativement aux unités de travail.
+;
+;    Référence.....: Demande de changement 000138.
+;
+;    Signet........: MP-01-06-13_D138.
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST
+
+set lock file update
+
+RUN pd656t
+
+
+;-------------------------------------------------------------------------------
+;
+REQUEST EPURATUON
+
+ACCESS PDTEMPO_EMBAL
+
+OUTPUT PDTEMPO_EMBAL DELETE
+
+;-------------------------------------------------------------------------------
+REQUEST CONSERVER_COMMANDE_DIAG
+
+acc vcomdiapdg
+
+choose ciecle    parm , &
+       comnumcom parm , &
+       dianum002 parm , &
+       pricodpri parm , &
+       dcinumlig parm
+
+select if comstu of vcomdiapdg ="P" or comstu of vcomdiapdg ="C"
+
+sort on pjtabr       of vcomdiapdg &
+     on ciecle       of vcomdiapdg &
+     on comnumcomint of vcomdiapdg &
+     on pjtann       of vcomdiapdg &
+     on pricodpri    of vcomdiapdg &
+     on dianumdia002 of vcomdiapdg 
+
+subfile w1_vcomdiapdg keep at pjtann include vcomdiapdg  
+                         
+subfile w2_vcomdiapdg keep at dianumdia002 include vcomdiapdg  &
+                                       index idx_2             &
+                                     segment pjtabr          , &
+                                             pjtann          , &
+                                             comnumcomint    , &
+                                             pricodpri       , &
+                                             dianumdia002    , &
+                                             ciecle          
+
+;-------------------------------------------------------------------------------
+REQUEST RECHERCHE_DIAGRAMME
+
+access *w1_vcomdiapdg                           &
+  link pjtabr       of w1_vcomdiapdg          , &
+       pjtann       of w1_vcomdiapdg          , &
+       comnumcomint of w1_vcomdiapdg          , &
+       ciecle       of w1_vcomdiapdg            &
+    to pjtabr                                 , &
+       pjtann                                 , &
+       comnumcomint                           , &
+       ciecle       of pdcomman_interne         &
+
+  link pjtabr       of pdcomman_interne       , &
+       pjtann       of pdcomman_interne       , &
+       comnumcomint of pdcomman_interne       , &
+       ciecle       of pdcomman_interne         &
+    to pjtabr                                 , &
+       pjtann                                 , &
+       comnumcomint                           , &
+       ciecle       of pddiagramme              &
+
+  link dianum002    of pddiagramme            , &
+       ciecle       of pddiagramme              &
+    to dianum002                              , &
+       ciecle       of pdpriorite_diag          &
+
+  link pjtabr       of pdpriorite_diag        , &
+       pjtann       of pdpriorite_diag        , &
+       comnumcomint of pdpriorite_diag        , &
+       pricodpri    of pdpriorite_diag        , &
+       dianumdia002 of pdpriorite_diag        , &
+       ciecle       of pdpriorite_diag          &
+    to pjtabr                                 , &
+       pjtann                                 , &
+       comnumcomint                           , &
+       pricodpri                              , &
+       dianumdia002                           , &
+       ciecle       of *w2_vcomdiapdg           &
+
+  link dianum002    of pdpriorite_diag        , &
+       ciecle       of pdpriorite_diag          &
+    to dianum002                              , &
+       ciecle       of pduni_trav_dia  optional &
+
+  link utrnumunitrv of pduni_trav_dia         , &
+       ciecle       of pduni_trav_dia           &
+    to utrnumunitrv,                            &
+       ciecle       of pdunite_travail optional &
+
+  link pjtabr       of pddiagramme            , &
+       dianumdia001 of pddiagramme            , &
+       dianumdia002 of pddiagramme            , &
+       ciecle       of pddiagramme              &
+    to pjtabr                                 , &
+       dianumdia001                           , &
+       dianumdia002                           , &
+       ciecle       of vdiaqte
+
+DEFINE D_TRI CHARACTER SIZE 10 = DIANUM002 OF PDPRIORITE_DIAG + &
+                                 UTRNUMUNITRV OF PDUNI_TRAV_DIA
+
+SORT ON COMNUMCOM OF PDPRIORITE_DIAG &
+     ON DIANUM002 OF PDPRIORITE_DIAG &
+     ON PRICODPRI OF PDPRIORITE_DIAG &
+     ON D_TRI
+
+TEMPORARY T_COMPTE  INTEGER   SIZE 04
+TEMPORARY T_DESCR_1 CHARACTER SIZE 40
+TEMPORARY T_DESCR_2 CHARACTER SIZE 40
+TEMPORARY T_DESCR_3 CHARACTER SIZE 40
+TEMPORARY T_DESCR_4 CHARACTER SIZE 40
+TEMPORARY T_DESCR_5 CHARACTER SIZE 40
+TEMPORARY T_WEMDQTEPRD INTEGER SIZE 4
+TEMPORARY T_SUM        INTEGER SIZE 4
+TEMPORARY T_REJET      INTEGER SIZE 4
+
+ITEM T_REJET      = DIAQTEREJ OF PDDIAGRAMME
+ITEM T_WEMDQTEPRD = 0
+ITEM T_SUM        = 0
+ITEM T_COMPTE COUNT RESET AT DIANUM002
+
+; ---------------------------------------------------------------------------
+; MP-01-06-13_D138.
+;
+; Code ou description de l'unité de travail. Ici, le client a choisi le code.
+
+ITEM T_DESCR_1 = UTRNUMUNITRV OF PDUNITE_TRAVAIL IF T_COMPTE = 1 RESET AT DIANUM002
+ITEM T_DESCR_2 = UTRNUMUNITRV OF PDUNITE_TRAVAIL IF T_COMPTE = 2 RESET AT DIANUM002
+ITEM T_DESCR_3 = UTRNUMUNITRV OF PDUNITE_TRAVAIL IF T_COMPTE = 3 RESET AT DIANUM002
+ITEM T_DESCR_4 = UTRNUMUNITRV OF PDUNITE_TRAVAIL IF T_COMPTE = 4 RESET AT DIANUM002
+ITEM T_DESCR_5 = UTRNUMUNITRV OF PDUNITE_TRAVAIL IF T_COMPTE = 5 RESET AT DIANUM002
+
+;ITEM T_DESCR_1 = UTRDSC001   OF PDUNITE_TRAVAIL IF T_COMPTE = 1 RESET AT DIANUM002
+;ITEM T_DESCR_2 = UTRDSC001   OF PDUNITE_TRAVAIL IF T_COMPTE = 2 RESET AT DIANUM002
+;ITEM T_DESCR_3 = UTRDSC001   OF PDUNITE_TRAVAIL IF T_COMPTE = 3 RESET AT DIANUM002
+;ITEM T_DESCR_4 = UTRDSC001   OF PDUNITE_TRAVAIL IF T_COMPTE = 4 RESET AT DIANUM002
+;ITEM T_DESCR_5 = UTRDSC001   OF PDUNITE_TRAVAIL IF T_COMPTE = 5 RESET AT DIANUM002
+
+DEFINE D_PDGQTE INTEGER SIZE 04 =  DIAQTEDBTGRA    OF VDIAQTE                                                   &
+                               IF (DIAQTEDBTGRA    OF VDIAQTE          > PDGQTEPLACPEGRA OF PDPRIORITE_DIAG AND &
+                                   PDGQTEPLACPEGRA OF PDPRIORITE_DIAG <> 0)                                     &
+                             ELSE  PDGQTEPLACPEGRA OF PDPRIORITE_DIAG                                           &
+                               IF  PDGQTEPLACPEGRA OF PDPRIORITE_DIAG <> 0                                      &
+                             ELSE  0
+
+; -------------------------------------------------------------
+
+
+OUTPUT PDTEMPO_EMBAL ADD AT PRICODPRI
+ ITEM CIECLE          OF PDTEMPO_EMBAL FINAL  CIECLE          OF PDPRIORITE_DIAG
+ ITEM DIANUM002       OF PDTEMPO_EMBAL FINAL  DIANUM002       OF PDPRIORITE_DIAG
+ ITEM COMNUMCOM       OF PDTEMPO_EMBAL FINAL  COMNUMCOM       OF PDPRIORITE_DIAG
+ ITEM DCINUMLIG       OF PDTEMPO_EMBAL FINAL  DCINUMLIG       OF PDPRIORITE_DIAG
+ ITEM PRICODPRI       OF PDTEMPO_EMBAL FINAL  PRICODPRI       OF PDPRIORITE_DIAG
+ ITEM D_PDGQTE        OF PDTEMPO_EMBAL FINAL  D_PDGQTE
+ ITEM PDGQTEPLACPEGRA OF PDTEMPO_EMBAL FINAL  PDGQTEPLACPEGRA OF PDPRIORITE_DIAG
+ ITEM TEMDIAQTEDBT    OF PDTEMPO_EMBAL FINAL  PDGQTEPLACPEGRA OF PDPRIORITE_DIAG
+ ITEM DIAQTEEMB       OF PDTEMPO_EMBAL FINAL  DIAQTEEMB       OF PDDIAGRAMME
+ ITEM TEMDIAQTEDBTGRA OF PDTEMPO_EMBAL FINAL  DIAQTEDBTGRA    OF VDIAQTE
+ ITEM T_WEMDQTEPRD    OF PDTEMPO_EMBAL FINAL  T_WEMDQTEPRD
+ ITEM T_REJET         OF PDTEMPO_EMBAL FINAL  T_REJET
+ ITEM T_SUM           OF PDTEMPO_EMBAL FINAL  T_SUM
+ ITEM T_COMPTE        OF PDTEMPO_EMBAL FINAL  T_COMPTE
+ ITEM T_DESCR_1       OF PDTEMPO_EMBAL FINAL  T_DESCR_1 ; MP-01-06-13_D138.
+ ITEM T_DESCR_2       OF PDTEMPO_EMBAL FINAL  T_DESCR_2 ; MP-01-06-13_D138.
+ ITEM T_DESCR_3       OF PDTEMPO_EMBAL FINAL  T_DESCR_3 ; MP-01-06-13_D138.
+ ITEM T_DESCR_4       OF PDTEMPO_EMBAL FINAL  T_DESCR_4 ; MP-01-06-13_D138.
+ ITEM T_DESCR_5       OF PDTEMPO_EMBAL FINAL  T_DESCR_5 ; MP-01-06-13_D138.
+ ITEM TEMDATE         OF PDTEMPO_EMBAL FINAL  SYSDATE
+ ITEM TEMHEURE        OF PDTEMPO_EMBAL FINAL  SYSTIME
+
+
+;--------------------------------------------------------------------
+;
+REQUEST PARAMETRE
+
+ACCESS PDTEMPO_EMBAL
+
+SORT ON CIECLE    OF PDTEMPO_EMBAL &
+     ON COMNUMCOM OF PDTEMPO_EMBAL &
+     ON DIANUM002 OF PDTEMPO_EMBAL
+
+OUTPUT PDPARAM_TMP ADD AT DIANUM002
+  ITEM CIECLE    OF PDPARAM_TMP FINAL CIECLE    OF PDTEMPO_EMBAL
+  ITEM COMNUMCOM OF PDPARAM_TMP FINAL COMNUMCOM OF PDTEMPO_EMBAL
+  ITEM DIANUM002 OF PDPARAM_TMP FINAL DIANUM002 OF PDTEMPO_EMBAL
+
+BUILD pd656t

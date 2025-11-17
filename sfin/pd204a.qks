@@ -1,0 +1,283 @@
+;/T/ Type de granit
+;
+;/P/ Programmeur..: René Bonneau
+;    Date création: 1994-11-03
+;
+;    Description..: Ce panorama permet de saisir les types de granit pour
+;                   les classes de granit.
+;
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd204a ACTIONBAR                    &
+              MODE LABEL "" AT 2,80        &
+              FROM 07,01 TO 23,80          &
+              NOACTION                     &
+              FIELDMARK RETAIN STARTUP     &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU,       &
+                        T_CIENOM,          &
+                        PDCLASSE
+
+
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+
+USE ussectmp  NOLIST
+    "PD204A"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+
+USE pd204a.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Classe de granit
+;
+
+FILE PDCLASSE         MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Type de granit par classe
+;
+
+FILE PDGRANIT_CLASSE  PRIMARY &
+                      NOITEM &
+                      OCCURS 10
+
+  ACCESS VIA     CIECLE,                                &
+                 CLGCODCLA                              &
+         USING   T_CIECLEMNU,                           &
+                 CLGCODCLA        OF PDCLASSE           &
+         ORDERBY CIECLE,                                &
+                 CLGCODCLA,                             &
+                 TGRCODGRA
+
+  ITEM CIECLE    OF PDGRANIT_CLASSE    INITIAL T_CIECLEMNU
+  ITEM CLGCODCLA OF PDGRANIT_CLASSE    INITIAL FIRST (CLGCODCLA OF PDCLASSE)
+
+
+;-------------------------------------------------------------------------------
+;
+; Type de granit
+;
+
+FILE PDTYPE_GRANIT    REFERENCE OCCURS WITH PDGRANIT_CLASSE
+
+  ACCESS VIA   CIECLE,                           &
+               TGRCODGRA                         &
+         USING T_CIECLEMNU,                      &
+               TGRCODGRA        OF PDGRANIT_CLASSE
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable servant a l'appel des dépisteurs
+;
+
+TEMPORARY T_TGRCODGRA CHARACTER SIZE 04
+
+
+;-------------------------------------------------------------------------------
+;
+DRAW 3,1 TO 17,80   ; Remplace le Draw pour les écrans pleine page
+;USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+;;;USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+;;;USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+;;;USE ushilite NOLIST ; Hilite pour tout les écrans
+
+
+SKIP 2
+
+TITLE &
+@IF FRANCAIS
+      " Type de granit / classe " &
+@ELSE
+      " %%%Type de granit / classe " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST ; Pour placer le TITLE OFF
+
+
+SKIP 1
+
+
+TITLE  " Type de granit " at , 2
+
+
+SKIP
+
+
+ALIGN (02,02,03) (,06,07)
+
+
+CLUSTER OCCURS WITH PDGRANIT_CLASSE ID BASE 05
+
+
+  FIELD TGRCODGRA      OF PDGRANIT_CLASSE                  &
+          HIDDEN                                           &
+          NUMERIC                                          &
+          REQUIRED                                         &
+          LABEL " "                                        &
+          LOOKUP ON PDTYPE_GRANIT                          &
+           MESSAGE 2910 & ; Ce type de granit n'existe pas
+          ,NOTON PDGRANIT_CLASSE                           &
+            VIA     CIECLE,                                &
+                    CLGCODCLA,                             &
+                    TGRCODGRA                              &
+            USING   T_CIECLEMNU ,                          &
+                    CLGCODCLA        OF PDCLASSE,          &
+                    TGRCODGRA        OF PDGRANIT_CLASSE    &
+           MESSAGE 2901 ; Ce type de granit existe déjà
+
+
+  FIELD TGRDSCFRA001   OF PDTYPE_GRANIT           &
+          HIDDEN                                  &
+          DISPLAY                                 &
+          REFRESH                                 &
+          LABEL " "
+
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+
+  USE ussececr NOLIST
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur (popup) pour le champs
+;
+
+PROCEDURE INPUT TGRCODGRA
+BEGIN
+
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TGRCODGRA = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd100 MODE F                   &
+                     PASSING T_TGRCODGRA,     &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_TGRCODGRA )
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+
+  USE ussecent NOLIST
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDGRANIT_CLASSE &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDGRANIT_CLASSE &
+     AND NOT NEWRECORD     OF PDGRANIT_CLASSE &
+     AND NOT DELETEDRECORD OF PDGRANIT_CLASSE &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+END
+
+BUILD
+@IF FORMAT
+
+*************************** Type de granit / classe ****************************
+*                                                                              *
+* Type de granit                                                               *
+* xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                 *
+* xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                 *
+* xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                 *
+* xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                 *
+* xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                 *
+* xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                 *
+* xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                 *
+* xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                 *
+* xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                 *
+* xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                 *
+* xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                 *
+*                                                                              *
+********************************************************************************
+@ENDIF

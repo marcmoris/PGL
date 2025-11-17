@@ -1,0 +1,193 @@
+;/T/ Facturation 
+;/M/ Pascal Tremblay, 98-01-21
+;
+;    Ajustement pour le changement de siècle
+;
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN ar009g ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             ACTIVITIES FIND, CHANGE &
+             FOR 12 LINES &
+             ON LINE 12  &  
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING  T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        T_FOUCIECLE, &
+                        T_PECCLEMNU, &
+                        ARRECEPTION
+
+USE ustrasse NOLIST ; Transaction QUERY pour les sous-écrans
+
+USE ussectmp NOLIST     ; Variable pour la sécurité
+    "AR009G"             ; Nom de l'écran
+
+USE ar009g.hlp NOLIST ; Use servant à la documentation de l'écran
+               
+
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-écrans
+
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE  4 ; Cie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la Cie du menu.
+TEMPORARY T_FOUCIECLE CHARACTER SIZE  4 ; Cie de la clef du fournisseur.
+TEMPORARY T_PECCLEMNU CHARACTER SIZE  4 ; Période du menu
+TEMPORARY T_PECCLECOU CHARACTER SIZE  4 ; Période courante
+TEMPORARY T_FOUCLEFND CHARACTER SIZE  6 ; # de fournisseur de recherche
+TEMPORARY T_CAPCLEFND CHARACTER SIZE 15 ; # de facture     de recherche
+
+FILE ARRECEPTION  MASTER
+
+;
+; Fichier des facturesa
+;
+FILE ARFAC_DETAIL  PRIMARY NOITEM OCCURS 8
+  ACCESS VIA   FACCIECLE, &
+               RECCLE     &
+         USING CIECLE    OF ARRECEPTION, &
+               RECCLE    OF ARRECEPTION
+
+;
+; Facture aux payable
+;
+FILE CPCPT_A_PAYER  REFERENCE OCCURS WITH ARFAC_DETAIL
+
+  ACCESS VIA   FOUCIECLE, &
+               FOUCLE   , &
+               CAPCLE     &
+         USING FOUCIECLE OF ARFAC_DETAIL, &
+               FOUCLE    OF ARFAC_DETAIL, &
+               FACCLE    OF ARFAC_DETAIL
+
+FILE MCREF_ADRESSE  REFERENCE OCCURS WITH ARFAC_DETAIL
+
+  ACCESS  VIA   REFCIECLE, &
+                REFCLETYP, &
+                REFCLENUM, &
+                RADCLE &
+          USING REFCIECLE OF CPCPT_A_PAYER, &
+                REFCLETYP OF CPCPT_A_PAYER, &
+                REFCLENUM OF CPCPT_A_PAYER, &
+                RADCLE    OF CPCPT_A_PAYER
+
+
+;-------------------------------------------------------------------------------
+
+SKIP
+USE ushilite NOLIST     ; Hilite pour tous les écrans
+
+DRAW FROM  2, 1 TO  2,79
+DRAW FROM  2, 1 TO  12,1
+DRAW FROM  3,80 TO  12,80
+DRAW FROM  12,1  TO 12,80
+
+
+SKIP 1
+TITLE &
+@IF FRANCAIS
+      " Facturation " &
+@ELSE
+      " %%%turation " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+;-------------------------------------------------------------------------------
+
+SKIP
+TITLE  &
+@IF FRANCAIS
+      "Code   Fournisseur          Document    Période lot    Date     Montant total" &
+@ELSE
+      "%%%e   Fournisseur          Document    Période lot    Date    Montant total" &
+@ENDIF
+      AT ,2
+
+
+CLUSTER OCCURS WITH ARFAC_DETAIL ID BASE 5
+;ALIGN (2,2,3) (,,10) (,,31) (,,44) (,,50) (,,55) (,,64)
+ALIGN (2,2,2) (,,9) (,,30) (,,43) (,,49) (,,54) (,,65)
+
+FIELD FOUCLE    OF ARFAC_DETAIL  &
+        HIDDEN &
+        LABEL " " 
+FIELD RADNOM    OF MCREF_ADRESSE SIZE 20 DISPLAY
+FIELD FACCLE    OF ARFAC_DETAIL          DISPLAY
+FIELD PECCLE    OF CPCPT_A_PAYER         DISPLAY
+FIELD LCPCLE    OF CPCPT_A_PAYER         DISPLAY
+FIELD CAPDAT    OF CPCPT_A_PAYER          FORMAT YYYYMMDD DISPLAY
+FIELD FADMNTTOT OF ARFAC_DETAIL          DISPLAY
+
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+PROCEDURE INPUT FOUCLE
+BEGIN
+
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+
+    LET T_FOUCLEFND = FOUCLE OF ARFAC_DETAIL
+    LET T_CAPCLEFND = FACCLE OF ARFAC_DETAIL
+    LET T_PECCLECOU = T_PECCLEMNU
+
+    IF 0 <> SIZE(TRUNCATE(CAPCLE OF CPCPT_A_PAYER))
+    THEN RUN SCREEN cp003 MODE F &
+                     PASSING T_FOUCIECLE, &
+                             T_CIECLEMNU, &
+                             T_CIENOM   , &
+                             T_PECCLEMNU, &
+                             T_PECCLECOU, &
+                             T_FOUCLEFND, &
+                             T_CAPCLEFND
+
+    ELSE RUN SCREEN ar011 MODE F &
+                     PASSING T_CIECLEMNU, &
+                             T_CIENOM,    &
+                             T_PECCLEMNU, &
+                             T_FOUCIECLE, &
+                             T_FOUCIECLE, &
+                             T_FOUCLEFND, &
+                             T_CAPCLEFND
+  END
+
+  LET FIELDTEXT = ""
+
+END
+
+;
+; Procédure qui permet de modifier la première occurrence d'un cluster
+; en Powerhouse Client
+;
+PROCEDURE DESIGNER PH01
+BEGIN
+  ACCEPT FOUCLE OF ARFAC_DETAIL
+END
+
+
+BUILD
+@IF FORMAT
+********************************************************************************
+*                                                                              *
+* Code   Fournisseur          Document    Période lot   Date    Montant total  *
+* xxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxx xxxxx xxxx xxxxxxxx xxxxxxxxxxxxxxx *
+* xxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxx xxxxx xxxx xxxxxxxx xxxxxxxxxxxxxxx *
+* xxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxx xxxxx xxxx xxxxxxxx xxxxxxxxxxxxxxx *
+* xxxxxx xxxxxxxxxxxxxxxxxxxx xxxxxxxxxxxx xxxxx xxxx xxxxxxxx xxxxxxxxxxxxxxx *
+********************************************************************************
+@ENDIF

@@ -1,0 +1,193 @@
+;/T/ Consultation des C.A.R.     CLICIECLE,CLICLE,TYPECRPAT,FLGSLD,CIECLE,CARCLE
+;
+;/P/ Programmeur..: Guy Chabot
+;    Date Création: 7 mai 1992
+;
+;    Description..: Permet de visionner et de choisir un compte à recevoir.
+;                   Seul les factures journsalisées seront sélectionnées.
+;
+;
+;    Paramètre....: CLICIECLE ==> - compagnie du client.
+;                                 - segment de la clé de recherche.
+;
+;                   CLICLE    ==> - numéro de client.
+;                                 - segment de la clé de recherche.
+;
+;                   TYPECRPAT ==> - Type de facture.
+;                                 - critère de sélection
+;                                 - sous la forme de pattern
+;
+;                   FLGSLD    ==> - Indicateur de sélection.
+;                                 - critère de sélection
+;                                 - si = 1, facture à recevoir ou solde <> 0
+;                                   si = 0, toutes les factures sans tenir
+;                                   compte du solde.
+;
+;                   CIELCE    ==> - compagnie du solde du client.
+;
+;                   CARCLE    ==> - numéro du compte à recevoir(facture).
+;                                 - segment de la clé de recherche.
+;                                 - peut contenir le caractére '@'.
+;                                 - contient la valeur de retour.
+;
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cr103 NOMODE NOACTION FIELDMARK &
+             FROM 11,20 TO 23,80 &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             ACTIVITIES FIND &
+             RECEIVING T_CLICIECLE, &
+                       T_CLICLE   , &
+                       T_TYPECRPAT, &
+                       T_FLGSLD   , &
+                       T_CIECLEMNU, &
+                       T_CARCLE
+
+USE cr103.hlp NOLIST
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CLICIECLE CHARACTER SIZE 4 ; Compagnie du client.
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4 ; Compagnie du menu.
+TEMPORARY T_CLICLE    CHARACTER SIZE 6 ; Numéro de client
+TEMPORARY T_TYPECRPAT CHARACTER SIZE 11; Type de facture
+TEMPORARY T_FLGSLD    CHARACTER SIZE 1 ; Flag sur le solde
+TEMPORARY T_CARCLE    CHARACTER SIZE 15; Numéro de facture
+
+
+;-------------------------------------------------------------------------------
+;
+FILE VCAR_SLD         PRIMARY &
+                      OCCURS 10
+
+  ACCESS VIA REFCIECLE, &
+             REFCLENUM, &
+             CIECLE   , &
+             CARCLE     &
+         USING T_CLICIECLE, &
+               T_CLICLE   , &
+               T_CIECLEMNU, &
+               T_CARCLE     &
+         ORDERBY CIECLE, &
+                 CARCLE
+
+  SELECT IF     CARDATJOU OF VCAR_SLD <> 0 &
+            AND MATCHPATTERN(CARTYPECR OF VCAR_SLD,TRUNCATE(T_TYPECRPAT)) &
+            AND ( &
+                  (     0 <> (  CARMNT    OF VCAR_SLD &
+                            + V_CARMNTAJT OF VCAR_SLD &
+                            + V_CARMNTCRT OF VCAR_SLD &
+                            - V_CARMNTREC OF VCAR_SLD &
+                            - V_CARMNTESC OF VCAR_SLD &
+                            - V_CARMNTMAC OF VCAR_SLD ) &
+                    AND T_FLGSLD = "1" &
+                  ) &
+                  OR  &
+                  T_FLGSLD = "0" &
+                )
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Montant du compte à recevoir.
+;
+DEFINE D_MNTFAC FLOAT SIZE 8 =   CARMNT      OF VCAR_SLD &
+                               + V_CARMNTAJT OF VCAR_SLD
+
+;
+; Solde à recevoir.
+;
+DEFINE D_SLDFAC FLOAT SIZE 8 =  D_MNTFAC &
+                                + V_CARMNTCRT OF VCAR_SLD &
+                                - V_CARMNTREC OF VCAR_SLD &
+                                - V_CARMNTESC OF VCAR_SLD &
+                                - V_CARMNTMAC OF VCAR_SLD
+
+
+;-------------------------------------------------------------------------------
+
+DRAW 1,1 TO 13,60
+
+USE ushilite NOLIST
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP TO 2
+
+TITLE &
+@IF FRANCAIS
+      "Numéro         Date            Brut     A recevoir" &
+@ELSE
+      "Number         Date          $ Gross  $ Receivable" &
+@ENDIF
+      AT 2,6
+
+ALIGN(3,3,6) (,,19) (,,30) (,,44)
+
+CLUSTER OCCURS WITH VCAR_SLD
+
+FIELD CARCLE    OF VCAR_SLD HIDDEN LABEL ">>" &
+        SIZE 12 &
+        DISPLAY
+
+FIELD CARDAT    OF VCAR_SLD  FORMAT YYYYMMDD PATTERN "####/##/##" &
+        DISPLAY
+
+FIELD D_MNTFAC &
+        DISPLAY &
+        PICTURE "^,^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5
+
+FIELD D_SLDFAC &
+        PICTURE "^,^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Enleve le @ si l'usager fait aucun choix à l'écran.
+;
+;
+PROCEDURE EXIT
+BEGIN
+  IF 0 <> IND(T_CARCLE, "@")
+  THEN LET T_CARCLE = ""
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Retourne la valeur choisi par l'usager.
+;
+;
+PROCEDURE DESIGNER 1
+BEGIN
+  LET T_CARCLE = CARCLE OF VCAR_SLD
+  RETURN
+END
+
+BUILD
+
+;                       *********************************************************
+;                       *    Numéro         Date            Brut     A recevoir *
+;                       * >> xxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+;                       * >> xxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+;                       * >> xxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+;                       * >> xxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+;                       * >> xxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+;                       * >> xxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+;                       * >> xxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+;                       * >> xxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+;                       * >> xxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+;                       * >> xxxxxxxxxxxx xxxxxxxx xxxxxxxxxxxxxx xxxxxxxxxxxxxx*
+;                       *********************************************************

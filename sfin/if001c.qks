@@ -1,0 +1,221 @@
+;/T/ Carte de bloc - Reservation de bloc
+;
+;/P/ Programmeur..: Francois Richard
+;    Date Creation: 31 octobre 1999
+;
+;    Description..: Permet de reserver un bloc
+;
+;-------------------------------------------------------------------------------
+
+SCREEN if001c ACTIONBAR & 
+              FROM 6,1 TO 16,80 &
+              MESSAGE ON 24 &
+              NOMODE &
+              NOACTION FIELDMARK STARTUP &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU, &
+                        T_CIENOM, &
+                        IFBLOC
+
+;USE if001c.hlp NOLIST
+
+USE ussectmp  NOLIST
+"IF001C"
+
+USE usactecr  NOLIST
+
+USE ustrasse NOLIST
+
+;-------------------------------------------------------------------------------
+;
+; Variable recu en parametre
+;
+TEMPORARY T_CIECLEMNU        CHARACTER SIZE 4  ; Num\351ro de cie
+TEMPORARY T_CIENOM           CHARACTER SIZE 40 ; Nom de la compagnie
+
+;-------------------------------------------------------------------------------
+;
+; Carte de bloc
+;
+FILE IFBLOC            MASTER
+
+;------------------------------------------------------------------------------
+;
+; Reservation de bloc
+;
+FILE IFRESERVATION PRIMARY
+
+ ACCESS VIA    CIECLE,              &
+               TGRCODGRA,           &
+               IFCCLE,              &
+               BLCCLE,              &
+               BLCRED               &
+         USING T_CIECLEMNU,         &
+               TGRCODGRA OF IFBLOC, &
+               IFCCLE OF IFBLOC,    &
+               BLCCLE OF IFBLOC,    &
+               BLCRED OF IFBLOC
+
+;------------------------------------------------------------------------------
+;
+; Pour afficher le nom de l'usager qui a reserver
+;
+FILE GSUSAGER         REFERENCE 
+  
+   ACCESS VIA   USRCLE &
+          USING BLRUSRRES OF IFRESERVATION
+
+;------------------------------------------------------------------------------
+;
+; Verifier si une reservation existe deja pour le bloc
+;
+FILE IFRESERVATION DESIGNER ALIAS A_IFRESERVATION
+
+;-------------------------------------------------------------------------------
+;
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4  = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+DRAW 3,1 TO 11,80
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP 
+
+TITLE &
+      " Réservation d'un bloc " &
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP 1
+
+ALIGN(3,3,19) (,,32)
+
+FIELD BLRUSRRES OF IFRESERVATION &
+      HIDDEN                     &
+      DISPLAY                    &
+      ID 10                      &
+      LABEL "Réservé par...:"
+
+FIELD USREMPNOM OF GSUSAGER &
+      DISPLAY       
+
+SKIP 1
+
+ALIGN(3,3,19)
+
+FIELD BLRDATRESDEB OF IFRESERVATION &
+      DISPLAY                       &     
+      FORMAT YYYYMMDD               &
+      PATTERN "####/##/##"          &
+      HIDDEN                        &
+      ID 15                         &
+      LABEL "Date de début.:"
+
+SKIP 1
+
+FIELD BLRDATRESFIN OF IFRESERVATION &
+      REQUIRED                      &
+      FORMAT YYYYMMDD               &
+      PATTERN "####/##/##"          &
+      HIDDEN                        &
+      ID 20                         &
+      LABEL "Date de fin...:"
+
+;-------------------------------------------------------------------------------
+;
+; Valide la s\351curit\351 d'acc\350s de l'\351cran.
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+
+  GET A_IFRESERVATION            &
+     VIA    CIECLE,              &
+            TGRCODGRA,           &
+            IFCCLE,              &
+            BLCCLE,              &
+            BLCRED               &
+      USING T_CIECLEMNU,         &
+            TGRCODGRA OF IFBLOC, &
+            IFCCLE OF IFBLOC,    &
+            BLCCLE OF IFBLOC,    &
+            BLCRED OF IFBLOC     &
+      OPTIONAL
+
+  ; Peut rien faire si pas usager de creation
+  IF ACCESSOK 
+  THEN ERROR 3285 ; PD385E Ce bloc est deja reserver, impossible de le modifier
+
+  ; Verifie si l'usager peut saisir une reservation ou pas
+  IF 0 <> SIZE(TRUNCATE(DCINUMLIG OF IFBLOC))
+  THEN ERROR 3284 ; PD384E Impossible de reserver ce bloc 
+
+  ; Usager de creation
+  LET  BLRUSRRES OF IFRESERVATION = LOGONID
+  DISPLAY BLRUSRRES OF IFRESERVATION
+
+  DISPLAY USREMPNOM OF GSUSAGER
+
+  ; Affichage de la date debut par defaut
+  LET BLRDATRESDEB OF IFRESERVATION = SYSDATE
+  DISPLAY BLRDATRESDEB OF IFRESERVATION
+ 
+END
+
+;------------------------------------------------------------------------------
+;
+; Validation de la date de fin 
+;
+PROCEDURE EDIT BLRDATRESFIN
+BEGIN
+
+  IF FIELDVALUE < BLRDATRESDEB OF IFRESERVATION
+  THEN ERROR 3287 ; PD387E La date de fin doit etre superieur a la date de debut
+
+END
+;------------------------------------------------------------------------------
+;
+; Validation de la saisie de la date de debut de reservation en changemode
+;
+PROCEDURE DESIGNER 20 
+BEGIN
+  IF BLRUSRRES OF IFRESERVATION <> LOGONID
+  THEN ERROR 3285 ; PD385E Ce bloc est deja reserver, impossible de le modifier 
+
+  IF 0 = SIZE(TRUNCATE(DCINUMLIG OF IFBLOC))
+  THEN ACCEPT BLRDATRESFIN OF IFRESERVATION
+END
+ 
+;-----------------------------------------------------------------------------  
+;
+;
+PROCEDURE DELETE
+BEGIN
+  IF BLRUSRRES OF IFRESERVATION <> LOGONID
+  THEN ERROR 3285 ; PD385E Ce bloc est deja reserver, impossible de le modifier
+  ELSE DELETE IFRESERVATION
+END
+
+;-----------------------------------------------------------------------------
+;
+;
+PROCEDURE POSTUPDATE
+BEGIN
+  RETURN
+END
+
+ 
+BUILD DETAIL LIST

@@ -1,0 +1,298 @@
+;/T/ Partie de l'écran GS090 pour Vax/Vms
+;
+;/P/ Prosig Informatique, Marc Morissette 13 Aout 1993
+;
+;-------------------------------------------------------------------------------
+;
+; Lecture de la variable environnemental pour se positionner sur la bonne
+; base de données.
+;
+;
+
+PROCEDURE INTERNAL PREPARATION_FICHIER_CMD
+BEGIN
+  ;
+  ; Préparation du fichier de commande
+  ;
+  LET T_FICCMD = "PG_TEMP:" + &
+                 TRUNCATE( XPRNOM OF GSPROGRAMME ) + &           ;Nom du programme
+                 "_" + TRUNCATE( GETSYSTEMVAL("USERNAME",SYMBOL) )+ & ;Nom de l'usager
+                 "_" + XJBCLE OF GSJOB + ".TMP" ; Fichier de commandes
+
+  LET T_FICPRT = "PG_TEMP:" + &
+                 TRUNCATE( XPRNOM OF GSPROGRAMME ) + &           ;Nom du programme
+                 "_" + TRUNCATE( GETSYSTEMVAL("USERNAME",SYMBOL) )+ & ;Nom de l'usager
+                 "_" + XJBCLE OF GSJOB + ".PRT" ; Fichier d'impression
+
+                                                                 ; Fichier du logfile
+  LET T_FICLOG = "PG_TEMP:" + &                                  ;Répertiore
+                 TRUNCATE( XPRNOM OF GSPROGRAMME ) + &           ;Nom du programme
+                 "_" + TRUNCATE( GETSYSTEMVAL("USERNAME",SYMBOL) )+ & ;Nom de l'usager
+                 "_" + XJBCLE OF GSJOB + ".LOG"
+  ;
+  ; On assigne le fichier de commande.
+  ;
+  LET T_CMD = "$ DEFINE/JOB/NOLOG GSFICHIER_CMD " + TRUNCATE(T_FICCMD)
+  RUN COMMAND T_CMD
+  ;
+  ; Il faut que le fichier de commande soit créé à vide.
+  ;
+  LET T_CMD = "$ COPY PG_DATA:GSXFC_VIDE.DAT " + T_FICCMD
+  RUN COMMAND T_CMD
+  ;
+  ; Variable d'environnement pour travailler dans la bonne base de donnée.
+  ; Exemple: T_SETBASE = "@FIN:[COM]SET_DEV FIN F"
+  ;
+
+;  LET T_DATA = "$ DEFINE SYS$OUTPUT " + T_FICLOG
+;  DO INTERNAL PUT_CMD
+
+  LET T_DATA = "$ " + GETSYSTEMVAL("SETBASE",SYMBOL)
+  DO INTERNAL PUT_CMD
+  ;
+  ; Nom logique pour le fichier d'impression.
+  ;
+  LET T_DATA = "$DEFINE/JOB/NOLOG PRFICIMP " + TRUNCATE(T_FICPRT)
+  DO INTERNAL PUT_CMD
+
+  ;
+  ; Variable environnementale pour les triggers.
+  ;
+  LET T_DATA = "$ PROSIG_XPRNOM :== " + TRUNCATE(XPRNOM OF GSPROGRAMME)
+  DO INTERNAL PUT_CMD
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Traitement de ligne contenant des commandes de système d'exploitation.
+;
+;
+PROCEDURE INTERNAL CMD_SYSTEME ; ok
+BEGIN
+  IF "$IF"    = UPSHIFT(XPDCMD OF GSPR_DETAIL)[1:3] OR & ; $IF
+     "$ENDIF" = UPSHIFT(XPDCMD OF GSPR_DETAIL)[1:6]      ; $ENDIF
+  THEN DO INTERNAL CHOIX_EXECUTION
+  ;
+  ; Il faut conserver si on est dans QUIZ ou QTP pour des traitements après
+  ; le EXIT.
+  ;
+  IF "$QUIZ" = UPSHIFT(XPDCMD OF GSPR_DETAIL) OR &
+     "$QTP"  = UPSHIFT(XPDCMD OF GSPR_DETAIL)
+  THEN LET T_MODPOW = UPSHIFT(XPDCMD OF GSPR_DETAIL[2:4])
+  ;
+  ; On genere les commandes pour imprimer la liste des paramètres
+  ;
+  IF "$QUIZ" = UPSHIFT(XPDCMD)
+  THEN BEGIN
+    ;
+    ; On incrit QUIZ
+    ;
+    LET T_DATA = "$QUIZ"
+    DO INTERNAL PUT_CMD
+    IF XPRFLGLSTPAR OF GSPROGRAMME = "1"
+    THEN BEGIN
+      LET T_DATA = "EXE " + D-NOM-LISTE
+      DO INTERNAL PUT_CMD
+      LET T_DATA = XJBCLE OF GSJOB
+      DO INTERNAL PUT_CMD
+      DO INTERNAL NULL
+      LET T_DATA = D_XPRDSC
+      DO INTERNAL PUT_CMD
+    END
+  END
+  ;
+  ; Appel de QTP.
+  ;
+  IF "$QTP" = UPSHIFT(XPDCMD OF GSPR_DETAIL)
+  THEN BEGIN
+    LET T_DATA = "$QTP"
+    DO INTERNAL PUT_CMD
+  END
+
+  ;
+  ; Traitement des lignes conditionnelles selon le système d'exploitation.
+  ;
+  IF "$@VMS" = XPDCMD OF GSPR_DETAIL[1:5]
+  THEN BEGIN
+    LET T_DATA = XPDCMD OF GSPR_DETAIL[6:70]
+    DO INTERNAL PUT_CMD
+  END
+
+  ;
+  ; Traitement des sous-fichiers. Chaque sous fichier permanant est un
+  ; fichier unique.
+  ;
+  ; Exemple : Dans le qtp CR001T on a un subfile WCR001A.
+  ;           Ce subfile doit être déclaré de la façon suivante
+  ;           dans prog_code:
+  ;                           $DEFINE A WCR001A
+  ;           Ce qui va générer un nom logique (ou file equation pour MPE)
+  ;           faisant la correspondance entre le subfile WCR001A et
+  ;           le fichier physique W99999A.
+  ;           Avec    W = Identification d'un subfile.
+  ;               99999 = Numéro du job.
+  ;                   A = Lettre permettant de séparer les subfile du QTP
+  ;                       (ou quiz)
+  ;
+  IF "$DEFINE" = UPSHIFT(XPDCMD OF GSPR_DETAIL[1:7])
+  THEN BEGIN
+      LET T_DATA = &
+            "$DEFINE/JOB/LOG " &
+          + TRUNCATE (UPSHIFT(XPDCMD OF GSPR_DETAIL[11:70])) &
+          + " PG_TEMP:W" + TRUNCATE( XPRNOM OF GSPROGRAMME ) + "_" + &
+              XJBCLE OF GSJOB + UPSHIFT(XPDCMD OF GSPR_DETAIL[9:1])
+      DO INTERNAL PUT_CMD
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Cette procedure détruit le fichier commande n'effectu pas de mise à jour.
+;
+;
+PROCEDURE INTERNAL DETRUIT_FICCMD
+BEGIN
+  CLOSE GSFICHIER_CMD
+  LET T_CMD = "$ DELETE/NOLOG/NOCONFIRM " + TRUNCATE(T_FICCMD) + ";*"
+  RUN COMMAND T_CMD
+END
+
+
+PROCEDURE INTERNAL CREATION_FICHIER_CMD
+BEGIN
+  ;
+  ; Lecture du détail d'un programme.
+  ;
+  ; Premier caractère de la ligne:   $ ==> Commande de système
+  ;                                  % ==> Traitement de paramètre
+  ;                                  ! ==> Manipulation de caractères
+  ;                                    ==> Ligne de texte
+  ;
+  WHILE RETRIEVING GSPR_DETAIL VIA      XPRNOM  &
+                               USING    XPRNOM OF GSPROGRAMME
+  BEGIN
+    LET T_CODE = " "
+
+    IF "$" = XPDCMD OF GSPR_DETAIL[1:1]
+    THEN DO INTERNAL CMD_SYSTEME
+    ELSE BEGIN
+      IF "%" = XPDCMD OF GSPR_DETAIL[1:1]
+      THEN DO INTERNAL PARAMETRE
+      ELSE BEGIN
+        IF "!" = XPDCMD OF GSPR_DETAIL[1:1]
+        THEN DO INTERNAL LIGNE_SPECIAL
+        ELSE BEGIN
+          LET T_DATA = TRUNCATE(XPDCMD OF GSPR_DETAIL)
+          DO INTERNAL PUT_CMD
+        END
+      END
+    END
+  END
+  LET T_CODE = " "
+END
+
+
+PROCEDURE INTERNAL EXECUTION_LOT
+BEGIN
+  IF XPRFLGIMP OF GSPROGRAMME = "1" ; Si l'on imprime le résultat
+  THEN BEGIN
+      ;
+      ; Ajout de la commande PRINT pour l'impression du PRT.
+      ;
+     LET T_DATA = "$ PRINT " + TRUNCATE(T_FICPRT) + ";* -"
+     DO INTERNAL PUT_CMD
+     ;
+     ;si le prog est pd226t diriger vers la i08
+     ;
+      LET T_DATA = "/QUEUE=" + XILQUENAM OF GSXIM_LOCAL + &
+                                   " /COPIE=" + ASCII(XJBNBRCOP OF GSJOB) + &
+                                   TRUNCATE(XPRPARIMP OF GSPROGRAMME) + "-"
+     DO INTERNAL PUT_CMD
+     LET T_DATA = "/NAME=" + TRUNCATE(XPRNOM OF GSPROGRAMME)
+
+     IF     XFRCLE OF GSPROGRAMME <> "" &
+        AND XFRPHYNAM OF GSFORME <> ""
+     THEN LET T_DATA = TRUNCATE( T_DATA ) + &
+               "/FORM=" + TRUNCATE(XFRPHYNAM OF GSFORME)
+
+     IF XPRIMPPRI OF GSPROGRAMME > 0
+     THEN LET T_DATA = TRUNCATE( T_DATA ) + &
+               "/PRIORITY=" + ASCII(XPRIMPPRI OF GSPROGRAMME)
+
+     DO INTERNAL PUT_CMD
+    END
+
+    CLOSE GSFICHIER_CMD
+    ;
+    ; Formatte l'heure saisie par l'usager pour le lancement différé
+    ;
+    IF "+" = XJBHREDIF OF GSJOB[1:1]
+    THEN LET T_AFTER = '/AFTER="+' + ASCII(XJBNBRJRS OF GSJOB) + "-" + &
+                       XJBHREDIF OF GSJOB[2:5] + '"'
+    ELSE LET T_AFTER = '/AFTER="' + TRUNCATE(XJBHREDIF OF GSJOB) + "+" + &
+                         ASCII(XJBNBRJRS OF GSJOB) + '-"'
+    LET T_CMD = "$ SUBMIT/DELETE " + TRUNCATE(T_FICCMD) + &
+                "/NAME=" + XPRNOM OF GSPROGRAMME + TRUNCATE(T_AFTER)
+    LET T_CMD = TRUNCATE(T_CMD) + "/QUEUE=" + TRUNCATE(XQBNAM OF GSQUEUE_BATCH)
+    LET T_CMD = TRUNCATE(T_CMD) + "/NOPRINT/LOG_FILE=" + T_FICLOG
+
+    RUN COMMAND T_CMD CLEAR LINE 23 TO 24
+END
+
+
+
+PROCEDURE INTERNAL EXECUTION_INTERACTIVE
+BEGIN
+    ;
+    ;  Ajout du CLOSE pour éviter le "file lock by another user" lors de
+    ;  l'exécution directement à l'écran.
+    ;$ SET TERM/WIDTH=132
+    ;$ TYPE/PAGE 'P1'
+    ;$ INQUIRE/NOP REP " Retour pour continuer "
+
+    ;
+;  LET T_DATA = "$ DEASSIGN SYS$OUTPUT"
+;  DO INTERNAL PUT_CMD
+  LET T_DATA = "$ SET TERM/WIDTH=132"
+  DO INTERNAL PUT_CMD
+  LET T_DATA = "$ TYPE/PAGE " + T_FICPRT
+  DO INTERNAL PUT_CMD
+  LET T_DATA = '$ INQUIRE/NOPUNCTUATION REP " Retour pour continuer "'
+  DO INTERNAL PUT_CMD
+  LET T_DATA = "$ SET TERM/WIDTH=80"
+  DO INTERNAL PUT_CMD
+
+  CLOSE GSFICHIER_CMD
+  LET T_CMD = "$ @" + T_FICCMD
+  RUN COMMAND T_CMD CLEAR ALL
+  REFRESH ALL
+  info = "                " now
+  DISPLAY D_LABEL FROM D_LBLIMP
+  DISPLAY D_XPAHLP FROM D_HLPIMP
+  LET T_FIELD = "N"
+  LET T_FLGIMP = "O"
+  LET T_REQOPT = "O" ; Optionnel
+  LET T_TYPSEL = ""
+  DISPLAY T_TYPSEL
+  ACCEPT T_FIELD
+  IF T_FIELD = "O" OR T_FIELD = "Y" OR T_FIELD = "1"
+  THEN BEGIN
+    ACCEPT XIMCOD OF GSJOB
+    DISPLAY D_XILDSC
+    ACCEPT XJBNBRCOP OF GSJOB
+    LET T_CMD = "$ PRINT " + TRUNCATE(T_FICPRT) + &
+                  "/QUEUE=" + TRUNCATE(XILQUENAM OF GSXIM_LOCAL) + &
+                  "/COPIE=" + ASCII(XJBNBRCOP OF GSJOB)   + &
+                  "/NAME=" + TRUNCATE(XPRNOM OF GSPROGRAMME) + &
+                  TRUNCATE(XPRPARIMP)
+    IF     XFRCLE OF GSPROGRAMME <> "" &
+         AND XFRPHYNAM OF GSFORME <> ""
+    THEN LET T_CMD=TRUNCATE(T_CMD)+"/FORM="+TRUNCATE(XFRPHYNAM OF GSFORME)
+    IF XPRIMPPRI OF GSPROGRAMME > 0
+    THEN LET T_CMD=TRUNCATE(T_CMD)+"/PRIORITY="+ASCII(XPRIMPPRI OF GSPROGRAMME)
+    RUN COMMAND T_CMD
+  END
+END

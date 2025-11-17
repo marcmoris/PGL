@@ -1,0 +1,565 @@
+;/T/ Etats de comptes (Desgagnés)
+;
+;/P/ Programmeur...: Alain Côté
+;    Date Création.: 30 juillet 1993
+;
+;    Description...: Etat de comptes du client. Un état de compte c'est
+;                    la liste de toutes les transactions liées aux factures
+;                    émisent pour le client.
+;
+;                    Pour faire la sélection des transactions on a besoin
+;                    de 2 dates, la première date sert à la sélection des
+;                    factures, crédits, note de crédit, ajustement et paiement
+;                    non-appliqué, la deuxième date sert à la sélection
+;                    des encaissements.
+;
+;                    Pourquoi la sélection des encaissements est différente,
+;                    c'est pour inclure les encaissements qui sont saisie
+;                    entre la date d'état de compte et la date de lancement.
+;                    C'est fréquent que l'impression des états de comptes
+;                    est fait plusieur jours après la fermeture du mois.
+;
+;                    La logique d'épuration des transactions est la suivante.
+;                    Toutes les factures qui sont inférieure à la date de
+;                    de début de période dont le solde est à zéro ne seront
+;                    pas imprimée.
+;
+;
+;/M/ Adatation....: Marc Morissette 4 Novembre 1993
+;
+;    Description..: Format différent
+;
+;/M/ Nancy Marceau, 1994/04/15
+;      - Aller chercher dans CRINTERVALLE, les informations à imprimer concernant
+;        la limite de crédit.
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST
+
+
+RUN cr335t
+
+GLOBAL TEMPORARY G_PECDATDEB DATE  ; Date de début de la période sélectionnée.
+GLOBAL TEMPORARY G_PECDATFIN DATE  ; Date de fin de la période sélectionnée.
+GLOBAL TEMPORARY G_DATSELENC DATE  ; Date de sélection pour les encaissement.
+;
+;Calcul de l'intérêt
+;
+GLOBAL TEMPORARY G_CALINT    CHARACTER SIZE 1 PARM
+
+;-------------------------------------------------------------------------------
+;
+;
+; Lecture de la période de référence pour obtenir la date de fin de cette
+; periode. Cette date de fin va servir de date de référence pour la
+; recherche des pièces.
+;
+;
+REQUEST DATE_FIN_PERIODE
+
+ACCESS MCPERIODE_CTB
+
+CHOOSE PECCLE PARM
+
+;
+; On demande la date de sélection pour les encaissements.
+;
+DEFINE    D_DATSELENC DATE  =   PARM
+
+;
+; On conserve les dates de la période.
+;
+ITEM G_PECDATDEB = PECDATDEB OF MCPERIODE_CTB
+ITEM G_PECDATFIN = PECDATFIN OF MCPERIODE_CTB
+
+;
+; Si l'usager saisie une date de sélection des encaissements inférieure
+; à la date de fin de période, alors on prend la date de fin de période
+; par défaut.
+;
+ITEM G_DATSELENC = D_DATSELENC IF D_DATSELENC >= PECDATFIN OF MCPERIODE_CTB &
+              ELSE G_PECDATFIN
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Sélection des factures, des crédits et des paiements non-appliqués selon
+; la date de fin de période et des transactions associées à celles-ci.
+;
+; Les transactions doivent être journalisées.
+;
+;
+REQUEST SELECT_FACTURE_ET_HISTO
+
+ACCESS CRCPT_A_REC &
+  ;
+  ; Cédule d'encaissement.
+  ;
+  LINK CIECLE OF CRCPT_A_REC  , &
+       CARCLE OF CRCPT_A_REC    &
+    TO CIECLE                 , &
+       CARCLE                    OF CRCAR_CEDULE &
+  ;
+  ; Historique des transactions.
+  ;
+  LINK CIECLE    OF CRCPT_A_REC  , &
+       CARCLE    OF CRCPT_A_REC  , &
+       CCDCLELIG OF CRCAR_CEDULE   &
+    TO CIECLE                 , &
+       CARCLE                 , &
+       CCDCLELIG                 OF CRCAR_HISTO OPTIONAL
+
+
+CHOOSE CIECLE     PARM, &     ; Numéro de compagnie du menu.
+       REFCIECLE  PARM, &     ; Compagnie de la charte client.
+       REFCLENUM  PARM        ; Numéro de client
+
+
+SELECT CRCPT_A_REC IF    (   CARTYPECR OF CRCPT_A_REC = "FA"  &
+                          OR CARTYPECR OF CRCPT_A_REC = "CR"  &
+                          OR CARTYPECR OF CRCPT_A_REC = "NA" ) &
+                     AND CARDAT OF CRCPT_A_REC <= G_PECDATFIN  &
+                     AND CARDATJOU OF CRCPT_A_REC <> 0
+
+
+SELECT CRCAR_HISTO IF CRHDATJOU OF CRCAR_HISTO <> 0 &
+                      AND &
+                      (  (  ( &
+                                 CRHTYPTRA OF CRCAR_HISTO = "AJ"  &
+                              OR CRHTYPTRA OF CRCAR_HISTO = "NC"  &
+                              OR CRHTYPTRA OF CRCAR_HISTO = "MC"  &
+                            ) &
+                            AND CRHDAT OF CRCAR_HISTO <= G_PECDATFIN &
+                         ) &
+                         OR &
+                         (  &
+                                CRHTYPTRA OF CRCAR_HISTO = "EN"  &
+                            AND CRHDAT OF CRCAR_HISTO <= G_DATSELENC &
+                         ) &
+                      )
+
+
+TEMPORARY T_DSC       CHARACTER SIZE 30 ; Description sur l'état de compte
+TEMPORARY T_FLGHIS    CHARACTER SIZE  1 ; Flag pour l'historique
+TEMPORARY T_CRHMNTCAR FLOAT     SIZE 8  ; Montant de l'historique
+
+
+
+SORT ON CIECLE    OF CRCPT_A_REC &
+     ON CARCLE    OF CRCPT_A_REC &
+     ON CCDCLELIG OF CRCAR_CEDULE
+
+
+
+ITEM T_DSC = CARCMDCLI OF CRCPT_A_REC &
+                  IF CARTYPECR OF CRCPT_A_REC <> "NA" &
+           ELSE "Paiement non-appl/No-appl Pmt."
+
+;
+; Si c'est un encaissement ou une mauvaise créance il faut inverser le
+; montant provenant de l'historique, pour que celui-ci diminue le
+; compte à recevoir.
+;
+ITEM T_CRHMNTCAR = 0 - CRHMNTCAR OF CRCAR_HISTO  &
+                            IF    CRHTYPTRA OF CRCAR_HISTO = "EN" &
+                               OR CRHTYPTRA OF CRCAR_HISTO = "MC" &
+              ELSE CRHMNTCAR OF CRCAR_HISTO
+
+;
+; Sous-fichier contenant les transactions qu'il faut calculer le solde.
+; C-a-d. les factures, les crédits et les paiements non-appliqués, car ces
+; transactions peuvent avoir des transactions associées.
+;
+; Comme par exemple, une facture de la période peut avoir un ajustement;
+; une facture peut avoir un encaissement dont la date est inférieur à la
+; période.
+;
+;
+SUBFILE WCR335A AT CCDCLELIG &
+  INCLUDE CIECLE    OF CRCPT_A_REC  , &
+          CARCLE    OF CRCPT_A_REC  , &
+          REFCIECLE OF CRCPT_A_REC  , &
+          REFCLENUM OF CRCPT_A_REC  , &
+          REFCLETYP OF CRCPT_A_REC  , &
+          RADCLE    OF CRCPT_A_REC  , &
+          CARTYPECR OF CRCPT_A_REC  , &
+          CARDAT    OF CRCPT_A_REC  , &
+          CARDATNET OF CRCPT_A_REC  , &
+          CARTERNET OF CRCPT_A_REC  , &
+          CARDATFRS OF CRCPT_A_REC  , &
+          CARTERFRS OF CRCPT_A_REC  , &
+          CCDCLELIG OF CRCAR_CEDULE , &
+          CCDDATDUE OF CRCAR_CEDULE , &
+          CCDMNT    OF CRCAR_CEDULE , &
+          T_DSC
+
+
+;
+; Transaction de l'historique.
+;  A --> Si la date de la transaction est inférieure à la date de début de
+;        période il faut que cette transaction soit sommarisé avec la facture,
+;        c'est pour cette raison que l'on ajoute cette transaction dans le
+;        même sous-fichier que la facture.
+;
+;  B --> La transaction fait partie de la période, elle doit être imprimé
+;        telquel.
+;
+ITEM T_FLGHIS = " " IF NOT RECORD CRCAR_HISTO EXISTS &
+           ELSE "A"
+;
+; Pour avoir les paiements du mois
+; IF (  (    CRHTYPTRA OF CRCAR_HISTO = "NC" &
+;                            OR CRHTYPTRA OF CRCAR_HISTO = "MC" &
+;                            OR CRHTYPTRA OF CRCAR_HISTO = "EN" &
+;                          ) &
+;                          AND CRHDAT OF CRCAR_HISTO < G_PECDATDEB &
+;                       ) &
+;                       OR  CRHTYPTRA OF CRCAR_HISTO = "AJ" &
+;           ELSE "B"
+
+;
+; Sous-fichier contenant les transactions de la période de l'état de compte.
+; C-a-d. les notes de crédits, les mauvaises créances et les encaissements
+; qui font partie de la période d'impression. Voir le commentaire sur la
+; variable T_FLGHIS.
+;
+SUBFILE WCR335B IF T_FLGHIS = "B" &
+  INCLUDE CIECLE    OF CRCPT_A_REC  , &
+          CARCLE    OF CRCPT_A_REC  , &
+          REFCIECLE OF CRCPT_A_REC  , &
+          REFCLENUM OF CRCPT_A_REC  , &
+          REFCLETYP OF CRCPT_A_REC  , &
+          RADCLE    OF CRCPT_A_REC  , &
+          CARDATNET OF CRCPT_A_REC  , &
+          CARTERNET OF CRCPT_A_REC  , &
+          CARDATFRS OF CRCPT_A_REC  , &
+          CARTERFRS OF CRCPT_A_REC  , &
+          CCDDATDUE OF CRCAR_CEDULE , &
+          CRHTYPTRA OF CRCAR_HISTO  , &
+          CRHDAT    OF CRCAR_HISTO  , &
+          T_CRHMNTCAR               ALIAS T_MNTTRA , &
+          T_DSC
+
+
+;
+; Sous-fichier contenant les transactions qu'il faut calculer le solde.
+; C'est le même sous-fichier que pour les factures ci-haut.
+; C-a-d. les notes de crédits, les mauvaises créances et les encaissements
+; qui ne font partie de la période d'impression. Voir le commentaire sur la
+; variable T_FLGHIS.
+;
+OUTPUT *WCR335A ALIAS A_WCR335_HIS &
+                ADD &
+                IF T_FLGHIS = "A"
+  ITEM CIECLE    OF A_WCR335_HIS FINAL CIECLE    OF CRCPT_A_REC
+  ITEM CARCLE    OF A_WCR335_HIS FINAL CARCLE    OF CRCPT_A_REC
+  ITEM REFCIECLE OF A_WCR335_HIS FINAL REFCIECLE OF CRCPT_A_REC
+  ITEM REFCLENUM OF A_WCR335_HIS FINAL REFCLENUM OF CRCPT_A_REC
+  ITEM REFCLETYP OF A_WCR335_HIS FINAL REFCLETYP OF CRCPT_A_REC
+  ITEM RADCLE    OF A_WCR335_HIS FINAL RADCLE    OF CRCPT_A_REC
+  ITEM CARTYPECR OF A_WCR335_HIS FINAL CARTYPECR OF CRCPT_A_REC
+  ITEM CARDAT    OF A_WCR335_HIS FINAL CARDAT    OF CRCPT_A_REC
+  ITEM CARDATNET OF A_WCR335_HIS FINAL CARDATNET OF CRCPT_A_REC
+  ITEM CARTERNET OF A_WCR335_HIS FINAL CARTERNET OF CRCPT_A_REC
+  ITEM CARDATFRS OF A_WCR335_HIS FINAL CARDATFRS OF CRCPT_A_REC
+  ITEM CARTERFRS OF A_WCR335_HIS FINAL CARTERFRS OF CRCPT_A_REC
+  ITEM CCDCLELIG OF A_WCR335_HIS FINAL CCDCLELIG OF CRCAR_CEDULE
+  ITEM CCDDATDUE OF A_WCR335_HIS FINAL CCDDATDUE OF CRCAR_CEDULE
+  ITEM CCDMNT    OF A_WCR335_HIS FINAL T_CRHMNTCAR
+  ITEM T_DSC     OF A_WCR335_HIS FINAL T_DSC
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; On calcul le solde des factures.
+; S'il reste un solde à recevoir on inscrit la facture dans le sous-fichier de
+; l'état de compte.
+;
+;
+REQUEST CALCUL_SOLDE_FACTURE
+
+ACCESS *WCR335A
+
+
+TEMPORARY T_SLD FLOAT SIZE 8 ; Solde de la cédule.
+
+
+SORT ON CIECLE    OF WCR335A , &  ; Compagnie
+        CARCLE    OF WCR335A , &  ; No document
+        CCDCLELIG OF WCR335A      ; Numéro de cédule
+
+
+ITEM T_SLD SUBTOTAL CCDMNT OF WCR335A &
+           RESET AT CCDCLELIG
+
+
+OUTPUT *WCR335B ADD &
+                AT CCDCLELIG &
+                IF T_SLD <> 0
+  ITEM CIECLE    OF WCR335B FINAL CIECLE    OF WCR335A
+  ITEM CARCLE    OF WCR335B FINAL CARCLE    OF WCR335A
+  ITEM REFCIECLE OF WCR335B FINAL REFCIECLE OF WCR335A
+  ITEM REFCLENUM OF WCR335B FINAL REFCLENUM OF WCR335A
+  ITEM REFCLETYP OF WCR335B FINAL REFCLETYP OF WCR335A
+  ITEM RADCLE    OF WCR335B FINAL RADCLE    OF WCR335A
+  ITEM CCDDATDUE OF WCR335B FINAL CCDDATDUE OF WCR335A
+  ITEM CRHTYPTRA OF WCR335B FINAL CARTYPECR OF WCR335A
+  ITEM CRHDAT    OF WCR335B FINAL CARDAT    OF WCR335A
+  ITEM CARDATNET OF WCR335B FINAL CARDATNET OF WCR335A
+  ITEM CARTERNET OF WCR335B FINAL CARTERNET OF WCR335A
+  ITEM CARDATFRS OF WCR335B FINAL CARDATFRS OF WCR335A
+  ITEM CARTERFRS OF WCR335B FINAL CARTERFRS OF WCR335A
+  ITEM T_MNTTRA  OF WCR335B FINAL T_SLD
+  ITEM T_DSC     OF WCR335B FINAL T_DSC     OF WCR335A
+
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Cette étape sert à creer un fichier qui va faire apparaitre les transactions
+; de facon trier pour l'impression de l'etat de compte et calcul le mini-age
+; des comptes par client.
+;
+;
+REQUEST TRIER_RECORD_ET_AGE_COMPTE
+
+ACCESS *WCR335B &
+  LINK REFCIECLE, &
+       REFCLENUM  &
+    TO CLICIECLE, &
+       CLICLE OF CRCLIENT  &
+  LINK CIECLE OF WCR335B , &
+       "3"               , &
+       CLILNG OF CRCLIENT &
+    TO CIECLE , &
+       ITVTYP , &
+       ITVCOD OF CRINTERVALLE
+
+;
+; Variable pour le mini-age des comptes.
+;
+TEMPORARY T_SLD01     FLOAT   SIZE 8
+TEMPORARY T_SLD02     FLOAT   SIZE 8
+TEMPORARY T_SLD03     FLOAT   SIZE 8
+TEMPORARY T_SLD04     FLOAT   SIZE 8
+TEMPORARY T_SLD05     FLOAT   SIZE 8
+TEMPORARY T_SLDCLI01  FLOAT   SIZE 8
+TEMPORARY T_SLDCLI02  FLOAT   SIZE 8
+TEMPORARY T_SLDCLI03  FLOAT   SIZE 8
+TEMPORARY T_SLDCLI04  FLOAT   SIZE 8
+TEMPORARY T_SLDCLI05  FLOAT   SIZE 8
+TEMPORARY T_DIFDAT    INTEGER SIZE 4
+;
+; Solde de la transaction, car on imprime pas les transactions par ligne
+; de cédule. Mais on a besoin de la cédule pour le calcul du mini-age des
+; comptes.
+;
+TEMPORARY T_SLDTRA    FLOAT SIZE 8
+;
+; Solde total pour calculer le dépassement de la limite de crédit s'il y a lieu.
+;
+TEMPORARY T_SLDLIMCRT FLOAT SIZE 8
+
+;
+; Flag qui indique le dernier record par client.
+;
+TEMPORARY T_FLGDRN CHARACTER SIZE 1
+TEMPORARY T_FLGTRI CHARACTER SIZE 1
+
+
+
+SORT ON CIECLE    OF WCR335B , &               ;Compagnie
+        REFCLENUM OF WCR335B , &               ;Code  client
+        RADCLE    OF WCR335B , &               ;Adresse d'état de compte
+        CRHDAT    OF WCR335B , &               ;Date de transaction
+        CARCLE    OF WCR335B , &               ;No document
+        CRHTYPTRA OF WCR335B                   ;Type de transaction
+
+
+
+;
+; On calcul le nombre de jours entre la date due et la date de fin de période.
+;
+ITEM T_DIFDAT = DAYS( G_PECDATFIN ) - DAYS( CCDDATDUE OF WCR335B )
+
+ITEM T_FLGTRI = "1"
+
+;
+; Répartition du solde dans la bonne colonne selon les intervalles de la
+; table CRINTERVALLE.
+;
+ITEM T_SLD01 = T_MNTTRA OF WCR335B &
+                                   IF T_DIFDAT <= ITVFIN1 OF CRINTERVALLE &
+          ELSE 0
+;
+ITEM T_SLD02 = T_MNTTRA OF WCR335B &
+                                   IF     T_DIFDAT >= ITVDEB2 OF CRINTERVALLE &
+                                      AND T_DIFDAT <= ITVFIN2 OF CRINTERVALLE &
+          ELSE 0
+;
+ITEM T_SLD03 = T_MNTTRA OF WCR335B &
+                                   IF     T_DIFDAT >= ITVDEB3 OF CRINTERVALLE &
+                                      AND T_DIFDAT <= ITVFIN3 OF CRINTERVALLE &
+          ELSE 0
+;
+ITEM T_SLD04 = T_MNTTRA OF WCR335B &
+                                   IF     T_DIFDAT >= ITVDEB4 OF CRINTERVALLE &
+                                      AND T_DIFDAT <= ITVFIN4 OF CRINTERVALLE &
+          ELSE 0
+;
+ITEM T_SLD05 = T_MNTTRA OF WCR335B &
+                                   IF     T_DIFDAT >= ITVDEB5 OF CRINTERVALLE &
+          ELSE 0
+
+
+ITEM T_SLDTRA   SUBTOTAL T_MNTTRA OF WCR335B RESET AT CRHTYPTRA
+
+ITEM T_SLDLIMCRT SUBTOTAL T_MNTTRA OF WCR335B RESET AT RADCLE
+
+;
+; Sous-fichier contenant toutes les transactions à imprimer sur l'état de
+; compte.
+; L'ordre des transactions est déterminé dans cette étape, car le dernier
+; record par client doit contenir l'age des comptes du client. C'est pour
+; cette raison qu'il nous faut un flag pour indiquer la dernière ligne
+; au programme d'impression.
+;
+SUBFILE WCR335C KEEP &
+                AT CRHTYPTRA &
+  INCLUDE CIECLE     OF WCR335B      , &
+          CARCLE     OF WCR335B      , &
+          REFCIECLE  OF WCR335B      , &
+          REFCLENUM  OF WCR335B      , &
+          REFCLETYP  OF WCR335B      , &
+          RADCLE     OF WCR335B      , &
+          CRHTYPTRA  OF WCR335B      , &
+          CRHDAT     OF WCR335B      , &
+          CCDDATDUE  OF WCR335B      , &
+          CARDATNET  OF WCR335B      , &
+          CARTERNET  OF WCR335B      , &
+          CARDATFRS  OF WCR335B      , &
+          CARTERFRS  OF WCR335B      , &
+          T_SLDTRA                   , &
+          T_SLDLIMCRT                , &
+          T_DIFDAT                   , &
+          T_DSC      OF WCR335B      , &
+          ITVDSC     OF CRINTERVALLE , &
+          ITVCOMFRA1 OF CRINTERVALLE , &
+          ITVCOMFRA2 OF CRINTERVALLE , &
+          ITVCOMFRA3 OF CRINTERVALLE , &
+          ITVCOMFRA4 OF CRINTERVALLE , &
+          ITVCOMFRA5 OF CRINTERVALLE , &
+          ITVLIMFRA1 OF CRINTERVALLE,  &
+          ITVLIMFRA2 OF CRINTERVALLE,  &
+          ITVLIMFRA3 OF CRINTERVALLE,  &
+          ITVLIMFRA4 OF CRINTERVALLE,  &
+          ITVLIMFRA5 OF CRINTERVALLE,  &
+          ITVCOLTIT1 OF CRINTERVALLE , &
+          ITVCOLTIT2 OF CRINTERVALLE , &
+          ITVCOLTIT3 OF CRINTERVALLE , &
+          ITVCOLTIT4 OF CRINTERVALLE , &
+          ITVCOLTIT5 OF CRINTERVALLE , &
+          T_SLD01 ALIAS T_SLDCLI01                 , &
+          T_SLD02 ALIAS T_SLDCLI02                 , &
+          T_SLD03 ALIAS T_SLDCLI03                 , &
+          T_SLD04 ALIAS T_SLDCLI04                 , &
+          T_SLD05 ALIAS T_SLDCLI05                 , &
+          T_FLGDRN                   , &
+          T_FLGTRI    , &
+          G_PECDATFIN , &
+          G_CALINT
+
+
+REQUEST CALCUL_INTETET SKIP IF G_CALINT <> "1"
+
+ACCESS *WCR335C &
+   LINK REFCIECLE OF WCR335C , &
+        REFCLENUM OF WCR335C , &
+        CIECLE    OF WCR335C &
+     TO CLICIECLE, &
+        CLICLE, &
+        CIECLE OF VCLC_CLI &
+   LINK CLCTERFRS OF VCLC_CLI &
+     TO TMECLE OF CRTERME ALIAS CLI_TERME_FRS & ; Pourcentage de frais
+   LINK CARTERFRS OF WCR335C &
+     TO TMECLE OF CRTERME ALIAS CAR_TERME_FRS OPTIONAL ; Pourcentage de frais
+
+
+SORTED ON CIECLE    OF WCR335C, &               ;Compagnie
+          REFCLENUM OF WCR335C, &               ;Code  client
+          RADCLE    OF WCR335C, &               ;Adresse d'état de compte
+          CRHDAT    OF WCR335C, &               ;Date de transaction
+          CARCLE    OF WCR335C                  ;No document
+
+TEMPORARY T_INTERETS FLOAT SIZE 8
+TEMPORARY T_TOTINT   FLOAT SIZE 8
+TEMPORARY T_TMEPCT   FLOAT SIZE 4
+TEMPORARY T_NBRJRS    INTEGER SIZE 4 ; Nombre de jours en retard
+TEMPORARY T_NBRJRSNET INTEGER SIZE 4 ; Nombre de jours sans intéret
+
+
+ITEM T_TMEPCT    = TMEPCT OF CAR_TERME_FRS IF RECORD CAR_TERME_FRS EXIST &
+              ELSE TMEPCT OF CLI_TERME_FRS
+
+; Nombre de jours en retard
+ITEM T_NBRJRS = DAYS( G_PECDATFIN ) - DAYS ( CRHDAT OF WCR335C )
+
+; Nombre de jours sans intéret
+ITEM T_NBRJRSNET = ( DAYS( CARDATFRS OF WCR335C ) - DAYS ( CRHDAT OF WCR335C ) )
+
+; Total de la facture * nombre de jours  * pourcentage /365
+;
+ITEM T_INTERETS = &
+   ROUND( ( T_SLDTRA * T_NBRJRS  ) * ( T_TMEPCT /365 ) ) &
+   IF   T_NBRJRS > T_NBRJRSNET &
+   ELSE 0
+
+ITEM T_TOTINT SUBTOTAL T_INTERETS RESET AT RADCLE
+
+OUTPUT *WCR335C ADD AT RADCLE ALIAS A_WCR335C_INTERETS IF T_TOTINT > 0
+  ITEM CIECLE      OF A_WCR335C_INTERETS FINAL CIECLE      OF WCR335C
+  ITEM CARCLE      OF A_WCR335C_INTERETS FINAL "Interets:"
+  ITEM REFCIECLE   OF A_WCR335C_INTERETS FINAL REFCIECLE   OF WCR335C
+  ITEM REFCLENUM   OF A_WCR335C_INTERETS FINAL REFCLENUM   OF WCR335C
+  ITEM REFCLETYP   OF A_WCR335C_INTERETS FINAL REFCLETYP   OF WCR335C
+  ITEM RADCLE      OF A_WCR335C_INTERETS FINAL RADCLE      OF WCR335C
+  ITEM CRHTYPTRA   OF A_WCR335C_INTERETS FINAL CRHTYPTRA   OF WCR335C
+  ITEM CRHDAT      OF A_WCR335C_INTERETS FINAL 0
+  ITEM T_DIFDAT    OF A_WCR335C_INTERETS FINAL T_DIFDAT    OF WCR335C
+  ITEM CARDATNET   OF A_WCR335C_INTERETS FINAL CARDATNET   OF WCR335C
+  ITEM CARTERNET   OF A_WCR335C_INTERETS FINAL CARTERNET   OF WCR335C
+  ITEM CARDATFRS   OF A_WCR335C_INTERETS FINAL CARDATFRS   OF WCR335C
+  ITEM CARTERFRS   OF A_WCR335C_INTERETS FINAL CARTERFRS   OF WCR335C
+  ITEM T_SLDTRA    OF A_WCR335C_INTERETS FINAL T_TOTINT
+  ITEM T_SLDLIMCRT OF A_WCR335C_INTERETS FINAL T_SLDLIMCRT OF WCR335C + &
+                                               T_TOTINT
+  ITEM T_DSC       OF A_WCR335C_INTERETS FINAL T_DSC       OF WCR335C
+  ITEM ITVDSC      OF A_WCR335C_INTERETS FINAL ITVDSC      OF WCR335C
+  ITEM ITVCOMFRA1  OF A_WCR335C_INTERETS FINAL ITVCOMFRA1  OF WCR335C
+  ITEM ITVCOMFRA2  OF A_WCR335C_INTERETS FINAL ITVCOMFRA2  OF WCR335C
+  ITEM ITVCOMFRA3  OF A_WCR335C_INTERETS FINAL ITVCOMFRA3  OF WCR335C
+  ITEM ITVCOMFRA4  OF A_WCR335C_INTERETS FINAL ITVCOMFRA4  OF WCR335C
+  ITEM ITVCOMFRA5  OF A_WCR335C_INTERETS FINAL ITVCOMFRA5  OF WCR335C
+  ITEM ITVCOLTIT1  OF A_WCR335C_INTERETS FINAL ITVCOLTIT1  OF WCR335C
+  ITEM ITVCOLTIT2  OF A_WCR335C_INTERETS FINAL ITVCOLTIT2  OF WCR335C
+  ITEM ITVCOLTIT3  OF A_WCR335C_INTERETS FINAL ITVCOLTIT3  OF WCR335C
+  ITEM ITVCOLTIT4  OF A_WCR335C_INTERETS FINAL ITVCOLTIT4  OF WCR335C
+  ITEM ITVCOLTIT5  OF A_WCR335C_INTERETS FINAL ITVCOLTIT5  OF WCR335C
+  ITEM T_SLDCLI01  OF A_WCR335C_INTERETS FINAL T_TOTINT
+  ITEM T_SLDCLI02  OF A_WCR335C_INTERETS FINAL 0
+  ITEM T_SLDCLI03  OF A_WCR335C_INTERETS FINAL 0
+  ITEM T_SLDCLI04  OF A_WCR335C_INTERETS FINAL 0
+  ITEM T_SLDCLI05  OF A_WCR335C_INTERETS FINAL 0
+  ITEM T_FLGDRN    OF A_WCR335C_INTERETS FINAL "1"
+  ITEM T_FLGTRI    OF A_WCR335C_INTERETS FINAL "3"
+  ITEM G_PECDATFIN OF A_WCR335C_INTERETS FINAL G_PECDATFIN OF WCR335C
+  ITEM G_CALINT    OF A_WCR335C_INTERETS FINAL G_CALINT    OF WCR335C
+
+
+
+BUILD cr335t

@@ -1,0 +1,447 @@
+;/T/ 2.5.7 Facturation commande interne. (Commentaire)
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1995-03-21
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   les commentaires pour la facturation des commandes
+;                   internes.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd213d ACTIONBAR                     &
+              MODE LABEL "" AT 2,80         &
+              NOACTION                      &
+              FIELDMARK RETAIN STARTUP      &
+              HELP POPUP FROM 4,9 TO 20,72  &
+              RECEIVING T_CIECLEMNU,        &
+                        T_CIENOM,           &
+                        PDFACTURE
+
+
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+
+USE ussectmp  NOLIST
+    "PD213D"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+
+USE pd213d.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable nécessaire au traitement
+;
+
+TEMPORARY T_SILENT           CHARACTER SIZE 01
+
+
+;-------------------------------------------------------------------------------
+;
+; Facture
+;
+
+FILE PDFACTURE MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Commentaire facture
+;
+
+FILE PDCOM_FACTURE PRIMARY &
+                   NOITEM &
+                   OCCURS 11 TIMES
+
+  ACCESS VIA     CIECLE,           &
+                 FTRNUMFAC         &
+         USING   T_CIECLEMNU,                           &
+                 FTRNUMFAC         OF PDFACTURE         &
+         ORDERBY CIECLE,           &
+                 FTRNUMFAC,        &
+                 COFNUMLIG
+
+  ITEM CIECLE    OF PDCOM_FACTURE INITIAL T_CIECLEMNU
+  ITEM FTRNUMFAC OF PDCOM_FACTURE INITIAL FTRNUMFAC OF PDFACTURE FIXED
+  ITEM COFMNT    OF PDCOM_FACTURE SUM INTO FTRMNTBRU OF PDFACTURE
+
+
+;-------------------------------------------------------------------------------
+;
+; Client
+;
+
+FILE VCLC_CLI        REFERENCE
+
+  ACCESS VIA     CLICIECLE,        &
+                 CLICLE,           &
+                 CIECLE            &
+         USING   "----",                                &
+                 CLICLE            OF PDFACTURE,        &
+                 T_CIECLEMNU
+
+
+FILE MCCOMPTE REFERENCE
+  ACCESS VIA     CPTCLE &
+         USING   CPTCLE OF PDCOM_FACTURE &
+         ORDERBY CPTCLE
+
+FILE MCUNITE_ADM REFERENCE
+  ACCESS VIA     CIECLE, &
+                 UNACLE &
+         USING   T_CIECLEMNU, &
+                 UNACLE OF PDCOM_FACTURE &
+         ORDERBY UNACLE
+
+
+;-------------------------------------------------------------------------------
+FILE PDLOT_TRANSFERT DESIGNER
+;-------------------------------------------------------------------------------
+FILE PDLOT_FACTURE DESIGNER
+;-------------------------------------------------------------------------------
+
+FILE VCPT_DSC         REFERENCE
+ ACCESS VIA   CPTCLE  &
+        USING CPTCLE OF PDCOM_FACTURE
+
+;-----------------------------------------------------------------------
+; Variable servant au traitement
+;
+
+TEMPORARY T_NOLIG INT SIZE 04 RESET AT STARTUP ; Pour no ligne automatique.
+
+TEMPORARY T_CPTCLE    CHARACTER SIZE 06 RESET AT STARTUP
+TEMPORARY T_UNACLE    CHARACTER SIZE 08 RESET AT STARTUP
+
+TEMPORARY T_CPTTYPPAT CHARACTER SIZE 01 ; Pattern type de compte
+TEMPORARY T_CPTCATPAT CHARACTER SIZE 08 ; Pattern catégorie du compte
+TEMPORARY T_PECCLE    CHARACTER SIZE 04 ; Période
+
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+
+SKIP
+
+
+TITLE &
+@IF FRANCAIS
+      " Facturation vente direct " &
+@ELSE
+      " %%%Facturation vente direct " &
+@ENDIF
+      CENTERED AT ,1
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+
+ALIGN (,3,19)
+
+
+FIELD FTRNUMFAC        OF PDFACTURE        &
+        DISPLAY                            &
+        FIXED
+
+
+ALIGN (,3,19) (,,28)
+
+
+FIELD CLICLE           OF PDFACTURE        &
+        DISPLAY                            &
+        FIXED
+
+
+FIELD CLINOM           OF VCLC_CLI         &
+        DISPLAY                            &
+        FIXED
+
+
+DRAW 8,2 TO 8,79
+
+
+SKIP TO LINE 8
+
+
+TITLE &
+@IF FRANCAIS
+      " Commentaires" &
+@ELSE
+      " %%%Commentaires" &
+@ENDIF
+      CENTERED AT ,1
+
+
+SKIP TO LINE 10
+
+
+TITLE &
+@IF FRANCAIS
+      "    Lig.   Description                       Imp. Compte    Unite     Montant" &
+@ELSE
+      "%%% Lig.   Description                       Imp.     Montant" &
+@ENDIF
+      AT ,2
+
+
+ALIGN (02,02,03) (,,07) (,,48)(,,52)(,,60)(,,70)
+
+
+CLUSTER OCCURS WITH PDCOM_FACTURE ID BASE 90
+
+
+FIELD COFNUMLIG        OF PDCOM_FACTURE    &
+        NOCHANGE                           &
+        HIDDEN                             &
+        LABEL " "
+
+
+FIELD COFCOM           OF PDCOM_FACTURE    &
+        HIDDEN
+
+
+FIELD COFFLGIMP        OF PDCOM_FACTURE    &
+        HIDDEN  &
+        DEFAULT "O"
+
+FIELD CPTCLE       OF PDCOM_FACTURE &
+        HIDDEN &
+        LOOKUP ON MCCOMPTE               &
+          MESSAGE 2924 ; Ce compte n'existe pas
+
+FIELD UNACLE       OF PDCOM_FACTURE &
+        HIDDEN &
+        LOOKUP ON MCUNITE_ADM            &
+          MESSAGE 2925 ; Cette unité n'existe pas
+
+FIELD COFMNT           OF PDCOM_FACTURE   &
+     BWZ PIC "^^^,^^^.^^" HIDDEN
+
+CLUSTER
+
+;-----------------------------------------------------------------------
+PROCEDURE EDIT COFMNT
+BEGIN
+ IF COFMNT OF PDCOM_FACTURE <> 0 AND CPTCLE OF PDCOM_FACTURE = ""
+ THEN ERROR = "PAS DE COMPTE"
+
+END
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Appel du popup pour le champs CPTCLE (compte)
+;
+;
+PROCEDURE INPUT CPTCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE    = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    LET T_CPTTYPPAT = "@"
+    LET T_CPTCATPAT = "@"
+    LET T_PECCLE    = ""
+    RUN SCREEN mc103 MODE F &
+                      PASSING T_CPTCLE, &
+                              T_CPTTYPPAT, &
+                              T_CPTCATPAT, &
+                              T_PECCLE
+    LET FIELDTEXT = TRUNCATE( T_CPTCLE )
+  END
+END
+;-------------------------------------------------------------------------
+PROCEDURE EDIT CPTCLE
+BEGIN
+ WARNING = CPTDSC OF VCPT_DSC
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Appel du popup pour le champs UNACLE (Unité administrative)
+;
+;
+PROCEDURE INPUT UNACLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE = CPTCLE OF PDCOM_FACTURE
+    LET T_PECCLE = ""
+    LET T_UNACLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+
+    RUN SCREEN mc115 MODE F &
+                     PASSING T_CIECLEMNU, &
+                             T_CPTCLE, &
+                             T_UNACLE, &
+                             T_PECCLE
+    LET FIELDTEXT = TRUNCATE( T_UNACLE )
+  END
+END
+;---------------------------------------------------------------------------
+PROCEDURE EDIT UNACLE
+BEGIN
+ WARNING = UNANOMABR OF MCUNITE_ADM
+END
+;-------------------------------------------------------------------------------
+;
+; Procedure permettant de générer le numéro de ligne automatique
+;
+
+PROCEDURE INPUT COFNUMLIG
+BEGIN
+  IF 0 = SIZE(FIELDTEXT ) AND &
+     COFNUMLIG OF PDCOM_FACTURE = 0
+  THEN BEGIN
+    LET FIELDTEXT = ASCII( T_NOLIG + 1 )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure permettant de générer le numéro de ligne automatique
+;
+
+PROCEDURE PROCESS COFNUMLIG
+BEGIN
+  LET T_NOLIG = COFNUMLIG OF PDCOM_FACTURE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour convertir OUI,NON en 1,0
+;
+
+PROCEDURE INPUT COFFLGIMP
+BEGIN
+  USE usflginp NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour convertir 1,0 en OUI,NON
+;
+
+PROCEDURE OUTPUT COFFLGIMP
+BEGIN
+  USE usflgout NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDCOM_FACTURE &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDCOM_FACTURE &
+     AND NOT NEWRECORD     OF PDCOM_FACTURE &
+     AND NOT DELETEDRECORD OF PDCOM_FACTURE &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+
+  ;
+ ;--validation du status du lot
+ ;
+  GET PDLOT_FACTURE OPTIONAL &
+    VIA   CIECLE,          &
+          FTRNUMFAC        &
+    USING T_CIECLEMNU,     &
+          FTRNUMFAC        OF PDFACTURE
+  IF ACCESSOK
+  THEN BEGIN
+   GET PDLOT_TRANSFERT OPTIONAL &
+    VIA   CIECLE,          &
+          LTRNUMLOT        &
+    USING CIECLE,     &
+          LTRNUMLOT        OF PDLOT_FACTURE
+    IF ACCESSOK
+    THEN BEGIN
+     IF LTRSTU OF PDLOT_TRANSFERT = "T"
+      THEN ERROR 2
+
+     END
+  END
+
+END
+
+
+BUILD
+

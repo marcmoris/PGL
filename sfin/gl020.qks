@@ -1,0 +1,724 @@
+;/T/ Gestion des Lots
+;
+;//M/GRA01/Francois Richard/1999-06-18
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur..: Michelibe Belanger
+;    Date Création: 8 septembre 1992
+;
+;    Description..: Cet écran permet de définir les lots d'écritures
+;                   pour le grand livre. Les autorisations de journalisations
+;                   sont gérées dans cet écran.
+;
+;/M/ François Déry, 30 avril 1999
+;       Modifier l'accèss au fichier de séquence car il a
+;       été converti en format interbase au lieu d'indexé.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN gl020 ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU, &
+                       T_CIENOM   , &
+                       T_PECCLEMNU, &
+                       T_PECCLECOU, &
+                       T_FLGMNU   , &
+                       T_PECCLEFND, &
+                       T_LGLCLEFND
+
+TEMPORARY T_PECCLECOU_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_FIELDTEXT_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+USE ussectmp NOLIST
+    "GL020"
+
+USE gl020.hlp NOLIST
+
+USE usactecr NOLIST
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4 ; Compagnie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40; Nom de la compagnie du menu.
+TEMPORARY T_PECCLEMNU CHARACTER SIZE 4 ; Période du menu.
+TEMPORARY T_PECCLECOU CHARACTER SIZE 4 ; Période courante.
+TEMPORARY T_FLGMNU    CHARACTER SIZE 1 ; Identifie le menu d'origine.
+TEMPORARY T_PECCLEFND CHARACTER SIZE 4 ; Période de recherche.
+TEMPORARY T_LGLCLEFND CHARACTER SIZE 4 ; Numéro de lot de recherche.
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE GLLGL_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+
+;-------------------------------------------------------------------------------
+;
+FILE GLLOT            PRIMARY NOITEM
+ ITEM LGLCIECLE    OF GLLOT INITIAL T_CIECLEMNU
+
+;
+; Pour valider et afficher l'usager.
+;
+FILE GSUSAGER         DESIGNER &
+                      OPEN READ
+
+;
+; Numéro séquentiel des lots.
+;
+FILE GLLGL_SEQ     DESIGNER &
+                   TRANSACTION GEN_NUM_SEQ
+;
+; Validation de la période.
+;
+FILE MCPERIODE_CTB    REFERENCE
+  ACCESS VIA PECCLE &
+         USING PECCLE OF GLLOT
+
+;
+; Validation du type d'écriture.
+;
+DEFINE    D_LGLTYPECR CHARACTER SIZE 16 = "LGLTYPECR"
+TEMPORARY T_LGLTYPECR CHARACTER SIZE 4
+;
+FILE VCBI_DSC         REFERENCE
+  ACCESS VIA XELNOM, &
+             CBICLE  &
+         USING D_LGLTYPECR, &
+               LGLTYPECR OF GLLOT
+
+;-------------------------------------------------------------------------------
+;
+;
+TEMPORARY T_USRCLE    CHARACTER SIZE 12 ; Popup sur les usagers
+TEMPORARY T_PECCLE    CHARACTER SIZE  4 ; Popup sur les périodes
+TEMPORARY T_MODCLE    CHARACTER SIZE  2 ; Popup sur les périodes
+
+;
+; Pour afficher le nom des usagers.
+;
+TEMPORARY T_LGLUSR_NOM    CHARACTER SIZE 40
+TEMPORARY T_LGLUSRJOU_NOM CHARACTER SIZE 40
+TEMPORARY T_LGLUSRATR_NOM CHARACTER SIZE 40
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU IF T_FLGMNU = "C"
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER(T_CIENOM)
+
+;
+; Calcul de l'écart entre le montant vérifier et le montant cumulé dans le
+; lot.
+;
+DEFINE D_DIFMNTTRS FLOAT   SIZE 8 = LGLCUMMNTVER OF GLLOT - &
+                                    LGLCUMMNT    OF GLLOT
+;
+; Calcul de l'écart entre le nombre vérifier et le nombre cumulé dans le
+; lot.
+;
+DEFINE D_DIFNBRTRS INTEGER SIZE 2 = LGLNBRTRSVER OF GLLOT - &
+                                    LGLNBRTRS    OF GLLOT
+;
+; Hors balance.
+;
+DEFINE D_HRSBLC CHARACTER SIZE 20 = &
+@IF FRANCAIS
+                                    "*** Hors Balance ***" &
+@ELSE
+                                    "** Out of balance **" &
+@ENDIF
+                                    IF  0 <> LGLNBRTRSERR OF GLLOT
+
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Gestion des lots " &
+@ELSE
+      " Batch Management " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST
+
+
+SKIP
+
+ALIGN (19,3,19) (,40,56)
+
+FIELD PECCLE OF GLLOT HIDDEN ID 05 &
+label "Période ......:"&
+        DEFAULT T_PECCLEMNU &
+        NOCHANGE  &
+        DUPLICATE &
+        LOOKUP ON MCPERIODE_CTB &
+          MESSAGE 222 ; Cette période n'existe pas
+
+FIELD LGLCLE OF GLLOT &
+label "Lot...........:"&
+        DISPLAY &
+        NUMERIC &
+        SIGNIFICANCE 4
+
+SKIP 1
+
+ALIGN (19,3,19)
+
+FIELD LGLDSC     OF GLLOT HIDDEN ID 10 &
+label "Description...:"
+
+
+SKIP 1
+
+ALIGN (19,3,19) (,,22)
+
+FIELD LGLTYPECR  OF GLLOT HIDDEN ID 15 &
+label "Type écriture.:"&
+        REQUIRED &
+        DUPLICATE &
+        LOOKUP ON VCBI_DSC &
+          MESSAGE 238  ; Ce type d'ecriture est invalide
+
+FIELD CBIDSC OF VCBI_DSC &
+        DISPLAY
+SKIP 1
+
+ALIGN (19,3,19) (,,32)
+
+FIELD LGLUSR     OF GLLOT HIDDEN ID 20 &
+label "Utilisateur...:"&
+        DEFAULT LOGONID &
+        DUPLICATE &
+        LOOKUP ON GSUSAGER &
+          VIA USRCLE &
+          USING LGLUSR OF GLLOT &
+          MESSAGE 237 ; Cette usager est inexistant
+
+FIELD T_LGLUSR_NOM &
+        DISPLAY
+
+SKIP 1
+
+FIELD LGLDATVAL  OF GLLOT  FORMAT YYYYMMDD PATTERN "####/##/##" HIDDEN ID 25 &
+label "Vérification..:"&
+        DISPLAY
+
+SKIP 1
+
+ALIGN (19,3,19) (,,24)
+
+FIELD LGLATRJOU  OF GLLOT HIDDEN ID 30 &
+label "Autor. journ..:"&
+        NOENTRY &
+        SIZE 3
+HILITE DISPLAY OFF
+
+FIELD D_HRSBLC &
+        DISPLAY &
+        HILITE DISPLAY INVERSE BLINKING IF D_HRSBLC <> ""
+
+USE ushilite NOLIST
+
+ALIGN (19,3,19) (,,32)
+FIELD LGLUSRATR OF GLLOT HIDDEN ID 35 &
+label "Usager autor..:"&
+        DISPLAY
+
+FIELD T_LGLUSRATR_NOM &
+        DISPLAY
+
+SKIP 1
+
+ALIGN(19,3,19) (,,32)
+FIELD LGLDATJOU  OF GLLOT  FORMAT YYYYMMDD PATTERN "####/##/##" HIDDEN ID 40 &
+label "Date journal..:"&
+        DISPLAY
+
+FIELD LGLHREJOU  OF GLLOT &
+        DISPLAY
+
+ALIGN (19,3,19) (,,32)
+FIELD LGLUSRJOU OF GLLOT HIDDEN ID 45 &
+label "Usager journ..:"&
+        DISPLAY
+
+FIELD T_LGLUSRJOU_NOM &
+        DISPLAY
+
+SKIP
+
+DRAW ,1 TO ,80
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+      "    Vérifié            Cumulé             Ecart" &
+@ELSE
+      "   Verified          Totalled           %%ecart" &
+@ENDIF
+      AT ,21
+
+SKIP
+
+ALIGN(19,3,19) (,,37) (,,55)
+FIELD LGLCUMMNTVER OF GLLOT HIDDEN ID 50 &
+@IF FRANCAIS
+        LABEL "Montant total.:"
+@ELSE
+        LABEL "Total amount..:"
+@ENDIF
+
+FIELD LGLCUMMNT    OF GLLOT &
+        DISPLAY
+
+FIELD D_DIFMNTTRS &
+        DISPLAY &
+        PICTURE "^^,^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5
+
+ALIGN(19,3,24) (,,42) (,,60)
+FIELD LGLNBRTRSVER OF GLLOT HIDDEN ID 55 &
+@IF FRANCAIS
+        LABEL "Nombre total..:"
+@ELSE
+        LABEL "Total number..:"
+@ENDIF
+
+FIELD LGLNBRTRS    OF GLLOT &
+        DISPLAY
+
+FIELD D_DIFNBRTRS &
+        DISPLAY &
+        PICTURE "^,^^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 2
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT PECCLE
+BEGIN
+  ;
+  ; Popup sur les périodes.
+  ;
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PECCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    LET T_MODCLE = "GL"
+    ;
+    ; Si on est dans le menu du holding il faut pointer sur le popup
+    ; des périodes du holding, sinon on pointe sur le popup des périodes
+    ; par compagnie.
+    ;
+    IF T_FLGMNU = "H"
+    THEN RUN SCREEN mc105 PASSING T_PECCLE MODE F
+    ELSE RUN SCREEN mc109 PASSING T_CIECLEMNU, T_PECCLE, T_MODCLE MODE F
+    LET FIELDTEXT = TRUNC(T_PECCLE)
+  END
+END
+
+;
+; Simulation du lookup pour la periode comptable (si inexistante, ferme)
+;
+PROCEDURE EDIT PECCLE
+BEGIN
+
+  ; Ajustement pour le changement de siècle
+  IF FIELDTEXT[1:1] < "8"
+  THEN LET T_FIELDTEXT_SIE = "1" + FIELDTEXT
+  ELSE LET T_FIELDTEXT_SIE = "0" + FIELDTEXT
+
+  ; Ajustement pour le changement de siècle
+  IF T_PECCLECOU[1:1] < "8"
+  THEN LET T_PECCLECOU_SIE = "1" + T_PECCLECOU
+  ELSE LET T_PECCLECOU_SIE = "0" + T_PECCLECOU
+
+  IF T_FIELDTEXT_SIE < T_PECCLECOU_SIE
+  THEN ERROR 223 ; Cette periode est fermée
+
+  IF FIELDTEXT <> T_PECCLECOU
+  THEN WARNING 321 ; Cette periode est inexistante
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les types d'écritures(code bilingue).
+;
+;
+PROCEDURE INPUT LGLTYPECR
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_LGLTYPECR = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_LGLTYPECR, T_LGLTYPECR
+    LET FIELDTEXT = TRUNC(T_LGLTYPECR)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+;  Sert à valider les codes réservés.
+;
+;
+PROCEDURE EDIT LGLTYPECR
+BEGIN
+  IF FIELDTEXT = "AU" OR &
+     FIELDTEXT = "RF"
+  THEN ERROR 246 ; Type d'écriture réservée
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les usagers.
+;
+;
+PROCEDURE INPUT LGLUSR
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_USRCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gs104 PASSING T_USRCLE MODE F
+    LET FIELDTEXT = TRUNC(T_USRCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Seul l'usager affecter au lot peut le donner a un autre usager.
+;
+;
+PROCEDURE EDIT LGLUSR
+BEGIN
+  IF NOT ENTRYMODE
+  THEN BEGIN
+    IF FIELDTEXT <> OLDVALUE(LGLUSR OF GLLOT) AND &
+       LOGONID   <> OLDVALUE(LGLUSR OF GLLOT)
+    THEN ERROR 239 ; seul l'usager du lot peut le reaffecter a une autre usager
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Pour afficher le nom de l'usager du lot(Utilisateur).
+;
+;
+PROCEDURE OUTPUT T_LGLUSR_NOM
+BEGIN
+  GET GSUSAGER VIA USRCLE &
+               USING LGLUSR OF GLLOT &
+               OPTIONAL
+  LET FIELDTEXT = USREMPNOM OF GSUSAGER
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; On transpose les valeurs O et N en valeurs 1 et 0.
+;
+;
+PROCEDURE INPUT LGLATRJOU
+BEGIN
+  USE usflginp NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; On conserve dans le lot le nom de l'usager qui a autorisé le lot
+;
+;
+PROCEDURE PROCESS LGLATRJOU
+BEGIN
+  IF FIELDTEXT = "1"
+  THEN LET LGLUSRATR OF GLLOT = LOGONID
+  ELSE LET LGLUSRATR OF GLLOT = " "
+  DISPLAY LGLUSRATR OF GLLOT
+  DISPLAY T_LGLUSRATR_NOM
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; On affiche les valeurs 1 et 0 sous la forme Oui et Non.
+;
+;
+PROCEDURE OUTPUT LGLATRJOU
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Pour afficher le nom de l'usager qui a autorisé le lot.
+;
+;
+PROCEDURE OUTPUT T_LGLUSRATR_NOM
+BEGIN
+  GET GSUSAGER VIA USRCLE &
+               USING LGLUSRATR OF GLLOT &
+               OPTIONAL
+  LET FIELDTEXT = USREMPNOM OF GSUSAGER
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Pour afficher le nom de l'usager qui a journalisé le lot.
+;
+;
+PROCEDURE OUTPUT T_LGLUSRJOU_NOM
+BEGIN
+  GET GSUSAGER VIA USRCLE &
+               USING LGLUSRJOU OF GLLOT &
+               OPTIONAL
+  LET FIELDTEXT = USREMPNOM OF GSUSAGER
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du nombre de décimal saisie par l'usager.
+;
+;
+PROCEDURE EDIT LGLCUMMNTVER
+BEGIN
+  USE usvaldec NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; On peut modifier le montant vérifié seulement si l'usager
+; est l'utilisateur du lot et qu'il n'y a aucune transaction de saisie
+; sur le lot.
+;
+;
+PROCEDURE DESIGNER 50
+BEGIN
+  IF LOGONID = LGLUSR OF GLLOT AND LGLNBRTRS OF GLLOT = 0
+  THEN ACCEPT LGLCUMMNTVER OF GLLOT
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; On peut modifier le nombre vérifié seulement si l'usager
+; est l'utilisateur du lot et qu'il n'y a aucune transaction de saisie
+; sur le lot.
+;
+;
+PROCEDURE DESIGNER 55
+BEGIN
+  IF LOGONID = LGLUSR OF GLLOT AND LGLNBRTRS OF GLLOT = 0
+  THEN ACCEPT LGLNBRTRSVER OF GLLOT
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Le path suivant tient compte de la période et du lot reçu en paramètres.
+;
+;
+PROCEDURE PATH
+BEGIN
+  IF T_PECCLEFND = ""
+  THEN BEGIN
+    REQUEST PECCLE OF GLLOT
+    IF PROMPTOK
+    THEN REQUEST LGLCLE OF GLLOT
+    IF PROMPTOK
+    THEN LET PATH = 1
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST PECCLE OF GLLOT
+      IF PROMPTOK
+      THEN LET PATH = 2
+    END
+    IF PATH = 0
+    THEN LET PATH = 3
+  END
+  ELSE LET PATH = 99
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Find spécial du au path 99.
+;
+;
+PROCEDURE FIND
+BEGIN
+  IF PATH = 1
+  THEN GET GLLOT VIA LGLCIECLE, &
+                     PECCLE   , &
+                     LGLCLE     &
+                 USING T_CIECLEMNU, &
+                       PECCLE OF GLLOT, &
+                       LGLCLE OF GLLOT  &
+                 ORDERBY PECCLE, &
+                         LGLCLE
+  IF PATH = 2
+  THEN GET GLLOT VIA LGLCIECLE, &
+                     PECCLE     &
+                 USING T_CIECLEMNU, &
+                       PECCLE OF GLLOT &
+                 ORDERBY PECCLE, &
+                         LGLCLE
+  IF PATH = 3
+  THEN GET GLLOT VIA LGLCIECLE     &
+                 USING T_CIECLEMNU &
+                 ORDERBY PECCLE, &
+                         LGLCLE
+  IF PATH = 99
+  THEN GET GLLOT VIA LGLCIECLE, &
+                     PECCLE   , &
+                     LGLCLE     &
+                 USING T_CIECLEMNU, &
+                       T_PECCLEFND, &
+                       T_LGLCLEFND  &
+                 ORDERBY PECCLE, &
+                         LGLCLE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF GLLOT &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF GLLOT &
+     AND NOT NEWRECORD     OF GLLOT &
+     AND NOT DELETEDRECORD OF GLLOT &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  IF LGLDATJOU OF GLLOT <> 0
+  THEN ERROR 236 ; Impossible de mettre à jour le lot est journalisé
+
+  IF DELETEDRECORD OF GLLOT AND &
+     LGLNBRTRS OF GLLOT <> 0
+  THEN ERROR 333 ; Vous ne pouvez pas supprimer un lot qui a des transactions.
+
+  IF 0 = SIZE(TRUNC(LGLCLE OF GLLOT))
+  THEN BEGIN
+    ;
+    ; Attribution du numéro de lot selon la cie et la periode
+    ; dans la table GLLGL_SEQ se trouve le dernier numero de lot
+    ; utilisé.
+    ;
+    START TRANSACTION GEN_NUM_SEQ
+    GET GLLGL_SEQ VIA LGSCIECLE, &
+                      PECCLE     &
+                  USING LGLCIECLE OF GLLOT,&
+                        PECCLE    OF GLLOT &
+                  OPTIONAL
+    LET LGSCIECLE OF GLLGL_SEQ = LGLCIECLE OF GLLOT
+    LET PECCLE    OF GLLGL_SEQ = PECCLE    OF GLLOT
+    LET LGSSEQ    OF GLLGL_SEQ = LGSSEQ OF GLLGL_SEQ + 1
+
+    LET LGLCLE    OF GLLOT = ASCII(LGSSEQ OF GLLGL_SEQ,(SIZE(LGLCLE OF GLLOT)))
+    PUT GLLGL_SEQ
+    COMMIT TRANSACTION GEN_NUM_SEQ
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Pour afficher le numéro de lot nouvellement créé et que l'écran ne s'afface
+; pas.
+;
+;
+PROCEDURE POSTUPDATE
+BEGIN
+  IF CORRECTMODE
+  THEN BEGIN
+    DISPLAY LGLCLE OF GLLOT
+    WARNING = " "
+  END
+END
+
+BUILD ;
+;xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+;******************************* Gestion des lots *******************************
+;* Période ......: xxxxx                Lot...........: xxxx                    *
+;*                                                                              *
+;* Description...: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+;*                                                                              *
+;* Type écriture.: xx xxxxxxxxxxxxxxxxxxxxxxxxx                                 *
+;*                                                                              *
+;* Utilisateur...: xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        *
+;*                                                                              *
+;* Vérification..: xxxxxxxx                                                     *
+;*                                                                              *
+;* Autor. journ..: xxx  xxxxxxxxxxxxxxxxxxxx                                    *
+;* Usager autor..: xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        *
+;*                                                                              *
+;* Date journal..: xxxxxxxx xxxxx                                               *
+;* Usager journ..: xxxxxxxxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx        *
+;********************************************************************************
+;*                       Vérifié            Cumulé             Ecart            *
+;* Montant total.: xxxxxxxxxxxxxx    xxxxxxxxxxxxxx    xxxxxxxxxxxxxx           *
+;* Nombre total..:      xxxxx             xxxxx             xxxxxx              *
+;********************************************************************************

@@ -1,0 +1,695 @@
+;/T/ Impression de la facture
+;
+;/P/ Programmeur...: Steeve Duguay
+;    Date Création.: 3 mai 1995
+;
+;    Description...: Ce programme permet de faire l'impression des factures.
+;                    Suite à la première impression, on peut
+;                    faire la réimpression de la facture ou des duplicatas.
+;
+;    Paramètres....: Compagnie          (Compagnie du menu)
+;                    Numéro de facture  (Borne de début)
+;                    Numéro de facture  (Borne de fin)
+;
+;    Particularités: Un compteur de réimpression et de duplicatas est
+;                    constamment mis à jour.
+;
+;-------------------------------------------------------------------------------
+
+
+USE ussetqzs NOLIST
+SET PAGE LENGTH 80 WIDTH 250
+SET FORMFEED
+
+
+ACCESS *WFA301A &
+    ;
+    ; Adresse de facturation.
+    ;
+  LINK CIECLE OF WFA301A &
+    TO CIECLE            OF MCCOMPAGNIE &
+
+  LINK FFDTERESC OF WFA301A  &
+    TO TMECLE            OF CRTERME OPTIONAL &
+
+  LINK CIECLE OF WFA301A, &
+       IMMCLE OF WFA301A  &
+    TO CIECLE, &
+       IMMCLE            OF IMIMMOBILISATION OPTIONAL &
+
+  LINK REFCIECLE OF WFA301A, &
+       REFCLETYP OF WFA301A, &
+       REFCLENUM OF WFA301A, &
+       RADCLE    OF WFA301A  &
+    TO REFCIECLE, &
+       REFCLETYP, &
+       REFCLENUM, &
+       RADCLE            OF MCREF_ADRESSE OPTIONAL
+
+
+
+;
+;*** CODE ESCAPE TYPIQUE A IMP. LASER SERIE HPIII ***
+;                                     deb: x  y  fin: x    y
+;   Exemple:  "%0BIN;SP1;PW0;pu0,1490;ea8128,7490;%0A"
+;      est une commande découpée ainsi:
+;              %0B             = entre en mode HP-GL/2
+;              IN;              = initialise le mode
+;              SP1;             = selectionne le trait noir (select pen number 1 (black))
+;              PW0;             = largeur du trait (pen width)
+;              pu0,1490;        = dépose le crayon a la coordonnee
+;              ea8128,7490;     = rectangle avec son coin superieur droit
+;              %0A             = retourne en mode PCL
+;
+;   Cet exemple est tire du livre de la HP4 page A-13
+DEFINE ESCCADRE   CHARACTER SIZE 43 = "%0BIN;SP1;PW0;pu0000,1740;ea8128,7390;%0A"   ;
+DEFINE ESCLNH1    CHARACTER SIZE 43 = "%0BIN;SP1;PW0;pu0000,6960;ea8128,6960;%0A"   ; entete
+DEFINE ESCLNV1    CHARACTER SIZE 43 = "%0BIN;SP1;PW0;pu0250,1740;ea0250,6960;%0A"  ; (ligne verticale apres nolig)
+DEFINE ESCBOITE1  CHARACTER SIZE 43 = "%0BIN;SP1;PW0;pu4568,1740;ea6322,7390;%0A"; (avant qté à avant tps)
+DEFINE ESCBOITE2  CHARACTER SIZE 43 = "%0BIN;SP1;PW0;pu5420,1740;ea7140,7390;%0A"; (avant taux à fin de tvq)
+DEFINE ESCBOITE3  CHARACTER SIZE 43 = "%0BIN;SP1;PW0;pu6720,1740;ea6720,7195;%0A"; (ligne vert. entre tps et tvq)
+DEFINE ESCBOITE4  CHARACTER SIZE 43 = "%0BIN;SP1;PW0;pu6322,7195;ea7140,7195;%0A"; ligne horiz. en-tete taxe
+DEFINE ESCBOITE5  CHARACTER SIZE 43 = "%0BIN;SP1;PW0;pu7140,0824;ea8128,1740;%0A"; mnts du bas
+DEFINE ESCBOITE6  CHARACTER SIZE 43 = "%0BIN;SP1;PW0;pu7140,1504;ea8128,1268;%0A"; sous-total et tps
+DEFINE ESCBOITE7  CHARACTER SIZE 43 = "%0BIN;SP1;PW0;pu7140,1041;ea8128,0824;%0A"; tvq et total
+DEFINE ESCBOITE8  CHARACTER SIZE 43 = "%0BIN;SP1;PW0;pu0000,0824;ea8128,1740;%0A"; boite du bas (no enreg,...)
+DEFINE ESCBOITE9  CHARACTER SIZE 46 = "%0BIN;SP1;PW0.25;pu0000,9240;ea8128,9240;%0A"; boite du haut (adresse client,...)
+
+DEFINE ESCBOITE10  CHARACTER SIZE 40 = "%0BIN;SP1;PW0;pu0,329;ea1870,763;%0A"     ; no facture
+DEFINE ESCBOITE11  CHARACTER SIZE 40 = "%0BIN;SP1;PW0;pu0,546;ea1870,546;%0A"     ; no facture
+DEFINE ESCBOITE12  CHARACTER SIZE 43 = "%0BIN;SP1;PW0;pu6222,0329;ea8128,0763;%0A" & ; mnt RECU
+                                     IF  FARMNTREC OF WFA301A <> 0 &
+                                   ELSE " "
+DEFINE ESCBOITE13  CHARACTER SIZE 43 = "%0BIN;SP1;PW0;pu7140,0546;ra8128,0546;%0A" & ; mnt RECU
+                                     IF  FARMNTREC OF WFA301A <> 0 &
+                                   ELSE " "
+DEFINE ESCBOITE14  CHARACTER SIZE 46 = "%0BIN;SP1;PW0;pu7140,0329;ea7140,0763;%0A" & ; mnt RECU
+                                     IF  FARMNTREC OF WFA301A <> 0 &
+                                   ELSE " "
+
+DEFINE ESCOMBRE1  CHARACTER SIZE 45 = "*t300R*p0x822Y*c2550a125b10g2P*p0x0Y"        ; entete
+DEFINE ESCOMBRE2  CHARACTER SIZE 42 = "*t300R*p0x2485Y*c2550a273b10g2P*p0x0Y"       ; bas de page
+DEFINE ESCOMBRE3  CHARACTER SIZE 40 = "*t300R*p0x2775Y*c550a65b10g2P*p0x0Y"         ; no facture
+
+DEFINE ESCLITE    CHARACTER SIZE 15 = "(10U&l8D&k4S"  ; 12 CPS, 8 ligne/pouce
+DEFINE ESCCOND    CHARACTER SIZE 15 = "(10U&l8D&k2S"  ; 16 CPS, 8 ligne/pouce
+DEFINE ESCNORM    CHARACTER SIZE 15 = "(10U&l6D&k0S"  ; 10 CPS, 6 ligne/pouce
+DEFINE ESCSPEC    CHARACTER SIZE 40 = "(8U(s0p5h0s3b4099T"
+; signification du code escape
+; 8u = roman8
+; (s = font selection
+; 0p = fixed (non proportionnelle)
+; 5h = 5 caracteres au pouce
+; 0s = normal (pas italique,...)
+; 3b = bold
+; 4148T = Univers
+;
+DEFINE ESCRESET   CHARACTER SIZE 5  = "E"
+
+DEFINE ESCCOINSUPGAUCHE CHARACTER SIZE 7 = "*p1x1Y"     ; PLACER CURSEUR AU DEBUT DE LA FEUILLE
+
+
+;
+;*** FIN CODE ESCAPE ***
+
+
+
+DEFINE D_CIENOM    CHARACTER SIZE 30 = CIENOM OF MCCOMPAGNIE[1:30]
+
+DEFINE D_APPROUV1  CHARACTER SIZE 54 = " "                                   &
+                       IF T_FLGDRN OF WFA301A = "1"                          &
+                     ELSE "*** Suite de la facture sur la page suivante ***" &
+                       IF CLILNG OF WFA301A = "F"                            &
+                     ELSE "***   Invoice continuation on next page    ***"
+
+DEFINE D_CIEADR1 CHARACTER SIZE 40 =        TRUNCATE(CIEADR1 OF MCCOMPAGNIE)
+
+DEFINE D_CIEADR2 CHARACTER SIZE 42 = ", " + TRUNCATE(CIEADR2 OF MCCOMPAGNIE) &
+                                  IF CIEADR2 OF MCCOMPAGNIE <> " "           &
+                                ELSE " "
+
+DEFINE D_CIEADR3 CHARACTER SIZE 42 = ", " + TRUNCATE(CIEADR3 OF MCCOMPAGNIE) &
+                                  IF CIEADR3 OF MCCOMPAGNIE <> " "           &
+                                ELSE " "
+
+DEFINE D_CIECP   CHARACTER SIZE 8  = " " + CIECP OF MCCOMPAGNIE
+
+DEFINE D_CIETEL  CHARACTER SIZE 25 = "Téléphone : " + CIETEL OF MCCOMPAGNIE &
+                                  IF CIETEL OF MCCOMPAGNIE <> " "     AND  &
+                                     CLILNG OF WFA301A = "F"               &
+                                ELSE "Telephone : " + CIETEL OF MCCOMPAGNIE &
+                                  IF CIETEL OF MCCOMPAGNIE <> " "          &
+                                ELSE " "
+
+DEFINE D_CIEFAX  CHARACTER SIZE 27 = "Télécopieur : " + CIEFAX OF MCCOMPAGNIE &
+                                  IF CIEFAX OF MCCOMPAGNIE <> " "       AND  &
+                                     CLILNG OF WFA301A = "F"                 &
+                                ELSE "Telefax : " + CIEFAX OF MCCOMPAGNIE  &
+                                  IF CIEFAX OF MCCOMPAGNIE <> " "            &
+                                ELSE " "
+
+
+DEFINE D_CIETLX  CHARACTER SIZE 21 = "Télex : " + CIETLX OF MCCOMPAGNIE       &
+                                  IF CIETLX OF MCCOMPAGNIE <> " "       AND  &
+                                     CLILNG OF WFA301A = "F"                 &
+                                ELSE "Telex : " + CIETLX OF MCCOMPAGNIE       &
+                                  IF CIETLX OF MCCOMPAGNIE <> " "            &
+                                ELSE " "
+
+
+DEFINE D_CIEADRLIG1     CHAR SIZE 130 = TRUNCATE(D_CIEADR1) + &
+                                        TRUNCATE(D_CIEADR2) + &
+                                        TRUNCATE(D_CIEADR3) + &
+                                        TRUNCATE(D_CIECP)
+
+DEFINE D_CIEADRLIG2     CHAR SIZE 130 = TRUNCATE(D_CIETEL) + "    " + &
+                                        TRUNCATE(D_CIEFAX) + "    " + &
+                                        TRUNCATE(D_CIETLX)
+
+DEFINE D_ENTETE1        CHAR SIZE 40 = CENTER(CIENOM OF MCCOMPAGNIE[1:40])
+DEFINE D_ENTETE2        CHAR SIZE 130= CENTER(D_CIEADRLIG1[1:130])
+DEFINE D_ENTETE3        CHAR SIZE 130= CENTER(D_CIEADRLIG2[1:130])
+DEFINE D_ENTETE4        CHAR SIZE 133= ""
+
+
+DEFINE D_RADADRLIB CHARACTER SIZE 3 = "À:"                    &
+                                   IF CLILNG OF WFA301A = "F" &
+                                 ELSE "To:"
+
+DEFINE D_CLICLELIB CHARACTER SIZE 16 = "No client......:"           &
+                                    IF CLILNG OF WFA301A = "F"     &
+                                  ELSE "Client number..:"
+
+DEFINE D_FARDATLIB CHARACTER SIZE 16 = "Date...........:"       &
+                                    IF CLILNG OF WFA301A = "F" &
+                                  ELSE "Date...........:"
+
+DEFINE D_CMDCLILIB    CHARACTER SIZE 16 = "Bon de commande:"  &
+                                       IF    CLILNG OF WFA301A = "F" &
+                                         AND 0 <> SIZE( TRUNCATE( FARCMDCLI OF WFA301A ) ) &
+                                     ELSE "Purchase order.:" &
+                                       IF 0 <> SIZE( TRUNCATE( FARCMDCLI OF WFA301A ) ) &
+                                     ELSE " "
+
+DEFINE D_PORORILIB CHARACTER SIZE 21 = "Port d'origine......:"     &
+                                    IF CLILNG OF WFA301A = "F" AND &
+                                       FFEPORORI OF WFA301A <> " " &
+                                  ELSE "Port of origin......:"     &
+                                    IF FFEPORORI OF WFA301A <> " " &
+                                  ELSE " "
+
+DEFINE D_PORDESLIB CHARACTER SIZE 21 = "Port de destination.:"     &
+                                    IF CLILNG OF WFA301A = "F" AND &
+                                       FFEPORDES OF WFA301A <> " " &
+                                  ELSE "Port of destination.:"     &
+                                    IF FFEPORDES OF WFA301A <> " " &
+                                  ELSE " "
+
+DEFINE D_LIUTRVLIB CHARACTER SIZE 21 = "Lieu de travail.....:"     &
+                                    IF CLILNG OF WFA301A = "F" AND &
+                                       FFELIUTRV OF WFA301A <> " " &
+                                  ELSE "Working site........:"     &
+                                    IF FFELIUTRV OF WFA301A <> " " &
+                                  ELSE " "
+
+DEFINE D_CONNAILIB CHARACTER SIZE 21 = "No référence........:"     &
+                                    IF CLILNG OF WFA301A = "F" AND &
+                                       FFECNS1   OF WFA301A <> " " &
+                                  ELSE "Reference number....:"     &
+                                    IF FFECNS1   OF WFA301A <> " " &
+                                  ELSE " "
+
+DEFINE D_FFEDESLIB CHARACTER SIZE 21 = "Destinataire........:"     &
+                                    IF CLILNG OF WFA301A = "F" AND &
+                                       FFEDES OF WFA301A <>" "     &
+                                  ELSE "Consignee...........:"     &
+                                    IF FFEDES OF WFA301A <>" "     &
+                                  ELSE " "
+
+
+DEFINE D_PORENT1   CHARACTER SIZE 77 = D_PORORILIB + " " +         &
+                                       FFEPORORI OF WFA301A        &
+                                    IF D_PORORILIB <> " "          &
+                                  ELSE D_PORDESLIB + " " +         &
+                                       FFEPORDES OF WFA301A        &
+                                    IF D_PORDESLIB <> " "          &
+                                  ELSE D_LIUTRVLIB + " " +         &
+                                       FFELIUTRV OF WFA301A        &
+                                    IF D_LIUTRVLIB <> " "          &
+                                  ELSE D_CONNAILIB + " " +         &
+                                       FFECNS1   OF WFA301A + " " + &
+                                       FFECNS2   OF WFA301A + " " + &
+                                       FFECNS3   OF WFA301A + " " + &
+                                       FFECNS4   OF WFA301A + " " + &
+                                       FFECNS5   OF WFA301A + " " + &
+                                       FFECNS6   OF WFA301A + " " + &
+                                       FFECNS7   OF WFA301A        &
+                                    IF D_CONNAILIB <> " "          &
+                                  ELSE D_FFEDESLIB + " " +         &
+                                       FFEDES OF WFA301A           &
+                                    IF D_FFEDESLIB <> " "          &
+                                  ELSE " "
+
+DEFINE D_PORENT2   CHARACTER SIZE 77 = D_PORDESLIB + " " +         &
+                                       FFEPORDES OF WFA301A        &
+                                    IF D_PORDESLIB <> " "      AND &
+                                       D_PORORILIB <> " "          &
+                                  ELSE D_LIUTRVLIB + " " +         &
+                                       FFELIUTRV OF WFA301A        &
+                                    IF D_LIUTRVLIB <> " "      AND &
+                                      (D_PORORILIB <> " "       OR &
+                                       D_PORDESLIB <> " ")         &
+                                  ELSE D_CONNAILIB + " " +         &
+                                       FFECNS1   OF WFA301A + " " + &
+                                       FFECNS2   OF WFA301A + " " + &
+                                       FFECNS3   OF WFA301A + " " + &
+                                       FFECNS4   OF WFA301A + " " + &
+                                       FFECNS5   OF WFA301A + " " + &
+                                       FFECNS6   OF WFA301A + " " + &
+                                       FFECNS7   OF WFA301A        &
+                                    IF D_CONNAILIB <> " "      AND &
+                                      (D_PORORILIB <> " "       OR &
+                                       D_PORDESLIB <> " "       OR &
+                                       D_LIUTRVLIB <> " ")         &
+                                  ELSE D_FFEDESLIB + " " +         &
+                                       FFEDES OF WFA301A           &
+                                    IF D_FFEDESLIB <> " "      AND &
+                                      (D_PORORILIB <> " "       OR &
+                                       D_PORDESLIB <> " "       OR &
+                                       D_LIUTRVLIB <> " "       OR &
+                                       D_CONNAILIB <> " ")         &
+                                  ELSE " "
+
+
+DEFINE D_PORENT3   CHARACTER SIZE 77 = D_LIUTRVLIB + " " +         &
+                                       FFELIUTRV OF WFA301A        &
+                                    IF D_LIUTRVLIB <> " "      AND &
+                                      (D_PORORILIB <> " "      AND &
+                                       D_PORDESLIB <> " ")         &
+                                  ELSE D_CONNAILIB + " " +         &
+                                       FFECNS1   OF WFA301A + " " + &
+                                       FFECNS2   OF WFA301A + " " + &
+                                       FFECNS3   OF WFA301A + " " + &
+                                       FFECNS4   OF WFA301A + " " + &
+                                       FFECNS5   OF WFA301A + " " + &
+                                       FFECNS6   OF WFA301A + " " + &
+                                       FFECNS7   OF WFA301A        &
+                                    IF D_CONNAILIB <> " "      AND &
+                                     ((D_PORORILIB <> " "      AND &
+                                       D_PORDESLIB <> " ")      OR &
+                                      (D_PORORILIB <> " "      AND &
+                                       D_LIUTRVLIB <>  " ")     OR &
+                                      (D_PORDESLIB <> " "      AND &
+                                       D_LIUTRVLIB <>  " "))       &
+                                  ELSE D_FFEDESLIB + " " +         &
+                                       FFEDES OF WFA301A           &
+                                    IF D_FFEDESLIB <> " "      AND &
+                                     ((D_PORORILIB <> " "      AND &
+                                       D_PORDESLIB <> " ")      OR &
+                                      (D_PORORILIB <> " "      AND &
+                                       D_LIUTRVLIB <> " ")     OR  &
+                                      (D_PORORILIB <> " "      AND &
+                                       D_CONNAILIB <> " ")     OR  &
+                                      (D_PORDESLIB <> " "      AND &
+                                       D_LIUTRVLIB <> " ")     OR  &
+                                      (D_PORDESLIB <> " "      AND &
+                                       D_CONNAILIB <> " ")     OR  &
+                                      (D_LIUTRVLIB <> " "      AND &
+                                       D_CONNAILIB <> " "))        &
+                                  ELSE " "
+
+
+DEFINE D_PORENT4   CHARACTER SIZE 77 = D_CONNAILIB + " " +         &
+                                       FFECNS1   OF WFA301A + " " + &
+                                       FFECNS2   OF WFA301A + " " + &
+                                       FFECNS3   OF WFA301A + " " + &
+                                       FFECNS4   OF WFA301A + " " + &
+                                       FFECNS5   OF WFA301A + " " + &
+                                       FFECNS6   OF WFA301A + " " + &
+                                       FFECNS7   OF WFA301A        &
+                                    IF D_CONNAILIB <> " "      AND &
+                                     ((D_PORORILIB <> " "      AND &
+                                       D_PORDESLIB <> " "      AND &
+                                       D_LIUTRVLIB <> " "))        &
+                                  ELSE D_FFEDESLIB + " " +         &
+                                       FFEDES OF WFA301A           &
+                                    IF D_FFEDESLIB <> " "      AND &
+                                     ((D_PORORILIB <> " "      AND &
+                                       D_PORDESLIB <> " "      AND &
+                                       D_LIUTRVLIB <> " ")      OR &
+                                      (D_PORORILIB <> " "      AND &
+                                       D_PORDESLIB <> " "      AND &
+                                       D_CONNAILIB <> " ")      OR &
+                                      (D_PORORILIB <> " "      AND &
+                                       D_LIUTRVLIB <> " "      AND &
+                                       D_CONNAILIB <> " ")      OR &
+                                      (D_PORDESLIB <> " "      AND &
+                                       D_LIUTRVLIB <> " "      AND &
+                                       D_CONNAILIB <> " "))        &
+                                  ELSE " "
+
+
+DEFINE D_PORENT5   CHARACTER SIZE 77 = D_FFEDESLIB + " " +         &
+                                       FFEDES OF WFA301A           &
+                                    IF D_FFEDESLIB <> " "      AND &
+                                       D_PORORILIB <> " "      AND &
+                                       D_PORDESLIB <> " "      AND &
+                                       D_LIUTRVLIB <> " "      AND &
+                                       D_CONNAILIB <> " "          &
+                                  ELSE " "
+
+DEFINE D_LIBQTE1 CHARACTER SIZE 8  = "QUANTITÉ"              &
+                                  IF CLILNG OF WFA301A = "F" &
+                                ELSE "QUANTITY"
+
+DEFINE D_LIBPRI1 CHARACTER SIZE 9 = " TAUX"                 &
+                                 IF CLILNG OF WFA301A = "F" &
+                               ELSE " RATE   "
+
+DEFINE D_LIBTAX    CHARACTER SIZE 12 = "Codes taxes*"               &
+                                       IF CLILNG OF WFA301A = "F" &
+                                     ELSE "Tax codes*"
+
+DEFINE D_LIBTAXTPSTOT CHARACTER SIZE 15 = " TPS"                &
+                                       IF CLILNG OF WFA301A = "F" &
+                                     ELSE " GST"
+
+DEFINE D_LIBTAXTVQTOT CHARACTER SIZE 15 = " TVQ"                &
+                                       IF CLILNG OF WFA301A = "F" &
+                                     ELSE " PST"
+
+DEFINE D_LIBBRU1 CHARACTER SIZE 9 = " MONTANT"              &
+                                 IF CLILNG OF WFA301A = "F" &
+                               ELSE "  GROSS  "
+
+DEFINE D_LIBBRU2 CHARACTER SIZE 9  = " BRUT   "              &
+                                  IF CLILNG OF WFA301A = "F" &
+                                ELSE "AMOUNT"
+
+DEFINE D_IMMDSC    CHARACTER SIZE 80 = IMMDSC OF IMIMMOBILISATION &
+                                     IF FFDIMPIMM OF WFA301A = "1" &
+                                   ELSE " "
+
+DEFINE D_ESC       CHARACTER SIZE 30 = "Escompte: "  &
+                                      + TMEDSCABRFRA OF CRTERME &
+                                  IF    CLILNG OF WFA301A = "F" &
+                                    AND FFDMNTESC OF WFA301A <> 0 &
+                                  ELSE  "Discount: " &
+                                      + TMEDSCABRANG OF CRTERME &
+                                  IF    FFDMNTESC OF WFA301A <> 0 &
+                                  ELSE " "
+
+DEFINE D_LIBSOUTOT CHARACTER SIZE 15 = "SOUS-TOTAL"            &
+                                    IF CLILNG OF WFA301A = "F" &
+                                  ELSE "SUBTOTAL"
+
+DEFINE D_LIBFAC  CHARACTER SIZE 15 = "NOTE DE CRÉDIT" &
+                                 IF FARTYPECR OF WFA301A = "NC" &
+                                    AND CLILNG OF WFA301A = "F" &
+                               ELSE "  CREDIT NOTE" &
+                                 IF FARTYPECR OF WFA301A = "NC" &
+                                    AND CLILNG OF WFA301A <> "F" &
+                               ELSE "    CREDIT" &
+                                 IF FARTYPECR OF WFA301A = "CR" &
+                               ELSE "    FACTURE" &
+                                 IF CLILNG OF WFA301A = "F" &
+                               ELSE "    INVOICE"
+
+DEFINE D_LIBREC1 CHARACTER SIZE 15 = "MONTANT REÇU"          &
+                                  IF     CLILNG OF WFA301A = "F" &
+                                     AND FARMNTREC OF WFA301A <> 0 &
+                                ELSE "RECEIPT"               &
+                                  IF     CLILNG OF WFA301A <> "F" &
+                                     AND FARMNTREC OF WFA301A <> 0 &
+                                ELSE " "
+
+DEFINE D_LIBTOT CHARACTER SIZE 15 = "TOTAL À PAYER"              &
+                                 IF     CLILNG OF WFA301A = "F"  &
+                                    AND FARMNTREC OF WFA301A <> 0 &
+                               ELSE "AMOUNT DUE"                &
+                                 IF     CLILNG OF WFA301A <> "F" &
+                                    AND FARMNTREC OF WFA301A <> 0 &
+                               ELSE " "
+
+DEFINE D_FOOTING1 CHARACTER SIZE 80 = &
+                      CENTER(TRUNCATE(CIECOMFAC1 OF MCCOMPAGNIE)[1:80]) &
+                                 IF     CLILNG OF WFA301A = "F" &
+                 ELSE CENTER(TRUNCATE(CIECOMFAC2 OF MCCOMPAGNIE)[1:80])
+
+
+DEFINE D_ENRTPS   CHARACTER SIZE 80 =                                        &
+       CENTER(("No enregistrement TPS " + CIEENRTPS OF MCCOMPAGNIE)[1:80]) &
+    IF CLILNG OF WFA301A = "F"                                               &
+  ELSE CENTER(("GST registration no. " + CIEENRTPS OF MCCOMPAGNIE)[1:80])
+
+DEFINE D_ENRTVQ   CHARACTER SIZE 80 =                                        &
+       CENTER(("No enregistrement TVQ " + CIEENRTVQ OF MCCOMPAGNIE)[1:80]) &
+    IF CLILNG OF WFA301A = "F"                                               &
+  ELSE CENTER(("PST registration no. " + CIEENRTVQ OF MCCOMPAGNIE)[1:80])
+
+DEFINE D_LEGTAX   CHARACTER SIZE 56 = &
+       "* I = Incluse, S = En sus, E = Exempt/non taxable"  &
+    IF CLILNG OF WFA301A = "F"                &
+  ELSE "* I = Included, S = Not included, E = Exempt/non taxable"
+
+DEFINE D_FARMNTBRU     FLOAT SIZE 8  &
+  PICTURE " ^^,^^^,^^^.^^ "     &
+  FLOAT    "$"                   &
+  NOBWZ SIGNIFICANCE 4           &
+  TRAILING SIGN "-"              &
+    = T_MNTBRUTOT  OF WFA301A &
+        IF T_FLGDRN OF WFA301A = "1" &
+      ELSE 0
+
+DEFINE D_FARMNTTPS     FLOAT SIZE 8  &
+  PICTURE " ^^,^^^,^^^.^^ "     &
+  FLOAT    "$"                   &
+  NOBWZ SIGNIFICANCE 4           &
+  TRAILING SIGN "-"              &
+    = FARMNTTPS OF WFA301A &
+        IF T_FLGDRN OF WFA301A = "1" &
+      ELSE 0
+
+DEFINE D_FARMNTTVQ     FLOAT SIZE 8  &
+  PICTURE " ^^,^^^,^^^.^^ "     &
+  FLOAT    "$"                   &
+  NOBWZ SIGNIFICANCE 4           &
+  TRAILING SIGN "-"              &
+    = FARMNTTVQ OF WFA301A &
+        IF T_FLGDRN OF WFA301A = "1" &
+      ELSE 0
+
+DEFINE D_FARMNTNET FLOAT SIZE 8  &
+  PICTURE " ^^,^^^,^^^.^^ "     &
+  FLOAT    "$"                   &
+  NOBWZ SIGNIFICANCE 4           &
+  TRAILING SIGN "-"              &
+    = FARMNTNET OF WFA301A       &
+        IF T_FLGDRN OF WFA301A = "1" &
+      ELSE 0
+
+DEFINE D_FARMNTREC FLOAT SIZE 8  &
+  PICTURE " ^^,^^^,^^^.^^ "     &
+  FLOAT    "$"                   &
+  BWZ SIGNIFICANCE 4             &
+  TRAILING SIGN "-"              &
+    = FARMNTREC OF WFA301A       &
+        IF T_FLGDRN OF WFA301A = "1" &
+      ELSE 0
+
+DEFINE D_FARMNTTOT FLOAT SIZE 8  &
+  PICTURE " ^^,^^^,^^^.^^ "     &
+  FLOAT    "$"                   &
+  BWZ SIGNIFICANCE 4             &
+  TRAILING SIGN "-"              &
+    = FARMNTNET OF WFA301A -     &
+      FARMNTREC OF WFA301A       &
+        IF   T_FLGDRN OF WFA301A = "1" &
+         AND FARMNTREC OF WFA301A <> 0 &
+      ELSE 0
+
+DEFINE D_DUPLICATA CHARACTER SIZE 20 = "D U P L I C A T A " &
+                                       IF G_DUPIMP OF WFA301A = "1" AND &
+                                          CLILNG OF WFA301A = "F"   ELSE &
+                                       "D U P L I C A T E "  &
+                                       IF G_DUPIMP OF WFA301A = "1" AND &
+                                          CLILNG OF WFA301A = "A"  ELSE  " "
+
+DEFINE D_REPIMP CHARACTER SIZE 5 = "(" + ASCII(FARNBRIMP OF WFA301A + 1,3) + ")" &
+                                   IF G_REIIMP OF WFA301A = "1"  ELSE &
+                                    "(" + ASCII(FARNBRDUP OF WFA301A + 1,3) + ")" &
+                                   IF G_DUPIMP OF WFA301A = "1" ELSE ""
+
+
+SORTED ON CIECLE    OF WFA301A            &
+       ON FARCLE    OF WFA301A RESET PAGE &
+       ON FFDCLELIG OF WFA301A            &
+       ON FFNSEQ    OF WFA301A
+
+PAGE HEADING &
+  ESCNORM  &
+  ESCCADRE &
+  ESCLNH1 &
+  ESCLNV1 &
+  ESCBOITE1 &
+  ESCBOITE2 &
+  ESCBOITE3 &
+  ESCBOITE4 &
+  ESCBOITE5 &
+  ESCBOITE6 &
+  ESCBOITE7 &
+  ESCBOITE8 &
+  ESCBOITE9 &
+  ESCBOITE10 &
+  ESCBOITE11 &
+  ESCBOITE12 &
+  ESCBOITE13 &
+  ESCBOITE14 &
+  ESCOMBRE1 &
+  ESCOMBRE2 &
+  ESCOMBRE3 &
+  ESCCOINSUPGAUCHE &
+SKIP  &
+  TAB 001 ESCSPEC &
+SKIP &
+  TAB 001 D_ENTETE1 &
+SKIP  &
+  TAB 001 ESCCOND &
+SKIP &
+  TAB 001 D_ENTETE2 &
+SKIP &
+  TAB 001 D_ENTETE3 &
+SKIP &
+  TAB 001 D_ENTETE4 &
+SKIP &
+  ESCLITE &
+
+  TAB 100 "PAGE:" &
+  TAB 106 SYSPAGE PICTURE "^^^^" &
+SKIP 2 &
+  TAB 002 D_RADADRLIB        &
+  TAB 006 RADNOM OF MCREF_ADRESSE &
+  TAB 050 D_CLICLELIB &
+  TAB 067 REFCLENUM OF MCREF_ADRESSE &
+SKIP &
+  TAB 006 RADADR1 OF MCREF_ADRESSE  &
+SKIP &
+  TAB 006 RADADR2 OF MCREF_ADRESSE  &
+  TAB 050 D_FARDATLIB             &
+  TAB 067 FARDAT OF WFA301A       &
+SKIP &
+  TAB 006 RADADR3 OF MCREF_ADRESSE &
+  TAB 050 D_CMDCLILIB               &
+  TAB 067 FARCMDCLI OF WFA301A      &
+SKIP &
+  TAB 006 RADADR4 OF MCREF_ADRESSE &
+SKIP &
+  TAB 006 RADCP   OF MCREF_ADRESSE &
+SKIP 2 &
+  TAB 006 D_PORENT1         &
+SKIP &
+  TAB 006 D_PORENT2         &
+SKIP &
+  TAB 006 D_PORENT3         &
+SKIP &
+  TAB 006 D_PORENT4         &
+SKIP &
+  TAB 006 D_PORENT5         &
+SKIP &
+  ESCCOND &
+SKIP &
+  TAB 106 D_LIBTAX  &
+  TAB 122 D_LIBBRU1 &
+SKIP &
+  TAB 025 "D E S C R I P T I O N" &
+  TAB 079 D_LIBQTE1 &
+  TAB 094 D_LIBPRI1 &
+  TAB 106 D_LIBTAXTPSTOT &
+  TAB 112 D_LIBTAXTVQTOT &
+  TAB 123 D_LIBBRU2 &
+SKIP &
+  TAB 108 "%" &
+  TAB 114 "%" &
+SKIP
+
+
+HEADING AT FFDCLELIG &
+  TAB 001 " " &
+     SKIP &
+  TAB 006 D_IMMDSC &
+SKIP &
+  TAB 002 T_NBRLIG OF WFA301A &
+    PICTURE "^^"   &
+    SIGNIFICANCE 2 &
+  TAB 006 FFDDSC OF WFA301A   &
+  TAB 076 FFDQTEFAC    OF WFA301A    &
+            PICTURE "^^^^^^.^^^^^^ " &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 9           &
+            BWZ  &
+  TAB 090 FFDPRIUNI    OF WFA301A  &
+    PICTURE " ^^^^,^^^.^^^^ "    &
+    FLOAT    "$"                 &
+    SIGNIFICANCE 7               &
+    TRAILING SIGN "-" BWZ        &
+  TAB 106 T_CODTPS &
+  TAB 113 T_CODTVQ &
+  TAB 119 T_MNTBRU             &
+    PICTURE " ^^,^^^,^^^.^^ "  &
+    FLOAT    "$" BWZ           &
+    TRAILING SIGN "-"
+
+REPORT &
+  TAB 011 FFNDSC OF WFA301A
+
+
+FOOTING AT FFDCLELIG &
+  TAB 008 D_ESC &
+  TAB 119 FFDMNTESC OF WFA301A &
+    PICTURE " ^^,^^^,^^^.^^ "  &
+    FLOAT    "$"   BWZ         &
+    TRAILING SIGN "-"
+
+
+FOOTING AT FARCLE &
+     SKIP PAGE
+
+PAGE FOOTING &
+    TAB 001 D_FOOTING1  &
+    TAB 103 D_LIBSOUTOT &
+    TAB 119 D_FARMNTBRU &
+SKIP 2 &
+    TAB 103 D_LIBTAXTPSTOT &
+    TAB 119 D_FARMNTTPS &
+SKIP &
+    TAB 001 D_ENRTPS &
+SKIP &
+    TAB 001 D_ENRTVQ &
+    TAB 103 D_LIBTAXTVQTOT &
+    TAB 119 D_FARMNTTVQ &
+SKIP 2 &
+    TAB 001 D_LEGTAX &
+    TAB 103 "TOTAL" &
+    TAB 114 DEVCLE OF WFA301A &
+    TAB 119 D_FARMNTNET &
+    TAB 140 ESCLITE &
+SKIP 2 &
+    TAB 005 D_LIBFAC &
+    TAB 040 ESCCOND  &
+    TAB 103 D_LIBREC1   &
+    TAB 119 D_FARMNTREC &
+SKIP &
+    TAB 044 D_APPROUV1 &
+    TAB 140 ESCLITE &
+SKIP &
+    TAB 002 FARCLE D_REPIMP &
+    TAB 040 ESCCOND  &
+    TAB 061 D_DUPLICATA &
+    TAB 103 D_LIBTOT &
+    TAB 119 D_FARMNTTOT &
+    TAB 140 ESCRESET
+
+BUILD fa301z
+
+
+

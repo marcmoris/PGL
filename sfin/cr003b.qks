@@ -1,0 +1,383 @@
+;/T/ Factures / notes de crédit - Cédule d'encaissement
+;
+;/P/ Programmeur..: Alain Côté
+;    Date Création: 7 juin 1993
+;
+;    Description..:
+;
+;/M/ Adaptation...: Marc Morissette 10 Nov 1993
+;
+;-------------------------------------------------------------------------------
+;/V/ 3.00.02    Guy Chabot 12-mai-1994 (197).
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cr003b ACTIONBAR &
+              MODE LABEL "" AT 2,80 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        D_SLD_A_REC, &
+                        D_DEVCAR   , &
+                        CRCPT_A_REC, &
+                        MCREF_ADRESSE
+
+USE ussectmp   NOLIST
+    "CR003B"
+
+USE cr003b.hlp NOLIST
+
+USE usactecr   NOLIST
+
+;
+; Ouverture d'une transaction QUERY indépendante de l'écran maitre.
+;
+USE ustrasse   NOLIST
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de compagnie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie du menu.
+DEFINE    D_DEVCAR    CHARACTER SIZE 4  ; Devise du client, pour l'affichage.
+DEFINE    D_SLD_A_REC FLOAT     SIZE 8  ; Solde à recevoir
+
+
+;-------------------------------------------------------------------------------
+;
+FILE CRCPT_A_REC      MASTER
+
+FILE MCREF_ADRESSE    MASTER
+
+;
+; Ligne de cédule.
+;
+FILE CRCAR_CEDULE     PRIMARY &
+                      OCCURS 14 &
+                      NOITEM
+  ACCESS VIA     CIECLE, &
+                 CARCLE  &
+         USING   CIECLE OF CRCPT_A_REC, &
+                 CARCLE OF CRCPT_A_REC  &
+         ORDERBY CIECLE, &
+                 CARCLE, &
+                 CCDCLELIG
+
+ ITEM CIECLE OF CRCAR_CEDULE INITIAL CIECLE OF CRCPT_A_REC
+ ITEM CARCLE OF CRCAR_CEDULE INITIAL CARCLE OF CRCPT_A_REC
+
+;
+; Pour avoir le montant encaissé par cédule.
+;
+FILE VCAR_CCD         REFERENCE &
+                      OCCURS WITH CRCAR_CEDULE
+  ACCESS VIA CIECLE, &
+             CARCLE, &
+             CCDCLELIG &
+         USING CIECLE    OF CRCAR_CEDULE, &
+               CARCLE    OF CRCAR_CEDULE, &
+               CCDCLELIG OF CRCAR_CEDULE
+
+
+;
+; Validation lors de la destruction.
+;
+FILE CRCAR_HISTO      DESIGNER &
+                      OPEN READ
+
+
+;-------------------------------------------------------------------------------
+;
+; Le cumulatif de la cédule n'inclus pas les ajustements et note de crédit.
+;
+DEFINE D_BALCED   FLOAT SIZE 8 = CARMNT    OF CRCPT_A_REC   &
+                                 - CARCUMCED OF CRCPT_A_REC
+
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Cédule d'encaissement " &
+@ELSE
+      " Payment Schedule " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST
+
+
+
+ALIGN(,3,19) (,46,62) (,,76)
+
+FIELD CARCLE    OF CRCPT_A_REC FIXED &
+label "Facture.......:"
+
+FIELD CARMNT    OF CRCPT_A_REC FIXED &
+label "Montant brut..:"
+
+FIELD D_DEVCAR                 FIXED
+
+FIELD D_SLD_A_REC  FIXED &
+        DISPLAY &
+@IF FRANCAIS
+        LABEL "Solde à rec...:" &
+@ELSE
+        LABEL "To receive....:" &
+@ENDIF
+        PICTURE "^^,^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5
+
+FIELD D_BALCED  &
+        DISPLAY &
+        PREDISPLAY &
+@IF FRANCAIS
+        LABEL "Solde à vent..:" &
+@ELSE
+        LABEL "To breakdown..:" &
+@ENDIF
+        PICTURE "^^,^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5
+
+SKIP
+
+DRAW ,1 TO ,80
+
+SKIP 1
+
+TITLE &
+@IF FRANCAIS
+      "No              Encaissement         Montant         Montant" &
+@ELSE
+      "Sch                Projected      Adjustment            Paid" &
+@ENDIF
+      AT ,4
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      "Céd.  Date due          Prévu    d'ajustement            reçu" &
+@ELSE
+      "No    Due date    payment amt          amount          amount" &
+@ENDIF
+      AT ,3
+
+SKIP
+
+
+ALIGN (4,3,4) (,,9) (,,21) (,,37) (,,53) (,,70)
+
+CLUSTER OCCURS WITH CRCAR_CEDULE ID BASE 05
+
+FIELD CCDCLELIG OF CRCAR_CEDULE HIDDEN LABEL " " &
+        REQUIRED &
+        NOCHANGE &
+        LOOKUP NOTON CRCAR_CEDULE &
+          VIA CIECLE   , &
+              CARCLE   , &
+              CCDCLELIG  &
+          USING CIECLE    OF CRCAR_CEDULE, &
+                CARCLE    OF CRCAR_CEDULE, &
+                CCDCLELIG OF CRCAR_CEDULE  &
+          MESSAGE 709 ; Cette ligne de cédule existe déjà
+
+FIELD CCDDATDUE OF CRCAR_CEDULE  FORMAT YYYYMMDD PATTERN "####/##/##"&
+        REQUIRED
+
+FIELD CCDMNT    OF CRCAR_CEDULE &
+        REQUIRED
+
+FIELD V_CCDMNTAUG OF VCAR_CCD    &
+        DISPLAY                  &
+        PICTURE "^^,^^^,^^^.^^ " &
+        TRAILING SIGN "-"        &
+        SIGNIFICANCE 5
+
+FIELD V_CCDMNTDIM OF VCAR_CCD    &
+        DISPLAY                  &
+        PICTURE "^^,^^^,^^^.^^ " &
+        TRAILING SIGN "-"        &
+        SIGNIFICANCE 5
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE INPUT CCDCLELIG
+BEGIN
+  USE ussecent NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Montant prévu d'encaissement
+;
+;
+PROCEDURE EDIT CCDMNT
+BEGIN
+  ;
+  ; Valide la partie décimale.
+  ;
+  USE usvaldec NOLIST
+  ;
+  ; Mise à jour du total de la cédule.
+  ;
+  LET CARCUMCED OF CRCPT_A_REC = CARCUMCED OF CRCPT_A_REC - &
+                                 OLDVALUE(CCDMNT OF CRCAR_CEDULE) + &
+                                 FIELDVALUE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Affiche le reste à ventiler.
+;
+;
+PROCEDURE PROCESS CCDMNT
+BEGIN
+  DISPLAY D_BALCED
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  FOR CRCAR_CEDULE
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF CRCAR_CEDULE &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF CRCAR_CEDULE &
+       AND NOT NEWRECORD     OF CRCAR_CEDULE &
+       AND NOT DELETEDRECORD OF CRCAR_CEDULE &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+    ;
+    ; Si l'usager modifi la cédule, il faut mettre la flag à Oui dans le fichier
+    ; maitre.
+    ;
+    IF   NEWRECORD     OF CRCAR_CEDULE &
+      OR ALTEREDRECORD OF CRCAR_CEDULE
+    THEN LET CARFLGCED OF CRCPT_A_REC = "1"
+    ;
+    ; Le timbre de modification est mis à jour si l'usager modifie
+    ; la table CRCAR_CEDULE.
+    ;
+    IF        NEWRECORD OF CRCAR_CEDULE &
+       OR ALTEREDRECORD OF CRCAR_CEDULE &
+       OR DELETEDRECORD OF CRCAR_CEDULE
+    THEN BEGIN
+      LET CARDATMOD OF CRCPT_A_REC = SYSDATE
+      LET CARHREMOD OF CRCPT_A_REC = SYSTIME / 10000
+      LET CARUSRMOD OF CRCPT_A_REC = LOGONID
+    END
+  END
+
+  ;
+  ; La cédule doit balancer avec le montant brut de la facture, car l'usager
+  ; peut modifier la cédule après journalisation, c'est pour cette raison
+  ; qu'il faut s'assurer que la cédule balance.
+  ;
+  IF D_BALCED <> 0
+  THEN ERROR 651 ; La cédule ne balance pas.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Mise à jour du total de la cédule.
+;
+;
+PROCEDURE DELETE
+BEGIN
+  ;
+  ; On vérifie si la cédule est référé avant de la détruire.
+  ;
+  GET CRCAR_HISTO VIA CIECLE, &
+                      CARCLE, &
+                      CCDCLELIG &
+                  USING CIECLE    OF CRCAR_CEDULE, &
+                        CARCLE    OF CRCAR_CEDULE, &
+                        CCDCLELIG OF CRCAR_CEDULE &
+                  OPTIONAL
+  IF ACCESSOK
+  THEN ERROR 702 ; Destruction annulée, la cédule est référée.
+
+  IF NOT DELETEDRECORD OF CRCAR_CEDULE
+  THEN BEGIN
+    LET CARCUMCED OF CRCPT_A_REC = CARCUMCED OF CRCPT_A_REC - &
+                                   CCDMNT    OF CRCAR_CEDULE
+    DISPLAY D_BALCED
+    DELETE CRCAR_CEDULE
+  END
+END
+
+
+BUILD
+
+;xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+;**************************** Cédule d'encaissement *****************************
+;* Facture.......: xxxxxxxxxxxxxxx            Montant brut..: xxxxxxxxxxxxxxxxxx*
+;* Solde à rec...: xxxxxxxxxxxxxx             Reste à vent..: xxxxxxxxxxxxxx    *
+;********************************************************************************
+;*  No              Encaissement         Montant         Montant                *
+;* Céd.  Date due          Prévu    d'ajustement            reçu                *
+;*  xx   xxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx               *
+;*  xx   xxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx               *
+;*  xx   xxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx               *
+;*  xx   xxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx               *
+;*  xx   xxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx               *
+;*  xx   xxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx               *
+;*  xx   xxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx               *
+;*  xx   xxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx               *
+;*  xx   xxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx               *
+;*  xx   xxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx               *
+;*  xx   xxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx               *
+;*  xx   xxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx               *
+;*  xx   xxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx               *
+;*  xx   xxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx  xxxxxxxxxxxxxx               *
+;********************************************************************************

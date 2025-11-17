@@ -1,0 +1,544 @@
+;/T/ Valorisation des blocs en inventaire par type de granit
+;
+;/M/ Fait par : Mario Fortin le 5 avril 1995
+;
+;/M/ François Déry, 18 mai 1999
+;       Conversion vers unix/interbase.
+;
+;/M/ Programmeur....: Bernard Samson
+;    Date...........: 21-10-1999
+;    Description....: Ajustement pour que le numero de bloc s'incrive sous sa
+;                     nouvelle forme
+;
+;
+;/M/ Programmeur....: Claudie Doyon
+;    Date ..........: 1999/11/08
+;    Description....: Modification du rapport pour le gerer par type de granit et
+;                     non par carrière.
+;
+;/M/ Programmeur....: Rene Rouleau
+;    Date...........: 1999-12-22
+;    Description....: Faire le calcul du coût du bloc                   
+;                                        coût du transport
+;                                        du total des deux
+;                     par code de granit et pour le grand total.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin     
+;    Date..............: 06 avril 2000
+;    Description.......: Ajout d'une ligne de totaux par année de production.
+;
+;    Référence.........: Demande de changement 000059.
+;
+;    Signet............: MP-00-05-25_D59.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST
+SET NOBLANKS
+
+ACCESS IFBLOC LINK TGRCODGRA OF IFBLOC            , &
+                   CIECLE    OF IFBLOC              &
+                TO TGRCODGRA                      , &
+                   CIECLE    OF PDTYPE_GRANIT       &
+
+              LINK CIECLE    OF IFBLOC            , &
+                   FTRNUMFAC OF IFBLOC              &
+                TO CIECLE                         , &
+                   FTRNUMFAC OF PDFACTURE OPTIONAL  &
+
+              LINK CIECLE    OF IFBLOC            , & ; MP-00-05-25_D59.
+                   IFCCLE    OF IFBLOC              & ; MP-00-05-25_D59.
+                TO CIECLE                         , & ; MP-00-05-25_D59.
+                   IFCCLE    OF *WIF320A  OPTIONAL    ; MP-00-05-25_D59.
+
+CHOOSE CIECLE    PARM, &
+       TGRCODGRA PARM
+
+DEFINE TMP-DAT-FIN DATE = PARM
+
+;
+; Coût total bloc
+;
+DEFINE D_TOT_BLOC INTEGER SIZE 4 = (BLCM3TOT OF IFBLOC  &
+                                 *  BLCMNTM3 OF IFBLOC) / 100 + .5
+
+;
+; Coût total du transport
+;
+DEFINE D_TOT_TRANS INTEGER SIZE 4 = (BLCM3TOT    OF IFBLOC  * &
+                                     BLCMNTEXPM3 OF IFBLOC) / 100  + .5
+
+;
+; Coût total
+;
+DEFINE D_COUT_TOTAL INTEGER SIZE 4 = D_TOT_BLOC + D_TOT_TRANS
+
+DEFINE D-CPT-BLOC  INTEGER SIZE 1 = 1 IF BLCDATREC <> 0 ELSE 0
+DEFINE D-BLCM3TOT  INTEGER SIZE 4 = BLCM3TOT IF BLCDATREC <> 0 ELSE 0
+DEFINE D-BLCTFINAL INTEGER SIZE 4 = BLCTFINAL IF BLCDATREC <> 0 ELSE 0
+
+
+; LE SELECT PREND LES ENREGISTREMENTS REPONDANT AUX CONDITIONS SUIVANTES :
+
+; - LE NUMERO DE FACTURE DANS LA TABLE BLOC=0 OU LA DATE DE LA FACTURE
+;   EST PLUS GRANDE QUE LA DATE DE FIN ENTRE
+; - LA DATE DU BLOC EST COMPRISE DANS LES LIMITES ENTREES SI IL Y EN A UNE
+
+
+SELECT IF     (    FTRNUMFAC OF IFBLOC = 0 &
+                OR FTRDATFAC OF PDFACTURE > TMP-DAT-FIN &
+              ) &
+          AND (    TMP-DAT-FIN >= BLCDAT OF IFBLOC&
+                OR TMP-DAT-FIN = 0 &
+              )
+
+
+DEFINE D_NUMBLC CHARACTER SIZE 14 =   TGRCODGRA OF IFBLOC &
+                                    + IFCCLE OF IFBLOC    &
+                                    + "-"                 &
+                                    + BLCCLE OF IFBLOC    &
+                                    + "-"                 &
+                                    + BLCRED OF IFBLOC
+
+
+SORT ON TGRCODGRA    OF IFBLOC    &
+     ON T_ANNEE_PROD OF WIF320A D & ; MP-00-05-25_D59.
+     ON D_NUMBLC                  &
+     ON BLCCLE       OF IFBLOC    
+
+;-------------------------------------------------------------------------------
+;
+; Variables obligatoires pour les en-têtes standards.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = PARM
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = "" IF TMP-DAT-FIN = 0 &
+        ELSE "En date du : " + ASCII( TMP-DAT-FIN , 8 )[3:2] + "/" + &
+                               ASCII( TMP-DAT-FIN , 8 )[5:2] + "/" + &
+                               ASCII( TMP-DAT-FIN , 8 )[7:2]
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE  7 = "IF310"
+;
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = PARM
+
+
+USE ustit180 NOLIST
+  SKIP 2 &
+             TAB 003 "NO"              &
+             TAB 009 "NO"              &
+             TAB 025 "DATE"            &
+             TAB 034 "DIMENSIONS "     &
+             TAB 048 "TOTAL"           &
+             TAB 056 "T/M"             &
+             TAB 064 "NO"              &
+             TAB 073 "CAT"             &
+             TAB 077 "COUL"            &
+             TAB 082 "QUAL"            &
+             TAB 088 "DATE"            &
+             TAB 096 "COUT BLOC"       &
+             TAB 107 "COUT TRANS"      &
+             TAB 122 "COUT"            &
+             TAB 129 "NO FAC"          &
+             TAB 137 "DATE DE"         &
+SKIP 1                                 &
+             TAB 003 "CAR."            &
+             TAB 008 "BLOC"            &
+             TAB 025 "PROD"            &
+             TAB 032 "LONG HAUT LARG"  &
+             TAB 049 "M3"              &
+             TAB 064 "EXP"             &
+             TAB 087 "DEBUT"           &
+             TAB 098 "$/M3"            &
+             TAB 110 "$/M3"            &
+             TAB 122 "TOTAL"           &
+             TAB 131 "C/P"             &
+             TAB 137 "TRANSPORT"       &
+SKIP 1                                 &
+             TAB 003 "----"            &
+             TAB 008 "--------------"  &
+             TAB 023 "--------"        &
+             TAB 032 "--------------"  &
+             TAB 047 "------"          &
+             TAB 054 "-------"         &
+             TAB 063 "-----"           &
+             TAB 073 "---"             &
+             TAB 077 "----"            &
+             TAB 082 "----"            &
+             TAB 087 "--------"        &
+             TAB 096 "----------"      &
+             TAB 107 "----------"      &
+             TAB 118 "-----------"     &
+             TAB 130 "------"          &
+             TAB 137 "---------"       &
+SKIP 2
+
+REPORT  &
+  TAB 003 TGRCODGRA OF IFBLOC PICTURE "^^^" PRINT AT TGRCODGRA OF IFBLOC&
+  TAB 008 D_NUMBLC                           &
+  TAB 023 BLCDAT OF IFBLOC                   &
+  TAB 033 BLCVENDULONG OF IFBLOC             &
+  TAB 038 BLCVENDUHAU OF IFBLOC              &
+  TAB 043 BLCVENDULAR OF IFBLOC              &
+  TAB 047 BLCM3TOT OF IFBLOC                 &
+  TAB 054 BLCTMREG OF IFBLOC                 &
+  TAB 063 EXNCLE OF IFBLOC     PIC "^^^^^"   &
+  TAB 073 CATCLE OF IFBLOC                   &
+  TAB 077 CLRCLE OF IFBLOC                   &
+  TAB 081 QLTCLE OF IFBLOC                   &
+  TAB 087 COEDATDEB OF IFBLOC                &
+  TAB 096 BLCMNTM3 OF IFBLOC                 &
+  TAB 107 BLCMNTEXPM3 OF IFBLOC PIC " ^^,^^^.^^" &
+          LEADING "-" SIGNIFICANCE 4         &
+  TAB 118 D_COUT_TOTAL PICTURE " ^^^,^^^.^^" &
+          LEADING "-" SIGNIFICANCE 4  &
+
+  TAB 130 CAPCLE OF IFBLOC PIC "^^^^^^"        &
+  TAB 137 BLCDATREC OF IFBLOC
+
+
+; ---------------------------------------------------------------
+; MP-00-05-25_D59.
+
+FOOTING AT T_ANNEE_PROD OF WIF320A                              &
+        TAB 6 "--------"                   &
+        TAB 44 "--------------------"      &
+        TAB 106 "-----------------------"  &
+ SKIP 2                                                         &
+        TAB 001 COUNT                 PICTURE "^^^^^" "Blocs"   &
+        TAB 030 "Sous-total:"                                   &
+        TAB 044 BLCM3TOT     SUBTOTAL PICTURE "^^^^^^.^^"       &
+        TAB 055 BLCTFINAL    SUBTOTAL PICTURE "^^^^^^.^^"       &
+        TAB 100 "Coût total bloc:"                              &
+        TAB 118 D_TOT_BLOC   SUBTOTAL PICTURE " ^^^,^^^.^^"     &
+        TAB 134 "Année :"                                       &
+        TAB 142 T_ANNEE_PROD OF WIF320A                         &
+ SKIP 1                                                         &
+        TAB 001 D-CPT-BLOC   SUBTOTAL PICTURE "^^^^^" "Transp." &
+        TAB 030 "Sous-total:"                                   &
+        TAB 044 D-BLCM3TOT   SUBTOTAL PICTURE "^^^^^^.^^"       &
+        TAB 055 D-BLCTFINAL  SUBTOTAL PICTURE "^^^^^^.^^"       &
+        TAB 095 "Coût total transport: "                        &
+        TAB 118 D_TOT_TRANS  SUBTOTAL PICTURE " ^^^,^^^.^^"     &
+                             LEADING "-" SIGNIFICANCE 4         &
+ SKIP 1                                                         &
+        TAB 105 "Coût total:"                                   &
+        TAB 118 D_COUT_TOTAL SUBTOTAL PICTURE " ^^^,^^^.^^"     &
+                             LEADING "-" SIGNIFICANCE 4         &
+ SKIP 2
+
+; ---------------------------------------------------------------
+
+FOOTING AT TGRCODGRA OF IFBLOC &
+        TAB 6 "--------"                   &
+        TAB 44 "--------------------"      &
+        TAB 106 "-----------------------"  &
+SKIP 2  &
+        TAB 1 COUNT PICTURE "^^^^^" "Blocs"         &
+        TAB 30 "Sous-total:"        &
+        TAB 44 BLCM3TOT SUBTOTAL PICTURE  "^^^^^^.^^" &
+        TAB 53 BLCTFINAL SUBTOTAL PICTURE "^^^^^^.^^" &
+        TAB 100 "Coût total bloc:" &
+        TAB 118 D_TOT_BLOC SUBTOTAL RESET AT TGRCODGRA OF IFBLOC &
+                PICTURE " ^^^,^^^.^^" &
+        TAB 134 "Granit:"                                                                &
+        TAB 142 TGRCODGRA    OF IFBLOC                                                   &
+        TAB 146 TGRDSCFRA001 OF PDTYPE_GRANIT PICTURE "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^"   &
+SKIP 1  &
+        TAB 1 D-CPT-BLOC SUBTOTAL RESET AT TGRCODGRA OF IFBLOC PICTURE "^^^^^" "Transp." &
+        TAB 30 "Sous-total:"                &
+        TAB 44 D-BLCM3TOT SUBTOTAL RESET AT TGRCODGRA OF IFBLOC PICTURE  "^^^^^^.^^" &
+        TAB 53 D-BLCTFINAL SUBTOTAL RESET AT TGRCODGRA OF IFBLOC PICTURE "^^^^^^.^^" &
+        TAB 95 "Coût total transport: " &
+        TAB 118 D_TOT_TRANS SUBTOTAL RESET AT TGRCODGRA OF IFBLOC PICTURE " ^^^,^^^.^^" &
+               LEADING "-" SIGNIFICANCE 4  &
+SKIP 1  &
+        TAB 105 "Coût total:" & 
+  TAB 118 D_COUT_TOTAL SUBTOTAL PICTURE " ^^^,^^^.^^" &
+          LEADING "-" SIGNIFICANCE 4  &
+SKIP 2
+
+FINAL FOOTING                                       &
+        TAB 6 "========"                            &
+        TAB 34 "============================"       &
+        TAB 96 "================================="  &
+SKIP 2  &
+        TAB 1 COUNT PICTURE "^^^^^" "Blocs"         &
+        TAB 30 "Total:"        &
+        TAB 44 BLCM3TOT SUBTOTAL PICTURE  "^^^^^^.^^" &
+        TAB 53 BLCTFINAL SUBTOTAL PICTURE "^^^^^^.^^" &
+        TAB 98 "Coût total bloc:" &
+        TAB 115 D_TOT_BLOC SUBTOTAL PICTURE " ^^,^^^,^^^.^^" &
+                LEADING "-" SIGNIFICANCE 4 &
+        TAB 134 "Grand total"                                &
+SKIP 1  &
+        TAB 1 D-CPT-BLOC SUBTOTAL PICTURE "^^^^^" "Transp." &
+        TAB 30 "Total:"                &
+        TAB 44 D-BLCM3TOT SUBTOTAL PICTURE  "^^^^^^.^^" &
+        TAB 53 D-BLCTFINAL SUBTOTAL PICTURE "^^^^^^.^^" &
+        TAB 93 "Coût total transport: " &
+        TAB 114 D_TOT_TRANS SUBTOTAL PICTURE " ^^^,^^^,^^^.^^" &
+               LEADING "-" SIGNIFICANCE 4  &
+
+SKIP 1  &
+        TAB 103 "Coût total:" & 
+        TAB 114 D_COUT_TOTAL SUBTOTAL PICTURE " ^^^,^^^,^^^.^^" &
+                LEADING "-" SIGNIFICANCE 4  &
+
+SKIP 2
+
+BUILD  if310z
+
+
+;/T/ Sommaire de la valorisation des blocs en inventaire par type de granit
+;
+;/A/ Auteur............: Marc Poulin     
+;    Date..............: 17 avril 2001
+;    Description.......: Ajout d'un rapport sommaire et ajustements des paramètres en conséquence.
+;
+;    Référence.........: Demande de changement 000134.
+;
+;    Signet............: MP-01-04-17_D134.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST
+SET NOBLANKS
+
+ACCESS IFBLOC LINK TGRCODGRA OF IFBLOC            , &
+                   CIECLE    OF IFBLOC              &
+                TO TGRCODGRA                      , &
+                   CIECLE    OF PDTYPE_GRANIT       &
+
+              LINK CIECLE    OF IFBLOC            , &
+                   FTRNUMFAC OF IFBLOC              &
+                TO CIECLE                         , &
+                   FTRNUMFAC OF PDFACTURE OPTIONAL  &
+
+              LINK CIECLE    OF IFBLOC            , & ; MP-00-05-25_D59.
+                   IFCCLE    OF IFBLOC              & ; MP-00-05-25_D59.
+                TO CIECLE                         , & ; MP-00-05-25_D59.
+                   IFCCLE    OF *WIF320A  OPTIONAL    ; MP-00-05-25_D59.
+
+CHOOSE CIECLE    PARM, &
+       TGRCODGRA PARM
+
+DEFINE TMP-DAT-FIN DATE = PARM
+
+;
+; Coût total bloc
+;
+DEFINE D_TOT_BLOC INTEGER SIZE 4 = (BLCM3TOT OF IFBLOC  &
+                                 *  BLCMNTM3 OF IFBLOC) / 100 + .5
+
+;
+; Coût total du transport
+;
+DEFINE D_TOT_TRANS INTEGER SIZE 4 = (BLCM3TOT    OF IFBLOC  * &
+                                     BLCMNTEXPM3 OF IFBLOC) / 100  + .5
+
+;
+; Coût total
+;
+DEFINE D_COUT_TOTAL INTEGER SIZE 4 = D_TOT_BLOC + D_TOT_TRANS
+
+DEFINE D-CPT-BLOC  INTEGER SIZE 1 = 1 IF BLCDATREC <> 0 ELSE 0
+DEFINE D-BLCM3TOT  INTEGER SIZE 4 = BLCM3TOT IF BLCDATREC <> 0 ELSE 0
+DEFINE D-BLCTFINAL INTEGER SIZE 4 = BLCTFINAL IF BLCDATREC <> 0 ELSE 0
+
+
+; LE SELECT PREND LES ENREGISTREMENTS REPONDANT AUX CONDITIONS SUIVANTES :
+
+; - LE NUMERO DE FACTURE DANS LA TABLE BLOC=0 OU LA DATE DE LA FACTURE
+;   EST PLUS GRANDE QUE LA DATE DE FIN ENTRE
+; - LA DATE DU BLOC EST COMPRISE DANS LES LIMITES ENTREES SI IL Y EN A UNE
+
+
+SELECT IF     (    FTRNUMFAC OF IFBLOC = 0 &
+                OR FTRDATFAC OF PDFACTURE > TMP-DAT-FIN &
+              ) &
+          AND (    TMP-DAT-FIN >= BLCDAT OF IFBLOC&
+                OR TMP-DAT-FIN = 0 &
+              )
+
+
+DEFINE D_NUMBLC CHARACTER SIZE 14 =   TGRCODGRA OF IFBLOC &
+                                    + IFCCLE OF IFBLOC    &
+                                    + "-"                 &
+                                    + BLCCLE OF IFBLOC    &
+                                    + "-"                 &
+                                    + BLCRED OF IFBLOC
+
+
+SORT ON TGRCODGRA    OF IFBLOC    &
+     ON T_ANNEE_PROD OF WIF320A D & ; MP-00-05-25_D59.
+     ON D_NUMBLC                  &
+     ON BLCCLE       OF IFBLOC    
+
+;-------------------------------------------------------------------------------
+;
+; Variables obligatoires pour les en-têtes standards.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = PARM
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = "" IF TMP-DAT-FIN = 0 &
+        ELSE "En date du : " + ASCII( TMP-DAT-FIN , 8 )[3:2] + "/" + &
+                               ASCII( TMP-DAT-FIN , 8 )[5:2] + "/" + &
+                               ASCII( TMP-DAT-FIN , 8 )[7:2]
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE  7 = "IF310ZA"
+;
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = PARM
+
+
+USE ustit180 NOLIST
+  SKIP 2 &
+             TAB 003 "NO"              &
+             TAB 009 "NO"              &
+             TAB 025 "DATE"            &
+             TAB 034 "DIMENSIONS "     &
+             TAB 048 "TOTAL"           &
+             TAB 056 "T/M"             &
+             TAB 064 "NO"              &
+             TAB 073 "CAT"             &
+             TAB 077 "COUL"            &
+             TAB 082 "QUAL"            &
+             TAB 088 "DATE"            &
+             TAB 096 "COUT BLOC"       &
+             TAB 107 "COUT TRANS"      &
+             TAB 122 "COUT"            &
+             TAB 129 "NO FAC"          &
+             TAB 137 "DATE DE"         &
+SKIP 1                                 &
+             TAB 003 "CAR."            &
+             TAB 008 "BLOC"            &
+             TAB 025 "PROD"            &
+             TAB 032 "LONG HAUT LARG"  &
+             TAB 049 "M3"              &
+             TAB 064 "EXP"             &
+             TAB 087 "DEBUT"           &
+             TAB 098 "$/M3"            &
+             TAB 110 "$/M3"            &
+             TAB 122 "TOTAL"           &
+             TAB 131 "C/P"             &
+             TAB 137 "TRANSPORT"       &
+SKIP 1                                 &
+             TAB 003 "----"            &
+             TAB 008 "--------------"  &
+             TAB 023 "--------"        &
+             TAB 032 "--------------"  &
+             TAB 047 "------"          &
+             TAB 054 "-------"         &
+             TAB 063 "-----"           &
+             TAB 073 "---"             &
+             TAB 077 "----"            &
+             TAB 082 "----"            &
+             TAB 087 "--------"        &
+             TAB 096 "----------"      &
+             TAB 107 "----------"      &
+             TAB 118 "-----------"     &
+             TAB 130 "------"          &
+             TAB 137 "---------"       &
+SKIP 2
+
+; ---------------------------------------------------------------
+; MP-00-05-25_D59.
+
+FOOTING AT T_ANNEE_PROD OF WIF320A                              &
+        TAB 6 "--------"                   &
+        TAB 44 "--------------------"      &
+        TAB 106 "-----------------------"  &
+ SKIP 2                                                         &
+        TAB 001 COUNT                 PICTURE "^^^^^" "Blocs"   &
+        TAB 030 "Sous-total:"                                   &
+        TAB 044 BLCM3TOT     SUBTOTAL PICTURE "^^^^^^.^^"       &
+        TAB 055 BLCTFINAL    SUBTOTAL PICTURE "^^^^^^.^^"       &
+        TAB 100 "Coût total bloc:"                              &
+        TAB 118 D_TOT_BLOC   SUBTOTAL PICTURE " ^^^,^^^.^^"     &
+        TAB 134 "Année :"                                       &
+        TAB 142 T_ANNEE_PROD OF WIF320A                         &
+ SKIP 1                                                         &
+        TAB 001 D-CPT-BLOC   SUBTOTAL PICTURE "^^^^^" "Transp." &
+        TAB 030 "Sous-total:"                                   &
+        TAB 044 D-BLCM3TOT   SUBTOTAL PICTURE "^^^^^^.^^"       &
+        TAB 055 D-BLCTFINAL  SUBTOTAL PICTURE "^^^^^^.^^"       &
+        TAB 095 "Coût total transport: "                        &
+        TAB 118 D_TOT_TRANS  SUBTOTAL PICTURE " ^^^,^^^.^^"     &
+                             LEADING "-" SIGNIFICANCE 4         &
+        TAB 134 "Granit:"                                                                &
+        TAB 142 TGRCODGRA    OF IFBLOC                                                   &
+        TAB 146 TGRDSCFRA001 OF PDTYPE_GRANIT PICTURE "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^"   &
+ SKIP 1                                                         &
+        TAB 105 "Coût total:"                                   &
+        TAB 118 D_COUT_TOTAL SUBTOTAL PICTURE " ^^^,^^^.^^"     &
+                             LEADING "-" SIGNIFICANCE 4         &
+ SKIP 2
+
+; ---------------------------------------------------------------
+
+FOOTING AT TGRCODGRA OF IFBLOC             &
+        TAB 6 "--------"                   &
+        TAB 44 "--------------------"      &
+        TAB 106 "-----------------------"  &
+SKIP 2  &
+        TAB 1 COUNT PICTURE "^^^^^" "Blocs"         &
+        TAB 30 "Sous-total:"        &
+        TAB 44 BLCM3TOT SUBTOTAL PICTURE  "^^^^^^.^^" &
+        TAB 53 BLCTFINAL SUBTOTAL PICTURE "^^^^^^.^^" &
+        TAB 100 "Coût total bloc:" &
+        TAB 118 D_TOT_BLOC SUBTOTAL RESET AT TGRCODGRA OF IFBLOC &
+                PICTURE " ^^^,^^^.^^" &
+        TAB 134 "Granit:"                                                                &
+        TAB 142 TGRCODGRA    OF IFBLOC                                                   &
+        TAB 146 TGRDSCFRA001 OF PDTYPE_GRANIT PICTURE "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^"   &
+SKIP 1  &
+        TAB 1 D-CPT-BLOC SUBTOTAL RESET AT TGRCODGRA OF IFBLOC PICTURE "^^^^^" "Transp." &
+        TAB 30 "Sous-total:"                &
+        TAB 44 D-BLCM3TOT SUBTOTAL RESET AT TGRCODGRA OF IFBLOC PICTURE  "^^^^^^.^^" &
+        TAB 53 D-BLCTFINAL SUBTOTAL RESET AT TGRCODGRA OF IFBLOC PICTURE "^^^^^^.^^" &
+        TAB 95 "Coût total transport: " &
+        TAB 118 D_TOT_TRANS SUBTOTAL RESET AT TGRCODGRA OF IFBLOC PICTURE " ^^^,^^^.^^" &
+               LEADING "-" SIGNIFICANCE 4  &
+SKIP 1  &
+        TAB 105 "Coût total:" & 
+  TAB 118 D_COUT_TOTAL SUBTOTAL PICTURE " ^^^,^^^.^^" &
+          LEADING "-" SIGNIFICANCE 4  &
+SKIP 2
+
+FINAL FOOTING                                       &
+        TAB 6 "========"                            &
+        TAB 34 "============================"       &
+        TAB 96 "================================="  &
+SKIP 2  &
+        TAB 1 COUNT PICTURE "^^^^^" "Blocs"         &
+        TAB 30 "Total:"        &
+        TAB 44 BLCM3TOT SUBTOTAL PICTURE  "^^^^^^.^^" &
+        TAB 53 BLCTFINAL SUBTOTAL PICTURE "^^^^^^.^^" &
+        TAB 98 "Coût total bloc:" &
+        TAB 115 D_TOT_BLOC SUBTOTAL PICTURE " ^^,^^^,^^^.^^" &
+                LEADING "-" SIGNIFICANCE 4 &
+        TAB 134 "Grand total"                                &
+SKIP 1  &
+        TAB 1 D-CPT-BLOC SUBTOTAL PICTURE "^^^^^" "Transp." &
+        TAB 30 "Total:"                &
+        TAB 44 D-BLCM3TOT SUBTOTAL PICTURE  "^^^^^^.^^" &
+        TAB 53 D-BLCTFINAL SUBTOTAL PICTURE "^^^^^^.^^" &
+        TAB 93 "Coût total transport: " &
+        TAB 114 D_TOT_TRANS SUBTOTAL PICTURE " ^^^,^^^,^^^.^^" &
+               LEADING "-" SIGNIFICANCE 4  &
+
+SKIP 1  &
+        TAB 103 "Coût total:" & 
+        TAB 114 D_COUT_TOTAL SUBTOTAL PICTURE " ^^^,^^^,^^^.^^" &
+                LEADING "-" SIGNIFICANCE 4  &
+
+SKIP 2
+
+BUILD  if310za

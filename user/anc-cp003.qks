@@ -1,0 +1,2293 @@
+;/T/ Factures / Notes de crédit
+;
+;/V??/M??/??bien_livrable??/Francois Richard/1999-03-22
+;  Description.: PROSIG
+;                Modification des traitements dans le quel
+;                on retrouve des années, périodes
+;                tel que select, sort, choose, define, if.
+;                Correction des formats sur les dates dans les écrans.
+;
+;/P/ Programmeur..: Thomas BRENNEUR
+;    Date Création: 10 Juin 1993
+;
+;    Description..: Saisie des factures (FA), crédits (CR), notes de
+;                   crédits (NC), ajustements (AJ)
+;
+;                   FA = Facture normale : montant POSITIF = pièce comptable
+;                   CR = Facture normale : montant NEGATIF = pièce comptable
+;                   NC = Note de crédit appliquée sur FA
+;                                        : montant NEGATIF = pièce comptable
+;                   AJ = ajustements appliquée sur FA,CR,NC
+;                                        : signe du montant indéterminé
+;                                                          = Ce n'est pas une
+;                                                            pièce comptable
+;
+;/M/ François Déry, 30 avril 1999
+;       Modifier l'accèss au fichier de séquence car il a
+;       été converti en format interbase au lieu d'indexé.
+;
+;/M/ Adatation....: Marc Morissette 18 Novembre 1993
+;
+;    Description..: Modification du titre de l'écran
+;-------------------------------------------------------------------------------
+;
+;/M/ Date modif...: 09-Mars-1994
+;
+;    Programmeur..: Guy Chabot
+;
+;    Description..: Ajout de CAPCIECLE dans l'appel du popup CP105 pour ne
+;                   référer que les pièces de la même compagnie.
+;
+;                   Modification du ACCESS de la table A_CAP_REFERE pour
+;                   n'avoir que les pièce de la compagnie.
+;
+;/M/ Modifié par..: Guy Chabot le 12 octobre 1994
+;
+;    Description..: Introduction du P.N.A. aux payables sur le même principe
+;                   ou presque des recevables.
+;
+;/M/ Marie-Josée Hamel, 96.03.21, ne pas permettre de modifier une facture qui
+;                                 provient des achats
+;
+;/M/ Marie-Josée Hamel, 96.03.26, ajouter le sous-écran pour aller dans la
+;                                 consolidation de facture.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+;
+;/M/ Modifié par.......: Marc Poulin
+;    Date modification.: 14 août 2000
+;    Description.......: Ajustement du traitement afin que l'information relative à la date dûe soit obligatoire en mode "Saisie"
+;                        pour les factures de type CR ou NC (Crédit ou Note de crédit).
+;
+;    Référence.........: Demande de changement 000080.
+;
+;    Signet............: MP-00-08-14_D80.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN cp003  ACTIONBAR &
+              MODE LABEL "" AT 2,80 &
+              NOACTION FIELDMARK RETAIN STARTUP &
+              AUTOUPDATE &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING T_FOUCIECLE, &
+                        T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        T_PECCLEMNU, &
+                        T_PECCLECOU, &
+                        T_FOUCLEFND, &
+                        T_CAPCLEFND
+
+TEMPORARY T_PECCLECOU_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+TEMPORARY T_FIELDTEXT_SIE CHARACTER SIZE 5 ; Temporaire servant pour le changement de siècle
+
+
+USE ustraecr  NOLIST  ; Il ne faut pas rompre la chaine de recherche si
+                      ; cet écran est appelé depuis la consultation des
+                      ; factures du fournisseur.
+
+USE usactecr  NOLIST
+
+USE cp003.hlp NOLIST
+
+USE ussectmp  NOLIST
+    "CP003"
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-Ecrans"
+  MENUITEM LABEL "Imputation                      " ACTION DESIGNER D001
+  MENUITEM LABEL "Ecriture comptable              " ACTION DESIGNER D002
+  MENUITEM LABEL "Historique des transactions     " ACTION DESIGNER D003
+  MENUITEM LABEL "Cédule de paiement              " ACTION DESIGNER D004
+  MENUITEM LABEL "Consolidation de facture        " ACTION DESIGNER D009
+  MENUITEM LABEL "Adresse - fournisseur divers    " ACTION DESIGNER D005
+  MENUITEM LABEL "Immobilisations                 " ACTION DESIGNER D006
+  MENUITEM LABEL "Gestion des lots                " ACTION DESIGNER D007
+  MENUITEM LABEL "Vérification                    " ACTION DESIGNER D008
+@ELSE
+ACTIONMENU LABEL "Subscreens"
+  MENUITEM LABEL "Imputation                   %%%" ACTION DESIGNER D001
+  MENUITEM LABEL "Ecriture comptable           %%%" ACTION DESIGNER D002
+  MENUITEM LABEL "Historique des transactions  %%%" ACTION DESIGNER D003
+  MENUITEM LABEL "Cédule de paiement           %%%" ACTION DESIGNER D004
+  MENUITEM LABEL "Consolidation de facture     %%%" ACTION DESIGNER D009
+  MENUITEM LABEL "Adresse - fournisseur divers %%%" ACTION DESIGNER D005
+  MENUITEM LABEL "Immobilisations              %%%" ACTION DESIGNER D006
+  MENUITEM LABEL "Gestion des lots             %%%" ACTION DESIGNER D007
+  MENUITEM LABEL "Vérification                 %%%" ACTION DESIGNER D008
+@ENDIF
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_RAD_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE MCRAD_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+
+TRANSACTION MAJ_TBL_CAP READ WRITE REPEATABLE READ COMMIT ON UPDATE &
+                        RESERVING FOR PROTECTED WRITE CPCPT_A_PAYER IN DICT
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE  4 ; Cie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la Cie du menu.
+TEMPORARY T_FOUCIECLE CHARACTER SIZE  4 ; Cie de la clef du fournisseur.
+TEMPORARY T_PECCLEMNU CHARACTER SIZE  4 ; Période du menu
+TEMPORARY T_PECCLECOU CHARACTER SIZE  4 ; Période courante
+TEMPORARY T_FOUCLEFND CHARACTER SIZE  6 ; # de fournisseur de recherche
+TEMPORARY T_CAPCLEFND CHARACTER SIZE 15 ; # de facture     de recherche
+
+;-------------------------------------------------------------------------------
+;
+; COMPTE À PAYER.
+;
+; ** ATTENTION : les procédures PATH & FIND ont été réécrites !! **
+;
+; Dans cet écran on prend en compte les transactions suivantes :
+;
+;   FA = factures
+;   CR = crédits
+;   NC = notes de crédits
+;   AJ = ajustements
+;   NA = paiement non-appliqué.
+;
+; Les rapports de dépenses et leurs ajustements ne sont pas pris en compte
+; dans cet écran.
+;
+
+FILE CPCPT_A_PAYER  PRIMARY TRANSACTION MAJ_TBL_CAP FOR UPDATE
+
+  SELECT IF (CAPTYPECR OF CPCPT_A_PAYER = "FA"   OR &
+             CAPTYPECR OF CPCPT_A_PAYER = "CR"   OR &
+             CAPTYPECR OF CPCPT_A_PAYER = "NA"   OR &
+             CAPTYPECR OF CPCPT_A_PAYER = "NC"   OR &
+             CAPTYPECR OF CPCPT_A_PAYER = "AJ")
+
+  ITEM FOUCIECLE    OF CPCPT_A_PAYER INITIAL T_FOUCIECLE
+  ITEM CAPCIECLE    OF CPCPT_A_PAYER INITIAL T_CIECLEMNU
+  ITEM REFCIECLE    OF CPCPT_A_PAYER INITIAL T_FOUCIECLE
+  ITEM REFCLETYP    OF CPCPT_A_PAYER INITIAL "F"
+  ITEM CAPFLGCED    OF CPCPT_A_PAYER INITIAL "0"
+  ITEM CAPDATCRE    OF CPCPT_A_PAYER INITIAL SYSDATE
+  ITEM CAPHRECRE    OF CPCPT_A_PAYER INITIAL SYSTIME / 10000
+  ITEM CAPUSRCRE    OF CPCPT_A_PAYER INITIAL LOGONID
+
+;-------------------------------------------------------------------------------
+;
+; HISTORIQUE & LIEN SUR LA FACTURE RÉFÉRÉE
+;
+;
+FILE CPCAP_HISTO  SECONDARY &
+                  NOITEM
+
+  ACCESS  VIA   CPHCLE1  , &
+                CPHCLE2  , &
+                CPHCLE3  , &
+                CPHTYPECR, &
+                CPHTYPTRA  &
+          USING FOUCIECLE OF CPCPT_A_PAYER, &
+                FOUCLE    OF CPCPT_A_PAYER, &
+                CAPCLE    OF CPCPT_A_PAYER, &
+                CAPTYPECR OF CPCPT_A_PAYER, &
+                CAPTYPECR OF CPCPT_A_PAYER
+
+  ITEM  FOUCIECLE OF CPCAP_HISTO  FINAL   FOUCIECLE   OF CPCPT_A_PAYER
+  ITEM  FOUCLE    OF CPCAP_HISTO  FINAL   FOUCLE      OF CPCPT_A_PAYER
+  ITEM  CPHTIMSTP OF CPCAP_HISTO  INITIAL SYSDATE * 1000000 + ROUND(SYSTIME / 100)
+  ITEM  CPHCLE1   OF CPCAP_HISTO  INITIAL T_FOUCIECLE
+  ITEM  CPHCLE2   OF CPCAP_HISTO  FINAL   FOUCLE      OF CPCPT_A_PAYER
+  ITEM  CPHCLE3   OF CPCAP_HISTO  FINAL   CAPCLE      OF CPCPT_A_PAYER
+  ITEM  CPHTYPECR OF CPCAP_HISTO  FINAL   CAPTYPECR   OF CPCPT_A_PAYER
+  ITEM  CPHTYPTRA OF CPCAP_HISTO  FINAL   CAPTYPECR   OF CPCPT_A_PAYER
+  ITEM  CPHMNTCAP OF CPCAP_HISTO  FINAL   CAPMNT      OF CPCPT_A_PAYER
+  ITEM  CPHDAT    OF CPCAP_HISTO  FINAL   CAPDAT      OF CPCPT_A_PAYER
+  ITEM  PECCLE    OF CPCAP_HISTO  FINAL   PECCLE      OF CPCPT_A_PAYER
+  ITEM  LCPCLE    OF CPCAP_HISTO  FINAL   LCPCLE      OF CPCPT_A_PAYER
+
+;-------------------------------------------------------------------------------
+;
+; AJUSTEMENT DE LA FACTURE RÉFÉRÉE PAR LA NOTE DE CRÉDIT
+; (lors de l'ajustement d'une note de crédit)
+;
+FILE CPCAP_HISTO  SECONDARY &
+                  NOITEM &
+                  ALIAS A_CPH_FACTURE
+
+  ACCESS  VIA   CPHCLE1  , &
+                CPHCLE2  , &
+                CPHCLE3  , &
+                CPHTYPECR, &
+                CPHTYPTRA  &
+          USING FOUCIECLE OF CPCPT_A_PAYER, &
+                FOUCLE    OF CPCPT_A_PAYER, &
+                CAPCLE    OF CPCPT_A_PAYER, &
+                "AJ"                      , &
+                "NC"
+
+  ITEM  FOUCIECLE OF A_CPH_FACTURE  FINAL   FOUCIECLE   OF CPCPT_A_PAYER
+  ITEM  FOUCLE    OF A_CPH_FACTURE  FINAL   FOUCLE      OF CPCPT_A_PAYER
+  ITEM  CPHTIMSTP OF A_CPH_FACTURE  INITIAL SYSDATE * 1000000 + ROUND(SYSTIME / 100)
+  ITEM  CPHCLE1   OF A_CPH_FACTURE  INITIAL CPHCLE1     OF CPCAP_HISTO
+  ITEM  CPHCLE2   OF A_CPH_FACTURE  FINAL   CPHCLE2     OF CPCAP_HISTO
+  ITEM  CPHCLE3   OF A_CPH_FACTURE  FINAL   CPHCLE3     OF CPCAP_HISTO
+  ITEM  CPHTYPECR OF A_CPH_FACTURE  FINAL   CPHTYPECR   OF CPCAP_HISTO
+  ITEM  CPHTYPTRA OF A_CPH_FACTURE  FINAL   "NC"
+  ITEM  CPCCLELIG OF A_CPH_FACTURE  FINAL   CPCCLELIG   OF CPCAP_HISTO
+  ITEM  CPHMNTCAP OF A_CPH_FACTURE  FINAL   CPHMNTCAP   OF CPCAP_HISTO
+  ITEM  CPHDAT    OF A_CPH_FACTURE  FINAL   CPHDAT      OF CPCAP_HISTO
+  ITEM  PECCLE    OF A_CPH_FACTURE  FINAL   PECCLE      OF CPCAP_HISTO
+  ITEM  LCPCLE    OF A_CPH_FACTURE  FINAL   LCPCLE      OF CPCAP_HISTO
+
+;-------------------------------------------------------------------------------
+;
+; RECHERCHE DE LA FACTURE RÉFÉRÉE ET COMPTAGE DU NOMBRE D'AJUSTEMENTS
+;
+;
+FILE CPCAP_HISTO  DESIGNER &
+                  ALIAS A_CPH_NC &
+                  OPEN READ
+
+;-------------------------------------------------------------------------------
+;
+; VUE SUR LES SOLDES DU COMPTE À PAYER
+;
+FILE VCAP_SLD REFERENCE &
+              NOITEM
+
+  ACCESS  VIA   FOUCIECLE, &
+                FOUCLE   , &
+                CAPCLE     &
+          USING FOUCIECLE OF CPCPT_A_PAYER, &
+                FOUCLE    OF CPCPT_A_PAYER, &
+                CAPCLE    OF CPCPT_A_PAYER
+
+
+;-------------------------------------------------------------------------------
+; Validation de la destruction, si la facture existe dans la facture transféré
+; par les achats.
+
+FILE ARFACTURE_REC DESIGNER
+
+
+;-------------------------------------------------------------------------------
+;
+; Cette table est utilisée pour valider les factures référées par les notes de
+; crédit.
+;
+FILE CPCPT_A_PAYER    REFERENCE &
+                      ALIAS A_CAP_REFERE
+
+  ACCESS  VIA   FOUCIECLE, &
+                FOUCLE   , &
+                CAPCLE   , &
+                CAPCIECLE  &
+          USING FOUCIECLE OF CPCPT_A_PAYER, &
+                FOUCLE    OF CPCPT_A_PAYER, &
+                CAPCLE    OF CPCAP_HISTO  , &
+                CAPCIECLE OF CPCPT_A_PAYER
+
+;-------------------------------------------------------------------------------
+;
+; FOURNISSEUR
+;
+;   Cette vue permet de récupérer les informations du fournisseur et ses
+;   informations spécifiques à la compagnie.
+;
+;
+FILE VFOC_FOU REFERENCE &
+              NOITEM
+
+  ACCESS  VIA   FOUCIECLE, &
+                FOUCLE   , &
+                FOCCIECLE  &
+          USING FOUCIECLE OF CPCPT_A_PAYER, &
+                REFCLENUM OF CPCPT_A_PAYER, &
+                CAPCIECLE OF CPCPT_A_PAYER
+
+  ITEM RADCLE     OF CPCPT_A_PAYER INITIAL FOCADRPAM OF VFOC_FOU
+  ITEM CAPCPTCAP  OF CPCPT_A_PAYER FINAL   FOCCPTCAP OF VFOC_FOU &
+                                   IF     CAPTYPECR OF CPCPT_A_PAYER <> "NC" &
+                                      AND CAPTYPECR OF CPCPT_A_PAYER <> "AJ" &
+                                   ELSE CAPCPTCAP OF A_CAP_REFERE
+
+;-------------------------------------------------------------------------------
+;
+; VALIDATION DU LOT
+;
+;   Note : Le cumul du nombre de transactions et le cumul des montants se
+;          fait par les triggers TCAPSTO,TCAPMOD,TCAPDEL
+;
+FILE CPLOT REFERENCE
+
+  ACCESS  VIA   CIECLE, &
+                PECCLE, &
+                LCPCLE &
+          USING CAPCIECLE OF CPCPT_A_PAYER, &
+                PECCLE    OF CPCPT_A_PAYER, &
+                LCPCLE    OF CPCPT_A_PAYER
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du numéro d'adresse et ajout de la nouvelle adresse pour les
+; fournisseur divers.
+;
+FILE MCREF_ADRESSE    SECONDARY &
+                      NOITEM &
+                      NODELETE
+
+  ACCESS  VIA   REFCIECLE, &
+                REFCLETYP, &
+                REFCLENUM, &
+                RADCLE &
+          USING REFCIECLE OF CPCPT_A_PAYER, &
+                REFCLETYP OF CPCPT_A_PAYER, &
+                REFCLENUM OF CPCPT_A_PAYER, &
+                RADCLE    OF CPCPT_A_PAYER
+
+  ITEM REFCIECLE OF MCREF_ADRESSE FINAL REFCIECLE OF CPCPT_A_PAYER
+  ITEM REFCLETYP OF MCREF_ADRESSE FINAL REFCLETYP OF CPCPT_A_PAYER
+  ITEM REFCLENUM OF MCREF_ADRESSE FINAL REFCLENUM OF CPCPT_A_PAYER
+  ITEM RADCLE    OF MCREF_ADRESSE FINAL RADCLE    OF CPCPT_A_PAYER
+  ITEM RADPAMCP  OF MCREF_ADRESSE INITIAL "1"
+
+;
+; Numéro de séquence des adresses pour les clients divers.
+;
+FILE MCRAD_SEQ        DESIGNER &
+                      TRANSACTION GEN_RAD_SEQ
+
+;-------------------------------------------------------------------------------
+;
+; Validation de l'existance de la cédule de paiement lors d'une note de
+; crédit ou d'un ajustement.
+;
+FILE CPCAP_CEDULE REFERENCE  &
+                  ALIAS A_CPC_REF
+
+  ACCESS  VIA   FOUCIECLE, &
+                FOUCLE   , &
+                CAPCLE   , &
+                CPCCLELIG  &
+          USING FOUCIECLE OF CPCPT_A_PAYER, &
+                FOUCLE    OF CPCPT_A_PAYER, &
+                CAPCLE    OF CPCAP_HISTO  , &
+                CPCCLELIG OF CPCAP_HISTO
+
+;-------------------------------------------------------------------------------
+;
+; VALIDATION DE LA PÉRIODE COMPTABLE
+;
+FILE MCPERIODE_CIE REFERENCE
+
+  ACCESS  VIA   CIECLE, &
+                PECCLE  &
+          USING T_CIECLEMNU, &
+                PECCLE OF CPCPT_A_PAYER
+
+FILE MCPERIODE_CTB REFERENCE
+
+  ACCESS  VIA   PECCLE  &
+          USING PECCLE OF CPCPT_A_PAYER
+
+;-------------------------------------------------------------------------------
+;
+; Validation des codes de termes.
+;
+FILE CPTERME          DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+; Paramètres pour la compagnie consolidé(holding)
+;
+FILE MCHOLDING REFERENCE
+  ACCESS VIA CIENMC USING "1"
+
+;-------------------------------------------------------------------------------
+;
+; Validation du type de pièce.
+;
+DEFINE    D_CAPTYPECR CHARACTER SIZE 16 = "CAPTYPECR"
+TEMPORARY T_CAPTYPECR CHARACTER SIZE  4
+
+FILE VCBI_DSC   REFERENCE &
+                ALIAS A_CBI_CAPTYPECR
+
+  ACCESS  VIA   XELNOM, &
+                CBICLE  &
+          USING D_CAPTYPECR, &
+                CAPTYPECR OF CPCPT_A_PAYER
+
+;-------------------------------------------------------------------------------
+;
+; Recherche du code des paiements automatiques pour interdire de
+; commencer un numéro de facture par ce code
+;
+FILE CPPARAMETRE REFERENCE
+
+  ACCESS  VIA   CIENMC &
+          USING "1"
+
+;-------------------------------------------------------------------------------
+;
+; Destruction des lignes de cédules lors de la destruction de la piece
+;
+FILE CPCAP_CEDULE DELETE &
+                  ALIAS A_CPC_DELETE &
+                  NOITEM
+
+  ACCESS  VIA   FOUCIECLE, &
+                FOUCLE, &
+                CAPCLE &
+          USING FOUCIECLE OF CPCPT_A_PAYER, &
+                FOUCLE    OF CPCPT_A_PAYER, &
+                CAPCLE    OF CPCPT_A_PAYER
+
+;-------------------------------------------------------------------------------
+;
+; Desctruction des lignes d'immobilisation lors de la destruction de la piece
+;
+
+FILE CPCAP_IMM  DELETE &
+                ALIAS A_CIM_DELETE &
+                NOITEM
+
+  ACCESS  VIA   FOUCIECLE, &
+                FOUCLE, &
+                CAPCLE &
+          USING FOUCIECLE OF CPCPT_A_PAYER, &
+                FOUCLE    OF CPCPT_A_PAYER, &
+                CAPCLE    OF CPCPT_A_PAYER
+
+;-------------------------------------------------------------------------------
+;
+; Destruction des ligne d'imputation lors de la destruction de la piece
+;
+
+FILE CPCAP_IMPUTATION DELETE &
+                      ALIAS A_CPI_DELETE &
+                      NOITEM
+
+  ACCESS  VIA   FOUCIECLE, &
+                FOUCLE   , &
+                CAPCLE     &
+          USING FOUCIECLE OF CPCPT_A_PAYER, &
+                FOUCLE    OF CPCPT_A_PAYER, &
+                CAPCLE    OF CPCPT_A_PAYER
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLE    CHARACTER SIZE  4
+TEMPORARY T_FOCCIECLE CHARACTER SIZE  4
+TEMPORARY T_CAPCIECLE CHARACTER SIZE  4
+TEMPORARY T_CAPCLE    CHARACTER SIZE 15
+TEMPORARY T_CODMOD    CHARACTER SIZE  2 INITIAL "CP" RESET AT STARTUP
+TEMPORARY T_FLGSLD    CHARACTER SIZE  1
+TEMPORARY T_FOUCLE    CHARACTER SIZE  6
+TEMPORARY T_CPCCLELIG INTEGER SIZE  2
+TEMPORARY T_LCPCLE    CHARACTER SIZE  4
+TEMPORARY T_PECCLE    CHARACTER SIZE  4
+TEMPORARY T_LCPCLEFND CHARACTER SIZE  4
+TEMPORARY T_PECCLEFND CHARACTER SIZE  4
+TEMPORARY T_REFCLETYP CHARACTER SIZE  1
+TEMPORARY T_REFCLENUM CHARACTER SIZE  6
+TEMPORARY T_RADCLE    INTEGER UNSIGNED SIZE  2
+TEMPORARY T_TERCAT    CHARACTER SIZE  4
+TEMPORARY T_TERCLE    CHARACTER SIZE  4
+TEMPORARY T_TYPADR    CHARACTER SIZE  3
+TEMPORARY T_TYPECR    CHARACTER SIZE  2
+TEMPORARY T_TYPECRPAT CHARACTER SIZE 30
+TEMPORARY T_TYPTRAPAT CHARACTER SIZE 30
+TEMPORARY T_CAPMNTOLD FLOAT     SIZE  8 ; Ancien montant de la facture
+TEMPORARY T_SILDATNET CHARACTER SIZE  1 ; Pour la validation de la date due
+
+TEMPORARY T_NUMAJT    CHARACTER SIZE  2 ; Pour le traitement des ajustements.
+TEMPORARY T_FACCLEFND CHARACTER SIZE 12 ; # de facture     de recherche
+
+;-------------------------------------------------------------------------------
+;
+; Clef d'accès pour la consultation des écritures.
+;
+DEFINE D_HISCLE    INTEGER UNSIGNED SIZE 4 = HISCLE OF CPCPT_A_PAYER
+
+;-------------------------------------------------------------------------------
+;
+; Pour le calcul des dates due.
+;
+USE ustertmp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Pour duplicater la période et le lot en mode ENTRY.
+;
+TEMPORARY T_PECCLE_DUP CHARACTER SIZE  4 RESET AT MODE
+TEMPORARY T_LCPCLE_DUP CHARACTER SIZE  4 RESET AT MODE
+
+DEFINE    D_DEVCLE CHARACTER SIZE 4 = " " IF DEVCLE OF VFOC_FOU = &
+                                             DEVCLE OF MCHOLDING &
+                                 ELSE "/" + DEVCLE OF VFOC_FOU
+
+DEFINE    D_MNT_PYE FLOAT SIZE 8 &
+          = V_CAPMNTPYE OF VCAP_SLD &
+          + V_CAPMNTESC OF VCAP_SLD
+
+DEFINE    D_SLD_A_PYE FLOAT SIZE 8 &
+          = CAPMNT      OF CPCPT_A_PAYER &
+          + V_CAPMNTAJT OF VCAP_SLD      &
+          + V_CAPMNTCRT OF VCAP_SLD      &
+          - V_CAPMNTPYE OF VCAP_SLD      &
+          - V_CAPMNTESC OF VCAP_SLD
+
+;
+; Si le lot est autorisé, sert au sous-écran CP003A
+;
+DEFINE D_LCPATRJOU    CHARACTER SIZE 1 = LCPATRJOU OF CPLOT
+
+
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Factures / Notes de crédit / Ajustements" &
+@ELSE
+      " Invoices / Credit Notes " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+;ALIGN (3,3,19) (,27,43) (,49,65) (,,76)
+ALIGN (3,3,19) (,26,42) (,48,64) (,,75)
+
+FIELD PECCLE OF CPCPT_A_PAYER &
+      ID 05 HIDDEN &
+      DEFAULT T_PECCLEMNU &
+      NOCHANGE &
+      LOOKUP ON MCPERIODE_CIE &
+        MESSAGE 404 ; Cette période n'est pas définie pour cette compagnie.
+
+FIELD LCPCLE OF CPCPT_A_PAYER &
+      ID SAME &
+      REQUIRED &
+      NOCHANGE &
+      NUMERIC SIGNIF 4 &
+      LOOKUP ON CPLOT &
+        MESSAGE 436 ; Ce numéro de lot n'existe pas
+
+FIELD CAPDATJOU OF CPCPT_A_PAYER  FORMAT YYYYMMDD PATTERN "####/##/##"&
+      DISPLAY
+
+FIELD CAPHREJOU OF CPCPT_A_PAYER &
+      DISPLAY
+
+SKIP
+
+ALIGN (3,3,19) (,,22)
+
+FIELD CAPTYPECR OF CPCPT_A_PAYER &
+      ID 10 HIDDEN &
+      REQUIRED &
+      NOCHANGE &
+      NOCORRECT &
+      LOOKUP ON A_CBI_CAPTYPECR &
+        MESSAGE 412 ; Ce type d'écriture est invalide
+
+FIELD CBIDSC OF A_CBI_CAPTYPECR &
+      DISPLAY
+
+SKIP 1
+ALIGN (3,3,19) (,,26)
+
+FIELD REFCLENUM OF CPCPT_A_PAYER &
+      ID 15 HIDDEN &
+@IF FRANCAIS
+      LABEL "Fournisseur...:" &
+@ELSE
+      LABEL "Supplier......:" &
+@ENDIF
+      REQUIRED NOCHANGE &
+      LOOKUP ON VFOC_FOU &
+          MESSAGE 437 ; Ce numéro de fournisseur n'existe pas.
+
+FIELD RADNOM OF MCREF_ADRESSE &
+      REQUIRED
+
+SKIP
+
+FIELD RADCLE OF CPCPT_A_PAYER &
+      ID 20 HIDDEN &
+@IF FRANCAIS
+      LABEL "Adr. paiement.:" &
+@ELSE
+      LABEL "Payment Adr...:" &
+@ENDIF
+      REQUIRED &
+      LOOKUP ON MCREF_ADRESSE &
+        MESSAGE 415 ; Ce code d'adresse est inexistant.
+
+FIELD RADADR1 OF MCREF_ADRESSE &
+      DISPLAY
+
+SKIP 1
+
+ALIGN(3,3,19) (,36,52) (,65,76)
+
+FIELD CAPCLE OF CPCPT_A_PAYER &
+      ID 25 HIDDEN &
+@IF FRANCAIS
+      LABEL "Facture.......:" &
+@ELSE
+      LABEL "Invoice.......:" &
+@ENDIF
+      REQUIRED NOCHANGE &
+      LOOKUP NOTON CPCPT_A_PAYER &
+        VIA   FOUCIECLE, &
+              FOUCLE   , &
+              CAPCLE     &
+        USING FOUCIECLE OF CPCPT_A_PAYER, &
+              FOUCLE    OF CPCPT_A_PAYER, &
+              CAPCLE    OF CPCPT_A_PAYER  &
+        MESSAGE 438 ; Ce numéro de facture existe déjà.
+
+FIELD CAPCLE OF CPCAP_HISTO &
+      REQUIRED &
+      NOCHANGE &
+      SIZE 12  &
+@IF FRANCAIS
+      LABEL "Facture réf...:" &
+@ELSE
+      LABEL "Invoice ref...:" &
+@ENDIF
+      LOOKUP ON A_CAP_REFERE &
+        MESSAGE 449 ; Cette facture n'existe pas.
+
+
+FIELD CPCCLELIG OF CPCAP_HISTO &
+      REQUIRED &
+      NOCHANGE &
+@IF FRANCAIS
+      LABEL "No ligne.:" &
+@ELSE
+      LABEL "%%%ligne.:" &
+@ENDIF
+      LOOKUP ON A_CPC_REF &
+        MESSAGE 540 ; Cette ligne de cédule est inexistante
+
+SKIP
+
+FIELD CAPDAT OF CPCPT_A_PAYER  FORMAT YYYYMMDD PATTERN "####/##/##"&
+      ID 30 HIDDEN &
+      REQUIRED
+
+FIELD CAPRTU OF CPCPT_A_PAYER &
+      SIZE 3
+
+SKIP
+ALIGN (3,3,19) (,,24) (,36,52) (,,57)
+
+FIELD CAPTERNET OF CPCPT_A_PAYER &
+      ID 35 HIDDEN
+
+FIELD CAPDATNET OF CPCPT_A_PAYER &
+      FORMAT YYYYMMDD            &
+      PATTERN "####/##/##"
+
+FIELD T_SILDATNET &
+        SILENT
+
+FIELD CAPTERESC1 OF CPCPT_A_PAYER
+
+FIELD CAPDATESC1 OF CPCPT_A_PAYER        FORMAT YYYYMMDD PATTERN "####/##/##"
+
+SKIP TO GROUP 3
+
+FIELD CAPTERESC2 OF CPCPT_A_PAYER
+
+FIELD CAPDATESC2 OF CPCPT_A_PAYER        FORMAT YYYYMMDD PATTERN "####/##/##"
+
+SKIP
+
+ALIGN(3,3,19)
+
+FIELD CAPDSC1 OF CPCPT_A_PAYER &
+      ID 40 HIDDEN
+
+FIELD CAPDSC2 OF CPCPT_A_PAYER &
+      ID SAME &
+      NOLABEL
+
+SKIP 1
+
+ALIGN (3,3,19) (,,33) (,40,56)
+
+FIELD CAPMNT OF CPCPT_A_PAYER &
+      ID 45 HIDDEN &
+      REQUIRED
+
+FIELD D_DEVCLE DISPLAY
+
+FIELD CAPMNTNET OF CPCPT_A_PAYER &
+      REFRESH
+
+SKIP
+ALIGN (3,3,19) (,40,56)
+
+FIELD V_CAPMNTAJT OF VCAP_SLD &
+      ID 50 HIDDEN &
+      DISPLAY &
+@IF FRANCAIS
+      LABEL "Ajustement....:" &
+@ELSE
+      LABEL "%%%stement....:" &
+@ENDIF
+      PICTURE "^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5
+
+FIELD CAPMNTTPS OF CPCPT_A_PAYER &
+      DISPLAY &
+      DATA AT ,59 &
+      REFRESH
+
+FIELD V_CAPMNTCRT OF VCAP_SLD &
+      ID 55 HIDDEN &
+      DISPLAY &
+@IF FRANCAIS
+      LABEL "Crédit........:" &
+@ELSE
+      LABEL "%%%dit........:" &
+@ENDIF
+      PICTURE "^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5
+
+FIELD CAPMNTCTI OF CPCPT_A_PAYER &
+      DISPLAY &
+      DATA AT ,59 &
+      REFRESH
+
+FIELD D_MNT_PYE &
+      ID 60 HIDDEN &
+      DISPLAY &
+@IF FRANCAIS
+      LABEL "Montant payé..:" &
+@ELSE
+      LABEL "%%%tant payé..:" &
+@ENDIF
+      PICTURE "^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5
+
+FIELD CAPMNTTVQ OF CPCPT_A_PAYER &
+      DISPLAY &
+      DATA AT ,59 &
+      REFRESH
+
+FIELD D_SLD_A_PYE &
+      ID 65 HIDDEN &
+      REFRESH &
+      DISPLAY &
+@IF FRANCAIS
+      LABEL "Reste à payer.:" &
+@ELSE
+      LABEL "%%%te à payer.:" &
+@ENDIF
+      PICTURE "^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5
+
+FIELD CAPMNTRTI OF CPCPT_A_PAYER &
+      DISPLAY &
+      DATA AT ,59 &
+      REFRESH
+
+FIELD V_CAPMNTESC OF VCAP_SLD &
+      ID 70 HIDDEN &
+      DISPLAY &
+@IF FRANCAIS
+      LABEL "Escompte pris.:" &
+@ELSE
+      LABEL "%%%ompte pris.:" &
+@ENDIF
+      PICTURE "^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5
+
+FIELD FOCSLDACJ OF VFOC_FOU &
+      DISPLAY &
+      REFRESH
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès pour l'écran par son code.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+  ;
+  ; Si l'écran n'est pas appellé par le menu, alors on interdit la saisie,
+  ; la destruction et la modification des données.
+  ;
+  IF T_FOUCLEFND <> ""
+  THEN BEGIN
+    LET TZ_SECENT = "0"
+    LET TZ_SECMOD = "0"
+    LET TZ_SECDEL = "0"
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION ET VALIDATION DE LA PÉRIODE COMPTABLE
+;
+;
+PROCEDURE INPUT PECCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = T_CIECLEMNU
+    LET T_PECCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc109 MODE F PASSING T_CIECLE, T_PECCLE, T_CODMOD
+    LET FIELDTEXT = TRUNCATE(T_PECCLE)
+  END
+END
+
+;
+; La période ne doit pas être fermée mais elle peut être différente de la
+; période courante.
+;
+
+PROCEDURE EDIT PECCLE
+BEGIN
+
+  ; Ajustement pour le changement de siècle
+  IF FIELDTEXT[1:1] < "8"
+  THEN LET T_FIELDTEXT_SIE = "1" + FIELDTEXT
+  ELSE LET T_FIELDTEXT_SIE = "0" + FIELDTEXT
+
+  ; Ajustement pour le changement de siècle
+  IF T_PECCLECOU[1:1] < "8"
+  THEN LET T_PECCLECOU_SIE = "1" + T_PECCLECOU
+  ELSE LET T_PECCLECOU_SIE = "0" + T_PECCLECOU
+
+  IF T_FIELDTEXT_SIE < T_PECCLECOU_SIE
+  THEN ERROR 406 ; Cette période est fermée.
+
+  IF FIELDTEXT <> T_PECCLECOU
+  THEN WARNING 407 ; Cette période diffère de la période courante.
+END
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION & VALIDATION DU LOT
+;
+;
+PROCEDURE INPUT LCPCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PECCLE = PECCLE OF CPCPT_A_PAYER
+    LET T_TYPECR = "FA"
+    LET T_LCPCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cp103 MODE F PASSING T_TYPECR, T_CIECLEMNU, T_PECCLE, T_LCPCLE
+    LET FIELDTEXT = TRUNCATE(T_LCPCLE)
+  END
+  ;
+  ; Force l'éxécution du LOOKUP sur le lot et de la procédure EDIT.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNCATE(LCPCLE OF CPCPT_A_PAYER))
+  THEN LET FIELDTEXT = LCPCLE OF CPCPT_A_PAYER
+END
+
+;
+; Le lot doit être un lot de factures,crédits,notes de crédits, ajustement,
+; il ne doit pas être autorisé ni journalisé. Et pour l'utiliser, il faut
+; être l'usager déclaré dans le lot.
+;
+
+PROCEDURE EDIT LCPCLE
+BEGIN
+  IF LCPTYPECR OF CPLOT <> "FA"
+  THEN ERROR 441 ; Ce lot n'est pas du bon type.
+
+  IF LCPDATJOU OF CPLOT <> 0
+  THEN ERROR 442 ; Le lot est déjà journalisé.
+
+  IF LCPATRJOU OF CPLOT = "1"
+  THEN ERROR 443 ; On ne peut pas utiliser un lot autorisé à la journalisation.
+
+  IF LCPUSR OF CPLOT <> LOGONID
+  THEN ERROR 444 ; Ce lot ne vous est pas destiné.
+
+  IF LCPNBRTRSVER of cplot = 0
+  THEN ERROR 549 ; Vous devez d'abord saisir les montants vérifiés dans le lot.
+
+  IF LCPDATVAL OF CPLOT <> 0
+  THEN WARNING 445 ; Une liste de vérification a déjà été demandé pour ce lot.
+END
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION & VALIDATION DU TYPE DE PIECE
+;
+;
+PROCEDURE INPUT CAPTYPECR
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CAPTYPECR = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_CAPTYPECR, T_CAPTYPECR
+    LET FIELDTEXT = TRUNCATE(T_CAPTYPECR)
+  END
+END
+
+PROCEDURE EDIT CAPTYPECR
+BEGIN
+  IF   CAPTYPECR OF CPCPT_A_PAYER = "RD" &
+    OR CAPTYPECR OF CPCPT_A_PAYER = "AR" &
+    OR CAPTYPECR OF CPCPT_A_PAYER = "NA"
+  THEN ERROR 145 ; Ce type de pièce ne peut pas être utilisé ici.
+END
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION & VALIDATION DU FOURNISSEUR
+;
+;
+PROCEDURE INPUT REFCLENUM
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = FOUCIECLE OF CPCPT_A_PAYER
+    LET T_FOUCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_FOCCIECLE = T_CIECLEMNU
+    RUN SCREEN cp104 MODE F PASSING T_CIECLE, T_FOUCLE, T_FOCCIECLE
+    LET FIELDTEXT = TRUNCATE(T_FOUCLE)
+  END
+END
+
+;
+; Le fournisseur doit être Actif.
+;
+PROCEDURE EDIT REFCLENUM
+BEGIN
+  IF FOUSTU OF VFOC_FOU = "I"
+  THEN ERROR 446 ; Le fournisseur est inactif.
+
+  IF FOURTU OF VFOC_FOU = "1"
+  THEN WARNING 447 ; Le fournisseur est présentement retenu.
+END
+
+;
+; Assignation...
+;  - du numéro de fournisseur.
+;  - de l'adresse de paiement du fournisseur à la facture.
+;  - des codes termes du fournisseur à la facture.
+;
+PROCEDURE PROCESS REFCLENUM
+BEGIN
+  LET FOUCLE     OF CPCPT_A_PAYER = REFCLENUM OF CPCPT_A_PAYER
+  LET CAPTERNET  OF CPCPT_A_PAYER = FOCTERNET  OF VFOC_FOU
+  LET CAPTERESC1 OF CPCPT_A_PAYER = FOCTERESC1 OF VFOC_FOU
+  LET CAPTERESC2 OF CPCPT_A_PAYER = FOCTERESC2 OF VFOC_FOU
+  IF FOUTYP OF VFOC_FOU <> "D"
+  THEN BEGIN
+    LET     RADCLE     OF CPCPT_A_PAYER = FOCADRPAM OF VFOC_FOU
+    EDIT    RADCLE     OF CPCPT_A_PAYER
+    DISPLAY RADCLE     OF CPCPT_A_PAYER
+  END
+  ELSE LET RADCLE OF CPCPT_A_PAYER = 0
+  DISPLAY CAPTERNET  OF CPCPT_A_PAYER
+  DISPLAY CAPTERESC1 OF CPCPT_A_PAYER
+  DISPLAY CAPTERESC2 OF CPCPT_A_PAYER
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Si l'usager modifie le nom du fournisseur divers, il faut mettre à jour
+; le nom abrégé si celui-ci correspond à l'ancienne valeur.
+;
+;
+PROCEDURE EDIT RADNOM
+BEGIN
+  IF RADNOMABR OF MCREF_ADRESSE = OLDVALUE( RADNOM OF MCREF_ADRESSE )[1:20]
+  THEN LET RADNOMABR OF MCREF_ADRESSE = RADNOM OF MCREF_ADRESSE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION & VALIDATION DES ADRESSES DE PAIEMENT
+;
+;
+PROCEDURE INPUT RADCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE    = REFCIECLE OF CPCPT_A_PAYER
+    LET T_REFCLETYP = REFCLETYP OF CPCPT_A_PAYER
+    LET T_FOUCLE    = REFCLENUM OF CPCPT_A_PAYER
+    LET T_TYPADR    = "PAM"
+    LET T_RADCLE = 0
+    RUN SCREEN mc108 MODE F PASSING   T_CIECLE, &
+                                      T_REFCLETYP, &
+                                      T_FOUCLE, &
+                                      T_TYPADR, &
+                                      T_RADCLE
+    IF T_RADCLE <> 0
+    THEN LET FIELDTEXT = ASCII(T_RADCLE)
+    ELSE LET FIELDTEXT = ""
+  END
+END
+
+PROCEDURE EDIT RADCLE
+BEGIN
+  IF RADPAMCP OF MCREF_ADRESSE <> "1"
+  THEN ERROR 423 ; Ce n'est pas une adresse de paiement.
+END
+
+;
+; Affiche le nom du fournisseur provenant de l'adresse (permet d'avoir le
+; nom du fournisseur divers
+;
+PROCEDURE PROCESS RADCLE
+BEGIN
+  DISPLAY RADNOM  OF MCREF_ADRESSE
+  DISPLAY RADADR1 OF MCREF_ADRESSE
+END
+
+;-------------------------------------------------------------------------------
+;
+; SAISIE & VALIDATION DU NUMERO DE FACTURE
+;
+
+;
+; Cette procédure force le LOOKUP du numéro de facture si l'usager recul
+; et modifie le numéro de fournisseur sans modifier le numéro de facture
+;
+PROCEDURE INPUT CAPCLE OF CPCPT_A_PAYER
+BEGIN
+  IF ENTRYMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     CAPCLE OF CPCPT_A_PAYER <> ""
+  THEN LET FIELDTEXT = CAPCLE OF CPCPT_A_PAYER
+END
+
+;
+; Validation du numéro de facture. Celui-ci ne doit pas dépasser 12 caractères
+; pour pouvoir laisser de la place au numéro d'ajustement. et il ne doit pas
+; commencer par les mêmes lettres que le code des paiements automatiques.
+;
+PROCEDURE EDIT CAPCLE OF CPCPT_A_PAYER
+BEGIN
+  IF 12 < SIZE(TRUNCATE(FIELDTEXT))
+  THEN ERROR 403 ; Le numéro est trop long.
+
+  IF FIELDTEXT[1:2] = CPPCODPAU OF CPPARAMETRE
+  THEN ERROR 448 ; Le numéro ne peut pas débuter par le code des paiements automatiques.
+END
+
+;-------------------------------------------------------------------------------
+;
+; SAISIE & VALIDATION DU NUMÉRO DE LA PIÈCE RÉFÉRÉE
+;
+
+;
+; Numéro de facture en référence pour les notes de crédit et ajustements
+;
+PROCEDURE INPUT CAPCLE OF CPCAP_HISTO
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE    = FOUCIECLE OF CPCPT_A_PAYER
+    LET T_FOUCLE    = FOUCLE    OF CPCPT_A_PAYER
+    LET T_CAPCIECLE = CAPCIECLE OF CPCPT_A_PAYER
+    LET T_REFCLENUM = "@"
+    ;
+    ; Si on saisie une note de crédit, alors on ne peut l'appliquer que sur
+    ; une facture. Mais si c'est un ajustement, alors on peut l'appliquer
+    ; sur une facture,crédit et note de crédit.
+    ;
+    IF CAPTYPECR OF CPCPT_A_PAYER = "NC"
+    THEN LET T_TYPECRPAT = "FA"
+    ELSE LET T_TYPECRPAT = "FA|CR|NC"
+
+    LET T_FLGSLD    = "0"
+    LET T_CAPCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+
+    RUN SCREEN cp105 MODE F PASSING T_CIECLE, T_FOUCLE, T_TYPECRPAT, &
+                                    T_FLGSLD, T_CAPCLE, T_REFCLENUM, &
+                                    T_CAPCIECLE
+
+    LET FIELDTEXT = TRUNCATE(T_CAPCLE)
+  END
+END
+
+;
+; Validation du numéro de référence pour les notes de crédit et ajustements.
+;
+PROCEDURE EDIT CAPCLE OF CPCAP_HISTO
+BEGIN
+  IF    CAPTYPECR OF CPCPT_A_PAYER = "NC" &
+    AND CAPTYPECR OF A_CAP_REFERE <> "FA"
+  THEN ERROR 450 ; Une note de crédit ne doit s'appliquer qu'à une facture.
+
+  IF    CAPTYPECR OF CPCPT_A_PAYER = "AJ" &
+    AND CAPTYPECR OF A_CAP_REFERE  = "AJ"
+  THEN ERROR 482 ; Vous ne pouvez pas appliquer un ajustement sur un ajustement.
+
+  IF CAPDATJOU OF A_CAP_REFERE = 0
+  THEN ERROR 451 ; La facture doit être journalisée pour la référer.
+END
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION & VALIDATION DU NUMÉRO DE CÉDULE
+;
+;
+PROCEDURE INPUT CPCCLELIG
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE    = FOUCIECLE OF A_CAP_REFERE
+    LET T_FOUCLE    = FOUCLE    OF A_CAP_REFERE
+    LET T_CAPCLE    = CAPCLE    OF A_CAP_REFERE
+    LET T_CPCCLELIG = 0
+    RUN SCREEN cp107 MODE F PASSING T_CIECLE, T_FOUCLE,  T_CAPCLE, T_CPCCLELIG
+    LET FIELDTEXT = ASCII(T_CPCCLELIG)
+  END
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT)
+  THEN LET FIELDTEXT = ASCII(CPCCLELIG OF CPCAP_HISTO)
+END
+
+;-------------------------------------------------------------------------------
+;
+; VALIDATION DE LA DATE DE LA FACTURE
+;
+;
+PROCEDURE EDIT CAPDAT
+BEGIN
+  IF FIELDVALUE < PECDATDEB OF MCPERIODE_CTB
+  THEN WARNING 452 ; La date est inférieure à la date de début de la période
+
+  IF FIELDVALUE > PECDATFIN OF MCPERIODE_CTB
+  THEN WARNING 453 ; La date est supérieure à la date de fin de la période.
+
+  IF CAPDATJOU OF CPCPT_A_PAYER <> 0
+  THEN ERROR "Impossible de modifier la date, la facture est journalisée !"
+
+END
+
+;
+; Calcul et affichage des dates dues.
+;
+PROCEDURE PROCESS CAPDAT
+BEGIN
+  EDIT CAPTERNET  OF CPCPT_A_PAYER
+  EDIT CAPTERESC1 OF CPCPT_A_PAYER
+  EDIT CAPTERESC2 OF CPCPT_A_PAYER
+END
+
+;-------------------------------------------------------------------------------
+;
+; FLAG OUI/NON SUR LE CODE DE RETENUE
+;
+;
+PROCEDURE INPUT CAPRTU
+BEGIN
+  USE usflginp NOLIST
+END
+
+PROCEDURE OUTPUT CAPRTU
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; PROCEDURE DE CALCUL DES DATES DUES APPELÉS PAR LES TERMES
+;
+;
+USE ustercal NOLIST
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION / VALIDATION / ET CALCUL DU TERME NET
+;
+;
+PROCEDURE INPUT CAPTERNET
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TERCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_TERCAT = "NET"
+    RUN SCREEN cp102 MODE F PASSING T_TERCLE, T_TERCAT
+    LET FIELDTEXT = TRUNCATE(T_TERCLE)
+  END
+END
+
+;
+; Le terme-net est optionel.
+;
+PROCEDURE EDIT CAPTERNET
+BEGIN
+  IF 0 <> SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    GET CPTERME &
+        VIA     TERCLE &
+        USING   CAPTERNET OF CPCPT_A_PAYER &
+        OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 419 ; Ce terme est inexistant.
+
+    IF TERCAT OF CPTERME <> "NET"
+    THEN ERROR 454 ; Ce n'est pas un code terme pour le net.
+  END
+END
+
+; ----------------------------------------------------------
+; MP-00-08-14_D80.
+;
+; Validation associée à la date dûe
+;
+procedure input capdatnet of cpcpt_a_payer 
+begin
+  if (captypecr of cpcpt_a_payer = "CR" or captypecr of cpcpt_a_payer = "NC") and 0=size(truncate(fieldtext)) and entrymode
+  then error 1072 ; Ce champ est obligatoire
+end
+; ----------------------------------------------------------
+
+;
+; Calcul de la date due.
+; Seules les factures (FA) utilisent les termes. Les autres types de pièces
+; ne sont pas concernés et prennent la date de la facture comme
+; date due.
+;
+PROCEDURE PROCESS CAPTERNET
+BEGIN
+  IF CAPTYPECR OF CPCPT_A_PAYER = "FA"
+  THEN BEGIN
+    IF 0 <> SIZE(TRUNCATE(FIELDTEXT))
+    THEN BEGIN
+      LET TZ_DATCAL = CAPDAT OF CPCPT_A_PAYER
+      DO INTERNAL TER_DATE_DUE
+      LET CAPDATNET OF CPCPT_A_PAYER = TZ_DATRES
+    END
+  END
+  ELSE BEGIN
+    LET CAPDATNET OF CPCPT_A_PAYER = CAPDAT OF CPCPT_A_PAYER
+  END
+  DISPLAY CAPDATNET OF CPCPT_A_PAYER
+END
+
+;-------------------------------------------------------------------------------
+;
+; VALIDATION DE LA DATE DUE POUR LE TERME NET
+;
+; Cette date est obligatoire. Normalement elle est calculée lors de la saisie
+; du terme net mais l'usager peut la modifier.
+;
+; Valide la date due avec la date de la facture.
+;
+;
+PROCEDURE EDIT T_SILDATNET
+BEGIN
+  IF CAPDATNET OF CPCPT_A_PAYER < CAPDAT OF CPCPT_A_PAYER
+  THEN ERROR 457 ; La date due ne peut être inférieure à la date de la facture.
+END
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION / VALIDATION / ET CALCUL DU PREMIER TERME D'ESCOMPTE
+;
+;
+PROCEDURE INPUT CAPTERESC1
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TERCAT = "ESC"
+    LET T_TERCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cp102 MODE F PASSING T_TERCLE, T_TERCAT
+    LET FIELDTEXT = TRUNCATE(T_TERCLE)
+  END
+END
+
+;
+; Validation du premier code d'escompte.
+;
+PROCEDURE EDIT CAPTERESC1
+BEGIN
+  IF 0 <> SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    GET CPTERME &
+        VIA   TERCLE &
+        USING FIELDTEXT OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 419 ; Ce terme n'existe pas.
+
+    IF TERCAT OF CPTERME <> "ESC"
+    THEN ERROR 455 ; Ce n'est pas un code terme pour les escomptes.
+  END
+END
+
+;
+; Calcul de la date due.
+;
+PROCEDURE PROCESS CAPTERESC1
+BEGIN
+  IF 0 <> SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    LET TZ_DATCAL = CAPDAT OF CPCPT_A_PAYER
+    DO INTERNAL TER_DATE_DUE
+    LET CAPDATESC1 OF CPCPT_A_PAYER = TZ_DATRES
+  END
+  ELSE BEGIN
+    ;
+    ; Le deuxiemme escompte ne peut pas exister sans le premier.
+    ;
+    LET CAPDATESC1 OF CPCPT_A_PAYER = 0
+    LET CAPTERESC2 OF CPCPT_A_PAYER = ""
+    LET CAPDATESC2 OF CPCPT_A_PAYER = 0
+    DISPLAY CAPTERESC2 OF CPCPT_A_PAYER
+    DISPLAY CAPDATESC2 OF CPCPT_A_PAYER
+  END
+  DISPLAY CAPDATESC1 OF CPCPT_A_PAYER
+END
+
+;-------------------------------------------------------------------------------
+;
+; VALIDATION DE LA DATE DUE POUR LE PREMIER TERME D'ESCOMPTE
+;
+;
+PROCEDURE EDIT CAPDATESC1
+BEGIN
+  IF FIELDVALUE < CAPDAT OF CPCPT_A_PAYER
+  THEN ERROR 457 ; La date due ne peut être inférieure à la date de la facture.
+END
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION / VALIDATION / ET CALCUL DU DEUXIEMME TERME D'ESCOMPTE
+;
+;
+PROCEDURE INPUT CAPTERESC2
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TERCAT = "ESC"
+    LET T_TERCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN cp102 MODE F PASSING T_TERCLE, T_TERCAT
+    LET FIELDTEXT = TRUNCATE(T_TERCLE)
+  END
+END
+
+;
+; Validation du deuxiemme code d'escompte.
+;
+PROCEDURE EDIT CAPTERESC2
+BEGIN
+  IF 0 <> SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    GET CPTERME &
+        VIA     TERCLE &
+        USING   FIELDTEXT &
+        OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 419 ; Ce terme n'existe pas.
+
+    IF TERCAT OF CPTERME <> "ESC"
+    THEN ERROR 455 ; Ce n'est pas un code terme pour les escomptes.
+  END
+END
+
+;
+; Calcul de la date due.
+;
+PROCEDURE PROCESS CAPTERESC2
+BEGIN
+  IF 0 <> SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    LET TZ_DATCAL = CAPDAT OF CPCPT_A_PAYER
+    DO INTERNAL TER_DATE_DUE
+    LET CAPDATESC2 OF CPCPT_A_PAYER = TZ_DATRES
+  END
+  ELSE BEGIN
+    LET CAPDATESC2 OF CPCPT_A_PAYER = 0
+  END
+  DISPLAY CAPDATESC2 OF CPCPT_A_PAYER
+END
+
+;-------------------------------------------------------------------------------
+;
+; VALIDATION DE LA DATE DUE DU DEUXIEMME TERME D'ESCOMPTE
+;
+;
+PROCEDURE EDIT CAPDATESC2
+BEGIN
+  IF FIELDVALUE < CAPDAT OF CPCPT_A_PAYER
+  THEN ERROR 457 ; La date due ne peut être inférieure à la date de la facture.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; VALIDATION DU MONTANT DE LA FACTURE
+;
+;   Le montant doit respecter les règles suivantes  :
+;
+;     FA : montant toujours positif
+;     CR : montant toujours négatif
+;     NC : montant toujours négatif
+;     AJ : pas de contraintes sur le signe du montant
+;
+;
+PROCEDURE EDIT CAPMNT
+BEGIN
+  ;
+  ; Valide la partie décimale.
+  ;
+  USE usvaldec NOLIST
+
+  ;
+  ; Validation du signe
+  ;
+
+  IF  (     CAPTYPECR OF CPCPT_A_PAYER = "NC"  &
+        OR  CAPTYPECR OF CPCPT_A_PAYER = "CR") &
+    AND CAPMNT OF CPCPT_A_PAYER > 0
+  THEN ERROR 489 ; Le montant d'un crédit ou d'une note de crédit doit être négatif.
+
+  IF    CAPTYPECR OF CPCPT_A_PAYER = "FA" &
+    AND CAPMNT    OF CPCPT_A_PAYER < 0
+  THEN ERROR 481 ; Le montant d'une facture doit être positif.
+
+  ;
+  ; Si on change le montant brut de la facture, alors on recalcule le
+  ; montant net.
+  ;
+  IF CHANGEMODE OR CORRECTMODE
+  THEN LET CAPMNTNET OF CPCPT_A_PAYER  = CAPMNT OF CPCPT_A_PAYER &
+                                       - CAPMNTCTI OF CPCPT_A_PAYER &
+                                       - CAPMNTRTI OF CPCPT_A_PAYER
+END
+
+;-------------------------------------------------------------------------------
+;
+; VALIDATION DU MONTANT NET (montant escomptable)
+;
+;
+PROCEDURE EDIT CAPMNTNET
+BEGIN
+  IF    (     CAPTYPECR OF CPCPT_A_PAYER = "FA" &
+          AND (     CAPMNTNET OF CPCPT_A_PAYER < 0 &
+                OR  CAPMNTNET OF CPCPT_A_PAYER > CAPMNT OF CPCPT_A_PAYER &
+              ) &
+        ) &
+    OR  (     CAPTYPECR OF CPCPT_A_PAYER = "CR" &
+          AND (     CAPMNTNET OF CPCPT_A_PAYER > 0 &
+                OR  CAPMNTNET OF CPCPT_A_PAYER < CAPMNT OF CPCPT_A_PAYER &
+              ) &
+        )
+  THEN ERROR 522 ; Le montant net doit être compris entre 0 et le montant de la pièce
+END
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION DES AJUSTEMENTS DE LA PIÈCE
+;
+;
+PROCEDURE INPUT V_CAPMNTAJT
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE    = FOUCIECLE OF CPCPT_A_PAYER
+    LET T_FOUCLE    = FOUCLE    OF CPCPT_A_PAYER
+    LET T_CAPCLE    = CAPCLE    OF CPCPT_A_PAYER
+    LET T_TYPTRAPAT = "AJ"
+    RUN SCREEN cp106 MODE F PASSING T_CIECLE, T_FOUCLE, T_CAPCLE, T_TYPTRAPAT
+  END
+  LET FIELDTEXT = ""
+END
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION DES NOTES DE CRÉDITS
+;
+;
+PROCEDURE INPUT V_CAPMNTCRT
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE    = FOUCIECLE OF CPCPT_A_PAYER
+    LET T_FOUCLE    = FOUCLE    OF CPCPT_A_PAYER
+    LET T_CAPCLE    = CAPCLE    OF CPCPT_A_PAYER
+    LET T_TYPTRAPAT = "NC"
+    RUN SCREEN cp106 MODE F PASSING T_CIECLE, T_FOUCLE, T_CAPCLE, T_TYPTRAPAT
+  END
+  LET FIELDTEXT = ""
+END
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION DES PAIEMENTS APPLIQUÉS SUR CETTE PIECE
+;
+;
+PROCEDURE INPUT D_MNT_PYE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE    = FOUCIECLE OF CPCPT_A_PAYER
+    LET T_FOUCLE    = FOUCLE    OF CPCPT_A_PAYER
+    LET T_CAPCLE    = CAPCLE    OF CPCPT_A_PAYER
+    LET T_TYPTRAPAT = "CH|CA"
+    RUN SCREEN cp106 MODE F PASSING T_CIECLE, T_FOUCLE, T_CAPCLE, T_TYPTRAPAT
+  END
+  LET FIELDTEXT = ""
+END
+
+PROCEDURE INPUT V_CAPMNTESC
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE    = FOUCIECLE OF CPCPT_A_PAYER
+    LET T_FOUCLE    = FOUCLE    OF CPCPT_A_PAYER
+    LET T_CAPCLE    = CAPCLE    OF CPCPT_A_PAYER
+    LET T_TYPTRAPAT = "CH|CA"
+    RUN SCREEN cp106 MODE F PASSING T_CIECLE, T_FOUCLE, T_CAPCLE, T_TYPTRAPAT
+  END
+  LET FIELDTEXT = ""
+END
+
+;-------------------------------------------------------------------------------
+;
+; VALIDATION DE LA SÉCURITÉE EN SAISIE DE DONNÉES
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; PROCÉDURE DE SAISIE DES PIÈCES
+;
+;
+PROCEDURE ENTRY
+BEGIN
+  ;
+  ; La période et le lot reste les mêmes pour la durée d'une saisie.
+  ;
+  IF T_PECCLE_DUP = ""
+  THEN BEGIN
+    ACCEPT PECCLE OF CPCPT_A_PAYER
+    ACCEPT LCPCLE OF CPCPT_A_PAYER
+    LET T_PECCLE_DUP = PECCLE OF CPCPT_A_PAYER
+    LET T_LCPCLE_DUP = LCPCLE OF CPCPT_A_PAYER
+  END
+  ELSE BEGIN
+    LET PECCLE OF CPCPT_A_PAYER = T_PECCLE_DUP
+    LET LCPCLE OF CPCPT_A_PAYER = T_LCPCLE_DUP
+    DISPLAY PECCLE OF CPCPT_A_PAYER
+    DISPLAY LCPCLE OF CPCPT_A_PAYER
+    EDIT    LCPCLE OF CPCPT_A_PAYER
+  END
+
+  ;
+  ; Type de facture.
+  ;
+  ACCEPT CAPTYPECR OF CPCPT_A_PAYER
+
+  ;
+  ; Numéro de fournisseur
+  ;
+  ACCEPT REFCLENUM OF CPCPT_A_PAYER
+  DISPLAY FOCSLDACJ OF VFOC_FOU
+  ;
+  ; Si on saisie une facture ou un crédit pour un fournisseur divers,
+  ; alors on doit saisir l'adresse de ce fournisseur divers.
+  ;
+  IF    FOUTYP OF VFOC_FOU = "D" &
+    AND (     CAPTYPECR OF CPCPT_A_PAYER = "FA" &
+          OR  CAPTYPECR OF CPCPT_A_PAYER = "CR" )
+  THEN BEGIN
+    ACCEPT RADNOM OF MCREF_ADRESSE
+    ;
+    ; Sous-écran pour la saisie de l'adresse.
+    ;
+    RUN SCREEN cp003c PASSING MCREF_ADRESSE MODE E
+    DISPLAY RADADR1  OF MCREF_ADRESSE
+  END
+  ;
+  ; Fournisseur régulier.
+  ;
+  ELSE BEGIN
+    DISPLAY RADNOM    OF MCREF_ADRESSE
+    DISPLAY RADCLE    OF CPCPT_A_PAYER
+    DISPLAY RADADR1   OF MCREF_ADRESSE
+  END
+  ;
+  ; Numéro de facture.
+  ;
+  IF CAPTYPECR OF CPCPT_A_PAYER <> "AJ"
+  THEN ACCEPT CAPCLE OF CPCPT_A_PAYER
+
+  IF   CAPTYPECR OF CPCPT_A_PAYER = "NC" &
+    OR CAPTYPECR OF CPCPT_A_PAYER =  "AJ"
+  THEN BEGIN
+    ACCEPT CAPCLE OF CPCAP_HISTO
+    ;
+    ; Assignation du numéro d'adresse selon le document référé.
+    ;
+    LET     RADCLE  OF CPCPT_A_PAYER = RADCLE OF A_CAP_REFERE
+    EDIT    RADCLE  OF CPCPT_A_PAYER
+    DISPLAY RADNOM  OF MCREF_ADRESSE
+    DISPLAY RADCLE  OF CPCPT_A_PAYER
+    DISPLAY RADADR1 OF MCREF_ADRESSE
+    ;
+    ; Note de crédit et ajustement sur facture ou crédit:
+    ;   si le document référé a une seule ligne de cédule, on prend le ligne 01,
+    ;   sinon l'usager doit la saisir.
+    ;
+    IF   CAPTYPECR OF CPCPT_A_PAYER = "NC" &
+      OR (    CAPTYPECR OF CPCPT_A_PAYER =  "AJ" &
+          AND CAPTYPECR OF A_CAP_REFERE  <> "NC" )
+    THEN BEGIN
+      IF CAPFLGCED OF A_CAP_REFERE  =  "1"
+      THEN ACCEPT CPCCLELIG OF CPCAP_HISTO
+      ELSE BEGIN
+        LET CPCCLELIG OF CPCAP_HISTO = 1
+        DISPLAY CPCCLELIG OF CPCAP_HISTO
+        EDIT CPCCLELIG OF CPCAP_HISTO
+      END
+    END
+    ;
+    IF CAPTYPECR OF CPCPT_A_PAYER = "AJ"
+    THEN BEGIN
+      ;
+      ; Si l'ajustement est sur une note de crédit,
+      ; 1- Pour trouver sur quelle facture la note de crédit s'applique il faut
+      ;    faire le lien avec l'historique de la note de crédit.
+      ; 2- il faut ajouter une ligne d'historique pour la facture qui est
+      ;    référée par la note de crédit.
+      ; 3- le numéro de cédule de l'ajustement doit celui de la note de crédit.
+      ;
+      IF CAPTYPECR OF A_CAP_REFERE = "NC"
+      THEN BEGIN
+        GET A_CPH_NC VIA    CPHCLE1  , &
+                            CPHCLE2  , &
+                            CPHCLE3  , &
+                            CPHTYPECR  &
+                     USING  FOUCIECLE OF CPCPT_A_PAYER , &
+                            FOUCLE    OF A_CAP_REFERE, &
+                            CAPCLE    OF A_CAP_REFERE, &
+                            CAPTYPECR OF A_CAP_REFERE  &
+                     OPTIONAL
+        LET CAPCLE    OF A_CPH_FACTURE = CAPCLE    OF A_CPH_NC
+        LET CPCCLELIG OF CPCAP_HISTO   = CPCCLELIG OF A_CPH_NC
+      END
+      DISPLAY CPCCLELIG OF CPCAP_HISTO
+      ;
+      ; Le numéro d'ajustement est composé du numéro de document plus
+      ; un numéro de séquence. Le numéro de séquence est séparé du numéro
+      ; du document par un #.
+      ;
+      ; Exemple: Facture    ==> A1234
+      ;          Ajustement ==> A1234#01
+      ;
+      LET T_NUMAJT = "00"
+      WHILE RETRIEVING A_CPH_NC VIA   FOUCIECLE , &
+                                      FOUCLE    , &
+                                      CAPCLE    , &
+                                      CPHTYPECR   &
+                                USING FOUCIECLE OF CPCPT_A_PAYER, &
+                                      FOUCLE    OF CPCPT_A_PAYER, &
+                                      CAPCLE    OF CPCAP_HISTO, &
+                                      CAPTYPECR OF CPCPT_A_PAYER
+      BEGIN
+        IF T_NUMAJT < &
+               CPHCLE3 OF A_CPH_NC[SIZE(TRUNCATE(CPHCLE3 OF A_CPH_NC)) - 1 : 2]
+        THEN LET T_NUMAJT = &
+               CPHCLE3 OF A_CPH_NC[SIZE(TRUNCATE(CPHCLE3 OF A_CPH_NC)) - 1 : 2]
+      END
+      LET CAPCLE OF CPCPT_A_PAYER = TRUNCATE( CAPCLE OF CPCAP_HISTO ) + "#" + &
+                                  ASCII( NCONVERT(T_NUMAJT) + 1 ,2 )
+      DISPLAY CAPCLE OF CPCPT_A_PAYER
+    END
+  END
+  ;
+  ; Date de la facture.
+  ;
+  ACCEPT CAPDAT OF CPCPT_A_PAYER
+  ;
+  ; Le terme-net ou la date due pour le net sont obligatoire.
+  ;
+  IF 0 = SIZE(TRUNCATE(CAPTERNET OF CPCPT_A_PAYER))
+  THEN BEGIN
+    ACCEPT CAPTERNET OF CPCPT_A_PAYER
+  END
+
+  ACCEPT CAPDATNET OF CPCPT_A_PAYER ; MP-00-08-14_D80.
+  EDIT   T_SILDATNET                ; MP-00-08-14_D80.
+
+  ACCEPT CAPDSC1 OF CPCPT_A_PAYER
+  ACCEPT CAPDSC2 OF CPCPT_A_PAYER
+
+  DISPLAY D_DEVCLE
+
+  ACCEPT CAPMNT OF CPCPT_A_PAYER
+
+  RUN SCREEN cp003a MODE E &
+              PASSING   T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        D_LCPATRJOU, &
+                        CPCPT_A_PAYER, &
+                        MCREF_ADRESSE, &
+                        CPCAP_HISTO  , &
+                        A_CPH_FACTURE
+
+  LET CAPMNTNET OF CPCPT_A_PAYER  = CAPMNT OF CPCPT_A_PAYER &
+                                  - CAPMNTCTI OF CPCPT_A_PAYER &
+                                  - CAPMNTRTI OF CPCPT_A_PAYER
+
+END
+
+;-------------------------------------------------------------------------------
+;
+; RECHERCHE DU CHEMIN D'ACCÈS
+;
+;
+PROCEDURE PATH
+BEGIN
+  IF T_FOUCLEFND <> ""
+  THEN BEGIN
+    LET PATH = 99
+  END
+  ELSE BEGIN
+    REQUEST REFCLENUM OF CPCPT_A_PAYER
+    IF PROMPTOK
+    THEN REQUEST CAPCLE OF CPCPT_A_PAYER
+    IF PROMPTOK
+    THEN LET PATH = 1
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST REFCLENUM OF CPCPT_A_PAYER
+      IF PROMPTOK
+      THEN LET PATH = 2
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST PECCLE OF CPCPT_A_PAYER
+      IF PROMPTOK
+      THEN REQUEST LCPCLE OF CPCPT_A_PAYER
+      IF PROMPTOK
+      THEN LET PATH = 3
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST PECCLE OF CPCPT_A_PAYER
+      IF PROMPTOK
+      THEN LET PATH = 4
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      LET PATH = 5
+    END
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; RECHERCHE DES DONNÉES
+;
+;
+PROCEDURE FIND
+BEGIN
+  IF PATH = 1
+  THEN GET CPCPT_A_PAYER &
+            VIA   FOUCIECLE, &
+                  FOUCLE   , &
+                  CAPCIECLE, &
+                  CAPCLE     &
+            USING T_FOUCIECLE                , &
+                  REFCLENUM OF CPCPT_A_PAYER , &
+                  T_CIECLEMNU                , &
+                  CAPCLE    OF CPCPT_A_PAYER
+
+  IF PATH = 2
+  THEN GET CPCPT_A_PAYER &
+            VIA     FOUCIECLE , &
+                    FOUCLE    , &
+                    CAPCIECLE   &
+            USING   T_FOUCIECLE               , &
+                    REFCLENUM OF CPCPT_A_PAYER, &
+                    T_CIECLEMNU                 &
+            ORDERBY FOUCIECLE, &
+                    FOUCLE   , &
+                    CAPCLE
+
+  IF PATH = 3
+  THEN GET CPCPT_A_PAYER &
+            VIA     CAPCIECLE, &
+                    PECCLE   , &
+                    LCPCLE     &
+            USING   T_CIECLEMNU                  , &
+                    PECCLE      OF CPCPT_A_PAYER , &
+                    LCPCLE      OF CPCPT_A_PAYER   &
+            ORDERBY FOUCIECLE, &
+                    FOUCLE   , &
+                    CAPCLE
+
+  IF PATH = 4
+  THEN GET CPCPT_A_PAYER &
+            VIA   CAPCIECLE, &
+                  PECCLE     &
+            USING T_CIECLEMNU            , &
+                  PECCLE OF CPCPT_A_PAYER  &
+            ORDERBY CAPCIECLE, &
+                    PECCLE   , &
+                    LCPCLE   , &
+                    FOUCIECLE, &
+                    FOUCLE   , &
+                    CAPCLE
+
+  IF PATH = 5
+  THEN GET CPCPT_A_PAYER &
+            VIA     FOUCIECLE, &
+                    CAPCIECLE  &
+            USING   T_FOUCIECLE, &
+                    T_CIECLEMNU  &
+            ORDERBY FOUCIECLE, &
+                    FOUCLE   , &
+                    CAPCLE
+
+  IF PATH = 99
+  THEN BEGIN
+    GET CPCPT_A_PAYER &
+        VIA   FOUCIECLE, &
+              FOUCLE   , &
+              CAPCIECLE, &
+              CAPCLE     &
+        USING T_FOUCIECLE, &
+              T_FOUCLEFND, &
+              T_CIECLEMNU, &
+              T_CAPCLEFND
+    LET T_FOUCLEFND = ""
+  END
+  GET VFOC_FOU
+  GET MCREF_ADRESSE OPTIONAL
+  GET CPCAP_HISTO   OPTIONAL
+END
+
+;-------------------------------------------------------------------------------
+;
+; Procedure qui conserve l'ancien montant de facture si la pièce actuelle
+; est une note de crédit ou un ajustement.
+;
+PROCEDURE POSTFIND
+BEGIN
+  IF   CAPTYPECR OF CPCPT_A_PAYER = "NC" &
+    OR CAPTYPECR OF CPCPT_A_PAYER = "AJ"
+  THEN LET T_CAPMNTOLD = CAPMNT OF CPCPT_A_PAYER
+END
+
+;-------------------------------------------------------------------------------
+;
+; PREPARATION DE LA MISE-A-JOUR.
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Valide les traitements permis par écran et par usager.
+  ;
+  ;
+  ; Validation de la destruction
+  ;
+  IF    DELETEDRECORD OF CPCPT_A_PAYER &
+    AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la mise à jour(Entrée, Modification)
+  ;
+  IF (   ALTEREDRECORD     OF CPCPT_A_PAYER &
+      OR ALTEREDRECORD     OF MCREF_ADRESSE &
+      OR ALTEREDRECORD     OF CPCAP_HISTO   &
+     ) &
+     AND NOT NEWRECORD     OF CPCPT_A_PAYER &
+     AND NOT DELETEDRECORD OF CPCPT_A_PAYER &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+ IF    DELETEDRECORD OF CPCPT_A_PAYER &
+   AND CAPDATJOU OF CPCPT_A_PAYER <> 0
+ THEN ERROR 550 ;Impossible de détruire une transaction journalisé
+
+ IF DELETEDRECORD OF CPCPT_A_PAYER ; mp-00-02-11
+ THEN BEGIN
+   GET ARFACTURE_REC VIA  FOUCIECLE, &
+                          FOUCLE   , &
+                          FACCLE     &
+                    USING FOUCIECLE OF CPCPT_A_PAYER, &
+                          FOUCLE    OF CPCPT_A_PAYER, &
+                          CAPCLE    OF CPCPT_A_PAYER  OPT
+   IF ACCESSOK
+   THEN ERROR 588 ; CP188 *E* Destruction impossible - Cette facture provient d'une consolidation
+ END
+
+  ;
+  ; Le document est non modifiable si le lot est autorisé.
+  ;
+  IF    LCPATRJOU OF CPLOT = "1" &
+    AND CAPDATJOU OF CPCPT_A_PAYER = 0
+  THEN ERROR 544 ;Impossible de mettre à jour la transaction est déjà autorisé
+
+  IF CAPMNT OF CPCPT_A_PAYER <> CAPCUMMNT OF CPCPT_A_PAYER
+  THEN WARNING 459 ; L'imputation ne balance pas.
+
+  IF CAPTYPECR OF CPCPT_A_PAYER = "NA"
+  THEN ERROR 583 ; Impossible de mettre à jour ce type de facture.
+  ;
+  ; On incrémente le numéro d'adresse pour les clients divers.
+  ;
+  IF     FOUTYP OF VFOC_FOU = "D" &
+     AND RADCLE OF CPCPT_A_PAYER = 0
+  THEN BEGIN
+    START TRANSACTION GEN_RAD_SEQ
+    GET MCRAD_SEQ VIA REFCIECLE, &
+                      REFCLETYP, &
+                      REFCLENUM  &
+                  USING REFCIECLE OF CPCPT_A_PAYER, &
+                        REFCLETYP OF CPCPT_A_PAYER, &
+                        REFCLENUM OF CPCPT_A_PAYER  &
+                  OPTIONAL
+    LET REFCIECLE OF MCRAD_SEQ = REFCIECLE OF CPCPT_A_PAYER
+    LET REFCLETYP OF MCRAD_SEQ = REFCLETYP OF CPCPT_A_PAYER
+    LET REFCLENUM OF MCRAD_SEQ = REFCLENUM OF CPCPT_A_PAYER
+    LET RASNUMSEQ OF MCRAD_SEQ = RASNUMSEQ OF MCRAD_SEQ + 1
+    LET RADCLE    OF CPCPT_A_PAYER = RASNUMSEQ OF MCRAD_SEQ
+    PUT MCRAD_SEQ
+    COMMIT GEN_RAD_SEQ
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Procedure qui conserve l'ancien numéro de facture référée par une note
+; de crédit et sont montant.
+;
+PROCEDURE POSTUPDATE
+BEGIN
+  IF   CAPTYPECR OF CPCPT_A_PAYER = "NC" &
+    OR CAPTYPECR OF CPCPT_A_PAYER = "AJ"
+  THEN BEGIN
+    LET T_CAPMNTOLD = CAPMNT    OF CPCPT_A_PAYER
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; MODIFICATION DU NOM DU FOURNISSEUR DIVERS
+;
+;
+PROCEDURE DESIGNER 15
+BEGIN
+  IF    FOUTYP    OF VFOC_FOU      = "D" &
+    AND CAPDATJOU OF CPCPT_A_PAYER = 0
+  THEN ACCEPT RADNOM OF MCREF_ADRESSE
+END
+
+;-------------------------------------------------------------------------------
+;
+; MODIFICATION DE LA DATE ET DE LA RETENUE DE LA FACTURE
+;
+;
+PROCEDURE DESIGNER 30
+BEGIN
+  ACCEPT CAPDAT OF CPCPT_A_PAYER
+  ACCEPT CAPRTU OF CPCPT_A_PAYER
+END
+
+;-------------------------------------------------------------------------------
+;
+; MODIFICATION DES CODES DE TERMES
+;
+;
+PROCEDURE DESIGNER 35
+BEGIN
+  ACCEPT CAPTERNET OF CPCPT_A_PAYER
+  ACCEPT CAPDATNET OF CPCPT_A_PAYER
+  EDIT   T_SILDATNET
+  ;
+  ; Le terme-escompte(1) est optionel et la date due est modifiable.
+  ;
+  ACCEPT CAPTERESC1 OF CPCPT_A_PAYER
+  IF 0 <> SIZE(TRUNCATE(CAPTERESC1 OF CPCPT_A_PAYER))
+  THEN ACCEPT CAPDATESC1 OF CPCPT_A_PAYER
+  ;
+  ; Le terme-escompte(2) est optionel et la date due est modifiable.
+  ;
+  IF 0 <> SIZE(TRUNCATE(CAPTERESC1 OF CPCPT_A_PAYER))
+  THEN BEGIN
+    ACCEPT CAPTERESC2 OF CPCPT_A_PAYER
+    IF 0 <> SIZE(TRUNCATE(CAPTERESC2 OF CPCPT_A_PAYER))
+    THEN ACCEPT CAPDATESC2 OF CPCPT_A_PAYER
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; MODIFICATION DE LA DESCRIPTION DE LA PIÈCE
+;
+; la modification est autorisée seulement si la facture n'est pas journalisée
+;
+PROCEDURE DESIGNER 40
+BEGIN
+  IF CAPDATJOU OF CPCPT_A_PAYER = 0
+  THEN BEGIN
+    ACCEPT CAPDSC1 OF CPCPT_A_PAYER
+    ACCEPT CAPDSC2 OF CPCPT_A_PAYER
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Si la facture est journalisée le montant brut de la facture est non
+; modifiable. Mais le montant net est toujours modifiable. Il permet de
+; calculer l'escompte.
+;
+PROCEDURE DESIGNER 45
+BEGIN
+  ;
+  ;  
+  ;
+  GET ARFACTURE_REC VIA FACCIECLE,            &
+                        FOUCLE,               &
+                        FACCLE                &
+                  USING T_CIECLEMNU, &
+                        FOUCLE    OF CPCPT_A_PAYER, &
+                        CAPCLE    OF CPCPT_A_PAYER OPTIONAL
+  IF ACCESSOK AND CAPTYPECR OF CPCPT_A_PAYER = "FA"
+  ;THEN ERROR 587 ; Champ non modifiable lorsque référé par consolidation de facture 
+  THEN BEGIN
+    IF CAPDATJOU OF CPCPT_A_PAYER = 0
+    THEN ACCEPT CAPMNT OF CPCPT_A_PAYER
+    ACCEPT CAPMNTNET OF CPCPT_A_PAYER
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; CONSULTATION DES PIECES POUR LES MONTANTS D'AJUSTEMENT, NOTE DE CRÉDIT,
+; PAIEMENT...
+;
+PROCEDURE DESIGNER 50
+BEGIN
+  ACCEPT V_CAPMNTAJT
+END
+
+PROCEDURE DESIGNER 55
+BEGIN
+  ACCEPT V_CAPMNTCRT
+END
+
+PROCEDURE DESIGNER 60
+BEGIN
+  ACCEPT D_MNT_PYE
+END
+
+PROCEDURE DESIGNER 70
+BEGIN
+  ACCEPT V_CAPMNTESC
+END
+
+;-------------------------------------------------------------------------------
+;
+; SOUS-ÉCRAN D'IMPUTATION
+;
+;
+PROCEDURE DESIGNER D001
+BEGIN
+  IF     CAPMNT OF CPCPT_A_PAYER <> T_CAPMNTOLD &
+    AND (CAPTYPECR OF CPCPT_A_PAYER = "NC" OR   &
+         CAPTYPECR OF CPCPT_A_PAYER = "AJ"    )
+  THEN ERROR 483 ; Faire une mise à jour avant d'accèder ce sous-écran.
+  ;
+  ; Les paiements non-appliqués non pas d'imputation comptable.
+  ;
+  IF CAPTYPECR OF CPCPT_A_PAYER <> "NA"
+  THEN RUN SCREEN cp003a MODE SAME &
+              PASSING   T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        D_LCPATRJOU, &
+                        CPCPT_A_PAYER, &
+                        MCREF_ADRESSE, &
+                        CPCAP_HISTO  , &
+                        A_CPH_FACTURE
+END
+
+;-------------------------------------------------------------------------------
+;
+; CONSULTATION DE L'ÉCRITURE COMPTABLE
+;
+;
+PROCEDURE DESIGNER D002
+BEGIN
+  IF CAPDATJOU OF CPCPT_A_PAYER = 0
+  THEN ERROR 460 ; L'écriture doit être journalisée pour accèder le sous-écran.
+  ;
+  ; Les paiements non-appliqués non pas d'écriture comptable.
+  ;
+  IF CAPTYPECR OF CPCPT_A_PAYER <> "NA"
+  THEN RUN SCREEN mc090  MODE F PASSING D_HISCLE
+END
+
+;-------------------------------------------------------------------------------
+;
+; SOUS-ECRAN DE L'HISTORIQUE DES TRANSACTIONS
+;
+PROCEDURE DESIGNER D003
+BEGIN
+    RUN SCREEN cp003e PASSING CPCPT_A_PAYER MODE F
+END
+
+;-------------------------------------------------------------------------------
+;
+; Cette procédure empeche l'accès au sous-écran de la Cédule de paiement
+; si la facture est modifiée.
+;
+;
+PROCEDURE DESIGNER D004
+BEGIN
+  IF ALTEREDRECORD OF CPCPT_A_PAYER
+  THEN ERROR 483 ; Faire une mise à jour avant d'accèder ce sous-écran.
+
+  IF    CAPTYPECR OF CPCPT_A_PAYER <> "FA" &
+    AND CAPTYPECR OF CPCPT_A_PAYER <> "CR"
+  THEN ERROR 547 ; On ne peut pas utiliser les cédules de paiement avec ce type de pièce.
+
+  RUN SCREEN cp003b MODE F &
+                    PASSING T_CIECLEMNU  , &
+                            T_CIENOM     , &
+                            D_SLD_A_PYE  , &
+                            CPCPT_A_PAYER, &
+                            D_DEVCLE
+END
+
+;-------------------------------------------------------------------------------
+;
+; SOUS-ECRAN D'ADRESSE POUR LE FOURNISSEUR DIVERS
+;
+PROCEDURE DESIGNER D005
+BEGIN
+  IF FOUTYP OF VFOC_FOU = "D"
+  THEN RUN SCREEN cp003c PASSING MCREF_ADRESSE MODE F
+END
+
+;-------------------------------------------------------------------------------
+;
+; Cette procédure empeche l'accès au sous-écran des immobilisations
+; si le montant ou la facture référé est modifiée dans le cas des notes de
+; crédit ou d'ajustements.
+;
+PROCEDURE DESIGNER D006
+BEGIN
+  IF     CAPMNT OF CPCPT_A_PAYER <> T_CAPMNTOLD &
+    AND (CAPTYPECR OF CPCPT_A_PAYER = "NC" OR   &
+         CAPTYPECR OF CPCPT_A_PAYER = "AJ"    )
+  THEN ERROR 483 ; Faire une mise à jour avant d'accèder ce sous-écran.
+  ;
+  ; Les paiements non-appliqués non pas de lien avec les immobilisations.
+  ;
+  IF CAPTYPECR OF CPCPT_A_PAYER <> "NA"
+  THEN RUN SCREEN cp003d MODE SAME &
+                    PASSING CPCPT_A_PAYER, VFOC_FOU
+END
+
+;-------------------------------------------------------------------------------
+;
+; GESTION DES LOTS
+;
+PROCEDURE DESIGNER D007
+BEGIN
+
+    LET T_PECCLEFND = PECCLE OF CPCPT_A_PAYER
+    LET T_LCPCLEFND = LCPCLE OF CPCPT_A_PAYER
+    ;
+    ; Les paiements non-appliqués ne sont pas dans des lots.
+    ;
+    IF CAPTYPECR OF CPCPT_A_PAYER <> "NA"
+    THEN RUN SCREEN cp020 &
+                PASSING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        T_PECCLEMNU, &
+                        T_PECCLECOU, &
+                        T_PECCLEFND, &
+                        T_LCPCLEFND  &
+                MODE F
+END
+
+;-------------------------------------------------------------------------------
+;
+; SOUS-ECRAN DE VÉRIFICATION
+;
+PROCEDURE DESIGNER D008
+BEGIN
+    RUN SCREEN cp003f PASSING CPCPT_A_PAYER MODE F
+END
+
+PROCEDURE DESIGNER D009
+BEGIN
+    LET T_FOUCLEFND = FOUCLE OF CPCPT_A_PAYER
+    LET T_FACCLEFND = CAPCLE OF CPCPT_A_PAYER
+
+    RUN SCREEN ar011 MODE F &
+                     PASSING T_CIECLEMNU, &
+                             T_CIENOM,    &
+                             T_PECCLEMNU, &
+                             T_FOUCIECLE, &
+                             T_FOUCLEFND, &
+                             T_FACCLEFND
+END
+
+BUILD list detail
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+************************** Factures / Notes de crédit **************************
+* Période ......: xxxxx   Numéro de lot.: xxxx  Journalisé le.: xxxxxxxx xxxxx *
+* Type écriture.: xx xxxxxxxxxxxxxxxxxxxxxxxxx                                 *
+*                                                                              *
+* Fournisseur...: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              *
+* Adr. paiement.: xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              *
+*                                                                              *
+* Facture.......: xxxxxxxxxxxxxxx  Facture réf...: xxxxxxxxxxxx No ligne.: xx  *
+* Date..........: xxxxxxxx         Retenu........: xxx                            *
+* Net...........: xxxx xxxxxxxx    Terme esc.(1).: xxxx xxxxxxxx                  *
+*                                  Terme esc.(2).: xxxx xxxxxxxx                  *
+* Description...: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                                                                              *
+* Montant brut..: xxxxxxxxxxxxxxxxxx   Montant net...: xxxxxxxxxxxxxx          *
+* Ajustement....: xxxxxxxxxxxxxx       Montant de TPS:    xxxxxxxxxxx          *
+* Crédit........: xxxxxxxxxxxxxx       C.T.I.........:    xxxxxxxxxxx          *
+* Montant payé..: xxxxxxxxxxxxxx       Montant de TVQ:    xxxxxxxxxxx          *
+* Reste à payer.: xxxxxxxxxxxxxx       R.T.I.........:    xxxxxxxxxxx          *
+* Escompte pris.: xxxxxxxxxxxxxx       Solde fourn...: xxxxxxxxxxxxxx          *
+********************************************************************************
+@ENDIF

@@ -1,0 +1,712 @@
+;/T/ Gérer les sorties de produits.
+;
+;/P/ Programmeur..: René Bonneau
+;    Date Création: 1994-10-20
+;
+;    Description..: Cette écran permet de faire la gestion des produits qui
+;                   sortent de l'usine sans utiliser le processus normal.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd192d ACTIONBAR                    &
+              FROM 06,01 TO 23,80          &
+              MODE LABEL "" AT 2,80        &
+              NOACTION                     &
+              FIELDMARK RETAIN STARTUP     &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING PDSORTIE_PRODUIT,  &
+                        T_CIECLEMNU
+
+
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 04
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+
+USE ussectmp  NOLIST
+    "PD192D"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+
+USE pd192d.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable pour le calcul du volume d'une pièce de granit
+;
+
+USE usvarvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Dimension maximum et minimun
+;
+USE usdimprd NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Sortie de produits
+;
+
+FILE PDSORTIE_PRODUIT MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Sortie de produits de dimension
+;
+
+FILE PDSOR_PROD_DIM   PRIMARY OCCURS 05                &
+                      NOITEM
+
+  ACCESS VIA     CIECLE,                               &
+                 SPRNUMSOR                             &
+         USING   T_CIECLEMNU,                          &
+                 SPRNUMSOR        OF PDSORTIE_PRODUIT  &
+         ORDERBY CIECLE,                               &
+                 PDILON,                               &
+                 PDIHAU,                               &
+                 PDIEPA,                               &
+                 TGRCODGRA,                            &
+                 TYFCODFIN
+
+  ACCESS VIA     CIECLE,                               &
+                 PDILON,                               &
+                 PDIHAU,                               &
+                 PDIEPA,                               &
+                 TGRCODGRA,                            &
+                 TYFCODFIN                             &
+         USING   T_CIECLEMNU,                          &
+                 PDILON           OF PDSOR_PROD_DIM,   &
+                 PDIHAU           OF PDSOR_PROD_DIM,   &
+                 PDIEPA           OF PDSOR_PROD_DIM,   &
+                 TGRCODGRA        OF PDSOR_PROD_DIM,   &
+                 TYFCODFIN        OF PDSOR_PROD_DIM    &
+         ORDERBY CIECLE,                               &
+                 PDILON,                               &
+                 PDIHAU,                               &
+                 PDIEPA,                               &
+                 TGRCODGRA,                            &
+                 TYFCODFIN
+
+  ACCESS VIA     CIECLE                                &
+         USING   T_CIECLEMNU                           &
+         ORDERBY CIECLE,                               &
+                 PDILON,                               &
+                 PDIHAU,                               &
+                 PDIEPA,                               &
+                 TGRCODGRA,                            &
+                 TYFCODFIN
+
+
+  ITEM CIECLE    OF PDSOR_PROD_DIM   INITIAL T_CIECLEMNU
+  ITEM SPRNUMSOR OF PDSOR_PROD_DIM   FINAL &
+                                     FIRST(SPRNUMSOR OF PDSORTIE_PRODUIT)
+
+
+;-------------------------------------------------------------------------------
+;
+; Tranches
+;
+
+FILE PDPROD_DIMENSION REFERENCE OCCURS WITH PDSOR_PROD_DIM
+
+  ACCESS VIA    CIECLE,                                &
+                PDILON,                                &
+                PDIHAU,                                &
+                PDIEPA,                                &
+                TGRCODGRA,                             &
+                TYFCODFIN                              &
+         USING  T_CIECLEMNU,                           &
+                PDILON           OF PDSOR_PROD_DIM,    &
+                PDIHAU           OF PDSOR_PROD_DIM,    &
+                PDIEPA           OF PDSOR_PROD_DIM,    &
+                TGRCODGRA        OF PDSOR_PROD_DIM,    &
+                TYFCODFIN        OF PDSOR_PROD_DIM
+
+
+;-------------------------------------------------------------------------------
+;
+; Tranche pour mise a jour
+;
+
+FILE PDPROD_DIMENSION        DESIGNER ALIAS PDPROD_DIMENSION_MAJ
+
+FILE PDSEQ_SORTIE     DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+; Type de granit
+;
+
+FILE PDTYPE_GRANIT    REFERENCE OCCURS WITH PDSOR_PROD_DIM
+
+  ACCESS VIA    CIECLE,                                   &
+                TGRCODGRA                                 &
+         USING  T_CIECLEMNU,                              &
+                TGRCODGRA        OF PDPROD_DIMENSION
+
+
+;-------------------------------------------------------------------------------
+;
+; Type de fini
+;
+
+FILE PDTYPE_FINI      REFERENCE OCCURS WITH PDSOR_PROD_DIM
+
+  ACCESS VIA    CIECLE,                                   &
+                TYFCODFIN                                 &
+         USING  T_CIECLEMNU,                              &
+                TYFCODFIN        OF PDPROD_DIMENSION
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Définition de variable temporaire pour le traitement
+;
+
+TEMPORARY T_OLD_VOL      FLOAT     SIZE 8 OCCURS WITH PDSOR_PROD_DIM
+TEMPORARY T_OLD_SUR      FLOAT     SIZE 8 OCCURS WITH PDSOR_PROD_DIM
+
+
+;-------------------------------------------------------------------------------
+;
+; Variable servant a l'appel des dépisteurs
+;
+
+TEMPORARY T_TGRCODGRA CHARACTER SIZE 04
+TEMPORARY T_TYFCODFIN CHARACTER SIZE 04
+
+
+;-------------------------------------------------------------------------------
+;
+;
+DRAW 3,1 TO 18,80   ; Remplace le Draw pour les écrans pleine page
+;USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP 2
+
+TITLE &
+@IF FRANCAIS
+      " Produits de dimension " &
+@ELSE
+      " %%%Produits de dimension " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP 1
+
+
+TITLE "Long  Haut  Épais Type de granit                         Surface" at , 03
+
+
+SKIP
+
+
+TITLE "Type de fini                       Quantité    totale " at ,21
+
+
+SKIP
+
+
+ALIGN (02,02,03) (,08,09) (,14,15) (,20,21) (,24,25)
+
+
+CLUSTER OCCURS WITH PDSOR_PROD_DIM ID BASE 10
+
+
+
+  FIELD PDILON           OF PDSOR_PROD_DIM          &
+          HIDDEN                                    &
+          LABEL " "                                 &
+          REQUIRED
+
+
+  FIELD PDIHAU           OF PDSOR_PROD_DIM          &
+          HIDDEN                                    &
+          LABEL " "                                 &
+          REQUIRED
+
+
+  FIELD PDIEPA           OF PDSOR_PROD_DIM          &
+          HIDDEN                                    &
+          LABEL " "                                 &
+          REQUIRED
+
+
+  FIELD TGRCODGRA        OF PDSOR_PROD_DIM          &
+          HIDDEN                                    &
+          NUMERIC                                   &
+          LABEL " "                                 &
+          REQUIRED                                  &
+          LOOKUP ON PDTYPE_GRANIT                   &
+            MESSAGE 2910 ; Ce type de granit n'existe pas
+
+
+
+  FIELD TGRDSCFRA001     OF PDTYPE_GRANIT           &
+          HIDDEN                                    &
+          DISPLAY                                   &
+          FOR 1,30                                  &
+          REFRESH                                   &
+          LABEL " "
+
+
+SKIP
+
+ALIGN (,20,21) (,24,25) (,57,58) (,65,66)
+
+  FIELD TYFCODFIN        OF PDSOR_PROD_DIM          &
+          HIDDEN                                    &
+          NUMERIC                                   &
+          DEFAULT "00"                              &
+          LABEL " "                                 &
+          REQUIRED                                  &
+          LOOKUP ON PDTYPE_FINI                     &
+            MESSAGE 2911 ; Ce type de fini n'existe pas
+
+
+  FIELD TYFDSCFRA001     OF PDTYPE_FINI             &
+          HIDDEN                                    &
+          DISPLAY                                   &
+          FOR 1,30                                  &
+          REFRESH                                   &
+          LABEL " "
+
+
+  FIELD SPDQTE           OF PDSOR_PROD_DIM          &
+          HIDDEN                                    &
+          LABEL " "                                 &
+          REQUIRED
+
+
+  FIELD PDISURMC2TOT     OF PDSOR_PROD_DIM          &
+          HIDDEN                                    &
+          DISPLAY                                   &
+          REFRESH                                   &
+          LABEL " "
+
+
+
+CLUSTER
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+
+  USE ussececr NOLIST
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procedure pour le calcul du volume d'une pièce de granit
+;
+
+use uscalvol NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+
+  USE ussecent NOLIST
+
+  IF SPRCON OF PDSORTIE_PRODUIT = "O"
+  THEN ERROR 3012 ; La saisie est impossible car la sortie est confirmée
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procedure permettant de valider les dimensions du produit de dimension
+; N.B.: on ne peut pas avoir un produit de dimension plus petit que 010 mm.
+;        ou plus grand que 4500 mm.
+;
+
+PROCEDURE EDIT PDILON
+BEGIN
+
+  IF PDILON    OF PDSOR_PROD_DIM < T_DIM_MIN_LAR_PD OR &
+     PDILON    OF PDSOR_PROD_DIM > T_DIM_MAX_LAR_PD
+  THEN BEGIN
+    ERROR 2962 ; Cette dimension hors des dimensions limites
+  END
+
+  ;
+  ; Calcul de la surface et du volume
+  ;
+  LET TZ_LARGEUR   = FIELDVALUE ; PDILON OF PDSOR_PROD_DIM
+  LET TZ_HAUTEUR   = PDIHAU OF PDSOR_PROD_DIM
+  LET TZ_EPAISSEUR = PDIEPA OF PDSOR_PROD_DIM
+  DO INTERNAL CALVOL
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul de la surface totale
+;
+
+PROCEDURE PROCESS PDILON
+BEGIN
+
+  LET     PDISURMC2    OF PDSOR_PROD_DIM = TZ_MC2
+  LET     PDIVOLMC3    OF PDSOR_PROD_DIM = TZ_VOLUME
+
+  IF NOT ENTRYMODE
+  THEN BEGIN
+    LET      PDISURMC2TOT   OF PDSOR_PROD_DIM = &
+       ROUND(SPDQTE         OF PDSOR_PROD_DIM * &
+             PDISURMC2      OF PDSOR_PROD_DIM,2)
+    DISPLAY PDISURMC2TOT    OF PDSOR_PROD_DIM
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procedure permettant de valider les dimensions du produit de dimension
+; N.B.: on ne peut pas avoir un produit de dimension plus petit que 010 mm.
+;        ou plus grand que 4500 mm.
+;
+
+PROCEDURE EDIT PDIHAU
+BEGIN
+
+  IF PDIHAU    OF PDSOR_PROD_DIM < T_DIM_MIN_HAU_PD OR &
+     PDIHAU    OF PDSOR_PROD_DIM > T_DIM_MAX_HAU_PD
+  THEN BEGIN
+    ERROR 2962 ; Cette dimension hors des dimensions limites
+  END
+
+  ;
+  ; Calcul de la surface et du volume
+  ;
+  LET TZ_LARGEUR   = PDILON OF PDSOR_PROD_DIM
+  LET TZ_HAUTEUR   = FIELDVALUE ; PDIHAU OF PDSOR_PROD_DIM
+  LET TZ_EPAISSEUR = PDIEPA OF PDSOR_PROD_DIM
+  DO INTERNAL CALVOL
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Calcul de la surface totale
+;
+
+PROCEDURE PROCESS PDIHAU
+BEGIN
+
+  LET     PDISURMC2    OF PDSOR_PROD_DIM = TZ_MC2
+  LET     PDIVOLMC3    OF PDSOR_PROD_DIM = TZ_VOLUME
+
+  IF NOT ENTRYMODE
+  THEN BEGIN
+    LET      PDISURMC2TOT   OF PDSOR_PROD_DIM = &
+       ROUND(SPDQTE         OF PDSOR_PROD_DIM * &
+             PDISURMC2      OF PDSOR_PROD_DIM,2)
+    DISPLAY PDISURMC2TOT    OF PDSOR_PROD_DIM
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procedure permettant de valider les dimensions du produit de dimension
+; N.B.: on ne peut pas avoir un produit de dimension plus petit que 010 mm.
+;        ou plus grand que 4500 mm.
+;
+
+PROCEDURE EDIT PDIEPA
+BEGIN
+
+  IF PDIEPA    OF PDSOR_PROD_DIM < T_DIM_MIN_EPA_PD OR &
+     PDIEPA    OF PDSOR_PROD_DIM > T_DIM_MAX_EPA_PD
+  THEN BEGIN
+    ERROR 2962 ; Cette dimension hors des dimensions limites
+  END
+
+  ;
+  ; Calcul de la surface et du volume
+  ;
+  LET TZ_LARGEUR   = PDILON OF PDSOR_PROD_DIM
+  LET TZ_HAUTEUR   = PDIHAU OF PDSOR_PROD_DIM
+  LET TZ_EPAISSEUR = FIELDVALUE ; PDIEPA OF PDSOR_PROD_DIM
+  DO INTERNAL CALVOL
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Affectation du volume et de la surface
+;
+
+PROCEDURE PROCESS PDIEPA
+BEGIN
+
+  LET     PDISURMC2    OF PDSOR_PROD_DIM = TZ_MC2
+  LET     PDIVOLMC3    OF PDSOR_PROD_DIM = TZ_VOLUME
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur (popup) pour le champs
+;
+
+PROCEDURE INPUT TGRCODGRA
+BEGIN
+
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TGRCODGRA = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_CIECLEMNU = CIECLE OF PDSORTIE_PRODUIT
+    RUN SCREEN pd100 MODE F               &
+                     PASSING T_TGRCODGRA, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_TGRCODGRA )
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur (popup) pour le champ
+;
+
+PROCEDURE INPUT TYFCODFIN
+BEGIN
+
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TYFCODFIN = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_CIECLEMNU = CIECLE OF PDSORTIE_PRODUIT
+    RUN SCREEN pd101 MODE F               &
+                     PASSING T_TYFCODFIN, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_TYFCODFIN )
+  END
+  ELSE BEGIN
+    IF 0 = SIZE(FIELDTEXT)
+    THEN BEGIN
+      LET FIELDTEXT = "00"
+    END
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procédure pour le calcul de la surface totale
+;
+
+PROCEDURE PROCESS SPDQTE
+BEGIN
+
+  GET PDPROD_DIMENSION                          &
+      VIA    CIECLE,                            &
+             PDILON,                            &
+             PDIHAU,                            &
+             PDIEPA,                            &
+             TGRCODGRA,                         &
+             TYFCODFIN                          &
+      USING  T_CIECLEMNU,                       &
+             PDILON         OF PDSOR_PROD_DIM,  &
+             PDIHAU         OF PDSOR_PROD_DIM,  &
+             PDIEPA         OF PDSOR_PROD_DIM,  &
+             TGRCODGRA      OF PDSOR_PROD_DIM,  &
+             TYFCODFIN      OF PDSOR_PROD_DIM   OPTIONAL
+  IF ACCESSOK AND &
+     SPDQTE      OF PDSOR_PROD_DIM > PDIQTE     OF PDPROD_DIMENSION
+  THEN ERROR 3019 ; La quantité a sortir dépasse la quantité de produit
+                 ; produit de dimension
+
+  LET      PDISURMC2TOT  OF PDSOR_PROD_DIM = &
+     ROUND(SPDQTE        OF PDSOR_PROD_DIM * &
+           PDISURMC2     OF PDSOR_PROD_DIM,2)
+  DISPLAY  PDISURMC2TOT  OF PDSOR_PROD_DIM
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+
+  ;
+  ; Empeche la destruction car la ssortie est confirmée
+  ;
+  IF SPRCON OF PDSORTIE_PRODUIT = "O" &
+     AND  DELETEDRECORD OF PDSOR_PROD_DIM
+  THEN ERROR 3013 ; La destruction est impossible, la sortie est confirmée
+
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDSOR_PROD_DIM &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDSOR_PROD_DIM &
+     AND NOT NEWRECORD     OF PDSOR_PROD_DIM &
+     AND NOT DELETEDRECORD OF PDSOR_PROD_DIM &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  IF 0 = SPRNUMSOR        OF PDSORTIE_PRODUIT
+  THEN BEGIN
+    GET PDSEQ_SORTIE OPTIONAL SEQUENTIAL
+    LET CIECLE    OF PDSEQ_SORTIE       = T_CIECLEMNU
+    LET SPRNUMSOR OF PDSEQ_SORTIE       = SPRNUMSOR OF PDSEQ_SORTIE + 1
+    LET SPRNUMSOR OF PDSORTIE_PRODUIT   = SPRNUMSOR OF PDSEQ_SORTIE
+    PUT PDSEQ_SORTIE
+  END
+
+  FOR PDSOR_PROD_DIM
+  BEGIN
+    IF NEWRECORD OF PDSOR_PROD_DIM
+    THEN BEGIN
+      GET PDPROD_DIMENSION_MAJ                     &
+          VIA   CIECLE,                            &
+                PDILON,                            &
+                PDIHAU,                            &
+                PDIEPA,                            &
+                TGRCODGRA,                         &
+                TYFCODFIN                          &
+          USING T_CIECLEMNU,                       &
+                PDILON          OF PDSOR_PROD_DIM, &
+                PDIHAU          OF PDSOR_PROD_DIM, &
+                PDIEPA          OF PDSOR_PROD_DIM, &
+                TGRCODGRA       OF PDSOR_PROD_DIM, &
+                TYFCODFIN       OF PDSOR_PROD_DIM OPTIONAL
+      IF ACCESSOK
+      THEN BEGIN
+        LET PDIQTE      OF PDPROD_DIMENSION_MAJ = &
+            PDIQTE      OF PDPROD_DIMENSION_MAJ - &
+            SPDQTE      OF PDSOR_PROD_DIM
+        PUT PDPROD_DIMENSION_MAJ
+      END
+      ELSE BEGIN
+        LET CIECLE      OF PDPROD_DIMENSION_MAJ = T_CIECLEMNU
+        LET PDILON      OF PDPROD_DIMENSION_MAJ = PDILON      OF PDSOR_PROD_DIM
+        LET PDIHAU      OF PDPROD_DIMENSION_MAJ = PDIHAU      OF PDSOR_PROD_DIM
+        LET PDIEPA      OF PDPROD_DIMENSION_MAJ = PDIEPA      OF PDSOR_PROD_DIM
+        LET PDILON      OF PDPROD_DIMENSION_MAJ = PDILON      OF PDSOR_PROD_DIM
+        LET PDIQTE      OF PDPROD_DIMENSION_MAJ = 0
+        LET TGRCODGRA   OF PDPROD_DIMENSION_MAJ = TGRCODGRA   OF PDSOR_PROD_DIM
+        LET TYFCODFIN   OF PDPROD_DIMENSION_MAJ = TYFCODFIN   OF PDSOR_PROD_DIM
+        LET PDISURMC2   OF PDPROD_DIMENSION_MAJ = PDISURMC2   OF PDSOR_PROD_DIM
+        LET PDIVOLMC3   OF PDPROD_DIMENSION_MAJ = PDIVOLMC3 OF PDSOR_PROD_DIM
+        PUT PDPROD_DIMENSION_MAJ
+      END
+    END
+    IF DELETEDRECORD OF PDSOR_PROD_DIM
+    THEN BEGIN
+      GET PDPROD_DIMENSION_MAJ                     &
+          VIA   CIECLE,                            &
+                PDILON,                            &
+                PDIHAU,                            &
+                PDIEPA,                            &
+                TGRCODGRA,                         &
+                TYFCODFIN                          &
+          USING T_CIECLEMNU,                       &
+                PDILON          OF PDSOR_PROD_DIM, &
+                PDIHAU          OF PDSOR_PROD_DIM, &
+                PDIEPA          OF PDSOR_PROD_DIM, &
+                TGRCODGRA       OF PDSOR_PROD_DIM, &
+                TYFCODFIN       OF PDSOR_PROD_DIM OPTIONAL
+      IF ACCESSOK
+      THEN BEGIN
+        LET PDIQTE      OF PDPROD_DIMENSION_MAJ = &
+            PDIQTE      OF PDPROD_DIMENSION_MAJ + &
+            SPDQTE      OF PDSOR_PROD_DIM
+        PUT PDPROD_DIMENSION_MAJ
+      END
+    END
+  END
+
+END
+
+
+BUILD
+
+@IF FORMAT
+
+**************************** Produits de dimension *****************************
+*                                                                              *
+* Long  Haut  Épais Type de fini                       Quantité    Surface     *
+* xxxxx xxxxx xxxxx xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                         *
+*                   xx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxxx   xxxxxxxxxxxx  *
+* xxxxx xxxxx xxxxx xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                         *
+*                   xx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxxx   xxxxxxxxxxxx  *
+* xxxxx xxxxx xxxxx xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                         *
+*                   xx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxxx   xxxxxxxxxxxx  *
+* xxxxx xxxxx xxxxx xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                         *
+*                   xx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxxx   xxxxxxxxxxxx  *
+* xxxxx xxxxx xxxxx xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                         *
+*                   xx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxxx   xxxxxxxxxxxx  *
+* xxxxx xxxxx xxxxx xxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                         *
+*                   xx  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   xxxxx   xxxxxxxxxxxx  *
+********************************************************************************
+
+@ENDIF

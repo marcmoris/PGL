@@ -1,0 +1,404 @@
+;/T/ Rapport de Vérification des encaissements
+;
+;/P/ Programmeur...: Chantal Martineau
+;    Date Création.: 15-juin-1993
+;
+;    Description...: La Liste de Verification des lots d'encaissements
+;                    non journalisé au Grand-Livre. Remarques que le
+;                    rapport peut être executer même si le lot a été
+;                    journalisé.
+;
+;/V3.02.04/, Nancy Marceau, 94/06/09, (264)
+;
+;/M/ Francois Richard, 1999-07-12
+;
+;    Ajustement pour le changement de siècle
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST   ; permet de faire les SET REPORT DEV....
+SET NOBLANK
+
+ACCESS *WCR331B &
+
+  LINK REFCIECLE OF WCR331B , &
+       REFCLETYP OF WCR331B , &
+       REFCLENUM OF WCR331B   &
+    TO REFCIECLE            , &
+       REFCLETYP            , &
+       REFCLENUM            OF MCREFERENCE OPTIONAL &
+
+  LINK CPTCLE    OF WCR331B   &
+    TO CPTCLE               OF VCPT_DSC    OPTIONAL &
+
+  LINK CIECLE    OF WCR331B , &
+       UNACLE    OF WCR331B   &
+    TO CIECLE               , &
+       UNACLE               OF MCUNITE_ADM OPTIONAL &
+
+  LINK CIECLE    OF WCR331B , &
+       PRJCLE    OF WCR331B   &
+    TO CIECLE               , &
+       PRJCLE               OF GPPROJETS    OPTIONAL &
+
+  LINK CIECLE    OF WCR331B , &
+       PRJCLE    OF WCR331B , &
+       PRACLE    OF WCR331B   &
+    TO CIECLE               , &
+       PRJCLE               , &
+       PRACLE               OF GPPRO_ACTIVITE  OPTIONAL &
+
+  LINK CIECLE OF WCR331B  , &
+       IMMCLE OF WCR331B    &
+    TO CIECLE             , &
+       IMMCLE             OF IMIMMOBILISATION OPTIONAL &
+
+  LINK LBQCPTENC OF WCR331B &
+    TO CPTCLE               OF VCPT_DSC ALIAS A_CPT_ENC OPTIONAL
+
+
+;
+; Titre de la liste.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+         "Vérification des encaissements"
+@ELSE
+         "%%%Vérification des encaissements"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = " "             ; titre2  du rapport
+
+;
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "CR331"
+
+;
+; Nom de la compagnie du menu.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM
+
+;
+; Valeur bilingue pour les flags Oui/Non.
+;
+USE usflgdet NOLIST
+
+;
+; Indique si le lot est hors balance.
+;
+DEFINE D_HRSBLC    CHARACTER SIZE 3 =  DZ_FLGAFFO &
+                                         IF 0 <> LCRNBRTRSERR OF WCR331B &
+                                  ELSE DZ_FLGAFFN
+
+;
+; Indique si le lot est journalisé
+;
+DEFINE D_JOURNALISE CHAR SIZE 12 = &
+@IF FRANCAIS
+           "Journalisé" &
+@ELSE
+           "Posted" &
+@ENDIF
+           IF LCRDATJOU OF WCR331B <> 0
+
+
+;***********************
+; Pour le rendre à 20 caractères.
+;
+DEFINE D_PRJTIT    CHARACTER SIZE 20 = PRJDSC1 OF GPPROJETS
+
+DEFINE D_PRATIT    CHARACTER SIZE 20 = PRADSC1 OF GPPRO_ACTIVITE
+
+DEFINE D_IMMTIT    CHARACTER SIZE 18 = IMMDSC  OF IMIMMOBILISATION
+;***********************
+
+;
+; Différence nbre transactions réel et nbre transactions évalué
+;
+DEFINE D_LCRNBRTRSDIF INTEGER SIZE 4 = LCRNBRTRSVER OF WCR331B - &
+                                       LCRNBRTRS    OF WCR331B
+
+;
+; Différence Montant transaction réel et Montant transaction évalué
+;
+DEFINE D_LCRCUMMNTDIF FLOAT SIZE 8 = LCRCUMMNTVER OF WCR331B - &
+                                     LCRCUMMNT    OF WCR331B
+
+;
+; On vérifie si montant de l'encaissement balance avec le total imputation et
+; de la ventilation factures.
+;
+DEFINE D_BALANCE  CHARACTER SIZE 1 = "*" IF DPOMNTPAM OF WCR331B <> &
+                                            ( DPOCUMMNT OF WCR331B + &
+                                              DPOMNTFAC OF WCR331B )
+
+;
+; Détermine si on doit imprimer la description du nom du dépot ou de la
+; référence.
+;
+DEFINE D_REFNOM CHARACTER SIZE 20 = REFNOMABR OF MCREFERENCE &
+                                      IF 0 = SIZE( TRUNCATE( DPONOM OF WCR331B ) )&
+                               ELSE DPONOM OF WCR331B
+
+;
+; Titre des ventilations.
+;   Si type 1, c'est l'imputation
+;   Si type 2, c'est une ventilation factures.
+;   Si type , pas de titre.
+;
+DEFINE D_TITVEN01 CHARACTER SIZE 176 =  &
+@IF FRANCAIS
+        "----------- Projet ---------- ----- Sous-projet ------ ------- Immobilisation -------- " + &
+        "----Unité administrative----- ----------Compte----------- -------Montant" &
+@ELSE
+        "%%%-------Compte-----------  ----Unité administrative-----  ---------Projet----------- " + &
+        "%%%-------Activité---------- -------Montant  " &
+@ENDIF
+          IF T_TYPDET OF WCR331B = "1" &
+   ELSE &
+        "                                                                       " + &
+@IF FRANCAIS
+        "---No facture--- -No cédule- ----Mnt à rec.  ------Mnt reçu  --Mnt escompte" &
+@ELSE
+        "%%%No facture--- -No cédule- ----Mnt à rec.  ------Mnt reçu  --Mnt escompte" &
+@ENDIF
+          IF T_TYPDET OF WCR331B = "2"
+
+;
+; Si c'est une ligne d'imputation il faut conserver la ligne d'impression, sinon
+; il faut l'effacer.
+;
+DEFINE D_EFFLIGIMP VARCHAR SIZE 162 = "" IF T_TYPDET OF WCR331B = "1" &
+                                 ELSE " "[1:160]
+
+;
+; Si c'est une ligne de ventilation de factures, il faut conserver la ligne
+; d'impression, sinon il faut l'effacer.
+;
+DEFINE D_EFFLIGFAC VARCHAR SIZE 162 = "" IF T_TYPDET OF WCR331B = "2" &
+                                 ELSE " "[1:160]
+
+;
+; Pour avoir le total de l'encaissent, c'est la sommation de l'imputation
+; plus la sommattion de la ventilation factures.
+;
+DEFINE D_TOTMNT  FLOAT SIZE 8  = DPIMNT OF WCR331B + CRHMNTREC OF WCR331B
+
+;
+; Le nombre de tirets du total de l'encaissement dépend si l'encaissement
+; fini par une imputation ou une ventilation facture.
+;
+DEFINE D_TITTIR02 CHARACTER SIZE  31 =  &
+   "---------------"                  IF T_TYPDET OF WCR331B = "1" ELSE &
+   "--------------- ---------------"  IF T_TYPDET OF WCR331B = "2" ELSE ""
+
+
+; Ajustement pour le changement de siècle
+DEFINE D_DPOCLE_TRI CHARACTER SIZE 13 = "1" + DPOCLE OF WCR331B &
+     IF DPOCLE OF WCR331B < "8" &
+     ELSE "0" + DPOCLE OF WCR331B 
+
+SORT ON LCRCLE    OF WCR331B, &    ;No lot
+        DPODATCRE OF WCR331B, &    ;Date de création
+        DPOHRECRE OF WCR331B, &    ;Heure de création
+        D_DPOCLE_TRI        , &    ;No dépot
+        T_TYPDET  OF WCR331B, &    ;Type de détail (Imputation Comptable/Ventilation facture)
+        DPITIMSTP OF WCR331B, &    ;Time stamp de l'imputation
+        CARCLE    OF WCR331B, &    ;No facture
+        CCDCLELIG OF WCR331B       ;No ligne de la cédule
+
+
+;
+; Impression de l'en-tête.
+;
+USE ustit180 NOLIST
+SKIP 2&
+@IF FRANCAIS
+ TAB 001 "Lot....: "   &
+@ELSE
+ TAB 001 "Batch..: "   &
+@ENDIF
+ TAB 011 LCRCLE OF WCR331B &
+ TAB 016 LCRDSC OF WCR331B &
+ TAB 060 D_JOURNALISE &
+ SKIP &
+@IF FRANCAIS
+ TAB 001 "Période: " &
+@ELSE
+ TAB 001 "Period.: " &
+@ENDIF
+ TAB 010 PECCLE OF WCR331B &
+SKIP 2 &
+  TAB 001 &
+"                                      Date         No                                                   Compte            Montant              Montant" &
+ SKIP &
+  TAB 001 &
+"*         Client/Employé            encaissé     chèque                   Description                   encaisse            reçu               encaissé" &
+ SKIP &
+  TAB 001 &
+"-  ---------------------------      --------    --------    ----------------------------------------    --------       ---------------      ---------------"
+
+HEADING AT D_DPOCLE_TRI &
+  TAB 001  D_BALANCE &
+  TAB 004  REFCLENUM OF WCR331B &
+  TAB 011  D_REFNOM &
+  TAB 037  DPODAT      OF WCR331B &
+  TAB 049  DPOCHQNUM   OF WCR331B &
+  TAB 061  DPODSC1     OF WCR331B &
+  TAB 106  LBQCPTENC   OF WCR331B &
+  TAB 121  DPOMNTPAM   OF WCR331B &
+  TAB 135 "/" &
+  TAB 136  DEVCLE      OF MCREFERENCE &
+  TAB 142  DPOMNTENC   OF WCR331B &
+  TAB 156 "/" &
+  TAB 157  DEVCLE      OF A_CPT_ENC &
+ SKIP &
+  TAB 061  DPODSC2     OF WCR331B &
+ SKIP 2
+
+REPORT &
+  TAB 003 D_TITVEN01 PRINT AT T_TYPDET &
+SKIP &
+  TAB 003 PRJCLE     OF WCR331B      &
+  TAB 012 D_PRJTIT   &
+  TAB 033 PRACLE     OF WCR331B      &
+  TAB 037 D_PRATIT   &
+  TAB 058 IMMCLE     OF WCR331B      &
+  TAB 071 D_IMMTIT   &
+  TAB 090 UNACLE     OF WCR331B      &
+  TAB 099 UNANOMABR  OF MCUNITE_ADM &
+  TAB 120 CPTCLE     OF WCR331B      &
+  TAB 127 CPTDSCABR  OF VCPT_DSC    &
+  TAB 140 DPIMNT       OF WCR331B       PICTURE "^^^,^^^,^^^.^^ " SIGNIFICANCE 5 &
+  TAB 003 D_EFFLIGIMP &
+ SKIP &
+  TAB 076 CARCLE    OF WCR331B &
+  TAB 096 CCDCLELIG OF WCR331B &
+  TAB 104 T_MNTCAR  OF WCR331B PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+  TAB 120 CRHMNTREC OF WCR331B PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+  TAB 136 CRHMNTESC OF WCR331B PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+  TAB 003 D_EFFLIGFAC
+
+
+FOOTING AT T_TYPDET SKIP 2
+
+
+FOOTING AT D_DPOCLE_TRI &
+  TAB 140 D_TITTIR02 &
+  TAB 004 D_EFFLIGIMP &
+ SKIP &
+  TAB 096 "Total:" &
+  TAB 140 DPIMNT     OF WCR331B SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+  TAB 004 D_EFFLIGIMP &
+ SKIP &
+  TAB 120 D_TITTIR02 &
+  TAB 004 D_EFFLIGFAC &
+ SKIP &
+  TAB 111 "Total:" &
+  TAB 120 D_TOTMNT             SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+  TAB 136 CRHMNTESC OF WCR331B SUBTOTAL PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+  TAB 004 D_EFFLIGFAC &
+ SKIP &
+  TAB 001  "------------------------------------------------------------------------------------------------------------------" &
+  TAB 112  "---------------------------------------------------------------------"
+
+
+
+FOOTING AT LCRCLE &
+@IF FRANCAIS
+  TAB 135 "Total paiement :" &
+@ELSE
+  TAB 135 "%%%al paiement :" &
+@ENDIF
+  TAB 152 DPOMNTPAM  OF WCR331B SUBTOTAL AT D_DPOCLE_TRI &
+        PICTURE "^^^,^^^,^^^.^^ " TRAILING "-" SIGNIFICANCE 5 &
+ SKIP 2 &
+@IF FRANCAIS
+  TAB 050   "    Vérifiés         Cumulés             Ecart        Hors balance(*)" &
+@ELSE
+  TAB 050   "%%% Vérifiés         Cumulés             Ecart        Hors balance(*)" &
+@ENDIF
+ SKIP 1 &
+  TAB 050   "--------------    --------------    --------------    --------------- "&
+ SKIP &
+@IF FRANCAIS
+  TAB 023   "Montant total.........:" &
+@ELSE
+  TAB 023   "%%%tant total.........:" &
+@ENDIF
+  TAB 050 LCRCUMMNTVER OF WCR331B   PICTURE "^^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5 &
+  TAB 068 LCRCUMMNT    OF WCR331B   PICTURE "^^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5 &
+  TAB 086 D_LCRCUMMNTDIF            PICTURE "^^^,^^^,^^^.^^ " TRAILING SIGN "-" SIGNIFICANCE 5 &
+  TAB 110 D_HRSBLC &
+SKIP &
+@IF FRANCAIS
+  TAB 023   "Nombre de transactions:" &
+@ELSE
+  TAB 023   "%%%bre de transactions:" &
+@ENDIF
+  TAB 056 LCRNBRTRSVER   OF WCR331B PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+  TAB 074 LCRNBRTRS      OF WCR331B PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+  TAB 092 D_LCRNBRTRSDIF            PICTURE "^,^^^ " TRAILING SIGN "-" SIGNIFICANCE 2 &
+  SKIP PAGE
+
+BUILD cr331z
+@IF FORMAT
+                                                                                                   1         1         1         1         1         1         1         1         1
+         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8
+123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+
+CR331                                                                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                                             Page:9999
+99/99/99 HH:MM xxxxxxxxxxxx                                                Vérification des encaissements
+                                                            xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+Lot....:  xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx    Journalisé
+Période: 99-99
+
+                                      Date         No                                                   Compte            Montant              Montant
+*         Client/Employé            encaissé     chèque                   Description                   encaisse            reçu               encaissé
+-  ---------------------------      --------    --------    ----------------------------------------    --------       ---------------      ---------------
+x  123456 xxxxxxxxxxxxxxxxxxxx      xx/xx/xx    12345678    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     xxxxxx         99,999,999.99-/xxx   99,999,999.99-/xxx
+                                                            xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+  ----------- Projet ---------- ----- Sous-projet ------ -------- Equipement ----------- ----Unité administrative----- ----------Compte----------- -------Montant  TF TP -----------TPS  -----------TVQ  Fac. ---------- Client ---------
+  12345678 xxxxxxxxxxxxxxxxxxxx 123 xxxxxxxxxxxxxxxxxxxx 1212345678 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx xx 999,999,999.99- 999,999,999.99- xxx  123456 xxxxxxxxxxxxxxxxxxxx
+  12345678 xxxxxxxxxxxxxxxxxxxx 123 xxxxxxxxxxxxxxxxxxxx 1212345678 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx xx 999,999,999.99- 999,999,999.99- xxx  123456 xxxxxxxxxxxxxxxxxxxx
+  12345678 xxxxxxxxxxxxxxxxxxxx 123 xxxxxxxxxxxxxxxxxxxx 1212345678 xxxxxxxxxxxxxxxxxxxx 12345678 xxxxxxxxxxxxxxxxxxxx 123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99- xx xx 999,999,999.99- 999,999,999.99- xxx  123456 xxxxxxxxxxxxxxxxxxxx
+                                                                                                                                                   ---------------       --------------- ---------------
+
+                                                                          ---No facture--- -No cédule- ----Mnt à rec.  ------Mnt reçu  --Mnt escompte
+                                                                           123456789012345     99      999,999,999.99- 999,999,999.99- 999,999,999.99-
+                                                                           123456789012345     99      999,999,999.99- 999,999,999.99- 999,999,999.99-
+
+                                                                                                                       --------------- ---------------
+                                                                                                              Total:   999,999,999.99- 999,999,999.99-
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+x    123456 xxxxxxxxxxxxxxxxxxxx    xx/xx/xx    12345678    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     xxxxxx         99,999,999.99-/xxx   99,999,999.99-/xxx
+                                                            xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+   ----------Compte-----------  ----Unité administrative-----  ---------Projet-----------  ---------Activité---------- -------Montant
+   123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99-
+   123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99-
+   123456 xxxxxxxxxxxxxxxxxxxx  12345678 xxxxxxxxxxxxxxxxxxxx  12345 xxxxxxxxxxxxxxxxxxxx  123456 xxxxxxxxxxxxxxxxxxxx 999,999,999.99-
+
+                                                                                                                       ---------------
+                                                                                                              Total:   999,999,999.99-
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+x    123456 xxxxxxxxxxxxxxxxxxxx    xx/xx/xx    12345678    xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     xxxxxx         99,999,999.99-/xxx   99,999,999.99-/xxx
+                                                            xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+                                                                          ---No facture--- -No cédule- ----Mnt à rec.  ------Mnt reçu  --Mnt escompte
+                                                                           123456789012345     99      999,999,999.99- 999,999,999.99- 999,999,999.99-
+                                                                           123456789012345     99      999,999,999.99- 999,999,999.99- 999,999,999.99-
+
+                                                                                                                       --------------- ---------------
+                                                                                                              Total:   999,999,999.99- 999,999,999.99-
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                                                      Total paiement : 999,999,999.99-
+
+                                                     Vérifiés         Cumulés             Ecart        Hors balance(*)
+                                                 --------------    --------------    --------------    ---------------
+                      Montant total.........:    999,999,999.99    999,999,999.99    999,999,999.99-         xxx
+                      Nombre de transactions:          9,999             9,999             9,999-
+@ENDIF

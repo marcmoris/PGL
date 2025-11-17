@@ -1,0 +1,549 @@
+;/T/ 2.2.4 P/O Rapport des transferts (réception/sortie).
+;
+;
+;
+;
+;/M/ Programmeur...: Claudie Doyon
+;    Date de modif.: 1999-11-24
+;    Description...: Modification du request sur les sorties de blocs pour modifier l'affectation
+;                    de l'item G_POIDS qui était :
+;
+;                    ITEM G_POIDS = BLOPOIREE OF PDBLOC IF 0 <> BLOPOIREE OF PDBLOC &
+;                    ELSE BLOPOIEST OF PDBLOC
+;
+;
+;
+;/P/ Programmeur...: Rémy Demers
+;    Date Création.: 1997-10-21
+;
+;    Description...:
+;
+;    Paramètres....: date de début d'intervale,
+;                    date de fin d'intervale
+;
+;    Particularités: AUCUNE
+;
+; Description:
+;
+;       Ce programme permettra de produire un rapport a partir des réceptions
+;       et des sorties de produit.
+;
+;       Comme l'information se trouve dans des fichiers très différents, et
+;       que le detail de chacune des sortie/entrée se trouve dans 4 fichiers
+;       distincts, la première étape de ce qtp consistera à créer le sous-
+;       fichier à blanc, d'où l'accés au fichier MCHOLDING.
+;
+;       Chacune des requètes subséquentes servira à colliger l'information
+;       de détail, qui sera conservée dans le sous-fichier global sous le
+;       même format, en conservant des indicateurs de provenance et de type
+;       d'information.
+;
+;***********************************************************************************************************************************
+;
+;/M/ Modifié par.......: Marc Poulin     
+;    Date modification.: 07 mars 2000
+;    Description.......: Ajout du code de fini pour les tranches.
+;
+;    Référence.........: Demande de changement 000024.
+;
+;    Signet............: MP-00-03-07_D24.
+;
+;-----------------------------------------------------------------------------------------------------------------------------------
+
+USE ussetqts NOLIST   ; Set process nolimit
+
+
+RUN pd311t
+
+
+GLOBAL TEMPORARY G_NUM_TRANS     INTEGER SIZE 4 &
+       PARM &
+       PROMPT "Numéro de Transfert...:"
+
+GLOBAL TEMPORARY G_CIECLE CHARACTER SIZE 4 &
+        PARM &
+        PROMPT "Numéro cie....: "
+
+
+
+GLOBAL TEMPORARY G_NUM_MOU      INTEGER   SIZE 4
+GLOBAL TEMPORARY G_TYP_MOU      CHARACTER SIZE 1
+GLOBAL TEMPORARY G_DAT_MOU      INTEGER SIZE 4
+;GLOBAL TEMPORARY G_CODFAB       CHARACTER SIZE 1
+GLOBAL TEMPORARY G_RSOCODSOR    CHARACTER SIZE 5
+GLOBAL TEMPORARY G_BCMNUMBCM    INTEGER SIZE 4
+GLOBAL TEMPORARY G_FOUCIECLE    CHARACTER SIZE 4
+GLOBAL TEMPORARY G_FOUCLE       CHARACTER SIZE 6
+GLOBAL TEMPORARY G_SFOUCLE       CHARACTER SIZE 6
+
+GLOBAL TEMPORARY G_RADNOM CHARACTER SIZE 40
+GLOBAL TEMPORARY G_RADADR1 CHARACTER SIZE 40
+GLOBAL TEMPORARY G_RADADR2 CHARACTER SIZE 40
+GLOBAL TEMPORARY G_RADADR3 CHARACTER SIZE 40
+GLOBAL TEMPORARY G_RADADR4 CHARACTER SIZE 40
+GLOBAL TEMPORARY G_RADCP   CHARACTER SIZE 7
+
+GLOBAL TEMPORARY G_DMR_CNS      CHARACTER SIZE 40
+GLOBAL TEMPORARY G_SPRCON       CHARACTER SIZE 1
+GLOBAL TEMPORARY G_CODE_PROD    CHARACTER SIZE 10
+GLOBAL TEMPORARY G_TYPE_PROD    CHARACTER SIZE 1
+GLOBAL TEMPORARY G_TGRCODGRA    CHARACTER SIZE 3
+GLOBAL TEMPORARY G_LONGUEUR     INTEGER SIZE 4
+GLOBAL TEMPORARY G_LARGEUR      INTEGER SIZE 4
+GLOBAL TEMPORARY G_EPAISSEUR    INTEGER SIZE 4
+GLOBAL TEMPORARY G_VOLMC3       FLOAT SIZE 8
+GLOBAL TEMPORARY G_SURMC2       FLOAT SIZE 8
+GLOBAL TEMPORARY G_CDDFIN       CHARACTER SIZE 2
+GLOBAL TEMPORARY G_QTE          INTEGER SIZE 4
+GLOBAL TEMPORARY G_CODPRI       CHARACTER SIZE 2
+GLOBAL TEMPORARY G_CAINUMCAI    CHAR SIZE 9
+GLOBAL TEMPORARY G_POIDS        FLOAT SIZE 8
+;--------------------------------------------------------------
+REQUEST CREATION-FICHIER
+;***********************
+
+ACCESS MCHOLDING
+
+; creation du sous-fichier a blanc.
+
+
+SUBFILE WPD311SR KEEP &
+        AT FINAL &
+        IF CIENMC OF MCHOLDING = "X9X9X9X9X9X9X9X9" &
+        INCLUDE &
+        G_CAINUMCAI,&
+        G_CIECLE, &
+        G_NUM_MOU, &
+        G_TYP_MOU, &
+        G_DAT_MOU, &
+;        G_CODFAB, &
+        G_BCMNUMBCM, &
+        G_FOUCIECLE, &
+        G_FOUCLE, &
+        G_SFOUCLE,&
+        G_RADNOM, &
+        G_RADADR1, &
+        G_RADADR2, &
+        G_RADADR3, &
+        G_RADADR4, &
+        G_RADCP,&
+        G_RSOCODSOR, &
+        G_DMR_CNS, &
+        G_SPRCON, &
+        G_CODE_PROD, &
+        G_TYPE_PROD, &
+        G_TGRCODGRA, &
+        G_LONGUEUR, &
+        G_LARGEUR, &
+        G_EPAISSEUR, &
+        G_VOLMC3, &
+        G_SURMC2, &
+        G_CDDFIN, &
+        G_QTE, &
+        G_CODPRI  , &
+        G_POIDS
+;        G_DATE_DEB, &
+;        G_DATE_FIN
+
+
+;-------------------------------------------------------------------------------
+REQUEST IDENTIFIE_RECEP
+;**********************
+
+; identifier les réceptions de produit contenus dans l'intervale de temps
+; spécifié
+
+ACCESS PDRECEPTION &
+
+        LINK    CIECLE,   &
+                BCMNUMBCM &
+        TO      CIECLE,   &
+                BCMNUMBCM OF PDBON_COMMANDE OPT &
+
+        LINK FOUCLE OF PDBON_COMMANDE ,    &
+             "F" &
+        TO   REFCLENUM ,&
+             REFCLETYP OF MCREF_ADRESSE OPT
+
+
+
+CHOOSE CIECLE PARM
+
+SELECT IF G_NUM_TRANS = RCTNUMREC OF PDRECEPTION
+
+
+SUBFILE WPD311REC KEEP &
+        INCLUDE &
+        G_CAINUMCAI,&
+        CIECLE    OF PDRECEPTION, &
+        RCTNUMREC OF PDRECEPTION, &
+        RCTDATREC OF PDRECEPTION, &
+        RCTCNS    OF PDRECEPTION, &
+        BCMNUMBCM OF PDRECEPTION, &
+        FOUCIECLE OF PDBON_COMMANDE, &
+        FOUCLE    OF PDBON_COMMANDE, &
+        RADNOM    OF MCREF_ADRESSE, &
+        RADADR1   OF MCREF_ADRESSE, &
+        RADADR2   OF MCREF_ADRESSE, &
+        RADADR3   OF MCREF_ADRESSE, &
+        RADADR4   OF MCREF_ADRESSE, &
+        RADCP     OF MCREF_ADRESSE
+;-------------------------------------------------------------------------------
+REQUEST RECEPTION_BLOC
+;*********************
+
+; identifier les blocs associés aux réceptions sélectionnées
+
+ACCESS *WPD311REC &
+
+        LINK    CIECLE    OF WPD311REC,          &
+                RCTNUMREC OF WPD311REC           &
+        TO      CIECLE,                          &
+                RCTNUMREC OF PDRECEPTION_BLOC    &
+
+        LINK    CIECLE OF WPD311REC,             &
+                BLONUMBLOAPR OF PDRECEPTION_BLOC &
+        TO      CIECLE ,                         &
+                BLONUMBLOAPR OF PDBLOC           &
+
+        LINK    CIECLE                          ,&
+                TGRCODGRA    OF PDBLOC           &
+        TO      CIECLE                          ,&
+                TGRCODGRA    OF PDTYPE_GRANIT
+
+
+
+
+        ITEM G_DAT_MOU = RCTDATREC OF WPD311REC
+
+        ITEM G_TYP_MOU = "R"
+
+        ITEM G_TYPE_PROD = "B"
+
+        ITEM G_CODE_PROD = BLONUMBLOAPR OF PDRECEPTION_BLOC
+
+        ITEM G_RSOCODSOR = " "
+
+        ITEM G_SPRCON = " "
+
+        ITEM G_VOLMC3 = BLOVOLMC3NET OF PDBLOC
+
+        ITEM G_SURMC2 = 0
+
+        ITEM G_CDDFIN = " "
+
+        ITEM G_QTE = 0
+
+        ITEM G_CODPRI = " "
+
+        ITEM G_POIDS = ((BLOVOLMC3BRU OF PDBLOC + BLOVOLMC3NET OF PDBLOC) /2) * TGRPOI OF PDTYPE_GRANIT
+
+
+SUBFILE WPD311SR APPEND &
+        INCLUDE &
+        G_CAINUMCAI,&
+        G_CIECLE, &
+        RCTNUMREC OF WPD311REC          ALIAS G_NUM_MOU, &
+        G_TYP_MOU, &
+        G_DAT_MOU, &
+        ; ALIAS G_CODFAB, &
+        BCMNUMBCM OF WPD311REC          ALIAS G_BCMNUMBCM, &
+        FOUCIECLE OF WPD311REC          ALIAS G_FOUCIECLE, &
+        FOUCLE OF WPD311REC             ALIAS G_FOUCLE, &
+        G_SFOUCLE,&
+        RADNOM OF WPD311REC      ALIAS G_RADNOM, &
+        RADADR1 OF WPD311REC     ALIAS G_RADADR1, &
+        RADADR2 OF WPD311REC     ALIAS G_RADADR2, &
+        RADADR3 OF WPD311REC     ALIAS G_RADADR3, &
+        RADADR4 OF WPD311REC     ALIAS G_RADADR4, &
+        RADCP   OF WPD311REC     ALIAS G_RADCP , &
+
+        G_RSOCODSOR, &
+        RCTCNS OF WPD311REC             ALIAS G_DMR_CNS, &
+        G_SPRCON, &
+        G_CODE_PROD, &
+        G_TYPE_PROD, &
+        TGRCODGRA OF PDBLOC             ALIAS G_TGRCODGRA, &
+        BLOLONNET OF PDBLOC             ALIAS G_LONGUEUR, &
+        BLOHAUNET OF PDBLOC             ALIAS G_LARGEUR, &
+        BLOLARNET OF PDBLOC             ALIAS G_EPAISSEUR, &
+        G_VOLMC3, &
+        G_SURMC2, &
+        G_CDDFIN, &
+        G_QTE, &
+        G_CODPRI  , &
+        G_POIDS               ; G_DATE_DEB, &
+       ; G_DATE_FIN
+
+;-------------------------------------------------------------------------------
+REQUEST RECEPTION_TRANCHE
+;************************
+
+; identifier les tranches associées aux réceptions sélectionnées
+
+ACCESS *WPD311REC &
+
+        LINK    CIECLE       OF WPD311REC,    &
+                RCTNUMREC    OF WPD311REC     &
+        TO      CIECLE,                       &
+                RCTNUMREC    OF PDREC_TRANCHE &
+
+        LINK    CIECLE       OF WPD311REC,    &
+                TRANUMTRA002 OF PDREC_TRANCHE &
+        TO      CIECLE,                       &
+                TRANUMTRA002 OF PDTRANCHE     &
+
+        LINK  CIECLE    OF PDTRANCHE      , &
+              TGRCODGRA OF PDTRANCHE        &
+       TO     CIECLE                      , &
+              TGRCODGRA OF PDTYPE_GRANIT
+
+
+        ITEM G_DAT_MOU = RCTDATREC OF WPD311REC
+
+        ITEM G_TYP_MOU = "R"
+
+        ITEM G_TYPE_PROD = "T"
+
+        ITEM G_CODE_PROD = TRANUMTRA002 OF PDREC_TRANCHE
+
+        ITEM G_RSOCODSOR = " "
+
+        ITEM G_SPRCON = " "
+
+        ITEM G_VOLMC3 = 0
+
+        ITEM G_SURMC2 = TRASURMC2 OF PDTRANCHE
+
+        ITEM G_CDDFIN = TYFCODFIN OF PDTRANCHE ; MP-00-03-07_D24.
+
+        ITEM G_QTE = 0
+
+        ITEM G_CODPRI = " "
+
+        ITEM G_POIDS = (G_SURMC2 * (TRAEPA OF PDTRANCHE/1000)) * TGRPOI OF PDTYPE_GRANIT
+
+SUBFILE WPD311SR APPEND &
+        INCLUDE &
+        G_CAINUMCAI,&
+        G_CIECLE, &
+        RCTNUMREC OF WPD311REC          ALIAS G_NUM_MOU, &
+        G_TYP_MOU, &
+        G_DAT_MOU, &
+        ; ICITTE OF WPD311REC           ALIAS G_CODFAB, &
+        BCMNUMBCM OF WPD311REC          ALIAS G_BCMNUMBCM, &
+        FOUCIECLE OF WPD311REC          ALIAS G_FOUCIECLE, &
+        FOUCLE OF WPD311REC             ALIAS G_FOUCLE, &
+        G_SFOUCLE,&
+        RADNOM OF WPD311REC     ALIAS G_RADNOM, &
+        RADADR1 OF WPD311REC     ALIAS G_RADADR1, &
+        RADADR2 OF WPD311REC     ALIAS G_RADADR2, &
+        RADADR3 OF WPD311REC     ALIAS G_RADADR3, &
+        RADADR4 OF WPD311REC     ALIAS G_RADADR4, &
+        RADCP   OF WPD311REC     ALIAS G_RADCP, &
+
+        G_RSOCODSOR, &
+        RCTCNS OF WPD311REC             ALIAS G_DMR_CNS, &
+        G_SPRCON, &
+        G_CODE_PROD, &
+        G_TYPE_PROD, &
+        TGRCODGRA OF PDTRANCHE          ALIAS G_TGRCODGRA, &
+        TRALON OF PDTRANCHE             ALIAS G_LONGUEUR, &
+        TRAHAU OF PDTRANCHE             ALIAS G_LARGEUR, &
+        TRAEPA OF PDTRANCHE             ALIAS G_EPAISSEUR, &
+        G_VOLMC3, &
+        G_SURMC2, &
+        G_CDDFIN, &
+        G_QTE, &
+        G_CODPRI  , &
+        G_POIDS       ; G_DATE_DEB, &
+       ; G_DATE_FIN
+
+;-------------------------------------------------------------------------------
+REQUEST RECEPTION_DIAGRAMME
+;**************************
+
+; identifier les diagrammes associés aux réceptions sélectionnées
+
+ACCESS *WPD311REC &
+
+       LINK CIECLE    ,                          &
+            RCTNUMREC                            &
+       TO   CIECLE,                              &
+            RCTNUMREC OF PDREC_CAISSON           &
+
+        LINK    CIECLE      OF PDREC_CAISSON    ,&
+                CAINUMCAI   OF PDREC_CAISSON     &
+        TO      CIECLE,                          &
+                CAINUMCAI   OF PDCAISSON         &
+
+        LINK    CIECLE       OF PDCAISSON,       &
+                CAINUMCAI    OF PDCAISSON        &
+        TO      CIECLE,                          &
+                CAINUMCAI    OF PDEMBAL_DIAG     &
+
+        LINK    CIECLE       OF PDEMBAL_DIAG    ,&
+                DIANUM002    OF PDEMBAL_DIAG      &
+        TO      CIECLE,                           &
+                DIANUM002 OF PDDIAGRAMME          &
+
+
+       LINK     CIECLE OF PDDIAGRAMME ,&
+                TGRCODGRA OF PDDIAGRAMME &
+            TO  CIECLE ,&
+                TGRCODGRA OF PDTYPE_GRANIT
+
+        ITEM G_CODE_PROD = DIANUM002 OF PDDIAGRAMME
+        ITEM G_CAINUMCAI = CAINUMCAI OF PDREC_CAISSON
+        DEFINE D_TRI CHAR SIZE 17 = G_CAINUMCAI + G_CODE_PROD
+
+;   SORT ON D_TRI &
+ ;       ON DIANUM002 OF PDDIAGRAMME
+
+        ITEM G_POIDS = DIAVOLMC3 OF PDDIAGRAMME * TGRPOI OF PDTYPE_GRANIT
+
+
+        ITEM G_DAT_MOU = RCTDATREC OF WPD311REC
+
+        ITEM G_TYP_MOU = "R"
+
+        ITEM G_TYPE_PROD = "D"
+
+
+        ITEM G_RSOCODSOR = " "
+
+        ITEM G_SPRCON = " "
+
+        ITEM G_VOLMC3 = 0
+
+        ITEM G_SURMC2 = 0
+
+        ITEM G_QTE = EMDQTEPRD OF PDEMBAL_DIAG
+
+SUBFILE WPD311SR APPEND &
+        INCLUDE &
+        G_CAINUMCAI ,&
+        G_CIECLE, &
+        RCTNUMREC OF WPD311REC          ALIAS G_NUM_MOU, &
+        G_TYP_MOU, &
+        G_DAT_MOU, &
+        ; ICITTE OF WPD311REC           ALIAS G_CODFAB, &
+        BCMNUMBCM OF WPD311REC          ALIAS G_BCMNUMBCM, &
+        FOUCIECLE OF WPD311REC          ALIAS G_FOUCIECLE, &
+        FOUCLE OF WPD311REC             ALIAS G_FOUCLE, &
+        G_SFOUCLE,&
+        RADNOM OF WPD311REC     ALIAS G_RADNOM, &
+        RADADR1 OF WPD311REC     ALIAS G_RADADR1, &
+        RADADR2 OF WPD311REC     ALIAS G_RADADR2, &
+        RADADR3 OF WPD311REC     ALIAS G_RADADR3, &
+        RADADR4 OF WPD311REC     ALIAS G_RADADR4, &
+        RADCP   OF WPD311REC     ALIAS G_RADCP, &
+
+        G_RSOCODSOR, &
+        RCTCNS OF WPD311REC             ALIAS G_DMR_CNS, &
+        G_SPRCON, &
+        G_CODE_PROD, &
+        G_TYPE_PROD, &
+        TGRCODGRA OF PDDIAGRAMME        ALIAS G_TGRCODGRA, &
+        DIALON OF PDDIAGRAMME           ALIAS G_LONGUEUR, &
+        DIAHAU OF PDDIAGRAMME           ALIAS G_LARGEUR, &
+        DIAEPA OF PDDIAGRAMME           ALIAS G_EPAISSEUR, &
+        G_VOLMC3, &
+        G_SURMC2, &
+        TYFCODFIN OF PDDIAGRAMME        ALIAS G_CDDFIN, &
+        G_QTE, &
+        PRICODPRI OF PDEMBAL_DIAG      ALIAS G_CODPRI  , &;RCDPRI OF PDREC_DIAGRAMME
+        G_POIDS              ; G_DATE_DEB, &
+       ; G_DATE_FIN
+
+;-------------------------------------------------------------------------------
+REQUEST RECEPTION_PROD_DIMEN
+;***************************
+
+; identifier les produits de dimension associés aux réceptions sélectionnées
+
+ACCESS *WPD311REC &
+
+        LINK    CIECLE       OF WPD311REC,       &
+                RCTNUMREC                        &
+        TO      CIECLE,                          &
+                RCTNUMREC OF PDREC_PROD_DIMEN   &
+
+
+        LINK CIECLE OF PDREC_PROD_DIMEN ,&
+             TGRCODGRA OF PDREC_PROD_DIMEN &
+          TO CIECLE ,&
+             TGRCODGRA OF PDTYPE_GRANIT ; &
+
+;        LINK PDILON OF PDREC_PROD_DIMEN,&
+;             PDIHAU OF PDREC_PROD_DIMEN,&
+;             PDIEPA OF PDREC_PROD_DIMEN,&
+;             TGRCODGRA OF PDREC_PROD_DIMEN ,&
+;             CIECLE    OF PDREC_PROD_DIMEN &
+;        TO   PDILON ,&
+;             PDIHAU ,&
+;             PDIEPA ,&
+;             TGRCODGRA ,&
+;             CIECLE    OF PDPROD_DIMENSION
+
+
+        ITEM G_DAT_MOU = RCTDATREC OF WPD311REC
+
+        ITEM G_TYP_MOU = "R"
+
+        ITEM G_TYPE_PROD = "P"
+
+        ITEM G_CODE_PROD = " "
+
+        ITEM G_RSOCODSOR = " "
+
+        ITEM G_SPRCON = " "
+
+        ITEM G_VOLMC3 = 0
+
+        ITEM G_SURMC2 = 0
+
+        ITEM G_QTE = RPDQTE OF PDREC_PROD_DIMEN
+
+    ITEM G_POIDS = (PDILON OF PDREC_PROD_DIMEN * PDIHAU OF PDREC_PROD_DIMEN &
+                 * PDIEPA OF PDREC_PROD_DIMEN /1000000) * TGRPOI OF PDTYPE_GRANIT
+
+SUBFILE WPD311SR APPEND &
+        INCLUDE &
+        G_CAINUMCAI,&
+        G_CIECLE, &
+        RCTNUMREC OF WPD311REC          ALIAS G_NUM_MOU, &
+        G_TYP_MOU, &
+        G_DAT_MOU, &
+        ; ICITTE OF WPD311REC           ALIAS G_CODFAB, &
+        BCMNUMBCM OF WPD311REC          ALIAS G_BCMNUMBCM, &
+        FOUCIECLE OF WPD311REC          ALIAS G_FOUCIECLE, &
+        FOUCLE OF WPD311REC             ALIAS G_FOUCLE, &
+        G_SFOUCLE,&
+        RADNOM OF WPD311REC     ALIAS G_RADNOM, &
+        RADADR1 OF WPD311REC     ALIAS G_RADADR1, &
+        RADADR2 OF WPD311REC     ALIAS G_RADADR2, &
+        RADADR3 OF WPD311REC     ALIAS G_RADADR3, &
+        RADADR4 OF WPD311REC     ALIAS G_RADADR4, &
+        RADCP   OF WPD311REC     ALIAS G_RADCP, &
+
+
+        G_RSOCODSOR, &
+        RCTCNS OF WPD311REC             ALIAS G_DMR_CNS, &
+        G_SPRCON, &
+        G_CODE_PROD, &
+        G_TYPE_PROD, &
+        TGRCODGRA OF PDREC_PROD_DIMEN   ALIAS G_TGRCODGRA, &
+        PDILON OF PDREC_PROD_DIMEN      ALIAS G_LONGUEUR, &
+        PDIHAU OF PDREC_PROD_DIMEN      ALIAS G_LARGEUR, &
+        PDIEPA OF PDREC_PROD_DIMEN      ALIAS G_EPAISSEUR, &
+        G_VOLMC3, &
+        G_SURMC2, &
+        TYFCODFIN OF PDREC_PROD_DIMEN   ALIAS G_CDDFIN, &
+        G_QTE, &
+        G_CODPRI  , &
+        G_POIDS       ; G_DATE_DEB, &
+       ; G_DATE_FIN
+
+
+BUILD pd311t

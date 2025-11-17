@@ -1,0 +1,2181 @@
+;/T/ Commandes d'achat
+;
+;/P/ Programmeur..: Nancy Marceau
+;    Date Création: 9 mars 1994
+;
+;    Description..: Cet écran permet de faire la gestion des commandes d'achat.
+;                   La commande d'achat n'appartient qu'à un et un seul
+;                   entrepôt.  La commande d'achat peut référer à une
+;                   réquisition ou non.
+;
+;/M/ Francois Richard, 98-02-04
+;
+;    Ajustement pour le changement de siècle
+;
+;
+;/M/ Programmeur.......: Patrick Langlois
+;    Date modification.: 09 Juin 1999
+;    Description.......: Migration Achat/Réception/Inventaire de l'environnement (BOC)
+;
+;/M/ Programmeur.......: Francois Richard
+;    Date modification.: 24 aout 1999
+;    Description.......: Ajout de champs suivant : CDEDATLIVPRE, CDEFAB,
+;                        CDETRP, CMDINDDNE, CMDREQCLETMP
+;
+;
+;------------------------------------------------------------------------------
+;/M/ Pascal Tremblay, 98-01-29
+;
+;    Ajustement pour le changement de siècle
+;
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN ar007 ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             AUTOUPDATE &
+             RECEIVING T_CIECLEMNU, &
+                       T_CIENOM,    &
+                       T_PECCLEMNU, &
+                       T_FOUCIECLE, &
+                       T_CMDCLEFND, &
+                       T_CMDAJTFND
+
+USE ussectmp NOLIST     ; Variable pour la sécurité
+    "AR007"             ; Nom de l'écran
+
+USE ar007.hlp NOLIST  ; Use servant à la documentation de l'écran
+
+USE ustraecr NOLIST
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-écrans
+
+
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE ARCMD_SEQ IN DICT
+
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ2 READ WRITE &
+                        RESERVING FOR PROTECTED WRITE MCHIS_SEQ_ENG IN DICT
+                                                ; Le IN DICT est pour unix
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_RAD_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE MCRAD_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Détail de commande          "    ACTION DESIGNER D001
+  MENUITEM LABEL "Engagement                  "    ACTION DESIGNER D002
+  MENUITEM LABEL "Historique des transactions "    ACTION DESIGNER D003
+  MENUITEM LABEL "Adresse - fournisseur divers"    ACTION DESIGNER D004
+  MENUITEM LABEL "Vérification                "    ACTION DESIGNER D005
+  MENUITEM LABEL "Mémo - achat                "    ACTION DESIGNER D006
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%Détail de commande          " ACTION DESIGNER D001
+  MENUITEM LABEL "%%%Engagement                  " ACTION DESIGNER D002
+  MENUITEM LABEL "%%%Historique                  " ACTION DESIGNER D003
+  MENUITEM LABEL "%%%Adresse - fournisseur divers" ACTION DESIGNER D004
+  MENUITEM LABEL "%%%Vérification                " ACTION DESIGNER D005
+  MENUITEM LABEL "%%%o - Achat                "    ACTION DESIGNER D006
+@ENDIF
+
+;-------------------------------------------------------------------------------
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Numéro de la compagnie
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie
+TEMPORARY T_PECCLEMNU CHARACTER SIZE 4  ; Période du menu
+TEMPORARY T_FOUCIECLE CHARACTER SIZE 4  ; Compagnie fournisseur
+TEMPORARY T_CMDCLEFND CHARACTER SIZE 9  ; Numéro de commande à chercher
+TEMPORARY T_CMDAJTFND CHARACTER SIZE 3  ; Séquence d'ajustement
+TEMPORARY T_CDECLEFND CHARACTER SIZE 1 INIT "0" ; Détail commande
+TEMPORARY T_CDECLE    INTEGER   SIZE 4 INIT 0   ; Détail commande
+
+;-------------------------------------------------------------------------------
+;
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;
+; Commande
+;
+FILE ARCOMMANDE  PRIMARY NOITEM 
+
+  ACCESS VIA   CIECLE,               &
+               CMDCLE,               &
+               CMDAJT                &
+         USING T_CIECLEMNU,          &
+               CMDCLE OF ARCOMMANDE, &
+               CMDAJT OF ARCOMMANDE  &
+         REQUEST CMDCLE,   &
+                 CMDAJT    &
+         ORDERBY CIECLE,   &
+                 CMDCLE,   &
+                 CMDAJT
+
+  ACCESS VIA   CIECLE,               &
+               CMDCLE                &
+         USING T_CIECLEMNU,          &
+               CMDCLE OF ARCOMMANDE  &
+         REQUEST CMDCLE    &
+         ORDERBY CIECLE,   &
+                 CMDCLE,   &
+                 CMDAJT
+
+  ACCESS VIA   CIECLE,               &
+               FOUCLE                &
+         USING T_CIECLEMNU,          &
+               FOUCLE OF ARCOMMANDE  &
+         REQUEST FOUCLE &
+         ORDERBY CIECLE, &
+                 FOUCLE, &
+                 CMDDAT DESC, &
+                 CMDCLE, &
+                 CMDAJT
+
+  ACCESS VIA   CIECLE,               &
+               ENTCLE                &
+         USING T_CIECLEMNU,          &
+               ENTCLE OF ARCOMMANDE  &
+         REQUEST ENTCLE  &
+         ORDERBY CIECLE, &
+                 ENTCLE, &
+                 CMDDAT DESC, &
+                 PECCLE, &
+                 CMDCLE, &
+                 CMDAJT
+
+  ACCESS VIA   CIECLE,               &
+               PECCLE                &
+         USING T_CIECLEMNU,          &
+               PECCLE OF ARCOMMANDE  &
+         REQUEST PECCLE  &
+         ORDERBY CIECLE, &
+                 ENTCLE, &
+                 PECCLE, &
+                 CMDDAT DESC, &
+                 CMDCLE, &
+                 CMDAJT
+
+  ACCESS VIA   CIECLE               &
+         USING T_CIECLEMNU          &
+         ORDERBY CIECLE, &
+                 CMDDAT DESC, &
+                 CMDCLE, &
+                 CMDAJT
+
+  ITEM CIECLE    OF ARCOMMANDE INITIAL T_CIECLEMNU
+  ITEM FOUCIECLE OF ARCOMMANDE INITIAL T_FOUCIECLE
+  ITEM REFCLETYP OF ARCOMMANDE INITIAL "F"
+  ITEM CMDSTU    OF ARCOMMANDE INITIAL "P"     ; Initialisation à préliminaire
+  ITEM CMDFLGIMP OF ARCOMMANDE INITIAL "0"     ; Initialisation à non imprimée
+  ITEM CMDAJT    OF ARCOMMANDE INITIAL "000"
+  ITEM CMDTYP    OF ARCOMMANDE INITIAL "CM"
+  ITEM CMDDATCRE OF ARCOMMANDE INITIAL SYSDATE
+  ITEM CMDHRECRE OF ARCOMMANDE INITIAL SYSTIME / 10000
+  ITEM CMDUSRCRE OF ARCOMMANDE INITIAL TZ_LOGONID
+  ITEM CMDDATMOD OF ARCOMMANDE FINAL   SYSDATE        &
+                                        IF NOT NEWRECORD OF ARCOMMANDE AND &
+                                           ALTEREDRECORD OF ARCOMMANDE
+  ITEM CMDHREMOD OF ARCOMMANDE FINAL   SYSTIME / 10000 &
+                                        IF NOT NEWRECORD OF ARCOMMANDE AND &
+                                           ALTEREDRECORD OF ARCOMMANDE
+  ITEM CMDUSRMOD OF ARCOMMANDE FINAL   TZ_LOGONID         &
+                                        IF NOT NEWRECORD OF ARCOMMANDE AND &
+                                           ALTEREDRECORD OF ARCOMMANDE
+
+;-------------------------------------------------------------------------------
+;
+; Validation du numéro d'adresse et ajout de la nouvelle adresse pour les
+; fournisseurs divers.
+;
+FILE MCREF_ADRESSE     SECONDARY &
+                      NOITEM &
+                      NODELETE
+
+  ACCESS  VIA   REFCIECLE, &
+                REFCLETYP, &
+                REFCLENUM, &
+                RADCLE &
+          USING FOUCIECLE OF ARCOMMANDE, &
+                REFCLETYP OF ARCOMMANDE, &
+                FOUCLE    OF ARCOMMANDE, &
+                RADCLE    OF ARCOMMANDE
+
+  ITEM REFCIECLE OF MCREF_ADRESSE FINAL FOUCIECLE OF ARCOMMANDE
+  ITEM REFCLETYP OF MCREF_ADRESSE FINAL REFCLETYP OF ARCOMMANDE
+  ITEM REFCLENUM OF MCREF_ADRESSE FINAL FOUCLE    OF ARCOMMANDE
+  ITEM RADCLE    OF MCREF_ADRESSE FINAL RADCLE    OF ARCOMMANDE
+  ITEM RADACHCP  OF MCREF_ADRESSE INITIAL "1"
+
+
+;------------------------------------------------------------------------------
+;
+; Lien avec la pièce que l'ont réfère par l'historique.
+;
+FILE ARCMD_HISTO         SECONDARY &
+                         NOITEM    
+
+  ACCESS  VIA   CMHCLE1  , &
+                CMHCLE2  , &
+                CMHCLE3    &
+          USING CIECLE OF ARCOMMANDE , &
+                CMDCLE OF ARCOMMANDE , &
+                CMDAJT OF ARCOMMANDE
+
+  ITEM CIECLE    OF ARCMD_HISTO INITIAL CIECLE OF ARCOMMANDE
+  ITEM CMDAJT    OF ARCMD_HISTO INITIAL "000"
+  ITEM CMHTIMSTP OF ARCMD_HISTO INITIAL SYSDATE * 1000000 + ROUND(SYSTIME / 100)
+  ITEM CMHCLE1   OF ARCMD_HISTO INITIAL T_CIECLEMNU
+  ITEM CMHCLE2   OF ARCMD_HISTO FINAL CMDCLE    OF ARCOMMANDE
+  ITEM CMHCLE3   OF ARCMD_HISTO FINAL CMDAJT    OF ARCOMMANDE
+  ITEM CMHTYP    OF ARCMD_HISTO FINAL CMDTYP    OF ARCOMMANDE
+  ITEM CMHDAT    OF ARCMD_HISTO FINAL CMDDAT    OF ARCOMMANDE
+  ITEM PECCLE    OF ARCMD_HISTO FINAL PECCLE    OF ARCOMMANDE
+  ITEM CMHDATJOU OF ARCMD_HISTO FINAL CMDDATAPP OF ARCOMMANDE
+  ITEM CMHMNT    OF ARCMD_HISTO FINAL CMDMNTTOT OF ARCOMMANDE
+  ITEM CMHMNTTPS OF ARCMD_HISTO FINAL CMDMNTTPS OF ARCOMMANDE
+  ITEM CMHMNTTVQ OF ARCMD_HISTO FINAL CMDMNTTVQ OF ARCOMMANDE
+  ITEM CMHMNTCTI OF ARCMD_HISTO FINAL CMDMNTCTI OF ARCOMMANDE
+  ITEM CMHMNTRTI OF ARCMD_HISTO FINAL CMDMNTRTI OF ARCOMMANDE
+  ITEM CMHMNTNET OF ARCMD_HISTO FINAL CMDMNTNET OF ARCOMMANDE
+
+;
+; Adresse d'expédition
+;
+TEMPORARY T_ADECLE     CHARACTER SIZE 5
+
+FILE ARADRESSE_EXP  REFERENCE
+
+  ACCESS VIA    ADECLE &
+         USING  ADECLE OF ARCOMMANDE
+
+
+;
+; Réquisition
+;
+FILE ARREQUISITION   REFERENCE
+
+  ACCESS VIA    CIECLE, &
+                CMDCLE  &
+         USING  CIECLE OF ARCOMMANDE, &
+                CMDCLE OF ARCOMMANDE
+
+;------------------------------------------------------------------------------
+;
+; Commande référée par l'ajustement.
+;
+FILE ARCOMMANDE  REFERENCE &
+                ALIAS A_CMD_REFERE
+
+  ACCESS VIA    CIECLE   , &
+                CMDCLE   , &
+                CMDAJT     &
+         USING  CIECLE    OF ARCOMMANDE , &
+                CMDCLE    OF ARCMD_HISTO, &
+                CMDAJT    OF ARCMD_HISTO
+
+;------------------------------------------------------------------------------
+;
+; Pour consulter les ajustements à la commande.
+;
+FILE VCMD_SLD    REFERENCE
+
+  ACCESS VIA    CIECLE, &
+                CMDCLE, &
+                CMDAJT  &
+         USING  CIECLE OF ARCOMMANDE, &
+                CMDCLE OF ARCOMMANDE, &
+                CMDAJT OF ARCOMMANDE
+
+;------------------------------------------------------------------------------
+;
+; Pour obtenir le plus grand numéro d'ajustement.
+;
+FILE ARCMD_HISTO  DESIGNER &
+                 ALIAS A_CMH_HISTO &
+                 OPEN READ
+
+;-------------------------------------------------------------------------------
+;
+; Numéros de séquence des adresses pour les clients divers.
+;
+FILE MCRAD_SEQ         DESIGNER TRANSACTION GEN_RAD_SEQ
+
+;-------------------------------------------------------------------------------
+;
+; Pour valider que l'entrepôt existe
+;
+FILE ARENTREPOT  REFERENCE
+  ACCESS VIA   CIECLE, &
+               ENTCLE  &
+         USING T_CIECLEMNU, &
+               ENTCLE OF ARCOMMANDE
+
+;------------------------------------------------------------------------------
+;
+; Fichiers permettant de mettre à jour les quantités, les montants engagés etc...
+;
+FILE ARCMD_DETAIL  DESIGNER
+  ACCESS VIA   CIECLE, &
+               CMDCLE, &
+               CMDAJT  &
+         USING CIECLE OF ARCOMMANDE, &
+               CMDCLE OF ARCOMMANDE, &
+               CMDAJT OF ARCOMMANDE
+
+;------------------------------------------------------------------------------
+;
+; Fichier pour les numéros séquentiels des commandes
+;
+FILE ARCMD_SEQ  DESIGNER TRANSACTION GEN_NUM_SEQ
+
+;------------------------------------------------------------------------------
+;
+; Fichier pour la notion d'engagement.
+;
+FILE MCHIS_ECR_ENG     DESIGNER
+FILE MCHIS_PROJET_ENG  DESIGNER
+FILE MCHIS_SEQ_ENG     DESIGNER TRANSACTION GEN_NUM_SEQ2
+FILE MCHISTO_ENG       DESIGNER
+
+;------------------------------------------------------------------------------
+;
+; Fichier d'historique des transactions
+;
+FILE ARPRD_HISTO  DESIGNER
+
+;------------------------------------------------------------------------------
+;
+; Permet d'obtenir le type de produit.
+;
+FILE VPRE_PRD  REFERENCE
+  ACCESS VIA   CIECLE, &
+               PRDCLE  &
+         USING CIECLE OF ARCMD_DETAIL, &
+               PRDCLE OF ARCMD_DETAIL
+
+;------------------------------------------------------------------------------
+;
+; Pour utiliser un numéro de commande réservé.
+;
+FILE ARRESERVATION  DESIGNER
+
+  SELECT IF RESDATUTI OF ARRESERVATION = 0
+
+;------------------------------------------------------------------------------
+;
+; Codes bilingues du mode de transport.
+;
+DEFINE    D_CDETRP CHARACTER SIZE 16 = "CMDTRP"
+TEMPORARY T_CDETRP CHARACTER SIZE 4
+
+FILE VCBI_DSC          REFERENCE ALIAS A_CBI_CDETRP
+  ACCESS  VIA XELNOM, &
+              CBICLE  &
+          USING D_CDETRP, &
+                CDETRP OF ARCOMMANDE
+
+;------------------------------------------------------------------------------
+;
+; Codes bilingues du code de terme de commerce
+;
+DEFINE    D_CDEFAB CHARACTER SIZE 16 = "CMDFAB"
+TEMPORARY T_CDEFAB CHARACTER SIZE 4
+
+FILE VCBI_DSC          REFERENCE ALIAS A_CBI_CDEFAB
+  ACCESS  VIA XELNOM, &
+              CBICLE  &
+          USING D_CDEFAB, &
+                CDEFAB OF ARCOMMANDE
+
+;------------------------------------------------------------------------------
+;
+; Codes bilingues du statut de la commande
+;
+DEFINE    D_CMDSTU CHARACTER SIZE 16 = "CMDSTU"
+TEMPORARY T_CMDSTU CHARACTER SIZE 4
+TEMPORARY T_CNSFLD CHARACTER SIZE 1 ; Conserver fieldtext du CMDSTU
+
+FILE VCBI_DSC  REFERENCE ALIAS A_CBI_CMDSTU
+  ACCESS  VIA XELNOM, &
+              CBICLE  &
+          USING D_CMDSTU, &
+                CMDSTU OF ARCOMMANDE
+
+;------------------------------------------------------------------------------
+;
+; Codes bilingues du type de commande
+;
+DEFINE    D_CMDTYP CHARACTER SIZE 16 = "CMDTYP"
+TEMPORARY T_CMDTYP CHARACTER SIZE 4
+
+FILE VCBI_DSC  REFERENCE ALIAS A_CBI_CMDTYP
+  ACCESS  VIA XELNOM, &
+              CBICLE  &
+          USING D_CMDTYP, &
+                CMDTYP OF ARCOMMANDE
+
+;------------------------------------------------------------------------------
+;
+; Fichier permettant de valider que le fournisseur existe.
+;
+FILE VFOC_FOU  REFERENCE
+  ACCESS VIA   FOUCIECLE, &
+               FOUCLE,    &
+               FOCCIECLE  &
+         USING T_FOUCIECLE,          &
+               FOUCLE OF ARCOMMANDE, &
+               CIECLE OF ARCOMMANDE
+
+;------------------------------------------------------------------------------
+;
+; Pour retrouver l'unité administrative d'inter du fournisseur interne.
+;
+FILE MCCOMPAGNIE  REFERENCE
+  ACCESS VIA   CIECLE &
+         USING FOUCIEINT OF VFOC_FOU
+
+;------------------------------------------------------------------------------
+;
+; Paramètres pour la compagnie consolidé(holding)
+;
+FILE MCHOLDING  REFERENCE
+  ACCESS VIA CIENMC USING "1"
+
+;------------------------------------------------------------------------------
+;
+; Validation de période d'engagement.
+;
+FILE MCPERIODE_CIE  DESIGNER &
+                   OPEN READ SHARE
+
+;-------------------------------------------------------------------------------
+;
+; Validation de période d'engagement.
+;
+FILE GSUSAGER DESIGNER &
+                   OPEN READ SHARE
+
+
+;------------------------------------------------------------------------------
+;
+; Fichiers permettant de mettre à jour les quantités, les montants engagés etc. 
+;
+FILE ARCMD_DETAIL DESIGNER &
+                  ALIAS ARCMD_DETAIL2 OPEN 2
+
+  ACCESS VIA   CIECLE, &
+               CMDCLE, &
+               CMDAJT  &
+         USING CIECLE OF ARCOMMANDE, &
+               CMDCLE OF ARCOMMANDE, &
+               CMDAJT OF ARCOMMANDE
+
+
+TEMPORARY T_ANNEE     CHARACTER SIZE 2
+TEMPORARY T_NUMSEQ    INTEGER UNSIGNED SIZE 4
+TEMPORARY T_HENCLE    INTEGER UNSIGNED SIZE 4
+TEMPORARY T_CPTLIG    INTEGER UNSIGNED SIZE 2
+
+TEMPORARY T_PECCLE    CHARACTER SIZE 4 ; Popup sur les périodes.
+TEMPORARY T_MOD       CHARACTER SIZE 2 ; Code de module.
+TEMPORARY T_FOUCLE    CHARACTER SIZE 6 ; Popup sur les fournisseurs.
+TEMPORARY T_FOCCIECLE CHARACTER SIZE 4 ; Popup sur les fournisseurs.
+TEMPORARY T_REFCLETYP CHARACTER SIZE 1 ; Popup sur adresses achat.
+TEMPORARY T_TYPADR    CHARACTER SIZE 3 ; Popup sur adresses achat.
+TEMPORARY T_RADCLE    INTEGER UNSIGNED SIZE  2 ; Popup sur adresses achat.
+TEMPORARY T_FLGDEL    CHARACTER SIZE 1
+TEMPORARY T_ENTCLE    CHARACTER SIZE 4 ; Popup sur entrepôts
+TEMPORARY T_CMDCLE    CHARACTER SIZE 9 ; Popup sur commande réservée
+TEMPORARY T_RESOK     CHARACTER SIZE 1 ; Indique si ont prend la réservation
+TEMPORARY T_FLGCMD    CHARACTER SIZE 1 INITIAL "1" ; Popup réservation
+TEMPORARY T_CMDSTUOLD CHARACTER SIZE 1 INITIAL "P"
+                                      ; Pour conserver ancienne valeur
+
+TEMPORARY T_CMDDATLIVPRE DATE         ; Permet la modification du champ
+                                      ; après modification.
+
+;-------------------------------------------------------------------------------
+; Temporaire associé à la numérotation des items
+
+TEMPORARY T_ITEM_COMPT          INTEGER   SIZE 4   RESET AT STARTUP
+
+;-------------------------------------------------------------------------------
+; Temporaire associée à la recherche du nom de l'employé (via le code d'usager)
+
+TEMPORARY T_USRCLE              CHARACTER SIZE 12   RESET AT STARTUP
+
+;-------------------------------------------------------------------------------
+;
+; Gestion des mémos.
+;
+TEMPORARY T_ARMTYPFND   CHARACTER SIZE 1  INITIAL "2"
+TEMPORARY T_NUMREFFND   CHARACTER SIZE 12
+
+
+DEFINE    D_DEVCLE    CHARACTER SIZE 04 = " " &
+          IF DEVCLE OF VFOC_FOU = DEVCLE OF MCHOLDING OR &
+             0 = SIZE(TRUNCATE(FOUCLE OF ARCOMMANDE)) &
+          ELSE "/" + DEVCLE OF VFOC_FOU
+
+USE usvarprd NOLIST
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST     ; Draw pour les écrans pleine page
+USE ustitstd NOLIST     ; En-tête pour les écrans pleine page
+USE ushilite NOLIST     ; Hilite pour tous les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Commande d'achat " &
+@ELSE
+      " %%%Commande d'achat " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+;-------------------------------------------------------------------------------
+
+SKIP
+ALIGN (3,3,19) (,,24)
+
+FIELD ENTCLE OF ARCOMMANDE &
+        HIDDEN ID 05            &
+        REQUIRED NOCHANGE       &
+        LOOKUP ON ARENTREPOT &
+          MESSAGE 1337        ; Ce code d'entrepôt n'existe pas.
+
+
+FIELD ENTNOM OF ARENTREPOT &
+        DISPLAY
+
+
+ALIGN (3,3,19) (,,21) (,40,56)
+
+FIELD CMDSTU OF ARCOMMANDE &
+        HIDDEN ID 10       &
+        NOENTRY            &
+        LOOKUP ON A_CBI_CMDSTU &
+          MESSAGE 1359 ; Ce statut de commande est invalide.
+
+FIELD CBIDSC OF A_CBI_CMDSTU &
+        DISPLAY  &
+        SIZE 15
+
+FIELD PECCLE OF ARCOMMANDE &
+        NOENTRY            &
+        LOOKUP ON MCPERIODE_CIE &
+          VIA   CIECLE, &
+                PECCLE &
+          USING CIECLE OF ARCOMMANDE, &
+                PECCLE OF ARCOMMANDE  &
+          MESSAGE 1307 ; Cette période n'existe pas
+
+SKIP
+ALIGN (,40,56) (,,59)
+
+FIELD CMDTYP    OF ARCOMMANDE &
+        NOCHANGE  &
+        NOCORRECT &
+        LOOKUP ON A_CBI_CMDTYP &
+          MESSAGE 1482 ; Ce type de commande n'existe pas.
+
+FIELD CBIDSC OF A_CBI_CMDTYP &
+        DISPLAY &
+        SIZE 20
+
+SKIP
+ALIGN (3,3,19) (,,26)
+
+FIELD ADECLE OF ARCOMMANDE &
+        HIDDEN ID 20  &
+        LOOKUP ON ARADRESSE_EXP &
+          VIA   ADECLE     &
+          USING ADECLE OF ARCOMMANDE &
+          MESSAGE 1488  & ; Cette adresse d'expédition n'existe pas.
+@IF FRANCAIS
+        LABEL "Adresse exp...:"
+@ELSE
+        LABEL "%%%Adresse exp...:"
+@ENDIF
+
+
+FIELD ADENOM  OF ARADRESSE_EXP DISPLAY
+FIELD FOUCLE OF ARCOMMANDE &
+        HIDDEN ID 25       &
+        REQUIRED           &
+        LOOKUP ON VFOC_FOU &
+          MESSAGE 1355 ; Ce fournisseur n'existe pas.
+
+FIELD RADNOM OF MCREF_ADRESSE &
+      FOR 2,30 &
+      DISPLAY
+
+FIELD RADCLE OF ARCOMMANDE &
+        HIDDEN ID 27  &
+        NOENTRY       &
+        REQUIRED      &
+        BWZ           &
+        LOOKUP ON MCREF_ADRESSE &
+          VIA   REFCIECLE, &
+                REFCLETYP, &
+                REFCLENUM, &
+                RADCLE     &
+          USING FOUCIECLE OF ARCOMMANDE, &
+                REFCLETYP OF ARCOMMANDE, &
+                FOUCLE    OF ARCOMMANDE, &
+                RADCLE    OF ARCOMMANDE  &
+          MESSAGE 1363  & ; Cette adresse n'existe pas pour ce fournisseur.
+@IF FRANCAIS
+        LABEL "Adresse achat.:"
+@ELSE
+        LABEL "%%%Adresse achat.:"
+@ENDIF
+
+
+FIELD RADADR1 OF MCREF_ADRESSE DISPLAY
+
+
+SKIP
+ALIGN (3,3,19)(,40,56)
+
+FIELD CMDREQCLETMP OF ARCOMMANDE &
+      HIDDEN ID 28
+
+FIELD CMDFLGIMP OF ARCOMMANDE DISPLAY &
+        SIZE 3
+
+SKIP
+ALIGN (3,3,19) (,,29) (,40,56) (,67,76)
+
+FIELD CMDCLE OF ARCOMMANDE &
+        HIDDEN ID 30       &
+        REQUIRED IF HLDCMDACH OF MCHOLDING <> "1" &
+        LOOKUP NOTON ARCOMMANDE      &
+           VIA CIECLE,               &
+               CMDCLE,               &
+               CMDAJT                &
+         USING T_CIECLEMNU,          &
+               CMDCLE OF ARCOMMANDE, &
+               CMDAJT OF ARCOMMANDE  &
+         MESSAGE 1357 , & ; Ce numéro de commande existe déjà.
+
+               NOTON ARREQUISITION   &
+          VIA  CIECLE, &
+               CMDCLE  &
+          USING T_CIECLEMNU, &
+                CMDCLE OF ARCOMMANDE &
+          MESSAGE 1357 & ; Ce numéro de commande existe déjà.
+        NOCHANGE 
+
+FIELD CMDAJT    OF ARCOMMANDE &
+        NOCHANGE  &
+        NUMERIC        &
+        SIGNIFICANCE 3 &
+        LOOKUP NOTON ARCOMMANDE &
+          VIA   CIECLE, &
+                CMDCLE, &
+                CMDAJT  &
+          USING T_CIECLEMNU, &
+                CMDCLE OF ARCOMMANDE, &
+                CMDAJT OF ARCOMMANDE  &
+          MESSAGE 1357
+
+
+FIELD CMDCLE    OF ARCMD_HISTO &
+      REQUIRED &
+      NOCHANGE &
+      NUMERIC &
+      SIGNIFICANCE 9 &
+@IF FRANCAIS
+      LABEL "Commande réf..:" &
+@ELSE
+      LABEL "Commande réf..:" &
+@ENDIF
+      LOOKUP ON A_CMD_REFERE &
+        MESSAGE 1399 ; Ce nuéro de commande n'existe pas.
+
+FIELD CMDNBRITE OF ARCOMMANDE &
+        LABEL "Nbr item:" &
+        DISPLAY PREDISPLAY &
+        REFRESH
+
+SKIP
+
+ALIGN (3,3,19) (,40,56)
+FIELD CMDDAT  OF ARCOMMANDE  FORMAT YYYYMMDD &
+        HIDDEN ID 40 &
+        DEFAULT SYSDATE
+
+FIELD CMDDATCRE OF ARCOMMANDE  FORMAT YYYYMMDD DISPLAY  &
+@IF FRANCAIS
+        LABEL "Date saisie...:"
+@ELSE
+        LABEL "%%%Date saisie...:"
+@ENDIF
+
+ALIGN (,3,19)
+FIELD CMDDATAPP OF ARCOMMANDE  FORMAT YYYYMMDD DISPLAY
+
+FIELD CMDACH OF ARCOMMANDE &
+        HIDDEN ID 55
+
+SKIP
+
+ALIGN (2,3,19)(,43,59)(,,64)
+
+FIELD CDEDATLIVPRE OF ARCOMMANDE &
+      FORMAT YYYYMMDD            &
+      DEFAULT SYSDATE            &
+      HIDDEN
+
+FIELD CDEFAB OF ARCOMMANDE &
+      LOOKUP ON A_CBI_CDEFAB &
+          MESSAGE 1365 ; Ce code de terme de commerce n'existe pas.
+
+FIELD CBIDSC OF A_CBI_CDEFAB   &
+        DISPLAY                &
+        SIZE 15
+
+ALIGN (2,3,19)(,,24)
+
+FIELD CDETRP OF ARCOMMANDE &
+      HIDDEN               &
+      LABEL "Via...........:" &
+      LOOKUP ON A_CBI_CDETRP &
+      MESSAGE 1364 ; Ce mode de transport n'existe pas.
+
+FIELD CBIDSC OF A_CBI_CDETRP &
+      DISPLAY                &
+      SIZE 17
+
+ALIGN (3,3,19) (,43,59)
+
+FIELD CMDINDDNE OF ARCOMMANDE &
+      HIDDEN &
+      SIZE 3
+
+FIELD CMDCOM OF ARCOMMANDE &
+        FOR 1,20 POPUP FROM 15,38 TO 17,79
+
+ALIGN (3,3,19) (,43,59) (,,74)
+
+FIELD V_CMDMNTAJT OF VCMD_SLD &
+        HIDDEN ID 70 &
+        DISPLAY &
+        PICTURE "^^^,^^^,^^^.^^ " &
+        TRAILING "-" &
+        SIGNIFICANCE 5 &
+@IF FRANCAIS
+        LABEL "Ajustement....:"
+@ELSE
+        LABEL "%%%stement....:"
+@ENDIF
+
+FIELD CMDMNTTOT OF ARCOMMANDE &
+         DISPLAY PREDISPLAY &
+         REFRESH
+
+FIELD D_DEVCLE   DISPLAY PREDISPLAY
+
+ALIGN (3,3,19) (,43,59)
+
+FIELD CMDMNTNET OF ARCOMMANDE &
+        DISPLAY PREDISPLAY &
+        HIDDEN ID 75 &
+        REFRESH
+
+FIELD CMDMNTTPS OF ARCOMMANDE &
+        DISPLAY PREDISPLAY &
+        REFRESH
+
+FIELD CMDMNTCTI OF ARCOMMANDE &
+        HIDDEN ID 80  &
+        DISPLAY PREDISPLAY &
+        REFRESH
+
+FIELD CMDMNTTVQ OF ARCOMMANDE &
+        DISPLAY PREDISPLAY &
+        REFRESH
+
+FIELD CMDMNTRTI OF ARCOMMANDE &
+        HIDDEN ID 85 &
+        DISPLAY PREDISPLAY &
+        REFRESH
+
+FIELD CMDMNTESC OF ARCOMMANDE &
+        DISPLAY PREDISPLAY &
+        REFRESH
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+  ;
+  ; Si l'écran n'est pas appelé par le menu, alors on interdit la saisie,
+  ; la destruction et la modification des données.
+  ;
+  IF T_CMDCLEFND <> ""
+  THEN BEGIN
+    LET TZ_SECENT = "0"
+    LET TZ_SECMOD = "0"
+    LET TZ_SECDEL = "0"
+  END
+
+END
+
+PROCEDURE INTERNAL ANNULE_CMD
+BEGIN
+  WHILE RETRIEVING MCHIS_ECR_ENG &
+      VIA   HENCLE     &
+      USING HENCLE OF ARCOMMANDE 
+  BEGIN
+    DELETE MCHIS_ECR_ENG 
+    PUT MCHIS_ECR_ENG
+  END
+
+  WHILE RETRIEVING MCHIS_PROJET_ENG &
+        VIA   HENCLE   &
+        USING HENCLE OF ARCOMMANDE 
+  BEGIN
+    DELETE MCHIS_PROJET_ENG
+    PUT MCHIS_PROJET_ENG
+  END
+
+  WHILE RETRIEVING ARPRD_HISTO &
+        VIA   CIECLE , &
+              PRHTYP , &
+              PRHNUMREF &
+        USING CIECLE OF ARCOMMANDE , &
+              "01" , &
+              (CMDCLE OF ARCOMMANDE + CMDAJT OF ARCOMMANDE)
+  BEGIN
+    DELETE ARPRD_HISTO
+    PUT ARPRD_HISTO 
+  END
+
+  WHILE RETRIEVING ARCMD_DETAIL &
+         VIA   CIECLE, &
+               CMDCLE, &
+               CMDAJT  &
+         USING CIECLE OF ARCOMMANDE, &
+               CMDCLE OF ARCOMMANDE, &
+               CMDAJT OF ARCOMMANDE
+  BEGIN
+    IF CDESTU OF ARCMD_DETAIL = ""
+    THEN LET CDESTU OF ARCMD_DETAIL = "X"
+    PUT ARCMD_DETAIL
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour l'adresse d'expédition.
+;
+PROCEDURE INPUT ADECLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_ADECLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN ar119 MODE F PASSING T_ADECLE &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_ADECLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de faire un écran dépisteur pour l'entrepôt
+;
+PROCEDURE INPUT ENTCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_ENTCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN ar100 MODE F PASSING T_CIECLEMNU, T_ENTCLE
+    LET FIELDTEXT = TRUNCATE(T_ENTCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de faire l'affichage des champs initialisés
+; au départ.
+;
+PROCEDURE PROCESS ENTCLE
+BEGIN
+  DISPLAY CMDSTU    OF ARCOMMANDE
+  DISPLAY CBIDSC    OF A_CBI_CMDSTU
+  DISPLAY CMDFLGIMP OF ARCOMMANDE
+END
+
+
+;-------------------------------------------------------------------------------
+; Ecran dépisteur pour la période comptable.
+;
+PROCEDURE INPUT PECCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_MOD = "AR"
+    LET T_PECCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN  mc109 PASSING T_CIECLEMNU, T_PECCLE, T_MOD  MODE F
+    LET FIELDTEXT = TRUNCATE(T_PECCLE)
+  END
+
+  ;
+  ; Valeur de défault
+  ;
+  IF NOT FINDMODE &
+     AND 0 = SIZE(FIELDTEXT) &
+     AND 0 = SIZE(TRUNCATE(PECCLE OF ARCOMMANDE))
+  THEN LET FIELDTEXT = T_PECCLEMNU
+  ;
+  ; On force la validation de la période.
+  ;
+  IF NOT FINDMODE &
+     AND 0 = SIZE(FIELDTEXT) &
+     AND 0 <> SIZE(TRUNCATE(PECCLE OF ARCOMMANDE))
+  THEN LET FIELDTEXT = PECCLE OF ARCOMMANDE
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du statut de la période.
+;
+;
+PROCEDURE EDIT PECCLE
+BEGIN
+  ;
+  IF PCCSTUAR OF MCPERIODE_CIE = "F"
+  THEN ERROR 1309 ; Cette période est fermée.
+  ;
+  IF PCCSTUAR OF MCPERIODE_CIE <> "C"
+  THEN WARNING 1310 ; La période saisie n'est pas la courante.
+END
+
+
+;-------------------------------------------------------------------------------
+; Pour saisir et afficher les valeurs Oui/Non
+;
+PROCEDURE INPUT CMDFLGIMP
+BEGIN
+  USE usflginp NOLIST  ; Pour l'entrée d'un flag oui/non
+END
+
+
+PROCEDURE OUTPUT CMDFLGIMP
+BEGIN
+  USE usflgout3 NOLIST ; Pour afficher la valeur Oui/Non avec 3 caractères.
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour le code bilingue statut de la commande.
+;
+;
+PROCEDURE INPUT CMDSTU
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CMDSTU = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_CMDSTU, T_CMDSTU
+    LET FIELDTEXT = TRUNCATE(T_CMDSTU)
+  END
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de valider que le seul statut modifiable est "P" et
+; que la seul valeur permise en saisie est "A"
+;
+PROCEDURE EDIT CMDSTU
+BEGIN
+  IF    OLDVALUE (CMDSTU OF ARCOMMANDE) <> "P" &
+    AND OLDVALUE (CMDSTU OF ARCOMMANDE) <> "A"
+  THEN ERROR 1360 ; On ne peut pas changer le statut de la commande.
+
+  IF FIELDTEXT <> "A" AND FIELDTEXT <> "P" AND FIELDTEXT <> "X"
+  THEN ERROR 1370 ; Cette valeur n'est pas permise.
+END
+
+
+;------------------------------------------------------------------------------
+; Cette procédure permet de mettre à jour la date d'approbation de la commande .
+;
+PROCEDURE PROCESS CMDSTU
+BEGIN
+  DISPLAY CMDSTU OF ARCOMMANDE
+  DISPLAY CBIDSC OF A_CBI_CMDSTU
+  IF CMDSTU OF ARCOMMANDE = "A"
+  THEN BEGIN
+    LET CMDDATAPP OF ARCOMMANDE = SYSDATE
+    DISPLAY CMDDATAPP OF ARCOMMANDE
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour le code bilingue type de commande.
+;
+PROCEDURE INPUT CMDTYP
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CMDTYP = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_CMDTYP, T_CMDTYP
+    LET FIELDTEXT = TRUNCATE(T_CMDTYP)
+  END
+END
+
+;-------------------------------------------------------------------------------
+; Ecran de consultation (dépisteur) des fournisseurs
+;
+;
+PROCEDURE INPUT FOUCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_FOUCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_FOCCIECLE = T_CIECLEMNU
+    RUN SCREEN cp104 MODE F PASSING T_FOUCIECLE, T_FOUCLE, T_FOCCIECLE
+    LET FIELDTEXT = TRUNCATE(T_FOUCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Le fournisseur doit être Actif.
+;
+PROCEDURE EDIT FOUCLE
+BEGIN
+  IF FOUSTU OF VFOC_FOU = "I"
+  THEN ERROR 1391 ; Le fournisseur est inactif.
+
+  IF FOURTU OF VFOC_FOU = "1"
+  THEN WARNING 1392 ; Le fournisseur est présentement retenu.
+END
+
+
+;-------------------------------------------------------------------------------
+; Procédure permettant d'initialiser les informations du fournisseur sur la
+; commande.  Permet aussi de vérifier si un numéro de commande est réservé.
+;
+PROCEDURE PROCESS FOUCLE
+BEGIN
+  IF FOUTYP OF VFOC_FOU <> "D"
+  THEN BEGIN
+    LET     RADCLE     OF ARCOMMANDE = FOCADRACH OF VFOC_FOU
+    EDIT    RADCLE     OF ARCOMMANDE
+    DISPLAY RADCLE     OF ARCOMMANDE
+  END
+  ELSE LET RADCLE OF ARCOMMANDE = 0
+END
+
+;-------------------------------------------------------------------------------
+;
+PROCEDURE INPUT CMDACH
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_USRCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gs104 MODE F PASSING T_USRCLE
+    LET FIELDTEXT = T_USRCLE
+  END
+
+  IF 0<>SIZE(TRUNC(FIELDTEXT)) OR (0=SIZE(TRUNC(FIELDTEXT)) AND CMDACH = ' ')
+  THEN BEGIN
+    GET GSUSAGER VIA USRCLE USING FIELDTEXT OPTIONAL
+    IF ACCESSOK
+    THEN LET FIELDTEXT = TRUNCATE(USREMPNOM OF GSUSAGER)
+    ELSE ERROR 193 ; MC093 Cet usage n'existe pas.
+  END
+  ELSE LET FIELDTEXT = ''
+END
+
+;-------------------------------------------------------------------------------
+;
+; Si l'usager modifie le nom du fournisseur divers, il faut mettre à jour
+; le nom abrégé si celui-ci correspond à l'ancienne valeur.
+;
+PROCEDURE EDIT RADNOM
+BEGIN
+  IF RADNOMABR OF MCREF_ADRESSE = OLDVALUE( RADNOM OF MCREF_ADRESSE )[1:20]
+  THEN LET RADNOMABR OF MCREF_ADRESSE = RADNOM OF MCREF_ADRESSE
+END
+
+
+;-------------------------------------------------------------------------------
+; Ecran dépisteur dur l'adresse d'achat du fournisseur
+;
+PROCEDURE INPUT RADCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_REFCLETYP = REFCLETYP OF ARCOMMANDE
+    LET T_FOUCLE    = FOUCLE    OF ARCOMMANDE
+    LET T_TYPADR    = "ACH"
+    LET T_RADCLE = 0
+    RUN SCREEN mc108 MODE F PASSING   T_FOUCIECLE, &
+                                      T_REFCLETYP, &
+                                      T_FOUCLE, &
+                                      T_TYPADR, &
+                                      T_RADCLE
+    IF T_RADCLE <> 0
+    THEN LET FIELDTEXT = ASCII(T_RADCLE)
+    ELSE LET FIELDTEXT = ""
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Validation que l'adresse est une adresse d'achat.
+;
+PROCEDURE EDIT RADCLE
+BEGIN
+  IF RADACHCP OF MCREF_ADRESSE <> "1"
+  THEN ERROR 1366 ; Ce n'est pas une adresse d'achat.
+END
+
+;-------------------------------------------------------------------------------
+;
+; Affiche le nom du fournisseur provenant de l'adresse (permet d'avoir le
+; nom du fournisseur divers)
+;
+PROCEDURE PROCESS RADCLE
+BEGIN
+  DISPLAY RADNOM  OF MCREF_ADRESSE
+  DISPLAY RADADR1 OF MCREF_ADRESSE
+END
+
+;------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT CMDCLE OF ARCOMMANDE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_FOUCLE = FOUCLE OF ARCOMMANDE
+    LET T_ENTCLE = ENTCLE OF ARCOMMANDE
+    LET T_CMDCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN ar108 MODE F PASSING T_CIECLEMNU, T_ENTCLE, T_CMDCLE, T_FOUCLE
+    LET FIELDTEXT = TRUNCATE(T_CMDCLE)
+  END
+  ELSE BEGIN
+    USE usinpcmd NOLIST
+  END
+END  
+;-------------------------------------------------------------------------------
+;
+; Cette procédure permet de choisir le numéro de commande.
+;
+PROCEDURE INPUT CMDCLE OF ARCMD_HISTO
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_FOUCLE = FOUCLE OF ARCOMMANDE
+    LET T_ENTCLE = ENTCLE OF ARCOMMANDE
+    LET T_CMDCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN ar108 MODE F PASSING T_CIECLEMNU, T_ENTCLE, T_CMDCLE, T_FOUCLE
+    LET FIELDTEXT = TRUNCATE(T_CMDCLE)
+  END
+  ELSE BEGIN
+    USE usinpcmd NOLIST
+  END
+END
+
+;------------------------------------------------------------------------------
+;
+; Procédure qui valide la pièce référée.
+;
+PROCEDURE EDIT CMDCLE OF ARCMD_HISTO
+BEGIN
+  IF CMDDATAPP OF A_CMD_REFERE = 0
+  THEN ERROR 1501 ; Vous devez référer une commande approuvée.
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour le code bilingue code de terme de commerce
+;
+;
+PROCEDURE INPUT CDEFAB
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CDEFAB = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_CDEFAB, T_CDEFAB &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_CDEFAB)
+  END
+
+
+  ;
+  ; Par d\351faut on utilise le code de transport du fournisseur.
+  ;
+  IF     0 = SIZE( FIELDTEXT ) &
+     AND NEWRECORD OF ARCMD_DETAIL &
+     AND CDEFAB    OF ARCMD_DETAIL = ""
+  THEN BEGIN
+    IF CMDFAB    OF VFOC_FOU <> ""
+    THEN LET FIELDTEXT = CMDFAB OF VFOC_FOU
+    ELSE LET FIELDTEXT = CDEFAB OF ARCMD_DETAIL
+  END
+END
+
+;------------------------------------------------------------------------------
+;
+; Indicateur de douane
+;
+PROCEDURE INPUT CMDINDDNE
+BEGIN
+   USE usflginp NOLIST
+END
+
+;------------------------------------------------------------------------------
+;
+;
+PROCEDURE OUTPUT CMDINDDNE
+BEGIN
+  USE usflgout3 NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du popup pour le code bilingue mode de transport.
+;
+;
+PROCEDURE INPUT CDETRP
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CDETRP = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_CDETRP, T_CDETRP &
+                            WINDOW WIDTH CONSTANT WHEN CALLING
+    LET FIELDTEXT = TRUNCATE(T_CDETRP)
+  END
+
+  ;
+  ; Par d\351faut on utilise le code de transport du fournisseur.
+  ;
+  IF     0 = SIZE( FIELDTEXT ) &
+     AND NEWRECORD OF ARCMD_DETAIL &
+     AND CDETRP    OF ARCMD_DETAIL = ""
+  THEN BEGIN
+     IF CMDTRP    OF VFOC_FOU <> ""
+     THEN LET FIELDTEXT = CMDTRP OF VFOC_FOU
+     ELSE LET FIELDTEXT = CDETRP OF ARCMD_DETAIL
+  END
+END
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+;------------------------------------------------------------------------------
+;
+; Uniquement si le statut est à "P" ont peux approuver.
+;
+PROCEDURE DESIGNER 10
+BEGIN
+  IF CMDSTU OF ARCOMMANDE = "P" OR &
+     CMDSTU OF ARCOMMANDE = "A"
+  THEN BEGIN
+    ACCEPT CMDSTU OF ARCOMMANDE
+    DISPLAY CBIDSC OF A_CBI_CMDSTU
+    IF "A" = CMDSTU OF ARCOMMANDE
+    THEN ACCEPT PECCLE OF ARCOMMANDE
+  END
+END
+
+;-------------------------------------------------------------------------------
+; Procédure d'appel du sous-écran du détail de la commande.
+;
+PROCEDURE DESIGNER D001
+BEGIN
+  IF     ALTEREDRECORD OF ARCOMMANDE &
+     AND CMDSTU OF ARCOMMANDE <> "P"
+  THEN ERROR 1390 ; Vous devez faire une mise à jour avant d'accéder le sous-écran.
+  ELSE BEGIN
+    GET ARCMD_DETAIL VIA CIECLE               , &
+                         CMDCLE               , &
+                         CMDAJT                 &
+                   USING CIECLE OF ARCOMMANDE , &
+                         CMDCLE OF ARCOMMANDE , &
+                         CMDAJT OF ARCOMMANDE   &
+                 ORDERBY CDECLE DESCENDING      &
+                 OPTIONAL
+
+    LET T_ITEM_COMPT = CDECLE OF ARCMD_DETAIL / 1000
+
+    RUN SCREEN ar007a PASSING T_CIECLEMNU     , &
+                              T_CIENOM        , &
+                              T_CMDSTUOLD     , &
+                              T_PECCLEMNU     , &
+                              ARCOMMANDE      , &
+                              ARCMD_HISTO     , &
+                              T_CDECLEFND     , &
+                              T_CDECLE        , &
+                              T_ITEM_COMPT      &
+                         MODE SAME
+  END
+END
+
+
+
+;-------------------------------------------------------------------------------
+; Procédure d'appel  du sous-écran de la consultation des engagements.
+;
+PROCEDURE DESIGNER D002
+BEGIN
+  RUN SCREEN ar007c &
+             PASSING ARCOMMANDE  &
+             MODE F
+END
+
+;-------------------------------------------------------------------------------
+;
+; Procédure d'appel  du sous-écran de la consultation des historiques.
+;
+PROCEDURE DESIGNER D003
+BEGIN
+  RUN SCREEN ar007f &
+             PASSING ARCOMMANDE  &
+             MODE F
+END
+
+
+
+;-------------------------------------------------------------------------------
+; Procédure d'appel du sous-écran de l'adresse du fournisseur divers.
+;
+PROCEDURE DESIGNER D004
+BEGIN
+  IF FOUTYP OF VFOC_FOU = "D"
+  THEN RUN SCREEN ar007e &
+             PASSING MCREF_ADRESSE  &
+             MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+; Procédure d'appel du sous-écran de la piste de vérification.
+;
+PROCEDURE DESIGNER D005
+BEGIN
+  RUN SCREEN ar007d &
+             PASSING ARCOMMANDE  &
+             MODE F
+END
+
+;-------------------------------------------------------------------------------
+;
+; Procédure d'appel du sous-écran des mémos.
+;
+PROCEDURE DESIGNER D006
+BEGIN
+  LET T_NUMREFFND = CMDCLE OF ARCOMMANDE
+  LET T_FOUCLE    = FOUCLE OF ARCOMMANDE
+  RUN SCREEN ar012 MODE F &
+                PASSING T_CIECLEMNU, &
+                        T_CIENOM   , &
+                        T_ARMTYPFND, &
+                        T_NUMREFFND, &
+                        T_FOUCIECLE, &
+                        T_FOUCLE
+END
+
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de mettre à jour les engagements losrque la commande
+; est approuvée.  A noter qu'un trigger met à jour les soldes annuels du grand
+; livre.
+;
+PROCEDURE INTERNAL MAJ_ENGAGEMENTS
+BEGIN
+
+  GET MCHIS_ECR_ENG &
+      VIA   CPTCLE, &
+            CIECLE, &
+            UNACLE, &
+            PECCLE, &
+            HEECIEINT, &
+            HEEUNAINT, &
+            HENCLE     &
+      USING CPTCLE OF ARCMD_DETAIL, &
+            CIECLE OF ARCMD_DETAIL, &
+            UNACLE OF ARCMD_DETAIL, &
+            PECCLE OF ARCOMMANDE,   &
+            CIECLE OF ARCMD_DETAIL, &
+            UNACLE OF ARCMD_DETAIL, &
+            T_HENCLE OPTIONAL
+  IF NOT ACCESSOK
+  THEN BEGIN
+    LET HENCLE       OF MCHIS_ECR_ENG = T_HENCLE
+    LET CPTCLE       OF MCHIS_ECR_ENG = CPTCLE      OF ARCMD_DETAIL
+    LET UNACLE       OF MCHIS_ECR_ENG = UNACLE      OF ARCMD_DETAIL
+    LET CIECLE       OF MCHIS_ECR_ENG = CIECLE      OF ARCMD_DETAIL
+    LET PECCLE       OF MCHIS_ECR_ENG = PECCLE      OF ARCOMMANDE
+    LET HEENUMDOC2   OF MCHIS_ECR_ENG = " "
+    IF FOUTYP OF VFOC_FOU <> "I"
+    THEN LET HEECIEINT OF MCHIS_ECR_ENG = CIECLE      OF ARCMD_DETAIL
+    ELSE LET HEECIEINT OF MCHIS_ECR_ENG = FOUCIEINT   OF VFOC_FOU
+    LET HEEUNAINT    OF MCHIS_ECR_ENG = CIEUNABIL   OF MCCOMPAGNIE
+    LET HEEFLGINT    OF MCHIS_ECR_ENG = "0"
+    LET HEEMNTCRT    OF MCHIS_ECR_ENG = 0
+    LET HEEMNTCRTORI OF MCHIS_ECR_ENG = 0
+    LET HEEMNTCRT    OF MCHIS_ECR_ENG = 0
+    LET HEEMNTCRTORI OF MCHIS_ECR_ENG = 0
+  END
+
+  IF CDEMNTENG OF ARCMD_DETAIL >= 0
+  THEN BEGIN
+    LET HEEMNTDBT    OF MCHIS_ECR_ENG = HEEMNTDBT    OF MCHIS_ECR_ENG + &
+                                        CDEMNTENG    OF ARCMD_DETAIL
+
+    LET HEEMNTDBTORI OF MCHIS_ECR_ENG = HEEMNTDBTORI OF MCHIS_ECR_ENG + &
+                                        CDEMNTENG    OF ARCMD_DETAIL
+  END
+  ELSE BEGIN
+    LET HEEMNTCRT    OF MCHIS_ECR_ENG = HEEMNTCRT     OF MCHIS_ECR_ENG + &
+                                        ABSOLUTE(CDEMNTENG OF ARCMD_DETAIL)
+
+    LET HEEMNTCRTORI OF MCHIS_ECR_ENG = HEEMNTCRTORI  OF MCHIS_ECR_ENG + &
+                                        ABSOLUTE(CDEMNTENG OF ARCMD_DETAIL)
+  END
+
+  PUT MCHIS_ECR_ENG RESET
+
+  GET MCHIS_PROJET_ENG &
+        VIA   CPTCLE , &
+              CIECLE , &
+              UNACLE , &
+              PRJCLE , &
+              PRACLE , &
+              IMMCLE , &
+              PECCLE , &
+              HENCLE   &
+        USING CPTCLE OF ARCMD_DETAIL , &
+              CIECLE OF ARCMD_DETAIL , &
+              UNACLE OF ARCMD_DETAIL , &
+              PRJCLE OF ARCMD_DETAIL , &
+              PRACLE OF ARCMD_DETAIL , &
+              IMMCLE OF ARCMD_DETAIL , &
+              PECCLE OF ARCOMMANDE   , &
+              T_HENCLE OPTIONAL
+  IF NOT ACCESSOK
+  THEN BEGIN
+    LET HENCLE       OF MCHIS_PROJET_ENG = T_HENCLE
+    LET HPENUMLIG    OF MCHIS_PROJET_ENG = T_CPTLIG
+    LET PRJCLE       OF MCHIS_PROJET_ENG = PRJCLE      OF ARCMD_DETAIL
+    LET PRACLE       OF MCHIS_PROJET_ENG = PRACLE      OF ARCMD_DETAIL
+    LET CPTCLE       OF MCHIS_PROJET_ENG = CPTCLE      OF ARCMD_DETAIL
+    LET UNACLE       OF MCHIS_PROJET_ENG = UNACLE      OF ARCMD_DETAIL
+    LET CIECLE       OF MCHIS_PROJET_ENG = CIECLE      OF ARCMD_DETAIL
+    LET PECCLE       OF MCHIS_PROJET_ENG = PECCLE      OF ARCOMMANDE
+    LET IMMCLE       OF MCHIS_PROJET_ENG = IMMCLE      OF ARCMD_DETAIL
+    LET T_CPTLIG = T_CPTLIG + 1
+  END
+
+  IF CDEMNTENG OF ARCMD_DETAIL >= 0
+  THEN BEGIN
+    LET HPEMNTDBT    OF MCHIS_PROJET_ENG = HPEMNTDBT    OF MCHIS_PROJET_ENG + &
+                                           CDEMNTENG    OF ARCMD_DETAIL
+
+    LET HPEMNTDBTORI OF MCHIS_PROJET_ENG = HPEMNTDBTORI OF MCHIS_PROJET_ENG + &
+                                           CDEMNTENG    OF ARCMD_DETAIL
+  END
+  ELSE BEGIN
+    LET HPEMNTCRT    OF MCHIS_PROJET_ENG = HPEMNTCRT    OF MCHIS_PROJET_ENG + &
+                                           ABSOLUTE(CDEMNTENG OF ARCMD_DETAIL)
+
+    LET HPEMNTCRTORI OF MCHIS_PROJET_ENG = HPEMNTCRTORI OF MCHIS_PROJET_ENG + &
+                                           ABSOLUTE(CDEMNTENG OF ARCMD_DETAIL)
+  END
+
+  PUT MCHIS_PROJET_ENG RESET
+
+END
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de mettre à jour l'historique losrque la commande
+; est approuvée.  A noter, qu'un trigger met à jour l'information des quantités
+; dans le catalogue fournisseur ainsi que dans le produit entrepôt.
+;
+PROCEDURE INTERNAL MAJ_HISTORIQUE
+BEGIN
+  LET CIECLE    OF ARPRD_HISTO = CIECLE OF ARCMD_DETAIL
+  LET PRDCLE    OF ARPRD_HISTO = PRDCLE OF ARCMD_DETAIL
+  LET PRDTYP    OF ARPRD_HISTO = PRDTYP OF VPRE_PRD
+  LET PRHTIMSTP OF ARPRD_HISTO = SYSDATE * 1000000 + ROUND(SYSTIME / 100)
+  LET ENTCLE    OF ARPRD_HISTO = ENTCLE OF ARCOMMANDE
+  LET PECCLE    OF ARPRD_HISTO = PECCLE OF ARCOMMANDE
+  LET PRHNUMREF OF ARPRD_HISTO = CMDCLE OF ARCMD_DETAIL + CMDAJT OF ARCMD_DETAIL
+  LET PRHDATREF OF ARPRD_HISTO = CMDDAT OF ARCOMMANDE
+  LET PRHTYP    OF ARPRD_HISTO = "01"   ; Commande.
+
+  LET PRHQTETRS OF ARPRD_HISTO = CDEQTECOM OF ARCMD_DETAIL
+  LET PRHUSRCRE OF ARPRD_HISTO = TZ_LOGONID
+  LET PRHDATCRE OF ARPRD_HISTO = SYSDATE
+  LET PRHHRECRE OF ARPRD_HISTO = SYSTIME / 10000
+
+  LET PRHITM    OF ARPRD_HISTO = CDECLE    OF ARCMD_DETAIL
+  LET PRHDERCOU OF ARPRD_HISTO = CDEPRIUNI OF ARCMD_DETAIL
+  LET FOUCIECLE OF ARPRD_HISTO = FOUCIECLE OF ARCOMMANDE
+  LET FOUCLE    OF ARPRD_HISTO = FOUCLE    OF ARCOMMANDE
+  LET PRHDSC    OF ARPRD_HISTO = RADNOM    OF MCREF_ADRESSE
+  LET PRHREFFOU OF ARPRD_HISTO = CDEREFFOU OF ARCMD_DETAIL
+  PUT ARPRD_HISTO RESET
+
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de mettre à jour les informations du produit, des
+; engagements, de l'historique etc... suite à l'approbation de la commande.
+;
+PROCEDURE INTERNAL MAJ_INFORMATIONS_COMMANDE
+BEGIN
+
+  LET T_ANNEE = ASCII(MOD(FLOOR(SYSDATE / 10000) ,100) ,2)
+
+  START TRANSACTION GEN_NUM_SEQ2
+
+  GET MCHIS_SEQ_ENG &
+      VIA   CIENMC, &
+          HSECLEANN &
+      USING "1", &
+            T_ANNEE OPTIONAL
+
+  LET CIENMC     OF MCHIS_SEQ_ENG = "1"
+  LET HSENUMSEQ  OF MCHIS_SEQ_ENG = HSENUMSEQ  OF MCHIS_SEQ_ENG + 1
+  LET HSECLEANN  OF MCHIS_SEQ_ENG = T_ANNEE
+  LET T_HENCLE = NCONVERT(T_ANNEE + ASCII(HSENUMSEQ  OF MCHIS_SEQ_ENG,7))
+  PUT MCHIS_SEQ_ENG
+  COMMIT TRANSACTION GEN_NUM_SEQ2
+
+
+  GET MCHISTO_ENG &
+      VIA   HENCLE &
+      USING T_HENCLE OPTIONAL
+  IF NOT ACCESSOK
+  THEN BEGIN
+    LET T_CPTLIG = 0
+    LET HENCLE       OF MCHISTO_ENG = T_HENCLE
+    LET HENCIECLE    OF MCHISTO_ENG = CIECLE        OF ARCOMMANDE
+    LET REFCIECLE    OF MCHISTO_ENG = FOUCIECLE     OF ARCOMMANDE
+    LET REFCLETYP    OF MCHISTO_ENG = REFCLETYP     OF ARCOMMANDE
+    LET REFCLENUM    OF MCHISTO_ENG = FOUCLE        OF ARCOMMANDE
+    LET HENNUMDOC    OF MCHISTO_ENG = CMDCLE        OF ARCOMMANDE + &
+                                      CMDAJT        OF ARCOMMANDE
+    LET SANANN       OF MCHISTO_ENG = PECCLE        OF ARCOMMANDE[1:2]
+    LET PECCLE       OF MCHISTO_ENG = PECCLE        OF ARCOMMANDE
+    LET HENDAT       OF MCHISTO_ENG = CMDDAT        OF ARCOMMANDE
+    LET HENDATJOU    OF MCHISTO_ENG = SYSDATE
+    LET HENCODMOD    OF MCHISTO_ENG = "AR"
+    LET HENTYPECR    OF MCHISTO_ENG = CMDTYP        OF ARCOMMANDE
+
+    IF FOUTYP OF VFOC_FOU <> "D"
+    THEN LET HENDSCGEN    OF MCHISTO_ENG = " "
+    ELSE LET HENDSCGEN    OF MCHISTO_ENG = RADNOM   OF MCREF_ADRESSE
+
+    LET HENDSCSAI    OF MCHISTO_ENG = CMDCOM        OF ARCOMMANDE
+    LET HENDSCSAI2   OF MCHISTO_ENG = " "
+    LET DEVCLE       OF MCHISTO_ENG = DEVCLE        OF VFOC_FOU
+    LET HENCLE1      OF MCHISTO_ENG = CIECLE        OF ARCOMMANDE
+    LET HENCLE2      OF MCHISTO_ENG = CMDCLE        OF ARCOMMANDE
+    LET HENCLE3      OF MCHISTO_ENG = CMDAJT        OF ARCOMMANDE
+    PUT MCHISTO_ENG RESET
+  END
+
+  LET HENCLE OF ARCOMMANDE = T_HENCLE
+
+  WHILE RETRIEVING ARCMD_DETAIL
+  BEGIN
+     ; On n'écrit pas l'historique pour un produit divers ou un produit de
+     ; frais.
+     ;
+     IF    PRDTYP OF VPRE_PRD <> "D" &
+       AND PRDTYP OF VPRE_PRD <> "F"
+     THEN DO INTERNAL MAJ_HISTORIQUE
+
+     DO INTERNAL MAJ_ENGAGEMENTS
+  END
+END
+
+;-------------------------------------------------------------------------------
+; La procédure PATH est codée afin de permettre l'appel de cet écran à partir
+; de l'historique des produits.
+;
+PROCEDURE PATH
+BEGIN
+  IF T_CMDAJTFND <> ""
+  THEN LET PATH = 99
+  ELSE BEGIN
+    IF T_CMDCLEFND <> "" ; L'appel provient de l'historique des produits
+    THEN LET PATH = 98
+  END
+  IF PATH = 0
+  THEN BEGIN
+    REQUEST CMDCLE OF ARCOMMANDE
+    IF PROMPTOK
+    THEN BEGIN
+      REQUEST CMDAJT OF ARCOMMANDE
+      IF PROMPTOK
+      THEN LET PATH = 1
+      ELSE LET PATH = 2
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST FOUCLE OF ARCOMMANDE
+      IF PROMPTOK
+      THEN LET PATH = 3
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST ENTCLE OF ARCOMMANDE
+      IF PROMPTOK
+      THEN LET PATH = 4
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      REQUEST PECCLE OF ARCOMMANDE
+      IF PROMPTOK
+      THEN LET PATH = 5
+    END
+
+    IF PATH = 0
+    THEN BEGIN
+      LET PATH = 6
+    END
+  END
+END
+
+;-------------------------------------------------------------------------------
+; La procédure FIND est codée pour les mêmes raisons que la procédure PATH
+;
+PROCEDURE FIND
+BEGIN
+  IF PATH = 1
+  THEN GET ARCOMMANDE &
+          VIA   CIECLE , &
+                CMDCLE , &
+                CMDAJT   &
+          USING T_CIECLEMNU , &
+                CMDCLE OF ARCOMMANDE, &
+                CMDAJT OF ARCOMMANDE  &
+          ORDERBY CIECLE , &
+                  CMDCLE , &
+                  CMDAJT
+
+  IF PATH = 2
+  THEN GET ARCOMMANDE &
+          VIA   CIECLE , &
+                CMDCLE   &
+          USING T_CIECLEMNU , &
+                CMDCLE OF ARCOMMANDE &
+          ORDERBY CIECLE , &
+                  CMDCLE , &
+                  CMDAJT
+
+
+  IF PATH = 3
+  THEN GET ARCOMMANDE &
+          VIA   CIECLE , &
+                FOUCLE   &
+          USING T_CIECLEMNU , &
+                FOUCLE OF ARCOMMANDE &
+          ORDERBY CIECLE , &
+                  FOUCLE , &
+                  CMDDAT DESC, &
+                  CMDCLE , &
+                  CMDAJT
+
+
+  IF PATH = 4
+  THEN GET ARCOMMANDE &
+          VIA   CIECLE , &
+                ENTCLE   &
+          USING T_CIECLEMNU , &
+                ENTCLE OF ARCOMMANDE &
+          ORDERBY CIECLE, &
+                  ENTCLE, &
+                  CMDDAT DESC, &
+                  PECCLE, &
+                  CMDCLE, &
+                  CMDAJT
+
+
+  IF PATH = 5
+  THEN GET ARCOMMANDE &
+          VIA   CIECLE , &
+                PECCLE   &
+          USING T_CIECLEMNU , &
+                PECCLE OF ARCOMMANDE &
+          ORDERBY CIECLE , &
+                  ENTCLE , &
+                  PECCLE , &
+                  CMDDAT DESC, &
+                  CMDCLE , &
+                  CMDAJT
+
+
+   IF PATH = 6
+   THEN GET ARCOMMANDE &
+           VIA   CIECLE  &
+           USING T_CIECLEMNU &
+           ORDERBY CIECLE , &
+                   CMDDAT DESC, &
+                   CMDCLE , &
+                   CMDAJT
+
+
+   ; L'appel provient de l'historique des produits.
+   ;
+   IF PATH = 99
+   THEN BEGIN
+     GET ARCOMMANDE &
+        VIA   CIECLE, &
+              CMDCLE, &
+              CMDAJT  &
+        USING T_CIECLEMNU, &
+              T_CMDCLEFND, &
+              T_CMDAJTFND
+   END
+
+   ; L'appel provient de l'historique des produits.
+   ;
+   IF PATH = 98
+   THEN BEGIN
+     GET ARCOMMANDE &
+        VIA   CIECLE, &
+              CMDCLE  &
+        USING T_CIECLEMNU, &
+              T_CMDCLEFND
+   END
+
+
+   GET MCREF_ADRESSE OPTIONAL
+   GET ARCMD_HISTO   OPTIONAL
+
+END
+
+;-------------------------------------------------------------------------------
+; Cette procédure permet de conserver l'ancien statut de la commande pour
+; vérifier lors du PREUPDATE si la modification est permise.
+;
+PROCEDURE POSTFIND
+BEGIN
+  LET T_CMDSTUOLD    = CMDSTU       OF ARCOMMANDE
+END
+
+
+
+;-------------------------------------------------------------------------------
+; Cette procédure est codée parce qu'on doit saisir l'adresse du fournisseur
+; lorsque c'est un fournisseur divers
+;
+PROCEDURE ENTRY
+BEGIN
+  ACCEPT  ENTCLE OF ARCOMMANDE
+  DISPLAY ENTNOM OF ARENTREPOT
+  DISPLAY CMDSTU OF ARCOMMANDE
+  DISPLAY CBIDSC OF A_CBI_CMDSTU
+  DISPLAY PECCLE OF ARCOMMANDE
+  ACCEPT  CMDTYP OF ARCOMMANDE
+  DISPLAY CBIDSC OF A_CBI_CMDTYP
+  ;
+  ; Si c'est un ajustement
+  ;
+  IF "AJ" = CMDTYP OF ARCOMMANDE
+  THEN BEGIN
+    ACCEPT CMDCLE OF ARCMD_HISTO
+
+    LET ADECLE       OF ARCOMMANDE = ADECLE       OF A_CMD_REFERE
+    LET ENTCLE       OF ARCOMMANDE = ENTCLE       OF A_CMD_REFERE
+    LET FOUCLE       OF ARCOMMANDE = FOUCLE       OF A_CMD_REFERE
+    LET FOUCIECLE    OF ARCOMMANDE = FOUCIECLE    OF A_CMD_REFERE
+    LET CMDREQCLETMP OF ARCOMMANDE = CMDREQCLETMP OF A_CMD_REFERE
+    LET CMDACH       OF ARCOMMANDE = CMDACH       OF A_CMD_REFERE
+    LET CDEDATLIVPRE OF ARCOMMANDE = CDEDATLIVPRE OF A_CMD_REFERE
+    LET CDEFAB       OF ARCOMMANDE = CDEFAB       OF A_CMD_REFERE
+    LET CDETRP       OF ARCOMMANDE = CDETRP       OF A_CMD_REFERE
+    LET CMDINDDNE    OF ARCOMMANDE = CMDINDDNE    OF A_CMD_REFERE
+
+    LET CMDCLE OF ARCOMMANDE = CMDCLE OF ARCMD_HISTO
+
+
+    LET RADCLE OF ARCOMMANDE = RADCLE OF A_CMD_REFERE
+    EDIT RADCLE OF ARCOMMANDE
+
+    GET A_CMH_HISTO VIA    CIECLE, &
+                           CMDCLE, &
+                           CMDAJT  &
+                    USING  CIECLE OF ARCOMMANDE , &
+                           CMDCLE OF ARCMD_HISTO, &
+                           "000" &
+                    ORDERBY CIECLE, &
+                            CMDCLE, &
+                            CMDAJT, &
+                            CMHCLE3 DESCENDING &
+                    OPTIONAL
+    IF ACCESSOK
+    THEN LET CMDAJT OF ARCOMMANDE = ASCII( NCONVERT( CMHCLE3 OF A_CMH_HISTO )+ 1 ,3)
+    ELSE LET CMDAJT OF ARCOMMANDE = "001"
+
+    DISPLAY CMDCLE OF ARCOMMANDE
+    DISPLAY CMDAJT OF ARCOMMANDE
+  END
+
+  ACCEPT ADECLE  OF ARCOMMANDE
+  DISPLAY ADENOM OF ARADRESSE_EXP
+
+  ACCEPT  FOUCLE OF ARCOMMANDE
+  ;
+  ; Saisie du nom et adresse du fournisseur divers.
+  ;
+  IF FOUTYP    OF VFOC_FOU      = "D"
+  THEN BEGIN
+    ACCEPT RADNOM OF MCREF_ADRESSE
+    ;
+    ; Sous-écran pour la saisie de l'adresse.
+    ;
+    RUN SCREEN ar007e &
+          PASSING MCREF_ADRESSE &
+          MODE E
+    DISPLAY RADADR1  OF MCREF_ADRESSE
+  END
+  ELSE BEGIN
+    DISPLAY RADNOM    OF MCREF_ADRESSE
+    DISPLAY RADCLE    OF ARCOMMANDE
+    DISPLAY RADADR1   OF MCREF_ADRESSE
+  END
+
+  ;
+  ; On vérifie si un numéro de commande a été réservé uniquement si nous
+  ; saisissons une commande.
+  ;
+  IF "CM" = CMDTYP OF ARCOMMANDE
+  THEN BEGIN
+    GET ARRESERVATION &
+        VIA     CIECLE   , &
+                ENTCLE   , &
+                FOUCIECLE, &
+                FOUCLE   , &
+                RESDATUTI  &
+          USING CIECLE    OF ARCOMMANDE, &
+                ENTCLE    OF ARCOMMANDE, &
+                FOUCIECLE OF ARCOMMANDE, &
+                FOUCLE    OF ARCOMMANDE, &
+                0 OPTIONAL
+    IF ACCESSOK
+    THEN BEGIN
+      LET T_ENTCLE = ENTCLE OF ARCOMMANDE
+      LET T_FOUCLE = FOUCLE OF ARCOMMANDE
+      LET T_CMDCLE = ""
+      RUN SCREEN ar112 MODE F PASSING T_CIECLEMNU, &
+                                      T_ENTCLE   , &
+                                      T_FOUCIECLE, &
+                                      T_FOUCLE   , &
+                                      T_CMDCLE   , &
+                                      T_FLGCMD &
+                WINDOW WIDTH CONSTANT WHEN CALLING
+
+      IF 0 <> SIZE(TRUNCATE(T_CMDCLE))
+      THEN BEGIN
+        LET CMDCLE OF ARCOMMANDE = TRUNCATE(T_CMDCLE)
+        GET ARRESERVATION &
+          VIA   CIECLE, &
+                CMDCLE  &
+          USING CIECLE OF ARCOMMANDE, &
+                CMDCLE OF ARCOMMANDE OPTIONAL
+        IF ACCESSOK
+        THEN BEGIN
+          IF RESDATUTI OF ARRESERVATION <> 0
+          THEN ERROR 1479 ;Ce numéro de commande a déjà été utilisé.
+        END
+        LET RESDATUTI OF ARRESERVATION = SYSDATE
+        LET T_RESOK = "1"
+        DISPLAY CMDCLE OF ARCOMMANDE
+      END
+      ELSE BEGIN
+        LET CMDCLE OF ARCOMMANDE = ""
+        LET T_RESOK = "0"
+      END
+    END
+  END
+  ;
+  ; On vérifie si on utilise la numérotation automatique pour
+  ; assigner un numéro de commande.
+  ;
+  IF HLDCMDACH OF MCHOLDING = "1"
+  THEN BEGIN
+    IF 0 = SIZE( TRUNCATE( CMDCLE OF ARCOMMANDE ) )
+    THEN BEGIN
+      ;
+      ; Attribution du numéro de commande selon la compagnie et l'année
+      ; dans la table ARCMD_SEQ où se trouve le dernier numéro de commande
+      ; utilisé.
+      ;
+      START TRANSACTION GEN_NUM_SEQ
+      GET ARCMD_SEQ VIA   CIECLE, &
+                          CMSANNCLE  &
+                    USING T_CIECLEMNU,&
+                          T_PECCLEMNU[1:2] &
+                    OPTIONAL
+      LET CIECLE    OF ARCMD_SEQ = T_CIECLEMNU
+      LET CMSANNCLE OF ARCMD_SEQ = T_PECCLEMNU[1:2]
+      LET CMSNUMSEQ OF ARCMD_SEQ = CMSNUMSEQ OF ARCMD_SEQ + 1
+
+      LET CMDCLE OF ARCOMMANDE = CMSANNCLE + &
+        ASCII(CMSNUMSEQ OF ARCMD_SEQ,CMSLONNUM OF ARCMD_SEQ)
+      PUT ARCMD_SEQ
+      COMMIT TRANSACTION GEN_NUM_SEQ
+    END
+  END
+
+  ACCEPT CMDREQCLETMP
+
+  IF    HLDCMDACH OF MCHOLDING <> "1" &
+    AND 0 = SIZE(TRUNCATE(CMDCLE OF ARCOMMANDE))
+  THEN ACCEPT CMDCLE OF ARCOMMANDE
+
+  DISPLAY CMDFLGIMP OF ARCOMMANDE
+  DISPLAY RADADR1 OF MCREF_ADRESSE
+
+  ACCEPT  CMDDAT OF ARCOMMANDE
+  DISPLAY CMDDATCRE OF ARCOMMANDE
+  DISPLAY CMDDATAPP OF ARCOMMANDE
+  ACCEPT  CMDACH OF ARCOMMANDE
+  ACCEPT  CDEDATLIVPRE OF ARCOMMANDE
+  ACCEPT  CDEFAB OF ARCOMMANDE
+  DISPLAY CBIDSC OF A_CBI_CDEFAB
+  ACCEPT  CDETRP OF ARCOMMANDE
+  DISPLAY CBIDSC OF A_CBI_CDETRP
+  ACCEPT  CMDINDDNE OF ARCOMMANDE
+  ACCEPT  CMDCOM OF ARCOMMANDE
+  DISPLAY CMDMNTTOT OF ARCOMMANDE
+  DISPLAY D_DEVCLE
+  DISPLAY V_CMDMNTAJT OF VCMD_SLD
+  DISPLAY CMDMNTNET OF ARCOMMANDE
+  DISPLAY CMDMNTTPS OF ARCOMMANDE
+  DISPLAY CMDMNTCTI OF ARCOMMANDE
+  DISPLAY CMDMNTTVQ OF ARCOMMANDE
+  DISPLAY CMDMNTRTI OF ARCOMMANDE
+  DISPLAY CMDMNTESC OF ARCOMMANDE
+  DISPLAY CMDNBRITE OF ARCOMMANDE
+  ;
+  ; S'il a eu utilisation de la réservation.
+  ;
+  IF T_RESOK = "1"
+  THEN PUT ARRESERVATION  ; Met à jour la date d'utilisation dans le cas d'un numéro
+                          ; de commande réservé.
+
+    GET ARCMD_DETAIL VIA CIECLE               , &
+                         CMDCLE               , &
+                         CMDAJT                 &
+                   USING CIECLE OF ARCOMMANDE , &
+                         CMDCLE OF ARCOMMANDE , &
+                         CMDAJT OF ARCOMMANDE   &
+                 ORDERBY CDECLE DESCENDING      &
+                 OPTIONAL
+
+    LET T_ITEM_COMPT = CDECLE OF ARCMD_DETAIL / 1000
+
+    RUN SCREEN ar007a PASSING T_CIECLEMNU     , &
+                              T_CIENOM        , &
+                              T_CMDSTUOLD     , &
+                              T_PECCLEMNU     , &
+                              ARCOMMANDE      , &
+                              ARCMD_HISTO     , &
+                              T_CDECLEFND     , &
+                              T_CDECLE        , &
+                              T_ITEM_COMPT      &
+                         MODE E
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la modification.
+  ;
+  IF    ( ALTEREDRECORD     OF ARCOMMANDE  &
+     OR   ALTEREDRECORD     OF MCREF_ADRESSE ) &
+     AND NOT NEWRECORD     OF ARCOMMANDE &
+     AND NOT DELETEDRECORD OF ARCOMMANDE &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  ;
+  ; Enlever le droit de modification si la commande n'est plus préliminaire.
+  ; Cependant, on permet la mise à jour si le statut vient juste d'être changer
+  ; pour "A".
+  ;
+  IF    ALTEREDRECORD OF ARCOMMANDE &
+    AND NOT NEWRECORD OF ARCOMMANDE &
+    AND NOT DELETEDRECORD OF ARCOMMANDE &
+    AND T_CMDSTUOLD  <> "P"         &
+    AND CMDSTU  OF ARCOMMANDE <> "X"
+  THEN ERROR 1371 ; Seule la modification d'une commande préliminaire est
+                  ; permise.
+
+  IF DELETEDRECORD OF ARCOMMANDE
+  THEN BEGIN
+    ;On ne peut pas détruire la commande si elle a encore des détails
+    ;
+    GET ARCMD_DETAIL2 &
+           VIA   CIECLE, &
+                 CMDCLE, &
+                 CMDAJT  &
+           USING CIECLE OF ARCOMMANDE, &
+                 CMDCLE OF ARCOMMANDE, &
+                 CMDAJT OF ARCOMMANDE OPT
+    IF ACCESSOK
+    THEN BEGIN
+      IF CDESTU OF ARCMD_DETAIL2 <> 'X'
+      THEN ERROR 1508 ; Destruction impossible car il y a du detail pour cette commande
+    END
+    ;On ne peut pas détruire la commande originale si elle a encore des ajustem 
+    ;
+    IF CMDTYP OF ARCOMMANDE = "CM"
+    THEN BEGIN
+      WHILE RETRIEVING A_CMH_HISTO VIA    CIECLE, &
+                                          CMDCLE, &
+                                          CMDAJT  &
+                                   USING  CIECLE OF ARCOMMANDE , &
+                                          CMDCLE OF ARCMD_HISTO, &
+                                          "000"
+      BEGIN
+        IF CMDAJT OF ARCOMMANDE <> "000"
+        THEN ERROR 1509 ; Cette commande possède encore des ajustements
+      END
+    END
+  END
+
+  ;
+  ; On incrémente le numéro d'adresse pour les clients divers.
+  ;
+  IF     FOUTYP OF VFOC_FOU = "D" &
+     AND RADCLE OF ARCOMMANDE = 0
+  THEN BEGIN
+    START TRANSACTION GEN_RAD_SEQ
+    GET MCRAD_SEQ VIA REFCIECLE, &
+                      REFCLETYP, &
+                      REFCLENUM  &
+                  USING FOUCIECLE OF ARCOMMANDE, &
+                        REFCLETYP OF ARCOMMANDE, &
+                        FOUCLE    OF ARCOMMANDE  &
+                  OPTIONAL
+    LET REFCIECLE OF MCRAD_SEQ = FOUCIECLE OF ARCOMMANDE
+    LET REFCLETYP OF MCRAD_SEQ = REFCLETYP OF ARCOMMANDE
+    LET REFCLENUM OF MCRAD_SEQ = FOUCLE    OF ARCOMMANDE
+    LET RASNUMSEQ OF MCRAD_SEQ = RASNUMSEQ OF MCRAD_SEQ + 1
+    LET RADCLE    OF ARCOMMANDE = RASNUMSEQ OF MCRAD_SEQ
+    PUT MCRAD_SEQ
+    COMMIT TRANSACTION GEN_RAD_SEQ
+  END
+  ;
+  ; Appel de la procédure de mise à jour des produits entrepôt, du catalogue
+  ; du fournisseur, des engagements et de l'historique des transactions lors de
+  ; l'approbation de la commande.
+  ;
+  IF     ALTEREDRECORD OF ARCOMMANDE &
+     AND CMDSTU OF ARCOMMANDE = "A"
+  THEN BEGIN
+    IF    FOUTYP OF VFOC_FOU = "D"  &
+      AND 0 = SIZE( TRUNCATE( RADNOM OF MCREF_ADRESSE ) )
+    THEN ERROR 1511 ; Le fournisseur divers doit avoir un nom
+
+    DO INTERNAL MAJ_INFORMATIONS_COMMANDE
+  END
+
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Pour afficher le numéro de commande nouvellement créé et que l'écran ne s'efface
+; pas.
+;
+;
+PROCEDURE POSTUPDATE
+BEGIN
+  LET T_CMDSTUOLD    = CMDSTU       OF ARCOMMANDE
+  IF    CORRECTMODE
+  THEN BEGIN
+    DISPLAY CMDCLE OF ARCOMMANDE            ; Pour éviter modification d'une
+    WARNING = " "                           ; commande venant juste d'être
+  END                                       ; approuvée (Engagement en double)
+
+  IF CMDSTU OF ARCOMMANDE = "X"
+  THEN DO INTERNAL ANNULE_CMD
+
+END
+
+PROCEDURE UPDATE
+   BEGIN
+     PUT MCREF_ADRESSE
+     PUT ARCMD_HISTO
+     PUT ARCOMMANDE
+   END
+BUILD DETAIL LIST
+
+
+@IF FORMAT
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+******************************* Commande d'achat *******************************
+* Entrepôt......: xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                *
+* Statut........: x xxxxxxxxxxxxxxx    Période ......: xxxxx                   *
+*                                      Type..........: x xxxxxxxxxxxxxxxxxxxx  *
+* Fournisseur...: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              *
+* Adresse achat.: xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              *
+* Adresse exp...: xxxx   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx              *
+*                                                                              *
+* Commande......: xxxxxxxxx xxx        Imprimée......: xxx                     *
+* Date document.: xxxxxxxx                                                     *
+* Livraison prév: xxxxxxxx             Date approb...: xxxxxxxx                *
+* Commentaire...: xxxxxxxxxxxxxxxxxxxx                                         *
+* Acheteur......: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                                                                              *
+*                                         Ajustement....: xxxxxxxxxxxxxxx      *
+* Montant brut..: xxxxxxxxxxxxxxxxxxx     Montant net...: xxxxxxxxxxxxxxx      *
+* Montant TPS...: xxxxxxxxxxxxxxx         Montant CTI...: xxxxxxxxxxxxxxx      *
+* Montant TVQ...: xxxxxxxxxxxxxxx         Montant RTI...: xxxxxxxxxxxxxxx      *
+* Montant esc...: xxxxxxxxxxxxxxx         Nombre d'item.: xxx                  *
+*                                                                              *
+********************************************************************************
+@ENDIF

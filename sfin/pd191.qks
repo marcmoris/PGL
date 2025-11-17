@@ -1,0 +1,762 @@
+
+;/T/ 1.4.2. Enregistrer les P/O pour la sous-traitance
+;
+;/P/ Programmeur..: René Bonneau
+;    Date Création: 1994-10-12
+;
+;    Description..: Cette écran permet de faire la gestion de projets qui
+;                   sont effectuées par les sous-contractants.
+;
+;/M/ François Déry, 12 mai 1999
+;       Ajout du in dict sur la transaction des séquences.
+;
+;/M/ Modification.: Denis Pouliot
+;    Date.........: 23 août 1996
+;    But..........: Mise à jour de COMNUMCOM incorrect.
+;                   Utilisé PJTANN au lieu de PJTNUMSEQ (SOS 312)
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd191 ACTIONBAR                      &
+             MODE LABEL "" AT 2,80          &
+             NOACTION                       &
+             AUTOUPDATE                     &
+             ACTIVITIES CHANGE, FIND, ENTRY &
+             FIELDMARK RETAIN STARTUP       &
+             HELP POPUP FROM 4,9 TO 20,72   &
+             RECEIVING T_CIECLEMNU ,        &
+                       T_CIENOM
+
+
+;-------------------------------------------------------------------------------
+;
+; Déclaration de la transaction pour donner un numéro séquentiel
+;
+
+TRANSACTION NO_SEQ READ WRITE &
+                   RESERVING FOR PROTECTED WRITE PDSEQ_BON_COMMAN IN DICT
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+
+USE ussectmp  NOLIST
+    "PD191"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+
+USE pd191.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+
+USE usactecr  NOLIST
+
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Détail (P/O)                 " ACTION DESIGNER D001
+  MENUITEM LABEL "Vérification                 " ACTION DESIGNER D002
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%Détail (P/O)              " ACTION DESIGNER D001
+  MENUITEM LABEL "%%%Vérification              " ACTION DESIGNER D002
+@ENDIF
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu.
+;
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Clés de recherche pour les popup de consultations et les sous écrans
+;
+
+TEMPORARY T_FOUCLE       CHARACTER SIZE 6
+TEMPORARY T_USINE_SEC    CHARACTER SIZE 1
+TEMPORARY T_PJTABR       CHARACTER SIZE 2
+TEMPORARY T_PJTANN       CHARACTER SIZE 2
+TEMPORARY T_PJTNUMSEQ    CHARACTER SIZE 3
+TEMPORARY T_COMNUMCOMINT CHARACTER SIZE 3
+TEMPORARY T_COMNUMCOM    CHARACTER SIZE 7
+TEMPORARY T_CHAMP        INTEGER UNSIGNED SIZE 01
+
+
+;-------------------------------------------------------------------------------
+;
+; Bon de commande
+;
+
+FILE PDBON_COMMANDE   PRIMARY                         &
+                      NOITEM
+
+  ACCESS VIA     CIECLE,                              &
+                 BCMNUMBCM                            &
+         USING   T_CIECLEMNU,                         &
+                 BCMNUMBCM        OF PDBON_COMMANDE   &
+         REQUEST BCMNUMBCM        OF PDBON_COMMANDE   &
+         ORDERBY CIECLE,                              &
+                 BCMNUMBCM
+
+  ACCESS VIA     CIECLE       &
+         USING   T_CIECLEMNU  &
+         ORDERBY CIECLE,      &
+                 BCMNUMBCM
+
+  ITEM   CIECLE           OF PDBON_COMMANDE   INITIAL T_CIECLEMNU
+  ITEM   BCMCODTYPBCM     OF PDBON_COMMANDE   INITIAL "S"
+  ITEM   BCMDATCRE        OF PDBON_COMMANDE   INITIAL SYSDATE
+  ITEM   BCMHRECRE        OF PDBON_COMMANDE   INITIAL SYSTIME / 10000
+  ITEM   BCMUSRCRE        OF PDBON_COMMANDE   INITIAL LOGONID
+  ITEM   FOCCIECLE        OF PDBON_COMMANDE   INITIAL T_CIECLEMNU
+  ITEM   FOUCIECLE        OF PDBON_COMMANDE   INITIAL "----"
+  ITEM   COMNUMCOM        OF PDBON_COMMANDE   FINAL   &
+         PJTABR           OF PDBON_COMMANDE   +       &
+         PJTANN           OF PDBON_COMMANDE   +       &
+         COMNUMCOMINT     OF PDBON_COMMANDE
+
+  ITEM   BCMDATMAJ        OF PDBON_COMMANDE   FINAL   SYSDATE &
+      IF NOT NEWRECORD    OF PDBON_COMMANDE   AND     &
+         ALTEREDRECORD    OF PDBON_COMMANDE
+  ITEM   BCMHREMAJ        OF PDBON_COMMANDE   FINAL   SYSTIME / 10000 &
+      IF NOT NEWRECORD    OF PDBON_COMMANDE   AND     &
+         ALTEREDRECORD    OF PDBON_COMMANDE
+  ITEM   BCMUSRMAJ        OF PDBON_COMMANDE   FINAL   LOGONID &
+      IF NOT NEWRECORD    OF PDBON_COMMANDE   AND     &
+         ALTEREDRECORD    OF PDBON_COMMANDE
+
+  SELECT IF BCMCODTYPBCM  OF PDBON_COMMANDE = "S"
+
+
+;-------------------------------------------------------------------------------
+;
+; Bon de commande (Vérification)
+;
+
+FILE PDBON_COMMANDE   REFERENCE ALIAS PDBON_COMMANDE_VER
+
+  ACCESS VIA    CIECLE,                               &
+                PJTABR,                               &
+                PJTANN,                               &
+                COMNUMCOMINT                          &
+         USING  T_CIECLEMNU,                          &
+                PJTABR           OF PDBON_COMMANDE,   &
+                PJTANN           OF PDBON_COMMANDE,   &
+                COMNUMCOMINT     OF PDBON_COMMANDE
+
+
+;-------------------------------------------------------------------------------
+;
+; Commande interne
+;
+
+FILE PDCOMMAN_INTERNE REFERENCE
+
+  ACCESS VIA     CIECLE,                               &
+                 PJTABR,                               &
+                 PJTANN,                               &
+                 COMNUMCOMINT                          &
+         USING   T_CIECLEMNU,                          &
+                 PJTABR           OF PDBON_COMMANDE,   &
+                 PJTANN           OF PDBON_COMMANDE,   &
+                 COMNUMCOMINT     OF PDBON_COMMANDE
+
+
+;-------------------------------------------------------------------------------
+;
+; Projet
+;
+
+FILE PDPROJET         REFERENCE
+
+  ACCESS VIA     CIECLE,                               &
+                 PJTABR                                &
+         USING   T_CIECLEMNU,                          &
+                 PJTABR          OF PDBON_COMMANDE
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro séquentiel pour les bons de commande
+;
+
+FILE PDSEQ_BON_COMMAN DESIGNER &
+                      TRANSACTION NO_SEQ
+
+;-----------------------------------------------------------------------------
+FILE PDPROD_BON_CMD   DESIGNER
+FILE PDDET_BON_COMMAN DESIGNER
+FILE PDDIAGRAMME      DESIGNER
+
+;-------------------------------------------------------------------------------
+;
+; Fournisseurs
+;
+
+FILE VFOC_FOU         REFERENCE
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Adresse du fournisseur
+;
+
+FILE MCREF_ADRESSE    REFERENCE
+
+  ACCESS VIA     REFCLETYP,                            &
+                 REFCLENUM ,                           &
+                 RADCLE                                &
+         USING   "F",                                  &
+                 FOUCLE           OF VFOC_FOU,         &
+                 FOCADRACH        OF VFOC_FOU
+
+
+
+
+;------------------------------------------------------------------------------
+;
+;
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Identification du P/O sous-contractant " &
+@ELSE
+      " %%%Identification du P/O sous-contract " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+ALIGN (2,3,19)
+
+
+FIELD BCMNUMBCM        OF PDBON_COMMANDE   &
+label "No de P/O.....:"&
+        HIDDEN ID 05                       &
+        DISPLAY                            &
+        REFRESH
+
+
+ALIGN (2,3,19) (36,37,53)
+
+
+FIELD BCMCODTYPBCM     OF PDBON_COMMANDE   &
+label "Type de P/O...:"&
+        HIDDEN ID 10                       &
+        DISPLAY
+
+
+FIELD BCMDATMAJ        OF PDBON_COMMANDE    FORMAT YYYYMMDD &
+PATTERN "####/##/##"&
+label "Date dern MAJ.:"&
+        HIDDEN ID 15                       &
+        DISPLAY                            &
+        REFRESH
+
+
+ALIGN (2,3,19) (36,37,37)
+
+
+FIELD FOUCLE           OF PDBON_COMMANDE   &
+label "Fournisseur...:"&
+        HIDDEN ID 20                       &
+        REQUIRED &
+        LOOKUP ON VFOC_FOU                 &
+          VIA    FOUCLE,                              &
+                 FOCCIECLE                           &
+          USING  FOUCLE          OF PDBON_COMMANDE,   &
+                 T_CIECLEMNU &
+          MESSAGE 2917 ; Ce founisseur n'existe pas
+
+
+FIELD FOUNOM           OF VFOC_FOU         &
+        HIDDEN ID 25                       &
+        DISPLAY                            &
+        NOLABEL
+
+
+ALIGN (2,3,19)
+
+
+FIELD RADADR1          OF MCREF_ADRESSE    &
+label "Adresse.......:"&
+        HIDDEN ID 30                       &
+        DISPLAY
+
+
+FIELD RADADR2          OF MCREF_ADRESSE    &
+        ID SAME                            &
+        DISPLAY                            &
+        NOLABEL
+
+
+FIELD RADADR3          OF MCREF_ADRESSE    &
+        ID SAME                            &
+        DISPLAY                            &
+        NOLABEL
+
+
+FIELD RADADR4          OF MCREF_ADRESSE    &
+        ID SAME                            &
+        DISPLAY                            &
+        NOLABEL
+
+
+FIELD RADCP            OF MCREF_ADRESSE    &
+        ID SAME                            &
+        DISPLAY                            &
+        NOLABEL
+
+
+ALIGN (2,3,19) (36,37,53)
+
+
+FIELD RADTEL           OF MCREF_ADRESSE    &
+label "Téléphone.....:"&
+        HIDDEN ID 35                       &
+        DISPLAY
+
+
+FIELD RADFAX           OF MCREF_ADRESSE    &
+label "Fax...........:"&
+        HIDDEN ID 40                       &
+        DISPLAY
+
+
+FIELD FOULNG           OF VFOC_FOU         &
+label "Langue........:"&
+        HIDDEN ID 45                       &
+        DISPLAY
+
+
+ALIGN (2,3,19)
+
+
+FIELD BCMDSC001        OF PDBON_COMMANDE   &
+label "Description...:"&
+        HIDDEN ID 55
+
+
+FIELD BCMDSC002        OF PDBON_COMMANDE   &
+        ID SAME                            &
+        NOLABEL
+
+
+;SKIP 1
+
+
+ALIGN (2,3,19) (,21,22) (,25,26) (,30,30)
+
+
+FIELD PJTABR           OF PDBON_COMMANDE   &
+        HIDDEN ID 65                       &
+        REQUIRED                           &
+;        NOCHANGE                           &
+        LABEL "Num. commande.:"            &
+        LOOKUP ON PDPROJET                            &
+          VIA     CIECLE,                             &
+                  PJTABR                              &
+          USING   T_CIECLEMNU,                        &
+                  PJTABR          OF PDBON_COMMANDE   &
+          MESSAGE 3074 ; Le code de projet n'existe pas
+
+FIELD PJTANN           OF PDBON_COMMANDE   &
+        HIDDEN ID SAME                     &
+        DISPLAY                            &
+        LABEL "-"
+
+
+FIELD COMNUMCOMINT     OF PDBON_COMMANDE              &
+        HIDDEN ID SAME                                &
+        NUMERIC                                       &
+        REQUIRED                                      &
+;        NOCHANGE                                      &
+        LABEL "-"                                     &
+        LOOKUP ON PDCOMMAN_INTERNE                    &
+          VIA    CIECLE,                              &
+                 PJTABR,                              &
+                 PJTANN,                              &
+                 COMNUMCOMINT                         &
+          USING  T_CIECLEMNU ,                        &
+                 PJTABR           OF PDBON_COMMANDE,  &
+                 PJTANN           OF PDBON_COMMANDE,  &
+                 COMNUMCOMINT     OF PDBON_COMMANDE   &
+          MESSAGE 3008 ; Cette commande interne n'existe pas
+
+
+FIELD COMNOM           OF PDCOMMAN_INTERNE   &
+        DISPLAY
+
+
+;SKIP 1
+
+
+ALIGN (2,3,19)
+
+
+FIELD BCMPROPOT        OF PDBON_COMMANDE     &
+label "Projet........:"&
+        HIDDEN ID 85
+
+
+;ALIGN (2,3,19) (30,,21) (36,37,53) (64,62,62)
+ALIGN (2,3,19) (30,,31) (36,37,53) (64,,65)
+
+
+FIELD BCMDATIMP        OF PDBON_COMMANDE      FORMAT YYYYMMDD &
+PATTERN "####/##/##"&
+        HIDDEN ID 90                         &
+        DISPLAY                              &
+        LABEL "Impression 1..:"
+
+
+FIELD BCMHREIMP        OF PDBON_COMMANDE     &
+        ID SAME                              &
+        DISPLAY                              &
+        NOLABEL
+
+
+FIELD BCMDATDERIMP     OF PDBON_COMMANDE      FORMAT YYYYMMDD &
+PATTERN "####/##/##"&
+        HIDDEN ID 92                         &
+        DISPLAY                              &
+        LABEL "Dernière imp..:"
+
+
+FIELD BCMHREDERIMP     OF PDBON_COMMANDE     &
+        ID SAME                              &
+        DISPLAY                              &
+        NOLABEL
+
+
+ALIGN (2,3,13)
+
+
+
+FIELD PODSURDBTCMD OF PDBON_COMMANDE &
+      HIDDEN &
+      PICTURE "^,^^^.^^^^"&
+      OUTPUT SCALE 4 &
+      LABEL "Sur.dbt..:"  &
+      DISPLAY
+
+FIELD PODSURFINCMD OF PDBON_COMMANDE &
+      HIDDEN &
+      PICTURE "^,^^^.^^^^"&
+      OUTPUT SCALE 4 &
+      LABEL "Sur.fin..:"  &
+      DISPLAY
+
+FIELD BCMFOR OF PDBON_COMMANDE   &
+      HIDDEN   &
+      LABEL "Prix.for.:"
+
+
+ SUBSCREEN pd191a AUTO     &
+   HIDDEN                  &
+   NOLABEL                 &
+   NOMARK                  &
+   MODE SAME               &
+   PASSING PDBON_COMMANDE, &
+           T_CIECLEMNU,    &
+           T_CIENOM
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur (pop-up) pour les fournisseurs.
+;
+
+PROCEDURE INPUT FOUCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_USINE_SEC = "0"
+    LET T_FOUCLE    = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd117 MODE F               &
+                     PASSING T_CIECLEMNU, &
+                             T_FOUCLE,    &
+                             T_USINE_SEC
+    LET FIELDTEXT = TRUNCATE( T_FOUCLE )
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel dépisteur No commande int (attention cet appel est particulier)
+;
+
+PROCEDURE INPUT PJTABR OF PDBON_COMMANDE
+BEGIN
+
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PJTABR           = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_PJTANN           = ""
+    LET T_COMNUMCOMINT     = ""
+    LET T_COMNUMCOM        = ""
+    LET T_CHAMP            = 1
+    RUN SCREEN pd124 MODE F                     &
+                     PASSING T_PJTABR,          &
+                             T_PJTANN,          &
+                             T_COMNUMCOMINT,    &
+                             T_COMNUMCOM,       &
+                             T_CHAMP,           &
+                             T_CIECLEMNU
+    LET FIELDTEXT          = TRUNCATE( T_PJTABR )
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Assigne les champs du projet
+;
+
+PROCEDURE PROCESS PJTABR OF PDBON_COMMANDE
+BEGIN
+  LET     PJTANN OF PDBON_COMMANDE =  PJTANN OF PDPROJET
+  DISPLAY PJTANN OF PDBON_COMMANDE
+
+  LET PJTNUMSEQ OF PDBON_COMMANDE = PJTNUMSEQ        OF PDPROJET
+
+  LET PJTNUMPRO OF PDBON_COMMANDE = PJTABR           OF PDBON_COMMANDE + &
+                                    PJTANN           OF PDBON_COMMANDE + &
+                                    PJTNUMSEQ        OF PDBON_COMMANDE
+
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel dépisteur No bloc (attemtion cet appel est particulier)
+;
+
+PROCEDURE INPUT COMNUMCOMINT OF PDBON_COMMANDE
+BEGIN
+
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PJTABR           = PJTABR          OF PDBON_COMMANDE
+    LET T_PJTANN           = PJTANN          OF PDBON_COMMANDE
+    LET T_COMNUMCOMINT     = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_COMNUMCOM        = ""
+    LET T_CHAMP            = 3
+    RUN SCREEN pd124 MODE F                     &
+                     PASSING T_PJTABR,          &
+                             T_PJTANN,          &
+                             T_COMNUMCOMINT,    &
+                             T_COMNUMCOM,       &
+                             T_CHAMP,           &
+                             T_CIECLEMNU
+    LET PJTABR     OF PDBON_COMMANDE = TRUNCATE( T_PJTABR )
+    LET PJTANN     OF PDBON_COMMANDE = TRUNCATE( T_PJTANN )
+    LET FIELDTEXT                    = TRUNCATE( T_COMNUMCOMINT )
+  END
+
+  IF 0 <> SIZE( TRUNCATE( T_COMNUMCOMINT ) ) AND &
+     0 = SIZE( TRUNCATE( FIELDTEXT) )
+  THEN BEGIN
+    LET FIELDTEXT                 = TRUNCATE( T_COMNUMCOMINT )
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Affectation du nom du projet potentiel.
+;
+
+PROCEDURE PROCESS COMNUMCOMINT OF PDBON_COMMANDE
+BEGIN
+  LET     BCMPROPOT OF PDBON_COMMANDE = PJTNOM OF PDPROJET
+  DISPLAY BCMPROPOT OF PDBON_COMMANDE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+
+  USE ussecent NOLIST
+
+END
+
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Vérification bon commande transfert
+;
+
+PROCEDURE DESIGNER D002
+BEGIN
+
+  RUN SCREEN  pd191c                    &
+              PASSING   PDBON_COMMANDE, &
+                        T_CIECLEMNU,    &
+                        T_CIENOM        &
+              MODE F
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDBON_COMMANDE &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDBON_COMMANDE &
+     AND NOT NEWRECORD     OF PDBON_COMMANDE &
+     AND NOT DELETEDRECORD OF PDBON_COMMANDE &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  ;
+  ; Incrémentation du numéro de séquence
+  ;
+  IF 0 = BCMNUMBCM OF PDBON_COMMANDE
+  THEN BEGIN
+    START TRANSACTION NO_SEQ
+    GET PDSEQ_BON_COMMAN OPTIONAL       &
+      VIA     CIECLE                    &
+      USING   T_CIECLEMNU
+    IF NOT ACCESSOK
+    THEN BEGIN
+      LET CIECLE    OF PDSEQ_BON_COMMAN = T_CIECLEMNU
+    END
+    LET BCQNUM    OF PDSEQ_BON_COMMAN = BCQNUM OF PDSEQ_BON_COMMAN + 1
+    LET BCMNUMBCM OF PDBON_COMMANDE   = BCQNUM OF PDSEQ_BON_COMMAN
+    PUT PDSEQ_BON_COMMAN
+    DISPLAY BCMNUMBCM OF PDBON_COMMANDE
+  END
+
+END
+;------------------------------------------------------------------------
+;
+; Détail (P/O)
+;
+
+PROCEDURE DESIGNER D001
+BEGIN
+
+  RUN SCREEN  pd191a                  &
+              PASSING PDBON_COMMANDE, &
+                      T_CIECLEMNU,    &
+                      T_CIENOM        &
+              MODE F
+DISPLAY PODSURDBTCMD OF PDBON_COMMANDE
+DISPLAY PODSURFINCMD OF PDBON_COMMANDE
+
+END
+;------------------------------------------------------------------------
+PROCEDURE FIND
+BEGIN
+     IF PATH = 1
+       THEN
+         GET PDBON_COMMANDE VIA CIECLE , BCMNUMBCM ORDERBY CIECLE , &
+             BCMNUMBCM USING T_CIECLEMNU , BCMNUMBCM OF PDBON_COMMANDE
+
+      IF PATH = 2
+       THEN
+         GET PDBON_COMMANDE VIA CIECLE ORDERBY CIECLE , BCMNUMBCM &
+                          USING T_CIECLEMNU
+
+END
+
+
+
+BUILD DETAIL LIST
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+******************** Identification du P/O sous-contractant ********************
+* No de P/O.....: xxxxxxxx                                                     *
+* Type de P/O...: x                 Date dern MAJ.: xxxxxxxx                   *
+* Fournisseur...: xxxxxx            xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   *
+* Adresse.......: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxx                                                      *
+* Téléphone.....: xxxxxxxxxxxxx     Fax...........: xxxxxxxxxxxxx              *
+* Langue........: x                                                            *
+* Description...: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+* Commande int..: 99-999-999  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx     *
+* Projet........: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+* Impression 1..: xxxxxxxx xxxxx    Dernière imp..: xxxxxxxx xxxxx             *
+*                                                                              *
+********************************************************************************
+@ENDIF

@@ -1,0 +1,1222 @@
+;/T/ 1.4.4 Gérer les bons de commande P/O
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1994-07-22
+;
+;    Description..: Cette écran permet de faire la gestion des bons de commande.
+;
+;/M/ François Déry, 12 mai 1999
+;       Ajout du in dict sur la transaction et de l'énoncé commit de cette
+;       transaction.
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd171 ACTIONBAR                    &
+             MODE LABEL "" AT 2,80        &
+             NOACTION                     &
+             ACTIVITIES CHANGE,FIND,ENTRY &
+             FIELDMARK RETAIN STARTUP     &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU ,      &
+                       T_CIENOM
+
+
+;-------------------------------------------------------------------------------
+;
+; Déclaration de la transaction pour donner un numéro séquentiel
+;
+
+TRANSACTION NO_SEQ READ WRITE &
+                   RESERVING FOR PROTECTED WRITE PDSEQ_BON_COMMAN IN DICT
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+
+USE ussectmp  NOLIST
+    "PD171"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+
+USE pd171.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+
+USE usactecr  NOLIST
+
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-écrans"
+  MENUITEM LABEL "Détail bon de commande (P/O)    " ACTION DESIGNER D001
+  MENUITEM LABEL "Vérification bon commnade (P/O) " ACTION DESIGNER D002
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%Détail bon de commande (P/O) " ACTION DESIGNER D001
+  MENUITEM LABEL "%%%Vérif. bon commnade (P/O)    " ACTION DESIGNER D002
+@ENDIF
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu. (et utilisés dans le passage de
+; paramètres).
+;
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Clés de recherche pour les popup de consultations et les sous-écrans
+;
+
+TEMPORARY T_FOUCLE    CHARACTER SIZE 6
+TEMPORARY T_USINE_SEC CHARACTER SIZE 1
+
+TEMPORARY T_TAXCLETYP CHARACTER SIZE 01 ; Popup sur les codes de taxes
+TEMPORARY T_TAXCLECOD CHARACTER SIZE 02 ; Popup sur les codes de taxes
+TEMPORARY T_TAXMODPAT CHARACTER SIZE 05 ; Popup sur les codes de taxes
+
+TEMPORARY T_TERCAT    CHARACTER SIZE 04 ; Popup sur les termes
+TEMPORARY T_TERCLE    CHARACTER SIZE 04 ; Popup sur les termes
+
+
+;-------------------------------------------------------------------------------
+;
+; Sert à valider les codes bilingue et pour les sous-écrans de consultation
+;
+DEFINE    D_BCMFRSCOU    CHARACTER SIZE 16 = "BCMFRSCOU"
+TEMPORARY T_BCMFRSCOU    CHARACTER SIZE 04
+DEFINE    D_BCMFRSTRPTER CHARACTER SIZE 16 = "BCMFRSTRPTER"
+TEMPORARY T_BCMFRSTRPTER CHARACTER SIZE 04
+DEFINE    D_BCMFRSTRPMAR CHARACTER SIZE 16 = "BCMFRSTRPMAR"
+TEMPORARY T_BCMFRSTRPMAR CHARACTER SIZE 04
+
+;-------------------------------------------------------------------------------
+;
+; Clés de recherche pour les popup de consultations et les sous écrans
+;
+
+TEMPORARY T_PJTABR       CHARACTER SIZE 2
+TEMPORARY T_PJTANN       CHARACTER SIZE 2
+TEMPORARY T_COMNUMCOMINT CHARACTER SIZE 3
+TEMPORARY T_COMNUMCOM    CHARACTER SIZE 7
+TEMPORARY T_CHAMP        INTEGER UNSIGNED SIZE 01
+
+;-------------------------------------------------------------------------------
+;
+; Bon de commande
+;
+
+FILE PDBON_COMMANDE PRIMARY &
+                    NOITEM
+
+  ACCESS VIA     CIECLE,   &
+                 BCMNUMBCM &
+         USING   T_CIECLEMNU,                &
+                 BCMNUMBCM OF PDBON_COMMANDE &
+         REQUEST BCMNUMBCM OF PDBON_COMMANDE &
+         ORDERBY CIECLE,   &
+                 BCMNUMBCM
+
+  ACCESS VIA     CIECLE      &
+         USING   T_CIECLEMNU &
+         ORDERBY CIECLE,     &
+                 BCMNUMBCM
+
+  ITEM   BCMCODTYPBCM OF PDBON_COMMANDE INITIAL "A"
+  ITEM   BCMTYPBCM    OF PDBON_COMMANDE INITIAL "E"
+  ITEM   BCMDATCRE    OF PDBON_COMMANDE INITIAL SYSDATE
+  ITEM   BCMHRECRE    OF PDBON_COMMANDE INITIAL SYSTIME / 10000
+  ITEM   BCMUSRCRE    OF PDBON_COMMANDE INITIAL LOGONID
+  ITEM   CIECLE       OF PDBON_COMMANDE INITIAL T_CIECLEMNU
+  ITEM   FOCCIECLE    OF PDBON_COMMANDE INITIAL T_CIECLEMNU
+  ITEM   FOUCIECLE    OF PDBON_COMMANDE INITIAL "----"
+  ITEM   BCMDATMAJ    OF PDBON_COMMANDE FINAL   SYSDATE &
+                                                IF NOT NEWRECORD OF PDBON_COMMANDE AND &
+                                                   ALTEREDRECORD     OF PDBON_COMMANDE
+  ITEM   BCMHREMAJ    OF PDBON_COMMANDE FINAL   SYSTIME / 10000 &
+                                                IF NOT NEWRECORD OF PDBON_COMMANDE AND &
+                                                   ALTEREDRECORD     OF PDBON_COMMANDE
+  ITEM   BCMUSRMAJ    OF PDBON_COMMANDE FINAL   LOGONID &
+                                                IF NOT NEWRECORD OF PDBON_COMMANDE AND &
+                                                   ALTEREDRECORD     OF PDBON_COMMANDE
+
+  ITEM   BCMPRITOT    OF PDBON_COMMANDE INITIAL 0.00
+
+  ITEM   BCMPRITOT    OF PDBON_COMMANDE FINAL   BCMPRIFOR    OF PDBON_COMMANDE &
+                                                IF BCMTYPBCM OF PDBON_COMMANDE = "F"
+
+  ITEM   COMNUMCOM    OF PDBON_COMMANDE FINAL   PJTABR       OF PDBON_COMMANDE +       &
+                                                PJTANN       OF PDBON_COMMANDE +       &
+                                                COMNUMCOMINT OF PDBON_COMMANDE
+
+
+SELECT IF BCMCODTYPBCM OF PDBON_COMMANDE = "A"
+
+
+;-------------------------------------------------------------------------------
+;
+; Commande interne
+;
+
+FILE PDCOMMAN_INTERNE REFERENCE
+
+  ACCESS VIA     CIECLE,                               &
+                 PJTABR,                               &
+                 PJTANN,                               &
+                 COMNUMCOMINT                          &
+         USING   T_CIECLEMNU,                          &
+                 PJTABR           OF PDBON_COMMANDE,   &
+                 PJTANN           OF PDBON_COMMANDE,   &
+                 COMNUMCOMINT     OF PDBON_COMMANDE
+
+
+;-------------------------------------------------------------------------------
+;
+; Projet
+;
+
+FILE PDPROJET         REFERENCE
+
+  ACCESS VIA     CIECLE,                               &
+                 PJTABR                                &
+         USING   T_CIECLEMNU,                          &
+                 PJTABR          OF PDBON_COMMANDE
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro séquentiel pour les bons de commande
+;
+
+FILE PDSEQ_BON_COMMAN DESIGNER &
+                      TRANSACTION NO_SEQ
+
+
+;-------------------------------------------------------------------------------
+;
+; Fournisseurs
+;
+
+FILE VFOC_FOU REFERENCE
+
+  ACCESS VIA     FOUCLE,                      &
+                 FOCCIECLE                    &
+         USING   FOUCLE    OF PDBON_COMMANDE, &
+                 T_CIECLEMNU
+
+
+;-------------------------------------------------------------------------------
+;
+; Adresse du fournisseur
+;
+
+FILE MCREF_ADRESSE REFERENCE
+
+  ACCESS VIA     REFCLETYP,                   &
+                 REFCLENUM ,                  &
+                 RADCLE                       &
+         USING   "F",                         &
+                 FOUCLE    OF PDBON_COMMANDE, &
+                 FOCADRACH OF VFOC_FOU
+
+;-------------------------------------------------------------------------------
+;
+; Frais de courtage
+;
+
+FILE VCBI_DSC  REFERENCE &
+               ALIAS A_CBI_FRSCOU
+
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_BCMFRSCOU,                          &
+               BCMFRSCOU OF PDBON_COMMANDE
+
+
+;-------------------------------------------------------------------------------
+;
+; Frais de transport terrestre
+;
+
+FILE VCBI_DSC  REFERENCE &
+               ALIAS A_CBI_FRSTRPTER
+
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_BCMFRSTRPTER,                       &
+               BCMFRSTRPTER OF PDBON_COMMANDE
+
+
+;-------------------------------------------------------------------------------
+;
+; Frais de transport maritime
+;
+
+FILE VCBI_DSC  REFERENCE &
+               ALIAS A_CBI_FRSTRPMAR
+
+
+  ACCESS VIA   XELNOM,                               &
+               CBICLE                                &
+         USING D_BCMFRSTRPMAR,                       &
+               BCMFRSTRPMAR OF PDBON_COMMANDE
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation des codes de taxes fédéral.
+;
+
+FILE MCTAXE           REFERENCE &
+                      ALIAS A_TAX_TPS
+
+  ACCESS  VIA   TAXCLETYP, &
+                TAXCLECOD &
+          USING "F"      , &
+                BCMTAXCODTPS OF PDBON_COMMANDE
+
+
+;-------------------------------------------------------------------------------
+;
+; Validation des codes de taxes provincial.
+;
+
+FILE MCTAXE           REFERENCE &
+                      ALIAS A_TAX_TVP
+
+  ACCESS  VIA   TAXCLETYP, &
+                TAXCLECOD &
+          USING "P"      , &
+                BCMTAXCODTVQ OF PDBON_COMMANDE
+
+
+;-------------------------------------------------------------------------------
+;
+; Terme de paiement
+;
+
+FILE CPTERME REFERENCE
+
+  ACCESS VIA     TERCLE &
+         USING   TERCLE OF PDBON_COMMANDE
+
+
+;-------------------------------------------------------------------------------
+;
+; Reception
+;
+
+FILE PDRECEPTION DESIGNER
+
+  ACCESS VIA     CIECLE, &
+                 BCMNUMBCM &
+         USING   T_CIECLEMNU, &
+                 BCMNUMBCM OF PDBON_COMMANDE
+
+
+;-------------------------------------------------------------------------------
+;
+;
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Bon de commande (P/O) " &
+@ELSE
+      " %%%Bon de commande (P/O) " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+SKIP TO LINE 5
+
+ALIGN (2,3,19)
+
+
+FIELD BCMNUMBCM    OF PDBON_COMMANDE          &
+LABEL "No de P/O.....:"&
+        HIDDEN ID 05                          &
+        DISPLAY                               &
+        REFRESH
+
+
+ALIGN (2,3,19) (36,37,53)
+
+
+FIELD BCMCODTYPBCM OF PDBON_COMMANDE          &
+LABEL "Type de P/O...:"&
+        HIDDEN ID 10                          &
+        DISPLAY
+
+
+FIELD BCMDATMAJ    OF PDBON_COMMANDE           FORMAT YYYYMMDD PATTERN "####/##/##"&
+LABEL "Date dern MAJ.:"&
+        HIDDEN ID 15                          &
+        DISPLAY                               &
+        REFRESH
+
+
+ALIGN (2,3,19) (36,37,37)
+
+
+FIELD FOUCLE       OF PDBON_COMMANDE           &
+LABEL "Fournisseur...:"&
+        HIDDEN ID 20                           &
+        REQUIRED                               &
+        LOOKUP ON VFOC_FOU                     &
+          VIA     FOUCLE,                      &
+                  FOCCIECLE                   &
+;                  FOCUSISEC                    &
+          USING   FOUCLE    OF PDBON_COMMANDE, &
+                  T_CIECLEMNU                 &
+;                  "0" & ; Non
+          MESSAGE 2917 ; Ce founisseur n'existe pas
+
+
+FIELD FOUNOM       OF VFOC_FOU                &
+        HIDDEN ID 25                          &
+        DISPLAY                               &
+        NOLABEL
+
+
+ALIGN (2,3,19)
+
+
+FIELD RADADR1      OF MCREF_ADRESSE           &
+LABEL "Adresse.......:"&
+        HIDDEN ID 30                          &
+        DISPLAY
+
+
+FIELD RADADR2      OF MCREF_ADRESSE           &
+        ID SAME                               &
+        DISPLAY                               &
+        NOLABEL
+
+
+FIELD RADADR3      OF MCREF_ADRESSE           &
+        ID SAME                               &
+        DISPLAY                               &
+        NOLABEL
+
+
+FIELD RADADR4      OF MCREF_ADRESSE           &
+        ID SAME                               &
+        DISPLAY                               &
+        NOLABEL
+
+
+FIELD RADCP        OF MCREF_ADRESSE           &
+        ID SAME                               &
+        DISPLAY                               &
+        NOLABEL
+
+
+ALIGN (2,3,19) (36,37,53)
+
+
+FIELD RADTEL       OF MCREF_ADRESSE           &
+LABEL "Téléphone.....:"&
+        HIDDEN ID 35                          &
+        DISPLAY
+
+
+FIELD RADFAX       OF MCREF_ADRESSE           &
+LABEL "Fax...........:"&
+        HIDDEN ID 40                          &
+        DISPLAY
+
+
+FIELD FOULNG       OF VFOC_FOU                &
+LABEL "Langue........:"&
+        HIDDEN ID 45                          &
+        DISPLAY
+
+
+FIELD BCMTYPBCM    OF PDBON_COMMANDE          &
+LABEL "Forfait/estimé:"&
+        HIDDEN ID 50
+
+
+ALIGN (,,55)
+
+FIELD BCMPRIFOR   OF PDBON_COMMANDE           &
+        ID SAME                               &
+        REQUIRED                              &
+        IF BCMTYPBCM OF PDBON_COMMANDE = "F"
+
+
+ALIGN (2,3,19)
+
+
+FIELD BCMDSC001    OF PDBON_COMMANDE          &
+label "Description...:"&
+        HIDDEN ID 55
+
+
+FIELD BCMDSC002    OF PDBON_COMMANDE          &
+        ID SAME                               &
+        NOLABEL
+
+
+SKIP
+
+ALIGN (2,3,19) (,21,22) (,25,26) (,30,30)
+
+
+FIELD PJTABR           OF PDBON_COMMANDE   &
+        HIDDEN ID 58                       &
+        LABEL "Num. commande.:"            &
+        LOOKUP ON PDPROJET                            &
+          VIA     CIECLE,                             &
+                  PJTABR                              &
+          USING   T_CIECLEMNU,                        &
+                  PJTABR          OF PDBON_COMMANDE   &
+          MESSAGE 3074 ; Le code de projet n'existe pas
+
+FIELD PJTANN           OF PDBON_COMMANDE   &
+        HIDDEN ID SAME                     &
+        DISPLAY                            &
+        LABEL "-"
+
+
+FIELD COMNUMCOMINT     OF PDBON_COMMANDE              &
+        HIDDEN ID SAME                                &
+        NUMERIC                                       &
+        LABEL "-"                                     &
+        LOOKUP ON PDCOMMAN_INTERNE                    &
+          VIA    CIECLE,                              &
+                 PJTABR,                              &
+                 PJTANN,                              &
+                 COMNUMCOMINT                         &
+          USING  T_CIECLEMNU ,                        &
+                 PJTABR           OF PDBON_COMMANDE,  &
+                 PJTANN           OF PDBON_COMMANDE,  &
+                 COMNUMCOMINT     OF PDBON_COMMANDE   &
+          MESSAGE 3008 ; Cette commande interne n'existe pas
+
+
+FIELD COMNOM           OF PDCOMMAN_INTERNE   &
+        DISPLAY
+
+
+SKIP
+
+FIELD BCMPROPOT    OF PDBON_COMMANDE          &
+label "Projet........:"&
+        HIDDEN ID 60
+
+
+SKIP
+
+
+ALIGN (02,03,19) (,,22)
+
+
+FIELD BCMFRSCOU        OF PDBON_COMMANDE   &
+label "Frs. courtage.:"&
+        HIDDEN ID 62                       &
+        LOOKUP ON A_CBI_FRSCOU             &
+          VIA   XELNOM,                               &
+                CBICLE                                &
+          USING D_BCMFRSCOU,                          &
+                BCMFRSCOU    OF PDBON_COMMANDE        &
+          MESSAGE 3177; Ce frais de courtage n'existe pas
+
+
+FIELD CBIDSC           OF A_CBI_FRSCOU    &
+        DISPLAY                           &
+        FOR ,15
+
+
+FIELD BCMFRSTRPTER     OF PDBON_COMMANDE   &
+label "Frs. trp. ter.:"&
+        HIDDEN ID 64                       &
+        LOOKUP ON A_CBI_FRSTRPTER          &
+          VIA   XELNOM,                               &
+                CBICLE                                &
+          USING D_BCMFRSTRPTER,                       &
+                BCMFRSTRPTER OF PDBON_COMMANDE        &
+          MESSAGE 3064 ; Ce code n'existe pas
+
+
+FIELD CBIDSC           OF A_CBI_FRSTRPTER  &
+        DISPLAY                            &
+        FOR ,15
+
+
+FIELD BCMFRSTRPMAR     OF PDBON_COMMANDE   &
+label "Frs. trp. mar.:"&
+        HIDDEN ID 66                       &
+        LOOKUP ON A_CBI_FRSTRPMAR          &
+          VIA   XELNOM,                               &
+                CBICLE                                &
+          USING D_BCMFRSTRPMAR,                       &
+                BCMFRSTRPMAR OF PDBON_COMMANDE        &
+          MESSAGE 3064 ; Ce code n'existe pas
+
+
+FIELD CBIDSC           OF A_CBI_FRSTRPMAR  &
+        DISPLAY                            &
+        FOR ,15
+
+
+SKIP TO LINE 19
+
+
+ALIGN (37,38,54) (,,59)
+
+
+FIELD BCMTAXCODTPS     OF   PDBON_COMMANDE &
+label "Code taxe TPS.:"&
+        HIDDEN ID 68                       &
+        LOOKUP ON A_TAX_TPS                &
+          MESSAGE 3089 ; Ce code de taxe n'existe pas
+
+
+FIELD TAXDSCFRA        OF A_TAX_TPS        &
+        DISPLAY
+
+
+FIELD BCMTAXCODTVQ     OF   PDBON_COMMANDE &
+label "Code taxe TVQ.:"&
+        HIDDEN ID 70                       &
+        LOOKUP ON A_TAX_TVP                &
+          MESSAGE 3089 ; Ce code de taxe n'existe pas
+
+
+FIELD TAXDSCFRA        OF A_TAX_TVP        &
+        DISPLAY
+
+
+FIELD TERCLE           OF PDBON_COMMANDE   &
+label "Code Terme....:"&
+        HIDDEN ID 72                       &
+        LOOKUP ON CPTERME                  &
+          MESSAGE 3084 ; Ce terme de paiement n'existe pas
+
+
+FIELD TERDSCABRFRA     OF CPTERME          &
+        DISPLAY
+
+
+SKIP
+
+
+;ALIGN (2,3,19) (27,28,28) (37,38,54) (62,63,63)
+ALIGN (2,3,19) (,,30) (37,38,54) (,,65)
+
+
+FIELD BCMDATIMP    OF PDBON_COMMANDE           FORMAT YYYYMMDD PATTERN "####/##/##"&
+        HIDDEN ID 76                          &
+        DISPLAY                               &
+        LABEL "Impression 1..:"
+
+
+FIELD BCMHREIMP    OF PDBON_COMMANDE          &
+        ID SAME                               &
+        DISPLAY                               &
+        NOLABEL
+
+
+FIELD BCMDATDERIMP    OF PDBON_COMMANDE        FORMAT YYYYMMDD PATTERN "####/##/##"&
+        HIDDEN ID 78                          &
+        DISPLAY                               &
+        LABEL "Dernière imp..:"
+
+
+FIELD BCMHREDERIMP    OF PDBON_COMMANDE       &
+        ID SAME                               &
+        DISPLAY                               &
+        NOLABEL
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur (pop-up) pour les fournisseurs.
+;
+
+PROCEDURE INPUT FOUCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_USINE_SEC = " " ; non
+    LET T_FOUCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd117 MODE F &
+                     PASSING T_CIECLEMNU, &
+                             T_FOUCLE, &
+                             T_USINE_SEC
+    LET FIELDTEXT = TRUNCATE( T_FOUCLE )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide qu'il n'y a pas eu de réception pour ce bon de commande
+;
+
+PROCEDURE EDIT FOUCLE
+BEGIN
+  IF NOT ENTRYMODE
+  THEN BEGIN
+
+    GET PDRECEPTION OPTIONAL
+
+    IF ACCESSOK
+    THEN BEGIN
+      ERROR 3226 ; Il y a une réception pour ce bon de commande
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide qu'il n'y a pas eu de réception pour ce bon de commande
+;
+
+PROCEDURE EDIT BCMTYPBCM
+BEGIN
+  IF NOT ENTRYMODE
+  THEN BEGIN
+
+    GET PDRECEPTION OPTIONAL
+
+    IF ACCESSOK
+    THEN BEGIN
+      ERROR 3226 ; Il y a une réception pour ce bon de commande
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur sur frais de courtage (codes bilingues)
+;
+
+PROCEDURE INPUT BCMFRSCOU
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_BCMFRSCOU = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F &
+                     PASSING D_BCMFRSCOU, &
+                             T_BCMFRSCOU
+    LET FIELDTEXT = TRUNCATE( T_BCMFRSCOU )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que le champ à été saisi
+;
+
+PROCEDURE EDIT BCMFRSCOU OF PDBON_COMMANDE
+BEGIN
+  IF 0 = SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    ERROR 3044 ; Ce champ est requis
+  END
+  ;
+  ; Valide qu'il n'y a pas eu de réception pour ce bon de commande
+  ;
+  IF NOT ENTRYMODE
+  THEN BEGIN
+
+    GET PDRECEPTION OPTIONAL
+
+    IF ACCESSOK
+    THEN BEGIN
+      ERROR 3226 ; Il y a une réception pour ce bon de commande
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur sur frais de courtage (codes bilingues)
+;
+
+PROCEDURE INPUT BCMFRSTRPTER
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_BCMFRSTRPTER = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F &
+                     PASSING D_BCMFRSTRPTER, &
+                             T_BCMFRSTRPTER
+    LET FIELDTEXT = TRUNCATE( T_BCMFRSTRPTER )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que le champ à été saisi
+;
+
+PROCEDURE EDIT BCMFRSTRPTER OF PDBON_COMMANDE
+BEGIN
+  IF 0 = SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    ERROR 3044 ; Ce champ est requis
+  END
+  ;
+  ; Valide qu'il n'y a pas eu de réception pour ce bon de commande
+  ;
+  IF NOT ENTRYMODE
+  THEN BEGIN
+
+    GET PDRECEPTION OPTIONAL
+
+    IF ACCESSOK
+    THEN BEGIN
+      ERROR 3226 ; Il y a une réception pour ce bon de commande
+    END
+  END
+
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur sur frais de transport maritime (codes bilingues)
+;
+
+PROCEDURE INPUT BCMFRSTRPMAR
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_BCMFRSTRPMAR = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F &
+                     PASSING D_BCMFRSTRPMAR, &
+                             T_BCMFRSTRPMAR
+    LET FIELDTEXT = TRUNCATE( T_BCMFRSTRPMAR )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que le champ à été saisi
+;
+
+PROCEDURE EDIT BCMFRSTRPMAR OF PDBON_COMMANDE
+BEGIN
+  IF 0 = SIZE(TRUNCATE(FIELDTEXT))
+  THEN BEGIN
+    ERROR 3044 ; Ce champ est requis
+  END
+  ;
+  ; Valide qu'il n'y a pas eu de réception pour ce bon de commande
+  ;
+  IF NOT ENTRYMODE
+  THEN BEGIN
+
+    GET PDRECEPTION OPTIONAL
+
+    IF ACCESSOK
+    THEN BEGIN
+      ERROR 3226 ; Il y a une réception pour ce bon de commande
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Sous-écran de consultation des codes de taxe.
+;
+
+PROCEDURE INPUT BCMTAXCODTPS
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TAXCLETYP = "F"
+    LET T_TAXCLECOD = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    LET T_TAXMODPAT = "@"
+    RUN SCREEN mc111 MODE F PASSING T_TAXCLETYP, &
+                                    T_TAXCLECOD, &
+                                    T_TAXMODPAT
+    LET FIELDTEXT = TRUNC(T_TAXCLECOD)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide qu'il n'y a pas eu de réception pour ce bon de commande
+;
+
+PROCEDURE EDIT BCMTAXCODTPS
+BEGIN
+
+  IF NOT ENTRYMODE
+  THEN BEGIN
+
+    GET PDRECEPTION OPTIONAL
+
+    IF ACCESSOK
+    THEN BEGIN
+      ERROR 3226 ; Il y a une réception pour ce bon de commande
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Sous-écran de consultation des codes de taxe.
+;
+
+PROCEDURE INPUT BCMTAXCODTVQ
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TAXCLETYP = "P"
+    LET T_TAXCLECOD = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    LET T_TAXMODPAT = "@"
+    RUN SCREEN mc111 MODE F PASSING T_TAXCLETYP, &
+                                    T_TAXCLECOD, &
+                                    T_TAXMODPAT
+    LET FIELDTEXT = TRUNC(T_TAXCLECOD)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide qu'il n'y a pas eu de réception pour ce bon de commande
+;
+
+PROCEDURE EDIT BCMTAXCODTVQ
+BEGIN
+
+  IF NOT ENTRYMODE
+  THEN BEGIN
+
+    GET PDRECEPTION OPTIONAL
+
+    IF ACCESSOK
+    THEN BEGIN
+      ERROR 3226 ; Il y a une réception pour ce bon de commande
+    END
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur pour le champ
+;
+
+PROCEDURE INPUT TERCLE
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TERCLE = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_TERCAT = "NET"
+    RUN SCREEN cp102 MODE F PASSING T_TERCLE, T_TERCAT
+    LET FIELDTEXT = TRUNCATE(T_TERCLE)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide qu'il n'y a pas eu de réception pour ce bon de commande
+;
+
+PROCEDURE EDIT TERCLE
+BEGIN
+
+  IF NOT ENTRYMODE
+  THEN BEGIN
+
+    GET PDRECEPTION OPTIONAL
+
+    IF ACCESSOK
+    THEN BEGIN
+      ERROR 3226 ; Il y a une réception pour ce bon de commande
+    END
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel dépisteur No commande int (attention cet appel est particulier)
+;
+
+PROCEDURE INPUT PJTABR OF PDBON_COMMANDE
+BEGIN
+
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PJTABR           = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_PJTANN           = ""
+    LET T_COMNUMCOMINT     = ""
+    LET T_COMNUMCOM        = ""
+    LET T_CHAMP            = 1
+    RUN SCREEN pd124 MODE F                     &
+                     PASSING T_PJTABR,          &
+                             T_PJTANN,          &
+                             T_COMNUMCOMINT,    &
+                             T_COMNUMCOM,       &
+                             T_CHAMP,           &
+                             T_CIECLEMNU
+    LET FIELDTEXT          = TRUNCATE( T_PJTABR )
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Assigne les champs du projet
+;
+
+PROCEDURE PROCESS PJTABR OF PDBON_COMMANDE
+BEGIN
+  LET     PJTANN OF PDBON_COMMANDE =  PJTANN OF PDPROJET
+  DISPLAY PJTANN OF PDBON_COMMANDE
+
+  LET PJTNUMSEQ OF PDBON_COMMANDE = PJTNUMSEQ        OF PDPROJET
+
+  LET PJTNUMPRO OF PDBON_COMMANDE = PJTABR           OF PDBON_COMMANDE + &
+                                    PJTANN           OF PDBON_COMMANDE + &
+                                    PJTNUMSEQ        OF PDBON_COMMANDE
+
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel dépisteur No bloc (attemtion cet appel est particulier)
+;
+
+PROCEDURE INPUT COMNUMCOMINT OF PDBON_COMMANDE
+BEGIN
+
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_PJTABR           = PJTABR          OF PDBON_COMMANDE
+    LET T_PJTANN           = PJTANN          OF PDBON_COMMANDE
+    LET T_COMNUMCOMINT     = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    LET T_COMNUMCOM        = ""
+    LET T_CHAMP            = 3
+    RUN SCREEN pd124 MODE F                     &
+                     PASSING T_PJTABR,          &
+                             T_PJTANN,          &
+                             T_COMNUMCOMINT,    &
+                             T_COMNUMCOM,       &
+                             T_CHAMP,           &
+                             T_CIECLEMNU
+    LET PJTABR     OF PDBON_COMMANDE = TRUNCATE( T_PJTABR )
+    LET PJTANN     OF PDBON_COMMANDE = TRUNCATE( T_PJTANN )
+    LET FIELDTEXT                    = TRUNCATE( T_COMNUMCOMINT )
+  END
+
+  IF 0 <> SIZE( TRUNCATE( T_COMNUMCOMINT ) ) AND &
+     0 = SIZE( TRUNCATE( FIELDTEXT) )
+  THEN BEGIN
+    LET FIELDTEXT                 = TRUNCATE( T_COMNUMCOMINT )
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Affectation du nom du projet potentiel.
+;
+
+PROCEDURE PROCESS COMNUMCOMINT OF PDBON_COMMANDE
+BEGIN
+  LET     BCMPROPOT OF PDBON_COMMANDE = PJTNOM OF PDPROJET
+  DISPLAY BCMPROPOT OF PDBON_COMMANDE
+END
+
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF PDBON_COMMANDE &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF PDBON_COMMANDE &
+     AND NOT NEWRECORD     OF PDBON_COMMANDE &
+     AND NOT DELETEDRECORD OF PDBON_COMMANDE &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+  ;
+  ; Initialisation le la compiagnie du fournisseur
+  ;
+  LET FOUCIECLE        OF PDBON_COMMANDE = FOUCIECLE        OF VFOC_FOU
+  LET FOCCIECLE        OF PDBON_COMMANDE = FOCCIECLE        OF VFOC_FOU
+  ;
+  ; Incrémentation du numéro de séquence
+  ;
+  IF 0 = BCMNUMBCM OF PDBON_COMMANDE
+  THEN BEGIN
+    START TRANSACTION NO_SEQ
+    GET PDSEQ_BON_COMMAN OPTIONAL       &
+      VIA     CIECLE                    &
+      USING   T_CIECLEMNU
+    LET CIECLE OF PDSEQ_BON_COMMAN = T_CIECLEMNU
+    LET BCQNUM OF PDSEQ_BON_COMMAN = BCQNUM OF PDSEQ_BON_COMMAN + 1
+    LET BCMNUMBCM OF PDBON_COMMANDE = BCQNUM OF PDSEQ_BON_COMMAN
+    PUT PDSEQ_BON_COMMAN
+    DISPLAY BCMNUMBCM OF PDBON_COMMANDE
+    COMMIT TRANSACTION NO_SEQ
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Permet de faire afficher le numéro de séquence du bon de commande
+;
+
+PROCEDURE POSTUPDATE
+BEGIN
+  IF CORRECTMODE
+  THEN BEGIN
+    DISPLAY BCMNUMBCM    OF PDBON_COMMANDE
+    WARNING = " "
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Détail bon de commande (P/O)
+;
+
+PROCEDURE DESIGNER D001
+BEGIN
+
+  IF ALTEREDRECORD OF PDBON_COMMANDE
+  THEN BEGIN
+    ERROR 2991 ; Faire une mise à jour avant d'accèder au sous-écran
+  END
+
+  RUN SCREEN  pd171a &
+              PASSING PDBON_COMMANDE, &
+                      T_CIECLEMNU,    &
+                      T_CIENOM        &
+              MODE F
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Vérification bon commnade (P/O)
+;
+
+PROCEDURE DESIGNER D002
+BEGIN
+  RUN SCREEN  pd171b &
+              PASSING   PDBON_COMMANDE, &
+                        T_CIECLEMNU,    &
+                        T_CIENOM        &
+              MODE F
+END
+
+BUILD
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+**************************** Bon de commande (P/O) *****************************
+*                                                                              *
+* No de P/O.....: xxxxxxxxxxx                                                  *
+* Type de P/O...: x                 Date dern MAJ.: xxxxxxxx                   *
+* Fournisseur...: xxxxxx            xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   *
+* Adresse.......: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxx                                                      *
+* Téléphone.....: xxxxxxxxxxxxx     Fax...........: xxxxxxxxxxxxx              *
+* Langue........: x                 Forfait/estimé: x xxxxxxxxxxxxxxx          *
+* Description...: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+*                 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+* Projet........: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+* Frs. courtage.: xx xxxxxxxxxxxxxxx Code taxe TPS.: xx   xxxxxxxxxxxxxxxxxxxx *
+* Frs. trp. ter.: xx xxxxxxxxxxxxxxx Code taxe TVP.: xx   xxxxxxxxxxxxxxxxxxxx *
+* Frs. trp. mar.: xx xxxxxxxxxxxxxxx Code Terme....: xxxx xxxxxxxxxxxxxxxxxxxx *
+* Impression 1..: xxxxxxxx xxxxx     Dernière imp..: xxxxxxxx xxxxx            *
+*                                                                              *
+********************************************************************************
+@ENDIF

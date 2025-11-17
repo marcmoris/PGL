@@ -1,0 +1,389 @@
+;/T/ 2.4.4. Enregistrer le débitage - PROCÉDURE DE VALIDATION
+;
+;/P/ Programmeur..: Martin Bruyère
+;    Date Création: 1994-03-31
+;
+;    Description..: Le but de cette unité de traitement est de gérer
+;                   le débitage des pièce de granit.
+;
+;/M/ François Déry, 6 mai 1999
+;       Modification de la table des diagrammes pour enlever les champs compute
+;       qu'elle contenait et création d'une vue pour compenser.
+;-------------------------------------------------------------------------------
+
+USE ussetqts NOLIST   ; set process nolimit
+
+RUN pd712t
+
+SET LOCK RECORD UPDATE
+
+USE usdimprd NOLIST   ; Dimension min et max pour les pièces de granit
+
+;-------------------------------------------------------------------------------
+;
+; Valide les lignes de détail du rapport d'opération de surface
+;
+
+REQUEST VALIDE_DETAIL_RAPPORT
+
+ACCESS PDDEBITAGE                            &
+
+  LINK CIECLE, &
+       DEBNUMRAP        OF PDDEBITAGE        &
+    TO CIECLE ,&
+       DEBNUMRAP        OF PDDET_DEBITAGE    &
+
+  LINK CIECLE OF PDDET_DEBITAGE,             &
+       TRANUMTRA002     OF PDDET_DEBITAGE    &
+    TO CIECLE,                                &
+       TRANUMTRA002     OF PDTRANCHE         OPTIONAL &
+
+  LINK CIECLE OF PDDET_DEBITAGE,              &
+       DIANUM002        OF PDDET_DEBITAGE    &
+    TO CIECLE,                                &
+       DIANUM002        OF PDDIAGRAMME       OPTIONAL &
+  LINK PJTABR OF PDDIAGRAMME, &
+       DIANUMDIA001 OF PDDIAGRAMME, &
+       DIANUMDIA002 OF PDDIAGRAMME, &
+       CIECLE OF PDDIAGRAMME &
+    TO PJTABR, &
+       DIANUMDIA001, &
+       DIANUMDIA002, &
+       CIECLE                           OF VDIAQTE OPTIONAL &
+
+ LINK CIECLE           OF PDDET_DEBITAGE,&
+       DDELON           OF PDDET_DEBITAGE,   &
+       DDEHAU           OF PDDET_DEBITAGE,   &
+       DDEEPA           OF PDDET_DEBITAGE,   &
+       TGRCODGRA        OF PDDET_DEBITAGE,   &
+       TYFCODFIN        OF PDDET_DEBITAGE    &
+    TO CIECLE,&
+       PDILON,                               &
+       PDIHAU,                               &
+       PDIEPA,                               &
+       TGRCODGRA,                            &
+       TYFCODFIN        OF PDPROD_DIMENSION  OPTIONAL &
+
+  LINK CIECLE           OF PDDET_DEBITAGE,&
+       TGRCODGRA        OF PDDET_DEBITAGE    &
+    TO CIECLE,&
+       TGRCODGRA        OF PDTYPE_GRANIT     OPTIONAL &
+
+  LINK CIECLE           OF PDDET_DEBITAGE,&
+       TYFCODFIN        OF PDDET_DEBITAGE    &
+    TO CIECLE,&
+       TYFCODFIN        OF PDTYPE_FINI       OPTIONAL &
+
+  LINK CIECLE           OF PDDEBITAGE,&
+       MDECODMAC        OF PDDEBITAGE        &
+    TO CIECLE,&
+       MDECODMAC        OF PDMACH_DEBITAGE   OPTIONAL &
+
+  LINK CIECLE           OF PDDEBITAGE,&
+       DEBNUMRAP        OF PDDEBITAGE        &
+    TO CIECLE,&
+       DEBNUMRAP        OF PDARRET_DEBIT     OPTIONAL &
+
+  LINK CIECLE           OF PDARRET_DEBIT,&
+       RAACODARR        OF PDARRET_DEBIT     &
+    TO CIECLE,&
+       RAACODARR        OF PDRAISON_ARRET    OPTIONAL &
+
+  LINK CIECLE           OF PDDEBITAGE,&
+       DEBNUMRAP        OF PDDEBITAGE        &
+    TO CIECLE,&
+       DEBNUMRAP        OF PDOPER_DEBITAGE   OPTIONAL &
+
+  LINK CIECLE           OF PDOPER_DEBITAGE,&
+       OPENUMEMP        OF PDOPER_DEBITAGE   &
+    TO CIECLE,&
+       OPENUMEMP        OF PDOPERATEUR       OPTIONAL &
+;
+;VALIDATION DES TOLERANCE DIAGRAMME
+;
+  LINK CIECLE       OF PDDIAGRAMME ,&
+       PJTABR       OF PDDIAGRAMME ,&
+       PJTANN       OF PDDIAGRAMME ,&
+       COMNUMCOMINT OF PDDIAGRAMME &
+   TO  CIECLE                      ,&
+       PJTABR                      ,&
+       PJTANN                      ,&
+       COMNUMCOMINT OF PDCOMMAN_INTERNE OPT
+
+
+
+CHOOSE CIECLE PARM ,&
+       DEBNUMRAP PARM
+
+SELECT PDDET_DEBITAGE IF DDESTU OF PDDET_DEBITAGE <> "M" &
+                         AND &
+                         DDESTU OF PDDET_DEBITAGE <> "D"
+
+SORT ON DEBNUMRAP OF PDDEBITAGE ON DIANUM002 OF PDDET_DEBITAGE ON DDENUMLIG OF PDDET_DEBITAGE
+
+TEMPORARY T_MESSAGE      CHARACTER SIZE 80
+DEFINE D_TRAEPAPLU    INTEGER   SIZE 4 = TRAEPA OF PDTRANCHE + COMEPAPLU OF PDCOMMAN_INTERNE &
+                                         IF RECORD PDCOMMAN_INTERNE EXIST &
+                                         ELSE TRAEPA OF PDTRANCHE + 2
+DEFINE D_TRAEPAMOI    INTEGER   SIZE 4 = TRAEPA OF PDTRANCHE - COMEPAMOI OF PDCOMMAN_INTERNE  &
+                                         IF RECORD PDCOMMAN_INTERNE EXIST &
+                                         ELSE TRAEPA OF PDTRANCHE - 2
+
+;-------------------------------------------------------------------------------
+;
+; Code d'erreur pour le rapport
+;
+
+TEMPORARY T_ERREUR_1 CHARACTER SIZE 01
+TEMPORARY T_ERREUR_2 CHARACTER SIZE 01
+TEMPORARY T_ERREUR_3 CHARACTER SIZE 01
+TEMPORARY T_ERREUR_4 CHARACTER SIZE 01
+TEMPORARY T_ERREUR_5 CHARACTER SIZE 01
+TEMPORARY T_ERREUR_6 CHARACTER SIZE 01
+TEMPORARY T_ERREUR_7 CHARACTER SIZE 01
+TEMPORARY T_ERREUR_8 CHARACTER SIZE 01
+TEMPORARY T_ERREUR_9 CHARACTER SIZE 01
+
+TEMPORARY T_SOM INTEGER SIZE 4
+
+ITEM T_SOM = T_SOM + DDEQTEFAB OF PDDET_DEBITAGE AT DDENUMLIG  &
+                                                 RESET AT DIANUM002
+
+;
+; Valide que le numéro d'opérateur existe
+;
+ITEM T_ERREUR_1 = "1" IF T_ERREUR_1 = "1" &
+                         OR &
+                         NOT RECORD PDOPERATEUR     EXISTS &
+                      ELSE "0" RESET AT DEBNUMRAP
+;
+; Valide que les opérateurs ont été saisie pour le rapport
+;
+ITEM T_ERREUR_2 = "1" IF T_ERREUR_2 = "1" &
+                         OR &
+                         NOT RECORD PDOPER_DEBITAGE EXISTS &
+                      ELSE "0" RESET AT DEBNUMRAP
+;
+; Valide que le code de machine existe
+;
+ITEM T_ERREUR_3 = "1" IF T_ERREUR_3 = "1" &
+                         OR &
+                         NOT RECORD PDMACH_DEBITAGE EXISTS &
+                      ELSE "0" RESET AT DEBNUMRAP
+;
+; Valide que l'heure de début de l'opérateur est compris dans l'intervalle du rapport
+;
+ITEM T_ERREUR_4 = "1" IF T_ERREUR_4 = "1" &
+                         OR &
+                         (RECORD PDOPERATEUR EXISTS &
+                         AND &
+                         (OPDHREDEB OF PDOPER_DEBITAGE < DEBDEP OF PDDEBITAGE &
+                          OR &
+                          OPDHREDEB OF PDOPER_DEBITAGE > DEBARR OF PDDEBITAGE)) &
+                      ELSE "0" RESET AT DEBNUMRAP
+;
+; Valide que l'heure de fin de l'opérateur est compris dans l'intervalle du rapport
+;
+ITEM T_ERREUR_5 = "1" IF T_ERREUR_5 = "1" &
+                         OR &
+                         (RECORD PDOPERATEUR EXISTS &
+                          AND &
+                          (OPDHREFIN OF PDOPER_DEBITAGE < DEBDEP OF PDDEBITAGE &
+                           OR &
+                           OPDHREFIN OF PDOPER_DEBITAGE > DEBARR OF PDDEBITAGE)) &
+                      ELSE "0" RESET AT DEBNUMRAP
+;
+; Valide que l'heure de début de l'arret de débitage est compris dans l'intervalle du rapport
+;
+ITEM T_ERREUR_6 = "1" IF T_ERREUR_6 = "1" &
+                         OR &
+                         (RECORD PDARRET_DEBIT EXISTS &
+                          AND &
+                          (ARDHREDEB OF PDARRET_DEBIT < DEBDEP OF PDDEBITAGE &
+                           OR &
+                           ARDHREDEB OF PDARRET_DEBIT > DEBARR OF PDDEBITAGE)) &
+                      ELSE "0" RESET AT DEBNUMRAP
+
+;
+; Valide que l'heure de fin de l'arret de débitage est compris dans l'intervalle du rapport
+;
+ITEM T_ERREUR_7 = "1" IF T_ERREUR_7 = "1" &
+                         OR &
+                         (RECORD PDARRET_DEBIT EXISTS &
+                          AND &
+                          (ARDHREFIN OF PDARRET_DEBIT < DEBDEP OF PDDEBITAGE &
+                           OR &
+                           ARDHREFIN OF PDARRET_DEBIT > DEBARR OF PDDEBITAGE)) &
+                      ELSE "0" RESET AT DEBNUMRAP
+;
+; Valide que la raison d'arrêt existe
+;
+ITEM T_ERREUR_8 = "1" IF T_ERREUR_8 = "1" &
+                         OR &
+                         (0 <> SIZE(TRUNCATE(RAACODARR OF PDARRET_DEBIT)) &
+                          AND &
+                          NOT RECORD PDRAISON_ARRET EXISTS) &
+                      ELSE "0" RESET AT DEBNUMRAP
+;
+; libre
+;
+ITEM T_ERREUR_9 INITIAL "0"
+
+DEFINE D_HREDEBOPE CHARACTER SIZE 04 = ASCII(OPDHREDEB OF PDOPER_DEBITAGE,4)
+DEFINE D_HREFINOPE CHARACTER SIZE 04 = ASCII(OPDHREFIN OF PDOPER_DEBITAGE,4)
+DEFINE D_HREDEBARR CHARACTER SIZE 04 = ASCII(ARDHREDEB OF PDARRET_DEBIT,4)
+DEFINE D_HREFINARR CHARACTER SIZE 04 = ASCII(ARDHREFIN OF PDARRET_DEBIT,4)
+
+DEFINE D_HREDEBOPERAP CHARACTER SIZE 05 = D_HREDEBOPE[1:2] + ":" + D_HREDEBOPE[3:2]
+DEFINE D_HREFINOPERAP CHARACTER SIZE 05 = D_HREFINOPE[1:2] + ":" + D_HREFINOPE[3:2]
+DEFINE D_HREDEBARRRAP CHARACTER SIZE 05 = D_HREDEBARR[1:2] + ":" + D_HREDEBARR[3:2]
+DEFINE D_HREFINARRRAP CHARACTER SIZE 05 = D_HREFINARR[1:2] + ":" + D_HREFINARR[3:2]
+
+ITEM T_MESSAGE = &
+
+     "." IF (DDEACCERR OF PDDET_DEBITAGE = "1") OR &
+            (DEBSTU OF PDDEBITAGE = "C" OR DDESTU OF PDDET_DEBITAGE = "V") &
+
+ELSE "Ce numéro de diagramme n'existe pas : " + DIANUM002 OF PDDET_DEBITAGE &
+     IF 0 <> SIZE(TRUNCATE(DIANUM002 OF PDDET_DEBITAGE)) AND NOT RECORD PDDIAGRAMME EXISTS &
+
+ELSE "Ce numéro de tranche n'existe pas : " + TRANUMTRA002 OF PDTRANCHE &
+     IF TRANUMTRA002 OF PDDET_DEBITAGE <> "" AND NOT RECORD PDTRANCHE EXISTS &
+
+ELSE "Le type de granit de la tranche est differente de celui du diagramme" &
+     IF RECORD PDTRANCHE EXISTS AND RECORD PDDIAGRAMME EXISTS AND &
+        TGRCODGRA OF PDTRANCHE <> TGRCODGRA OF PDDIAGRAMME &
+
+ELSE "Le statut de la tranche ne permet pas cette opération : " + TRANUMTRA002 OF PDDET_DEBITAGE &
+     IF TRASTU OF PDTRANCHE <> "I" &
+        AND TRASTU OF PDTRANCHE <> "R" &
+        AND TRASTU OF PDTRANCHE <> "A" &
+        AND RECORD PDTRANCHE EXISTS &
+
+ELSE "Le type de granit n'existe pas : " + TGRCODGRA OF PDDET_DEBITAGE &
+     IF NOT RECORD PDTYPE_GRANIT EXISTS &
+
+ELSE "Le type de fini n'existe pas : " + TYFCODFIN OF PDDET_DEBITAGE &
+     IF NOT RECORD PDTYPE_FINI EXISTS &
+
+ELSE "Le type de fini est different de celui du diagramme" &
+     IF (RECORD PDTRANCHE EXIST AND RECORD PDDIAGRAMME EXISTS AND &
+        TYFCODFIN OF PDDIAGRAMME <> TYFCODFIN OF PDTRANCHE) &
+
+
+ELSE "La longueur n'est pas dans les limites permises : " + ASCII(DDELON OF PDDET_DEBITAGE,4) &
+     IF (TPDTYPPRD        OF PDDET_DEBITAGE = "DI" AND &
+         (DDELON          OF PDDET_DEBITAGE > G_DIM_MAX_LAR_DI OR &
+          DDELON          OF PDDET_DEBITAGE < G_DIM_MIN_LAR_DI)) &
+        OR &
+        (TPDTYPPRD        OF PDDET_DEBITAGE = "PD" AND &
+         (DDELON          OF PDDET_DEBITAGE > G_DIM_MAX_LAR_PD OR &
+          DDELON          OF PDDET_DEBITAGE < G_DIM_MIN_LAR_PD)) &
+ELSE "La hauteur n'est pas dans les limites permises: " + ASCII(DDEHAU OF PDDET_DEBITAGE,4) &
+     IF (TPDTYPPRD        OF PDDET_DEBITAGE = "DI" AND &
+         (DDEHAU          OF PDDET_DEBITAGE > G_DIM_MAX_HAU_DI OR &
+          DDEHAU          OF PDDET_DEBITAGE < G_DIM_MIN_HAU_DI)) &
+        OR &
+        (TPDTYPPRD        OF PDDET_DEBITAGE = "PD" AND &
+         (DDEHAU          OF PDDET_DEBITAGE > G_DIM_MAX_HAU_PD OR &
+          DDEHAU          OF PDDET_DEBITAGE < G_DIM_MIN_HAU_PD)) &
+ELSE "L'épaisseur n'est pas dans les limites permises: " + ASCII(DDEEPA OF PDDET_DEBITAGE,4) &
+     IF (TPDTYPPRD        OF PDDET_DEBITAGE = "DI" AND &
+         (DDEEPA          OF PDDET_DEBITAGE > G_DIM_MAX_EPA_DI OR &
+          DDEEPA          OF PDDET_DEBITAGE < G_DIM_MIN_EPA_DI)) &
+        OR &
+        (TPDTYPPRD        OF PDDET_DEBITAGE = "PD" AND &
+         (DDEEPA          OF PDDET_DEBITAGE > G_DIM_MAX_EPA_PD OR &
+          DDEEPA          OF PDDET_DEBITAGE < G_DIM_MIN_EPA_PD)) &
+ELSE "La Qte produite est supérieur à la Qte à fabriquer : " + DIANUM002 OF PDDET_DEBITAGE &
+     IF 0 <> SIZE(TRUNCATE(DIANUM002 OF PDDET_DEBITAGE)) &
+        AND &
+          T_SOM > (DIAQTEPLADBTGRA OF VDIAQTE - (DIAQTEDBTGRA OF VDIAQTE - DIAQTEREJ OF PDDIAGRAMME)) &
+ELSE "Min et/ou Max non respecter de l'epaisseur de la tranche "&
+     IF 0 <> SIZE(TRUNCATE(DIANUM002 OF PDDET_DEBITAGE)) &
+        AND &
+        (DDEEPA OF PDDET_DEBITAGE > G_DIM_MAX_EPA_TR OR &
+         DDEEPA OF PDDET_DEBITAGE < G_DIM_MIN_EPA_TR) &
+ELSE "L'epaisseur de la tranche ne respecte pas les tolérances "&
+     IF 0 <> SIZE(TRUNCATE(TRANUMTRA002 OF PDDET_DEBITAGE)) &
+       AND  (DDEEPA OF PDDET_DEBITAGE > D_TRAEPAPLU OR &
+             DDEEPA OF PDDET_DEBITAGE < D_TRAEPAMOI) &
+ELSE "." AT DDENUMLIG
+
+
+SUBFILE W-PD712-PARAMETRE AT DEBNUMRAP &
+  INCLUDE DEBNUMRAP OF PDDEBITAGE, &
+          CIECLE OF PDDEBITAGE
+
+SUBFILE W-PD712M KEEP APPEND AT DDENUMLIG &
+  INCLUDE DEBNUMRAP OF PDDEBITAGE, &
+          DDENUMLIG OF PDDET_DEBITAGE, &
+          CIECLE    OF PDDEBITAGE, &
+          T_MESSAGE, &
+          T_ERREUR_1, &
+          T_ERREUR_2, &
+          T_ERREUR_3, &
+          T_ERREUR_4, &
+          T_ERREUR_5, &
+          T_ERREUR_6, &
+          T_ERREUR_7, &
+          T_ERREUR_8, &
+          T_ERREUR_9
+
+OUTPUT PDDET_DEBITAGE UPDATE AT DDENUMLIG IF DDESTU OF PDDET_DEBITAGE <> "T"
+  ITEM DDESTU OF PDDET_DEBITAGE FINAL "V" IF T_MESSAGE = "." AND (DDESTU OF PDDET_DEBITAGE = "E" OR DDESTU OF PDDET_DEBITAGE = "C")
+
+SUBFILE WTR1_PDDET_DEBITAGE KEEP AT DDENUMLIG IF DDESTU OF PDDET_DEBITAGE <> "T" INCLUDE PDDET_DEBITAGE
+;-------------------------------------------------------------------------------
+;
+; Valide le rapport d'opération de surface
+;
+
+REQUEST VALIDE_RAPPORT
+
+ACCESS *W-PD712-PARAMETRE                    &
+
+  LINK CIECLE OF W-PD712-PARAMETRE,&
+       DEBNUMRAP        OF W-PD712-PARAMETRE &
+    TO CIECLE,&
+       DEBNUMRAP        OF PDDEBITAGE        &
+
+  LINK CIECLE OF W-PD712-PARAMETRE,&
+       DEBNUMRAP        OF W-PD712-PARAMETRE &
+    TO CIECLE,&
+       DEBNUMRAP        OF PDDET_DEBITAGE    OPTIONAL &
+
+  LINK CIECLE OF W-PD712-PARAMETRE,&
+       DEBNUMRAP        OF PDDEBITAGE        &
+    TO CIECLE,&
+       DEBNUMRAP        OF PDOPER_DEBITAGE   OPTIONAL
+
+
+TEMPORARY T_ERREUR       CHARACTER SIZE 01
+
+
+ITEM T_ERREUR = "E" IF T_ERREUR = "E" &
+                       OR &
+                       (DDESTU OF PDDET_DEBITAGE <> "V" &
+                        AND &
+                        DDESTU OF PDDET_DEBITAGE <> "T" &
+                        AND &
+                        DDESTU OF PDDET_DEBITAGE <> "M" &
+                        AND &
+                        DDESTU OF PDDET_DEBITAGE <> "D") &
+                       OR &
+                       NOT RECORD PDOPER_DEBITAGE EXISTS &
+                    ELSE "C" IF DEBSTU OF PDDEBITAGE = "C" &
+                               ; OR &
+                    ELSE "T" IF DEBSTU OF PDDEBITAGE = "T" &
+                    ELSE "V"
+
+
+SORT ON DEBNUMRAP OF W-PD712-PARAMETRE
+
+OUTPUT PDDEBITAGE UPDATE AT DEBNUMRAP
+  ITEM DEBSTU OF PDDEBITAGE FINAL T_ERREUR
+
+SUBFILE WTR2_PDDET_DEBITAGE KEEP AT DEBNUMRAP INCLUDE PDDET_DEBITAGE
+
+BUILD pd712t

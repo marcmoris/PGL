@@ -1,0 +1,766 @@
+;/T/ Immobilisation - Amortissement / Aliénation
+;
+;/P/ Programmeur..: Alain Côté
+;    Date création: 21 février 1994
+;
+;/M/ François Déry, 30 avril 1999
+;       Modifier l'accèss au fichier de séquence car il a
+;       été converti en format interbase au lieu d'indexé.
+;
+;/V3.02.00/ Alain Côté, 21 février 1994, Immobilisation
+;
+;    Description..: Cet écran sert à inscrire les informations nécessaires sur
+;                   l'amortissement pour la comptabilisation de immobilisation.
+;
+;                   Le champ 'Méthode amortissement' permet de savoir s'il
+;                   s'agit d'un amortissement linéaire ou dégressif.
+;
+;                   Le champ 'Taux amortissement' représente le pourcentage
+;                   annuel d'amortissement. Il ne s'applique qu'à l'amortisse-
+;                   ment dégressif.
+;
+;                   Le champ 'Durée en pér. ctb' représente la durée de vie
+;                   d'une immobilisation. Il ne s'applique qu'à
+;                   l'amortissement linéaire.
+;
+;                   Cet écran permet aussi de définir le montant de la vente
+;                   d'une immobilisation.
+;
+;                   L'aliénation de l'immobilisation est une aliénation totale
+;                   du bien et elle prend effet à la période mentionnée.
+;
+;                   S'il y a aliénation partielle du bien, elle devrait se
+;                   faire par l'intermédiaire de l'écran des ajustements.
+;
+;
+;-----------------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN im001b SLAVE &
+              FROM 7,1 TO 23,80         &
+              MODE LABEL "" AT 1,80 NOACTION &
+              FIELDMARK RETAIN STARTUP &
+              HELP POPUP FROM 4,9 TO 20,72 &
+              RECEIVING IMIMMOBILISATION , &
+                        T_CIECLEMNU      , &
+                        T_CIENOM
+
+;
+; Variables pour la sécurité.
+;
+USE ussectmp  NOLIST
+    "IM001B"
+
+;
+; Documentation de l'écran.
+;
+USE im001b.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  ; Compagnie du menu.
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 ; Nom de la compagnie du menu.
+;
+; Sert à la génération du numéro de séquence
+;
+TRANSACTION GEN_NUM_SEQ READ WRITE &
+                        RESERVING FOR PROTECTED WRITE IMIMM_SEQ IN DICT
+                                                ; Le IN DICT est pour unix
+
+
+;-------------------------------------------------------------------------------
+;
+FILE IMIMMOBILISATION MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Sert à valider les codes bilingue et pour les sous-écrans de consultation
+;
+DEFINE    D_IMMTYPAMO CHARACTER SIZE 16 = "IMMTYPAMO"
+TEMPORARY T_IMMTYPAMO CHARACTER SIZE 4
+
+FILE VCBI_DSC         REFERENCE
+  ACCESS VIA   XELNOM , &
+               CBICLE   &
+         USING D_IMMTYPAMO , &
+               IMMTYPAMO OF IMIMMOBILISATION
+
+;
+; Numéro séquentiel des immobilisations, fichier indexé.
+;
+FILE IMIMM_SEQ        DESIGNER &
+                      TRANSACTION GEN_NUM_SEQ
+  ACCESS VIA   CIECLE &
+         USING CIECLE OF IMIMM_SEQ
+  ITEM CIECLE OF IMIMM_SEQ INITIAL CIECLE OF IMIMMOBILISATION
+
+;
+; Paramètres pour la compagnie consolidé(holding)
+;
+FILE MCHOLDING REFERENCE
+  ACCESS VIA   CIENMC &
+         USING "1"
+
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_PECNO       CHARACTER SIZE 4
+TEMPORARY T_MODULE      CHARACTER SIZE 2
+
+TEMPORARY T_PECCLEMNU CHARACTER SIZE 4 ; Période du menu
+TEMPORARY T_PECCLECOU CHARACTER SIZE 4 ; Période courante
+TEMPORARY T_ECJCIECLEFND CHARACTER SIZE 4
+TEMPORARY T_ECJCLENUMFND CHARACTER SIZE 9
+TEMPORARY T_ECJCLESEQFND CHARACTER SIZE 2
+
+TEMPORARY T_TYPE CHARACTER SIZE 5
+
+;
+; Valeur à amortir = Montant initial + ajustement - récupération.
+;
+DEFINE D_MNT_A_AMT FLOAT SIZE 8 =  IMMMNTINI OF IMIMMOBILISATION + &
+                                   IMMMNTAJT OF IMIMMOBILISATION - &
+                                   IMMMNTREC OF IMIMMOBILISATION
+
+;
+; Valeur non amortie = Valeur à amortir - armortissement accumulé.
+;
+DEFINE D_MNT_NON_AMT  FLOAT SIZE 8 =    D_MNT_A_AMT &
+                                      - IMMAMTACC    OF IMIMMOBILISATION &
+                                      - IMMMNTAMTANN OF IMIMMOBILISATION
+
+;
+; Nombre de périodes à amortir.
+;
+DEFINE D_PER_A_AMT INTEGER SIZE 2 = IMMDURAMT OF IMIMMOBILISATION - &
+                                    IMMNBRPERAMT OF IMIMMOBILISATION &
+                                      IF IMMTYPAMO OF IMIMMOBILISATION = "L" &
+                               ELSE 0
+
+;
+; Montant de l'amortissement par période.
+;
+; Linéaire  = Montant non amortie / nombre de période à amortir.
+; Dégressif = Montant non amortie en début d'année X taux amortissement
+;             / nombre période du G/L
+;
+DEFINE D_MNTAMTPER FLOAT SIZE 8 = ROUND( D_MNT_NON_AMT / D_PER_A_AMT ) &
+                                    IF IMMTYPAMO OF IMIMMOBILISATION = "L" &
+                   ELSE ROUND( ( D_MNT_NON_AMT &
+                                 + IMMMNTAMTANN OF IMIMMOBILISATION ) &
+                               * IMMTAUAMT OF IMIMMOBILISATION / &
+                               HLDNBRPERCTB OF MCHOLDING )
+
+
+;-------------------------------------------------------------------------------
+;
+;
+USE ushilite NOLIST
+
+DRAW 01,01 TO 01,79
+DRAW 01,01 TO 17,01
+DRAW 17,01 TO 17,80
+DRAW 02,80 TO 17,80
+
+TITLE &
+@IF FRANCAIS
+      " Amortissement / Aliénation " &
+@ELSE
+      " %%%Amortissement / Aliénation " &
+@ENDIF
+     AT ,1 CENTERED
+
+
+SKIP
+
+ALIGN (21,5,21) (,,23)
+
+FIELD IMMTYPAMO OF IMIMMOBILISATION ID 05 HIDDEN &
+        REQUIRED &
+        LOOKUP ON VCBI_DSC &
+          MESSAGE 1618 ; Code invalide.
+
+FIELD CBIDSC OF VCBI_DSC &
+        DISPLAY
+
+ALIGN (21,5,21)
+
+FIELD IMMTAUAMT OF IMIMMOBILISATION ID 10 HIDDEN &
+        REQUIRED &
+        IF IMMTYPAMO OF IMIMMOBILISATION = "D"
+
+SKIP 1
+
+ALIGN (21,5,21)
+
+FIELD IMMMNTINI OF IMIMMOBILISATION ID 12 HIDDEN &
+        REQUIRED
+
+SKIP
+
+TITLE "+" AT ,3
+
+FIELD IMMMNTAJT OF IMIMMOBILISATION &
+        ID SAME &
+        DISPLAY
+
+SKIP
+
+TITLE "-" AT ,3
+
+FIELD IMMMNTREC OF IMIMMOBILISATION ID 15 HIDDEN &
+        DISPLAY ON ENTRY
+
+SKIP 1
+
+TITLE "=" AT ,3
+
+ALIGN (21,5,21) (,39,64)
+
+FIELD D_MNT_A_AMT ID 18 HIDDEN &
+@IF FRANCAIS
+        LABEL "Mnt à amortir.:" &
+@ELSE
+        LABEL "%%% à amortir.:" &
+@ENDIF
+        DISPLAY                  &
+        PICTURE "^^,^^^,^^^.^^" &
+        SIGNIFICANCE 4
+
+FIELD IMMDURAMT OF IMIMMOBILISATION &
+        REQUIRED &
+        IF IMMTYPAMO OF IMIMMOBILISATION = "L" &
+@IF FRANCAIS
+        LABEL "  Périodes à amortir...:"
+@ELSE
+        LABEL "%%%Périodes à amortir:"
+@ENDIF
+
+SKIP
+
+TITLE "-" AT ,3
+
+FIELD IMMAMTACC  OF IMIMMOBILISATION ID 20 HIDDEN
+
+FIELD IMMNBRPERAMT OF IMIMMOBILISATION &
+@IF FRANCAIS
+        LABEL "- Périodes amorties....:"
+@ELSE
+        LABEL "- %%%Périodes amorties.:"
+@ENDIF
+
+SKIP
+
+TITLE "-" AT ,3
+
+FIELD IMMMNTAMTANN OF IMIMMOBILISATION ID 22 HIDDEN
+
+SKIP 1
+
+TITLE "=" AT ,3
+
+FIELD D_MNT_NON_AMT &
+        DISPLAY     &
+@IF FRANCAIS
+        LABEL "Mnt non amorti:" &
+@ELSE
+        LABEL "%%%Mnt non amo:" &
+@ENDIF
+        PICTURE "^^,^^^,^^^.^^" &
+        SIGNIFICANCE 4
+
+FIELD D_PER_A_AMT   &
+        DISPLAY &
+@IF FRANCAIS
+        LABEL "= Périodes non amorties:" &
+@ELSE
+        LABEL "  %%%Périodes non amort:" &
+@ENDIF
+        PICTURE "^^^"
+
+SKIP
+
+FIELD D_MNTAMTPER &
+        DISPLAY   &
+@IF FRANCAIS
+        LABEL "Amortissement.:" &
+@ELSE
+        LABEL "%%%Amortisseme:" &
+@ENDIF
+        PICTURE "^,^^^,^^^.^^ " &
+        TRAILING SIGN "-" &
+        SIGNIFICANCE 5
+
+SKIP
+DRAW ,1 TO ,80
+
+TITLE &
+@IF FRANCAIS
+      " Aliénation " &
+@ELSE
+      " %%%Aliénation " &
+@ENDIF
+      AT ,1 CENTERED
+
+SKIP
+
+ALIGN (21,5,21) (,41,57)
+
+FIELD IMMMNTALI  OF IMIMMOBILISATION ID 25 HIDDEN &
+        NOENTRY
+
+FIELD IMMDATALI  OF IMIMMOBILISATION  FORMAT YYYYMMDD &
+        NOENTRY &
+        PATTERN "@" ; On permet une date à zéro
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Appel du popup pour les codes bilingues, Type d'amortissement.
+;
+;
+PROCEDURE INPUT IMMTYPAMO
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_IMMTYPAMO = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F &
+                     PASSING D_IMMTYPAMO , &
+                             T_IMMTYPAMO
+    LET FIELDTEXT = TRUNCATE( T_IMMTYPAMO )
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Si un des montants est modifiés ou le nombre de période on réaffiche toutes
+; les valeurs de la formule.
+;
+;
+PROCEDURE INTERNAL AFFICHE
+BEGIN
+  DISPLAY D_MNT_A_AMT
+  DISPLAY D_MNT_NON_AMT
+  DISPLAY D_MNTAMTPER
+  DISPLAY D_PER_A_AMT
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Type d'amortissement, pour le type dégressif seul le taux est saisie et
+; pour le type linéaire seul le nombre de période est saisie.
+;
+;
+PROCEDURE PROCESS IMMTYPAMO
+BEGIN
+  IF FIELDTEXT = "L"
+  THEN BEGIN
+    LET IMMTAUAMT OF IMIMMOBILISATION = 0
+    DISPLAY IMMTAUAMT OF IMIMMOBILISATION
+  END
+  ELSE BEGIN
+    LET IMMDURAMT OF IMIMMOBILISATION = 0
+    DISPLAY IMMDURAMT OF IMIMMOBILISATION
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Si le taux annuel est modifié, on réaffiche les valeurs.
+;
+;
+PROCEDURE PROCESS IMMTAUAMT
+BEGIN
+  DO INTERNAL AFFICHE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Montant initial.
+; La formule suivante doit toujours être plus grande ou égale à zéro.
+;
+;  Montant initial + ajustement - récupération - amort. accumulé.
+;
+;
+PROCEDURE EDIT IMMMNTINI
+BEGIN
+  IF 0 > (   FIELDVALUE                    &
+           + IMMMNTAJT    OF IMIMMOBILISATION &
+           - IMMMNTREC    OF IMIMMOBILISATION &
+           - IMMAMTACC    OF IMIMMOBILISATION &
+           - IMMMNTAMTANN OF IMIMMOBILISATION )
+  THEN ERROR 1621 ; Problème de montant, vérifier ceux-ci.
+  ;
+  ; Validation du nombre de décimale.
+  ;
+  USE usvaldec NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Si le montant initial est modifié, on réaffiche les valeurs.
+;
+;
+PROCEDURE PROCESS IMMMNTINI
+BEGIN
+  DO INTERNAL AFFICHE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Montant de récupération.
+; La formule suivante doit toujours être plus grande ou égale à zéro.
+;
+;  Montant initial + ajustement - récupération - amort. accumulé.
+;
+;
+PROCEDURE EDIT IMMMNTREC
+BEGIN
+  IF 0 > (   IMMMNTINI    OF IMIMMOBILISATION &
+           + IMMMNTAJT    OF IMIMMOBILISATION &
+           - FIELDVALUE                    &
+           - IMMAMTACC    OF IMIMMOBILISATION &
+           - IMMMNTAMTANN OF IMIMMOBILISATION )
+  THEN ERROR 1621 ; Problème de montant, vérifier ceux-ci.
+  ;
+  ; Validation du nombre de décimale.
+  ;
+  USE usvaldec NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Si le montant de récupération est modifié, on réaffiche les valeurs.
+;
+;
+PROCEDURE PROCESS IMMMNTREC
+BEGIN
+  DO INTERNAL AFFICHE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Si le nombre de période à amortir est modifié, on réaffiche les valeurs.
+;
+;
+PROCEDURE PROCESS IMMDURAMT
+BEGIN
+  DO INTERNAL AFFICHE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Amortissement accumulé.
+; La formule suivante doit toujours être plus grande ou égale à zéro.
+;
+;  Montant initial + ajustement - récupération - amort. accumulé.
+;
+;
+PROCEDURE EDIT IMMAMTACC
+BEGIN
+  IF 0 > (   IMMMNTINI    OF IMIMMOBILISATION &
+           + IMMMNTAJT    OF IMIMMOBILISATION &
+           - IMMMNTREC    OF IMIMMOBILISATION &
+           - FIELDVALUE                       &
+           - IMMMNTAMTANN OF IMIMMOBILISATION )
+  THEN ERROR 1621 ; Problème de montant, vérifier ceux-ci.
+  ;
+  ; Validation du nombre de décimale.
+  ;
+  USE usvaldec NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Si l'amortissement accumulé est modifié, on réaffiche les valeurs.
+;
+;
+PROCEDURE PROCESS IMMAMTACC
+BEGIN
+  DO INTERNAL AFFICHE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Si le nombre de périodes amorties est modifiés, on réaffiche les valeurs.
+;
+;
+PROCEDURE PROCESS IMMNBRPERAMT
+BEGIN
+  DO INTERNAL AFFICHE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Amortissement annuel.
+; La formule suivante doit toujours être plus grande ou égale à zéro.
+;
+;  Montant initial + ajustement - récupération - amort. accumulé. - amort.annuel
+;
+;
+PROCEDURE EDIT IMMMNTAMTANN
+BEGIN
+  IF 0 > (   IMMMNTINI    OF IMIMMOBILISATION &
+           + IMMMNTAJT    OF IMIMMOBILISATION &
+           - IMMMNTREC    OF IMIMMOBILISATION &
+           - IMMAMTACC    OF IMIMMOBILISATION &
+           - FIELDVALUE                    )
+  THEN ERROR 1621 ; Problème de montant, vérifier ceux-ci.
+  ;
+  ; Validation du nombre de décimale.
+  ;
+  USE usvaldec NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Si l'amortissement annuel est modifié, on réaffiche les valeurs.
+;
+;
+PROCEDURE PROCESS IMMMNTAMTANN
+BEGIN
+  DO INTERNAL AFFICHE
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Montant aliénation, validation du nombre de décimale.
+;
+;
+PROCEDURE EDIT IMMMNTALI
+BEGIN
+  USE usvaldec NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Le type d'amortissement est non-modifiable si l'immobilisation a été aliéné.
+;
+;
+PROCEDURE DESIGNER 05
+BEGIN
+  IF IMMDATALI OF IMIMMOBILISATION = 0
+  THEN BEGIN
+    ACCEPT  IMMTYPAMO OF IMIMMOBILISATION
+    DISPLAY CBIDSC OF VCBI_DSC
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; On demande le taux annuel que pour le type dégressif, le taux est
+; non-modifiable si l'immobilisation a été aliéné.
+;
+;
+PROCEDURE DESIGNER 10
+BEGIN
+  IF     IMMTYPAMO OF IMIMMOBILISATION = "D" &
+     AND IMMDATALI OF IMIMMOBILISATION = 0
+  THEN ACCEPT IMMTAUAMT OF IMIMMOBILISATION
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Le montant initial est non-modifiable si l'immobilisation a été aliénée.
+;
+;
+PROCEDURE DESIGNER 12
+BEGIN
+  IF IMMDATALI OF IMIMMOBILISATION = 0
+  THEN ACCEPT IMMMNTINI OF IMIMMOBILISATION
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Le montant récupération est non-modifiable si l'immobilisation a été aliénée.
+;
+;
+PROCEDURE DESIGNER 15
+BEGIN
+  IF IMMDATALI OF IMIMMOBILISATION = 0
+  THEN ACCEPT IMMMNTREC OF IMIMMOBILISATION
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; On demande le nombre de période que pour le type linéaire, le nombre est
+; non-modifiable si l'immobilisation est aliénée.
+;
+;
+PROCEDURE DESIGNER 18
+BEGIN
+  IF     IMMTYPAMO OF IMIMMOBILISATION = "L" &
+     AND IMMDATALI OF IMIMMOBILISATION = 0
+  THEN ACCEPT IMMDURAMT OF IMIMMOBILISATION
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; L'amortissement accumulé et le nombre de période amorties sont non-modifiables
+; si l'immobilisation est aliénée.
+;
+;
+PROCEDURE DESIGNER 20
+BEGIN
+  IF IMMDATALI OF IMIMMOBILISATION = 0
+  THEN BEGIN
+    ACCEPT IMMAMTACC    OF IMIMMOBILISATION
+    ACCEPT IMMNBRPERAMT OF IMIMMOBILISATION
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; L'amortissement annuel est non-modifiables si l'immobilisation est aliénée.
+;
+;
+PROCEDURE DESIGNER 22
+BEGIN
+  IF IMMDATALI OF IMIMMOBILISATION = 0
+  THEN ACCEPT IMMMNTAMTANN OF IMIMMOBILISATION
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Le montant et la date d'aliénation sont non-modifiables sir la procédure
+; d'aliénation a été exécuté pour cette immobilisation.
+;
+;
+PROCEDURE DESIGNER 25
+BEGIN
+  IF "" = TRUNCATE( IMMPECALI OF IMIMMOBILISATION )
+  THEN BEGIN
+    ACCEPT IMMMNTALI  OF IMIMMOBILISATION
+    ACCEPT IMMDATALI  OF IMIMMOBILISATION
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF   DELETEDRECORD OF IMIMMOBILISATION &
+    AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification
+  ;
+  IF    ALTEREDRECORD OF IMIMMOBILISATION &
+    AND NOT NEWRECORD OF IMIMMOBILISATION &
+    AND NOT DELETEDRECORD OF IMIMMOBILISATION &
+    AND TZ_SECMOD = "0"
+  THEN ERROR 2
+  ;
+  ; On assigne un numéro à la fiche d'immobilisation.
+  ;
+  IF "" = TRUNCATE( IMMCLE OF IMIMMOBILISATION )
+  THEN BEGIN
+    START TRANSACTION GEN_NUM_SEQ
+    GET IMIMM_SEQ OPTIONAL
+    LET IMSNUMSEQ OF IMIMM_SEQ = ASCII( &
+                                        NCONVERT(IMSNUMSEQ OF IMIMM_SEQ) + 1 , &
+                                        IMSLONNUM OF IMIMM_SEQ )
+    LET IMMCLE    OF IMIMMOBILISATION = IMSNUMSEQ OF IMIMM_SEQ
+    PUT IMIMM_SEQ
+    COMMIT TRANSACTION GEN_NUM_SEQ
+  END
+END
+
+BUILD
+@IF FORMAT
+************************** Amortissement / Aliénation *************************x
+*   Type amortiss.: x xxxxxxxxxxxxxxxxxxxxxxxxx                                *
+*   Taux annuel...: xxxxxx                                                     *
+*                                                                              *
+*   Coût initial..: xxxxxxxxxxxxx                                              *
+* + Ajustement....: xxxxxxxxxxxxxx                                             *
+* - Récupération..: xxxxxxxxxxxxx                                              *
+*                                                                              *
+* = Mnt à amortir.: xxxxxxxxxxxxx       Périodes à amortir...: xxx             *
+* - Amort.accumulé: xxxxxxxxxxxxx     - Périodes amorties....: xxx             *
+* - Amort.annuel..: xxxxxxxxxxxxx                                              *
+*                                                                              *
+* = Mnt non amorti: xxxxxxxxxxxxx     = Périodes non amorties: xxx             *
+*   Amortissement.: xxxxxxxxxxxxx                                              *
+********************************** Aliénation **********************************
+*   Montant.......: xxxxxxxxxxxxx       Date..........: xxxxxxxx               *
+********************************************************************************
+@ENDIF

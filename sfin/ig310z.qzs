@@ -1,0 +1,357 @@
+;/T/ Impression de la liste d'erreur de l'inventaire physique
+;    des diagrammes .
+;
+;/P/ Programmeur..: René Bonneau
+;    Date Création: 1996-04-02
+;
+;    Description..: Le but de cette unité de traitement est d'imprimer
+;                   la liste d'erreur des diagrammes de l'inventaire physique
+;                   de diagrammes de Granicor.
+;
+;    Paramètres....: Compagnie
+;
+;/M/ François Déry, 6 mai 1999
+;       Modification de la table des diagrammes pour enlever les champs compute
+;       qu'elle contenait et création d'une vue pour compenser.
+;-------------------------------------------------------------------------------
+;
+; initialisation des paramètres globales de QUIZ.
+;
+CANCEL CLEAR
+
+USE ussetqzs NOLIST
+
+;
+; Liste des erreurs ==> produits en cours
+;
+; Sommation de la quantites en inventaire par diagramme(indiagramme)
+;
+ACCESS INDIAGRAMME
+
+CHOOSE CIECLE PARM
+
+DEFINE D-EN-FAB INT SIZE 4 = 0
+
+SORT ON DIANUMDIA002
+
+SET SUBFILE NAME WIG310Z1 AT DIANUMDIA002
+
+REPORT SUMMARY &
+  CIECLE        OF INDIAGRAMME &
+  DIANUMDIA002  OF INDIAGRAMME &
+  PJTABR        OF INDIAGRAMME &
+  IDIQTEINV     OF INDIAGRAMME SUB RESET AT DIANUMDIA002 &
+  D-EN-FAB
+
+BUILD ig310z1
+
+;==============================================================================
+;
+; Cette etape calcule les produits en cours chez granicor
+;
+ACCESS PDDIAGRAMME &
+  LINK PJTABR OF PDDIAGRAMME, &
+       DIANUMDIA001 OF PDDIAGRAMME, &
+       DIANUMDIA002 OF PDDIAGRAMME, &
+       CIECLE OF PDDIAGRAMME &
+    TO PJTABR, &
+       DIANUMDIA001, &
+       DIANUMDIA002, &
+       CIECLE                   OF VDIAQTE OPTIONAL
+
+
+CHOOSE CIECLE PARM
+
+SORT ON DIANUMDIA002
+
+DEFINE D-EN-FAB         INTEGER SIZE 4 = &
+                         DIAQTEDBTGRA OF VDIAQTE + &
+                        (DIAQTEPLADBTGRA OF VDIAQTE - &
+                         DIAQTEEXPSCT OF PDDIAGRAMME) + &
+                         DIAQTEEXPUSISCD - &
+                         DIAQTEEMB OF PDDIAGRAMME
+
+DEFINE D-QTE-INV FLOAT SIZE 8 = 0
+
+SET SUBFILE AT DIANUMDIA002 NAME WIG310Z1 APPEND
+
+REPORT SUMMARY &
+  CIECLE        OF PDDIAGRAMME &
+  DIANUMDIA002  OF PDDIAGRAMME &
+  PJTABR        OF PDDIAGRAMME &
+  D-QTE-INV &
+  D-EN-FAB
+
+BUILD ig310z2
+
+;=============================================================================
+;
+; Sommation des quantitees par PDDIAGRAMME
+;
+ACCESS *WIG310Z1
+
+SORTED ON DIANUMDIA002
+
+SET SUBFILE AT DIANUMDIA002 NAME WIG310Z2
+
+REPORT SUMMARY &
+  CIECLE        OF WIG310Z1 &
+  DIANUMDIA002  OF WIG310Z1 &
+  PJTABR        OF WIG310Z1 &
+  IDIQTEINV             MAX RESET AT DIANUMDIA002 &
+  D-EN-FAB              MAX RESET AT DIANUMDIA002
+
+BUILD ig310z3
+
+;===============================================================================
+;
+; Creation du sous-fichier WIG310Z3
+;
+ACCESS *WIG310Z2
+
+SELECT IF IDIQTEINV OF WIG310Z2 <> D-EN-FAB
+
+SORTED ON DIANUMDIA002
+
+DEFINE D-BALANCE        INTEGER SIZE 2 = IDIQTEINV - D-EN-FAB
+
+SET SUBFILE AT DIANUMDIA002 NAME WIG310Z3
+
+REPORT SUMMARY &
+  CIECLE        OF WIG310Z2 &
+  DIANUMDIA002  OF WIG310Z2 &
+  PJTABR        OF WIG310Z2 &
+  IDIQTEINV     OF WIG310Z2 &
+  D-EN-FAB      OF WIG310Z2 &
+  D-BALANCE
+
+BUILD ig310z4
+
+;==============================================================================
+;
+; Impression par projet
+;
+ACCESS *WIG310Z3 &
+  LINK DIANUMDIA002     OF WIG310Z3,    &
+       CIECLE           OF WIG310Z3     &
+    TO DIANUMDIA002,                    &
+       CIECLE           OF PDDIAGRAMME OPTIONAL &
+  LINK PJTABR OF PDDIAGRAMME, &
+       DIANUMDIA001 OF PDDIAGRAMME, &
+       DIANUMDIA002 OF PDDIAGRAMME, &
+       CIECLE OF PDDIAGRAMME &
+    TO PJTABR, &
+       DIANUMDIA001, &
+       DIANUMDIA002, &
+       CIECLE           OF VDIAQTE OPTIONAL &
+  LINK DIANUMDIA002     OF WIG310Z3,    &
+       CIECLE           OF WIG310Z3     &
+    TO DIANUMDIA002,                    &
+       CIECLE           OF INDIAGRAMME OPTIONAL
+
+;-------------------------------------------------------------------------------
+; Variables obligatoires pour les en-têtes standards.
+;
+DEFINE DZ_NOMRAP1       CHARACTER SIZE 60 = PARM
+DEFINE DZ_NOMRAP2       CHARACTER SIZE 60 = ""
+
+;-------------------------------------------------------------------------------
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP        CHARACTER SIZE  7 = "IG310"
+
+;-------------------------------------------------------------------------------
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM        CHARACTER SIZE 40 = PARM
+
+SELECT IF D-BALANCE <> 0
+
+DEFINE D-A-FAIRE        INTEGER SIZE 2 = DIAQTEPLADBTGRA OF VDIAQTE
+
+DEFINE D-ERREUR         CHARACTER SIZE 25 = &
+                        "# PDDIAGRAMME INEXISTANT" &
+                IF NOT RECORD PDDIAGRAMME EXISTS &
+                ELSE &
+                        "QTE INV PHYS > QTE EN FAB" &
+                IF D-BALANCE > 0 &
+                ELSE &
+                        "QTE EN FAB > QTE INV PHYS"
+
+DEFINE D-ATTENTE        CHARACTER SIZE 2 = &
+                        "**" &
+                IF D-A-FAIRE < (DIAQTEDBT + D-BALANCE) AND &
+                   RECORD PDDIAGRAMME EXISTS
+
+DEFINE D-CODE-PROJET    CHARACTER SIZE 2 = PJTABR OF WIG310Z3
+
+DEFINE D-QTE-REQ        INTEGER   SIZE 2 = DIAQTEPLADBTGRA OF VDIAQTE
+
+DEFINE D-QTE-FAB        INTEGER   SIZE 2 = DIAQTEDBTGRA OF VDIAQTE
+
+SORT ON D-CODE-PROJET &
+     ON DIANUMDIA002 OF WIG310Z3
+
+DEFINE D-TITRE-CENTRE CHARACTER SIZE 80 = &
+        CENTRE ("LISTE DES ERREURS --- INVENTAIRE P.E.C. PAR PROJET                              ")
+DEFINE D-TITRE-CENTRE-TEMP CHARACTER SIZE 80 = &
+        CENTRE ("PROJET: " + D-CODE-PROJET )
+DEFINE D-TITRE-CENTRE1 CHARACTER SIZE 80 = &
+        CENTRE (D-TITRE-CENTRE-TEMP)
+
+USE ustitgor200_45 NOLIST
+
+SKIP 3 &
+  TAB 025 D-TITRE-CENTRE &
+SKIP 1 &
+  TAB 025 D-TITRE-CENTRE1 &
+SKIP 3 &
+  TAB 003 " NUMÉRO                          ------------   QUANTITÉ   ------------" &
+SKIP 1 &
+  TAB 003 "                                                             EN    INV.              NUMÉRO" &
+SKIP 1 &
+  TAB 003 "DIAGRAMME  LONG.  HAUT.  EPAI.   REQ.   FAB.   EMB.   EXP.   FAB.  PHYS.      LOCA     PAGE  ERREUR" &
+SKIP 1 &
+  TAB 003 "---------  -----  -----  -----  -----  -----  -----  -----  -----  -----  --  ----     ----  ------" &
+SKIP 2
+
+HEAD AT D-CODE-PROJET SKIP PAGE
+
+FOOTING AT DIANUMDIA002                                         &
+  TAB 003 DIANUMDIA002 OF WIG310Z3                              &
+  TAB 014 DIALON                                                &
+  TAB 021 DIAHAU                                                &
+  TAB 028 DIAEPA                                                &
+  TAB 035 D-QTE-REQ                     PICTURE "^^^^^"         &
+  TAB 042 D-QTE-FAB                     PICTURE "^^^^^"         &
+  TAB 049 DIAQTEEMB                     PICTURE "^^^^^"         &
+  TAB 056 DIAQTEEXPCLI                  PICTURE "^^^^^"         &
+  TAB 063 D-EN-FAB                      PICTURE "^^^^^"         &
+  TAB 070 IDIQTEINV OF INDIAGRAMME      PICTURE "^^^^^.^^^^"    &
+  TAB 075 "     "                                               &
+  TAB 077 D-ATTENTE                                             &
+  TAB 081 IDINUMLOC OF INDIAGRAMME                              &
+  TAB 088 IDINUMPGE OF INDIAGRAMME                              &
+  TAB 095 D-ERREUR
+
+PAGE FOOTING &
+ " " SKIP &
+ " ** ==> CELA INDIQUE QUE LA QUANTITE EN INVENTAIRE PHYSIQUE DEPASSE LA" &
+ " QUANTITE REQUISE"
+
+FINAL FOOT SKIP 2 &
+       TAB 20 "NOMBRE TOTAL DE PDDIAGRAMMES EN ERREUR: " COUNT AT DIANUMDIA002 &
+       SKIP PAGE
+
+BUILD ig310z5
+
+;===================================================================================================================================
+;
+;  Impression par localisation
+;
+ACCESS *WIG310Z3 &
+  LINK DIANUMDIA002     OF WIG310Z3,    &
+       CIECLE           OF WIG310Z3     &
+    TO DIANUMDIA002,                    &
+       CIECLE           OF PDDIAGRAMME OPTIONAL &
+  LINK PJTABR OF PDDIAGRAMME, &
+       DIANUMDIA001 OF PDDIAGRAMME, &
+       DIANUMDIA002 OF PDDIAGRAMME, &
+       CIECLE OF PDDIAGRAMME &
+    TO PJTABR, &
+       DIANUMDIA001, &
+       DIANUMDIA002, &
+       CIECLE                   OF VDIAQTE OPTIONAL &
+  LINK DIANUMDIA002     OF WIG310Z3,    &
+       CIECLE           OF WIG310Z3     &
+    TO DIANUMDIA002,                    &
+       CIECLE           OF INDIAGRAMME
+
+;-------------------------------------------------------------------------------
+; Variables obligatoires pour les en-têtes standards.
+;
+DEFINE DZ_NOMRAP1       CHARACTER SIZE 60 = PARM
+DEFINE DZ_NOMRAP2       CHARACTER SIZE 60 = ""
+
+;-------------------------------------------------------------------------------
+; Numéro du rapport.
+;
+DEFINE DZ_NUMRAP        CHARACTER SIZE  7 = "IG310"
+
+;-------------------------------------------------------------------------------
+; Nom de la compagnie.
+;
+DEFINE DZ_CIENOM        CHARACTER SIZE 40 = PARM
+
+SELECT IF D-BALANCE <> 0
+
+DEFINE D-A-FAIRE        INTEGER SIZE 2 = DIAQTEPLADBTGRA OF VDIAQTE
+
+DEFINE D-ERREUR         CHARACTER SIZE 25 = &
+                        "# PDDIAGRAMME INEXISTANT" &
+                IF NOT RECORD PDDIAGRAMME EXISTS &
+                ELSE &
+                        "QTE INV PHYS > QTE EN FAB" &
+                IF D-BALANCE > 0 &
+                ELSE &
+                        "QTE EN FAB > QTE INV PHYS"
+
+DEFINE D-ATTENTE        CHARACTER SIZE 2 = &
+                        "**" &
+                IF D-A-FAIRE < (DIAQTEDBT + D-BALANCE)
+
+DEFINE D-QTE-REQ        INTEGER   SIZE 2 = DIAQTEPLADBTGRA OF VDIAQTE
+
+DEFINE D-QTE-FAB        INTEGER   SIZE 2 = DIAQTEDBTGRA OF VDIAQTE
+
+SORT ON IDINUMLOC OF INDIAGRAMME &
+     ON IDINUMPGE OF INDIAGRAMME
+
+DEFINE D-TITRE-CENTRE CHARACTER SIZE 80 = &
+        CENTRE ("LISTE DES ERREURS --- INVENTAIRE P.E.C. PAR LOCALISATION                        ")
+DEFINE D-TITRE-CENTRE-TEMP CHARACTER SIZE 80 = &
+        CENTRE ("LOCALITION: " + IDINUMLOC OF INDIAGRAMME)
+DEFINE D-TITRE-CENTRE1 CHARACTER SIZE 80 = &
+        CENTRE (D-TITRE-CENTRE-TEMP)
+
+USE ustitgor200_45 NOLIST
+
+SKIP 3 &
+  TAB 025 D-TITRE-CENTRE &
+SKIP 1 &
+  TAB 025 D-TITRE-CENTRE1 &
+SKIP 3 &
+  TAB 003 "NUMÉRO  NUMÉRO                          ------------   QUANTITÉ   ------------" &
+SKIP 1 &
+  TAB 003 "                                                              EN    INV.            " &
+SKIP 1 &
+  TAB 003 "  PAGE  DIAGRAMME  LONG.  HAUT.  EPAI.   REQ.   FAB.   EMB.   EXP.   FAB.  PHYS.     LOCA  ERREUR" &
+SKIP 1 &
+  TAB 003 "  ----  --------  -----  -----  -----  -----  -----  -----  -----  -----  -----  --  ----  ------" &
+SKIP 2
+
+REPORT &
+  TAB 003 IDINUMPGE OF INDIAGRAMME      PRINT AT IDINUMPGE      &
+  TAB 011 DIANUMDIA002 OF WIG310Z3                              &
+  TAB 021 DIALON                                                &
+  TAB 028 DIAHAU                                                &
+  TAB 035 DIAEPA                                                &
+  TAB 042 D-QTE-REQ                     PICTURE "^^^^^"         &
+  TAB 049 D-QTE-FAB                     PICTURE "^^^^^"         &
+  TAB 056 DIAQTEEMB                     PICTURE "^^^^^"         &
+  TAB 063 DIAQTEEXPCLI                  PICTURE "^^^^^"         &
+  TAB 070 D-EN-FAB                      PICTURE "^^^^^"         &
+  TAB 077 IDIQTEINV OF INDIAGRAMME      PICTURE "^^^^^^.^^^^"   &
+  TAB 083 "     "                                               &
+  TAB 084 D-ATTENTE                                             &
+  TAB 086 IDINUMLOC OF INDIAGRAMME                              &
+  TAB 092 D-ERREUR
+
+FOOTING AT IDINUMLOC OF INDIAGRAMME SKIP PAGE
+
+PAGE FOOTING &
+ "   " SKIP &
+ " ** ==> CELA INDIQUE QUE LA QUANTITE EN INVENTAIRE PHYSIQUE DEPASSE LA" &
+ " QUANTITE REQUISE"
+
+BUILD ig310z6

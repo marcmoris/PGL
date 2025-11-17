@@ -1,0 +1,816 @@
+;/T/ Cédule d'impression
+;
+;/P/ Programmeur..: Alain Côté
+;    Date Création: 26 mars 1992
+;
+;/V3.00.02/ Alain Côté, 9 mars 1994, 197
+;/V3.02.00/ Thomas BRENNEUR, 25 Mars 1994, 187
+;
+;    Description..: Sert à regrouper l'impression d'états financier. La période
+;                   et le commentaire provient du dernier lancement.
+;
+;/M/ Modifié par..: Guy Chabot le 18 octobre 1994
+;            but..: Retirer la procédure PROCESS UNACLE pour l'affectation du
+;                   centre par défaut car le centre est un regroupement d'unité
+;                   et si l'ont modifie le centre dans l'unité l'état sort à 0.
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+;
+SCREEN gl012 ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIECLEMNU, &
+                       T_CIENOM   , &
+                       T_FLGMNU
+
+
+USE gl012.hlp NOLIST
+
+USE ussectmp NOLIST
+    "GL012"
+
+USE usactecr NOLIST     ; Actionbar standard dans les écrans pleine
+                        ; page et sous-ecran
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-Ecrans"
+  MENUITEM LABEL "Paramètres d'impression" ACTION ID 15
+@ELSE
+ACTIONMENU LABEL "Subscreens"
+  MENUITEM LABEL "Print parameters       " ACTION ID 15
+@ENDIF
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4 ; Compagnie du menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40; Compagnie du menu
+TEMPORARY T_FLGMNU    CHARACTER SIZE 1 ; Provenance du menu.
+
+;-------------------------------------------------------------------------------
+
+FILE GLEF_CEDULE      PRIMARY
+  ACCESS VIA     ECECIECLE,  ECECLE &
+         USING   T_CIECLEMNU,ECECLE OF GLEF_CEDULE &
+         REQUEST ECECLE OF GLEF_CEDULE
+
+  ACCESS VIA   ECECIECLE &
+         USING T_CIECLEMNU &
+         ORDERBY ECECLE
+
+  ITEM ECECIECLE OF GLEF_CEDULE INITIAL T_CIECLEMNU
+  ITEM ECECON    OF GLEF_CEDULE INITIAL "0"
+
+;-------------------------------------------------------------------------------
+
+FILE GLECE_DETAIL     DETAIL &
+                      OCCURS 12 &
+                      NOITEM
+
+  ACCESS VIA     ECECIECLE,ECECLE &
+         USING   ECECIECLE OF GLEF_CEDULE, ECECLE OF GLEF_CEDULE &
+         ORDERBY ECDNUMLIG
+
+  ITEM ECECIECLE OF GLECE_DETAIL INITIAL ECECIECLE OF GLEF_CEDULE
+  ITEM EFICIECLE OF GLECE_DETAIL INITIAL ECECIECLE OF GLEF_CEDULE
+  ITEM ECECLE    OF GLECE_DETAIL INITIAL ECECLE    OF GLEF_CEDULE
+  ITEM ECDCON    OF GLECE_DETAIL INITIAL "0"
+
+;-------------------------------------------------------------------------------
+;
+; Alias du détail de la cédule. Lorsque la cédule est une cédule consolidé,
+; toutes les lignes du détail de la cédule doivent faire référence au même
+; état financier. Cet alias permet de valider que les numéros d'états
+; financiers soient tous identiques dans la cédule.
+;
+FILE GLECE_DETAIL     DESIGNER OPEN READ SHARE ALIAS A_ECD_ECECON
+
+  ACCESS VIA      ECECIECLE , &
+                  ECECLE      &
+         USING    ECECIECLE OF GLEF_CEDULE  , &
+                  ECECLE    OF GLEF_CEDULE
+
+  SELECT IF       EFICLE OF A_ECD_ECECON <> EFICLE OF GLECE_DETAIL
+
+;-------------------------------------------------------------------------------
+;
+; Destruction global, sert à conserver l'intégrité des données.
+;
+FILE GLECE_DETAIL     ALIAS A_ECD_DELETE &
+                      DELETE &
+                      NOITEM
+
+  ACCESS VIA   ECECIECLE , &
+               ECECLE &
+         USING ECECIECLE OF GLEF_CEDULE , &
+               ECECLE    OF GLEF_CEDULE
+
+;
+; Destruction global, sert à conserver l'intégrité des données.
+;
+FILE GLECD_SEL_COL  ALIAS A_ESC_DELETE &
+                    DELETE &
+                    NOITEM
+  ACCESS  VIA   ECECIECLE , &
+                ECECLE      &
+          USING ECECIECLE OF GLEF_CEDULE , &
+                ECECLE    OF GLEF_CEDULE
+
+;-------------------------------------------------------------------------------
+; Validation du # d'état financier. On ne doit pas sélectionner de NOTES
+;
+
+FILE GLETAT_FINANCIER REFERENCE
+
+  ACCESS VIA   EFICIECLE,EFICLE &
+         USING T_CIECLEMNU, EFICLE OF GLECE_DETAIL
+
+  SELECT IF EFITYP OF GLETAT_FINANCIER <> "N"
+
+;-------------------------------------------------------------------------------
+; Validation du centre
+;
+
+FILE MCCENTRE         REFERENCE
+
+;-------------------------------------------------------------------------------
+; Validation du numéro de compagnie.
+;
+
+FILE MCCOMPAGNIE      REFERENCE
+
+;-------------------------------------------------------------------------------
+; Validation de l'unité adm.
+;
+
+FILE MCUNITE_ADM      REFERENCE
+
+;-------------------------------------------------------------------------------
+; Pour afficher la description du type d'état financier.
+;
+
+FILE VCBI_DSC         DESIGNER OPEN READ
+
+;------------------------------------------------------------------------------
+;
+; Gestion des destructions dans la relation de sélection, si l'usager modifi
+; le flag de sélection dans la ligne de cédule ou détruit une ligne.
+;
+FILE GLECD_SEL_COL  ALIAS A_GLECD_SEL_COL_DELETE &
+                    DELETE &
+                    NOITEM &
+                    OCCURS WITH GLECE_DETAIL
+
+  ACCESS  VIA   ECECIECLE , &
+                ECECLE    , &
+                ECDNUMLIG   &
+          USING ECECIECLE OF GLECE_DETAIL , &
+                ECECLE    OF GLECE_DETAIL , &
+                ECDNUMLIG OF GLECE_DETAIL
+
+
+;------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+DEFINE DZ_CIECLE CHARACTER SIZE  4 = T_CIECLEMNU      IF T_FLGMNU = "C"
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER(T_CIENOM)
+
+DEFINE D_EFITYP    CHAR SIZE 16 = "EFITYP"
+
+;
+; Pour la numérotation des lignes.
+;
+
+TEMP   T_NUMLIG    INT SIZE 4 RESET AT STARTUP
+
+;
+; Sert aux sous-écrans de consultation
+;
+TEMPORARY T_CENCLE        CHARACTER SIZE 4
+TEMPORARY T_CIECLE        CHARACTER SIZE 4
+TEMPORARY T_EFICIECLE     CHARACTER SIZE 4
+TEMPORARY T_EFICLE        CHARACTER SIZE 4
+TEMPORARY T_EFITYP        CHARACTER SIZE 1
+TEMPORARY T_UNACLE        CHARACTER SIZE 8
+TEMPORARY T_ECDNUMLIG     INTEGER   SIZE 2
+TEMPORARY T_ECECIECLE     CHARACTER SIZE 4
+TEMPORARY T_ECECLE        CHARACTER SIZE 4
+TEMPORARY T_ECDFLGSELCOL  CHARACTER SIZE 1
+
+;
+; Validation des numéro d'états financiers dans le cas des cédules consolidées
+;
+
+TEMPORARY T_EFICLETMP     CHARACTER SIZE 4
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Cédule d'impression " &
+@ELSE
+      " Printing Schedule   " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+SKIP
+
+ALIGN(2,3,19) (,,26)
+
+FIELD ECECLE OF GLEF_CEDULE HIDDEN ID 5 &
+        REQUIRED &
+        NOCHANGE &
+        LOOKUP NOTON GLEF_CEDULE &
+          VIA   ECECIECLE,ECECLE &
+          USING T_CIECLEMNU,ECECLE OF GLEF_CEDULE &
+          MESSAGE 292 ; Ce code de cédule existe déjà.
+
+FIELD ECEDSC OF GLEF_CEDULE &
+        REQUIRED
+
+FIELD PECCLE    OF GLEF_CEDULE HIDDEN ID 7 DISPLAY
+
+SKIP
+
+FIELD ECETITCOM OF GLEF_CEDULE HIDDEN ID 9 DISPLAY
+
+SKIP
+
+FIELD ECECON    OF GLEF_CEDULE HIDDEN ID 11 &
+        REQUIRED &
+        NOCHANGE
+
+ALIGN(2)
+
+SUBSCREEN gl012a ID 15 NOMARK &
+                 AUTO &
+                 MODE SAME &
+                 PASSING GLEF_CEDULE
+
+DRAW ,1 TO ,80
+SKIP
+
+@IF FRANCAIS
+  TITLE "  No   Code                                      Unité        Sel       Nombre" AT ,2
+  SKIP
+  TITLE " Ligne E/F  Titre de l'état financier      Cie    adm.   Cen. col Cons. copies" AT ,2
+@ELSE
+  TITLE " Line  F/S                                        Adm.        Sel       Copies" AT ,2
+  SKIP
+  TITLE "  No   Code Financial statement title      Co.    Unit   Cen. col Cons.  Qtty " AT ,2
+@ENDIF
+
+ALIGN(4,2,4) (,,9) (,,14) (,,45) (,,50) (,,59) (,,65) (,,70) (,,76)
+CLUSTER OCCURS WITH GLECE_DETAIL ID BASE 20
+
+FIELD ECDNUMLIG OF GLECE_DETAIL HIDDEN LABEL " "
+
+FIELD EFICLE    OF GLECE_DETAIL &
+        REQUIRED &
+        NOCHANGE &
+        LOOKUP &
+          ON    GLETAT_FINANCIER &
+                MESSAGE 291 ; Numéro d'E/F n'existe pas
+
+FIELD ECDTITEF      OF GLECE_DETAIL
+FIELD CIECLE        OF GLECE_DETAIL
+FIELD UNACLE        OF GLECE_DETAIL
+FIELD CENCLE        OF GLECE_DETAIL
+FIELD ECDFLGSELCOL  OF GLECE_DETAIL
+FIELD ECDCON        OF GLECE_DETAIL IF ECECON OF GLEF_CEDULE <> "1"
+FIELD ECDNBRCOP     OF GLECE_DETAIL
+
+CLUSTER
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès pour l'écran par son code.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie, mode APPEND.
+;
+;
+PROCEDURE INPUT ECDNUMLIG
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Conserve le numéro de ligne saisie par l'usager, sert à la numérotation
+; automatique des lignes.
+;
+;
+PROCEDURE EDIT ECDNUMLIG
+BEGIN
+  LET T_NUMLIG = FIELDVALUE
+END
+
+;-------------------------------------------------------------------------------
+;
+; Traitement du numéro d'état financier.
+;
+
+;
+; Accés au sous-écran de consultation des états financier.
+;
+PROCEDURE INPUT EFICLE
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_EFICIECLE = T_CIECLEMNU
+    LET T_EFICLE    = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN gl108 MODE F PASSING T_EFITYP, T_EFICIECLE, T_EFICLE
+    LET FIELDTEXT = TRUNC(T_EFICLE)
+  END
+END
+
+;
+; Numérotation automatique des numéros de ligne.
+;
+PROCEDURE PROCESS EFICLE
+BEGIN
+  IF ECDNUMLIG OF GLECE_DETAIL = 0 AND &
+     NEWRECORD OF GLECE_DETAIL
+  THEN BEGIN
+    LET T_NUMLIG = T_NUMLIG + 5
+    LET ECDNUMLIG OF GLECE_DETAIL = T_NUMLIG
+    DISPLAY ECDNUMLIG
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Priorité d'affichage:
+; 1) Affiche le titre saisie par l'usager dans cette écran.
+; 2) Affiche le titre saisie par l'usager dans l'écran des états financier.
+; 3) Affiche la description du type d'état financier dans le titre.
+;
+;
+PROCEDURE OUTPUT ECDTITEF
+BEGIN
+  IF 0 = SIZE(TRUNC(ECDTITEF OF GLECE_DETAIL))
+  THEN BEGIN
+    IF 0 <> SIZE(TRUNC(EFITITEF OF GLETAT_FINANCIER))
+    THEN LET FIELDTEXT = EFITITEF OF GLETAT_FINANCIER
+    ELSE BEGIN
+      GET VCBI_DSC VIA XELNOM, CBICLE &
+                   USING D_EFITYP, EFITYP OF GLETAT_FINANCIER OPTIONAL
+      IF ACCESSOK
+      THEN LET FIELDTEXT = CBIDSC OF VCBI_DSC
+    END
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Accés au sous-écran de consultation des compagnies.
+;
+;
+PROCEDURE INPUT CIECLE
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc106 MODE F PASSING T_CIECLE
+    LET FIELDTEXT = TRUNC(T_CIECLE)
+  END
+END
+
+;
+; Validation du numéro de compagnie, il est optionel.
+;
+PROCEDURE EDIT CIECLE
+BEGIN
+  IF 0 <> SIZE(TRUNC(FIELDTEXT))
+  THEN BEGIN
+    GET MCCOMPAGNIE VIA CIECLE &
+                    USING CIECLE OF GLECE_DETAIL OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 207 ; Ce numéro de compagnie n'existe pas.
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Traitement de l'unité administrative
+;
+
+;
+; Accés au sous-écran de consultation des unités administrative.
+;
+PROCEDURE INPUT UNACLE
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CIECLE = CIECLE OF GLECE_DETAIL
+    LET T_UNACLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc104 MODE F PASSING T_CIECLE,T_UNACLE
+    LET FIELDTEXT = TRUNC(T_UNACLE)
+  END
+  ;
+  ; Force l'éxécution du la procédure EDIT.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNC(UNACLE OF GLECE_DETAIL))
+  THEN LET FIELDTEXT = UNACLE OF GLECE_DETAIL
+
+END
+
+;
+; Validation de l'unité adm., elle est optionel.
+;
+PROCEDURE EDIT UNACLE
+BEGIN
+  ;
+  ; On valide l'unité adm. seulement si l'usager a spécifié un numéro de
+  ; compagnie sur la ligne.
+  ;
+  IF 0 <> SIZE(TRUNC(FIELDTEXT)) AND &
+     0 <> SIZE(TRUNC(CIECLE OF GLECE_DETAIL))
+  THEN BEGIN
+    GET MCUNITE_ADM VIA CIECLE, UNACLE &
+                    USING CIECLE OF GLECE_DETAIL, &
+                          UNACLE OF GLECE_DETAIL OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 220 ; Ce numéro d'unité adm. n'existe pas.
+  END
+END
+
+;
+; Affichage du centre si l'usager à saisie une unité.
+;
+;PROCEDURE PROCESS UNACLE
+;BEGIN
+;  IF     0 <> SIZE(TRUNCATE(UNACLE OF GLECE_DETAIL)) &
+;     AND 0 <> SIZE(TRUNCATE(CIECLE OF GLECE_DETAIL))
+;  THEN
+;    BEGIN
+;      LET CENCLE OF GLECE_DETAIL = CENCLE OF MCUNITE_ADM
+;      DISPLAY CENCLE OF GLECE_DETAIL
+;    END
+;  ELSE LET CENCLE OF GLECE_DETAIL = ""
+;END
+
+;-------------------------------------------------------------------------------
+;
+; Traitement du Centre
+;
+
+;
+; Accès au sous-écran de consultation.
+;
+PROCEDURE INPUT CENCLE
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CENCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc114 MODE F PASSING T_CENCLE
+    LET FIELDTEXT = TRUNC(T_CENCLE)
+  END
+  ;
+  ; Force l'éxécution de la procédure EDIT.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT) AND &
+     0 <> SIZE(TRUNC(CENCLE OF GLECE_DETAIL))
+  THEN LET FIELDTEXT = CENCLE OF GLECE_DETAIL
+END
+
+;
+; Validation du centre, il est optionel.
+;
+PROCEDURE EDIT CENCLE
+BEGIN
+  IF 0 <> SIZE(TRUNC(FIELDTEXT))
+  THEN BEGIN
+    GET MCCENTRE VIA CENCLE &
+                 USING CENCLE OF GLECE_DETAIL OPTIONAL
+    IF NOT ACCESSOK
+    THEN ERROR 226 ; Ce numéro de centre n'existe pas.
+  END
+END
+
+;------------------------------------------------------------------------------
+; Saisie du flag oui/non sur la sélection des unités
+;
+PROCEDURE INPUT ECDFLGSELCOL
+BEGIN
+  IF 0 = SIZE (TRUNCATE(FIELDTEXT))
+  THEN LET FIELDTEXT = ECDFLGSELCOL OF GLECE_DETAIL
+
+  USE usflginp NOLIST
+END
+
+;
+; Si l'usager demande de faire des sélection par colonne, alors
+; on appelle le popup de saisie de la sélection. Le flag T_ECDFLGSELCOL
+; est nécéssaire car si je met le RUN-SCREEN dans la procédure EDIT,
+; PowerHouse réinitialise ECDFLGSELCOL de GLECE_DETAIL
+;
+PROCEDURE EDIT ECDFLGSELCOL
+BEGIN
+  IF ECDFLGSELCOL OF GLECE_DETAIL = "1"
+  THEN LET T_ECDFLGSELCOL = "1"
+  ELSE LET T_ECDFLGSELCOL = "0"
+END
+
+PROCEDURE PROCESS ECDFLGSELCOL
+BEGIN
+  IF T_ECDFLGSELCOL = "1"
+  THEN BEGIN
+      LET T_ECECIECLE = ECECIECLE OF GLECE_DETAIL
+      LET T_ECECLE    = ECECLE    OF GLECE_DETAIL
+      LET T_ECDNUMLIG = ECDNUMLIG OF GLECE_DETAIL
+      LET T_EFICIECLE = EFICIECLE OF GLECE_DETAIL
+      LET T_EFICLE    = EFICLE    OF GLECE_DETAIL
+      LET T_CIECLE    = CIECLE    OF GLECE_DETAIL
+      LET T_UNACLE    = UNACLE    OF GLECE_DETAIL
+      LET T_CENCLE    = CENCLE    OF GLECE_DETAIL
+      RUN SCREEN gl012b MODE SAME PASSING &
+          T_ECECIECLE, &
+          T_ECECLE   , &
+          T_ECDNUMLIG, &
+          T_EFICIECLE, &
+          T_EFICLE   , &
+          T_CIECLE   , &
+          T_UNACLE   , &
+          T_CENCLE
+    END
+  ELSE BEGIN
+    ;
+    ; Si l'usager ne veut pas de sélection par unités sur sa ligne de
+    ; détail, alors on va supprimer les sélections existantes. Ce
+    ; traitement est nécessaire dans le cas ou l'usager avait une sélection
+    ; et qu'il revient flaguer la ligne pour enlever la sélection.
+    ; Remarque : On demande de supprimer des sélections qui n'ont
+    ;            peut-être jamais existées. Mais le coût en performance est
+    ;            minime car l'usager utilise peu ces écrans.
+    ;
+    IF NOT DELETEDRECORD OF A_GLECD_SEL_COL_DELETE
+    THEN DELETE A_GLECD_SEL_COL_DELETE
+  END
+END
+
+PROCEDURE OUTPUT ECDFLGSELCOL
+BEGIN
+  USE usflgout NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Flag OUI/NON pour le consolidé de la cédule complète.
+;
+PROCEDURE EDIT ECECON
+BEGIN
+  USE usflginp NOLIST
+END
+
+PROCEDURE OUTPUT ECECON
+BEGIN
+  USE usflgout NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Flag OUI/NON pour le consolidé du détail de la cédule.
+;
+PROCEDURE EDIT ECDCON
+BEGIN
+  USE usflginp NOLIST
+END
+
+PROCEDURE OUTPUT ECDCON
+BEGIN
+  USE usflgout NOLIST
+END
+
+;-------------------------------------------------------------------------------
+
+PROCEDURE DESIGNER 20
+BEGIN
+  ACCEPT ECDNUMLIG    OF GLECE_DETAIL
+  ACCEPT EFICLE       OF GLECE_DETAIL
+  ACCEPT ECDTITEF     OF GLECE_DETAIL
+  ACCEPT CIECLE       OF GLECE_DETAIL
+  ACCEPT UNACLE       OF GLECE_DETAIL
+  ;
+  IF 0 = SIZE (TRUNCATE(UNACLE OF GLECE_DETAIL))
+  THEN ACCEPT CENCLE OF GLECE_DETAIL
+  ELSE DISPLAY CENCLE OF GLECE_DETAIL
+  ;
+  ACCEPT ECDFLGSELCOL OF GLECE_DETAIL
+  ;
+  IF ECECON OF GLEF_CEDULE <> "1"
+  THEN ACCEPT ECDCON OF GLECE_DETAIL
+  ELSE DISPLAY ECDCON OF GLECE_DETAIL
+  ;
+  ACCEPT ECDNBRCOP OF GLECE_DETAIL
+END
+
+;-------------------------------------------------------------------------------
+
+PROCEDURE APPEND
+BEGIN
+  ACCEPT ECDNUMLIG    OF GLECE_DETAIL
+  ACCEPT EFICLE       OF GLECE_DETAIL
+  ACCEPT ECDTITEF     OF GLECE_DETAIL
+  ACCEPT CIECLE       OF GLECE_DETAIL
+  ACCEPT UNACLE       OF GLECE_DETAIL
+  ;
+  IF 0 = SIZE (TRUNCATE(UNACLE OF GLECE_DETAIL))
+  THEN ACCEPT CENCLE OF GLECE_DETAIL
+  ELSE DISPLAY CENCLE OF GLECE_DETAIL
+  ;
+  ACCEPT ECDFLGSELCOL OF GLECE_DETAIL
+  ;
+  IF ECECON OF GLEF_CEDULE <> "1"
+  THEN ACCEPT ECDCON OF GLECE_DETAIL
+  ELSE DISPLAY ECDCON OF GLECE_DETAIL
+  ;
+  ACCEPT ECDNBRCOP OF GLECE_DETAIL
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Entrée d'une nouvelle cédule.
+;
+PROCEDURE ENTRY
+BEGIN
+    ACCEPT ECECLE OF GLEF_CEDULE
+    ACCEPT ECEDSC OF GLEF_CEDULE
+
+    DISPLAY PECCLE OF GLEF_CEDULE
+    DISPLAY ECETITCOM OF GLEF_CEDULE
+
+    ACCEPT ECECON OF GLEF_CEDULE
+
+    RUN SCREEN gl012a PASSING GLEF_CEDULE MODE SAME
+
+    FOR GLECE_DETAIL
+    BEGIN
+      PERFORM APPEND
+    END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+;------------------------------------------------------------------------------
+; Valide les traitements permis par écran et par usager.
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF    DELETEDRECORD OF GLEF_CEDULE &
+    AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la mise à jour(Entrée, Modification)
+  ;
+  IF    ALTEREDRECORD     OF GLEF_CEDULE &
+    AND NOT NEWRECORD     OF GLEF_CEDULE &
+    AND NOT DELETEDRECORD OF GLEF_CEDULE &
+    AND TZ_SECMOD = "0"
+  THEN ERROR 2
+
+  FOR GLECE_DETAIL
+  BEGIN
+    ;
+    ; Validation de la destruction
+    ;
+    IF    DELETEDRECORD OF GLECE_DETAIL &
+      AND TZ_SECDEL = "0"
+    THEN ERROR 1
+    ;
+    ; Validation de la mise à jour(Entrée, Modification)
+    ;
+    IF    ALTEREDRECORD     OF GLECE_DETAIL &
+      AND NOT NEWRECORD     OF GLECE_DETAIL &
+      AND NOT DELETEDRECORD OF GLECE_DETAIL &
+      AND TZ_SECMOD = "0"
+    THEN ERROR 2
+  END
+
+  ;
+  ; Dans le cas des cédules consolidées,on doit valider que les numéros
+  ; d'etats financiers saisis soient tous les mêmes. Autrement dit, toutes
+  ; les lignes de détail de la cédule doivent avoir le même numéro
+  ; d'état financier.
+  ;
+  IF    ECECON OF GLEF_CEDULE = "1"
+  THEN  IF  NEWRECORD OF GLEF_CEDULE
+        THEN  FOR GLECE_DETAIL
+              BEGIN
+                IF OCCURRENCE = 1
+                THEN LET T_EFICLETMP = EFICLE OF GLECE_DETAIL
+                IF T_EFICLETMP <> EFICLE OF GLECE_DETAIL
+                THEN ERROR 271 ; GL071E Dans une cédule consolidé, l'EF doit être le même pour toutes les lignes.
+              END
+        ELSE  FOR GLECE_DETAIL
+              BEGIN
+                GET A_ECD_ECECON OPTIONAL
+                IF ACCESSOK
+                THEN ERROR 271 ; GL071E Dans une cédule consolidé, l'EF doit être le même pour toutes les lignes.
+              END
+
+  ;
+  ; Maintenance du nombre de lignes de détail d'un état financier, servant
+  ; au programme d'impression des états financier.
+  ;
+  FOR GLECE_DETAIL
+  BEGIN
+    IF NEWRECORD OF GLECE_DETAIL
+    THEN LET ECENBRLIG OF GLEF_CEDULE = ECENBRLIG OF GLEF_CEDULE + 1
+    ;
+    ; Lors d'une destruction, la première mise à jour fait par l'usager rempli
+    ; la condition qui suit. Dans le cas des mises à jour subséquente du même
+    ; record seul le flag DELETEDRECORD est vrai et le flag ALTEREDRECORD est
+    ; à faux.
+    ;
+    IF DELETEDRECORD OF GLECE_DETAIL AND &
+       ALTEREDRECORD OF GLECE_DETAIL
+    THEN LET ECENBRLIG OF GLEF_CEDULE = ECENBRLIG OF GLEF_CEDULE - 1
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; La procédure update doit être réécrite car elle ne génère pas automatiquement
+; le FOR sur le fichier A_GLECD_SEL_COL_DELETE
+;
+;
+PROCEDURE UPDATE
+BEGIN
+  PUT GLEF_CEDULE
+  FOR GLECE_DETAIL
+  BEGIN
+    PUT GLECE_DETAIL
+  END
+  PUT A_ECD_DELETE
+  FOR A_GLECD_SEL_COL_DELETE
+  BEGIN
+    PUT A_GLECD_SEL_COL_DELETE
+  END
+  PUT A_ESC_DELETE
+END
+
+BUILD
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+***************************** Cédule d'impression ******************************
+* Numéro de lot.: xxxx   xxxxxxxxxxxxxxxxxxxxxxxxx                             *
+* Période ......: xxxxx                                                        *
+* Titre - comm..: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                     *
+* Céd. consolidé: x                                                            *
+********************************************************************************
+*  No   Code                                      Unité        Sel       Nombre*
+* Ligne E/F  Titre de l'état financier      Cie    adm.   Cen. col Cons. copies*
+*  xxx  xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxx xxxxxxxx xxxx  x    x     xx  *
+*  xxx  xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxx xxxxxxxx xxxx  x    x     xx  *
+*  xxx  xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxx xxxxxxxx xxxx  x    x     xx  *
+*  xxx  xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxx xxxxxxxx xxxx  x    x     xx  *
+*  xxx  xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxx xxxxxxxx xxxx  x    x     xx  *
+*  xxx  xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxx xxxxxxxx xxxx  x    x     xx  *
+*  xxx  xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxx xxxxxxxx xxxx  x    x     xx  *
+*  xxx  xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxx xxxxxxxx xxxx  x    x     xx  *
+*  xxx  xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxx xxxxxxxx xxxx  x    x     xx  *
+*  xxx  xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxx xxxxxxxx xxxx  x    x     xx  *
+*  xxx  xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxx xxxxxxxx xxxx  x    x     xx  *
+*  xxx  xxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx xxxx xxxxxxxx xxxx  x    x     xx  *
+********************************************************************************
+@ENDIF

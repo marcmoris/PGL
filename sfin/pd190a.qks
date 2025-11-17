@@ -1,0 +1,831 @@
+;/T/ Identification du P/O de transfert
+;
+;/P/ Programmeur..: René Bonneau
+;    Date Création: 1994-10-13
+;
+;    Description..: Cette écran permet de faire l'identification du P/O de
+;                   transfert du bon de commande pour les produit semis-finis.
+;
+;/M/ François Déry, 12 mai 1999
+;       Ajout du in dict sur la transaction des séquences.
+;
+;/M/ Programmeur..: Martin Bruyère
+;    Date Création: 1995-11-06
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN pd190a ACTIONBAR                      &
+              MODE LABEL "" AT 2,80          &
+              NOACTION                       &
+              FIELDMARK RETAIN STARTUP       &
+              HELP POPUP FROM 4,9 TO 20,72   &
+              RECEIVING PDBON_COMMANDE,      &
+                        T_CIECLEMNU ,        &
+                        T_CIENOM
+
+
+;-------------------------------------------------------------------------------
+;
+; Déclaration de la transaction pour donner un numéro séquentiel
+;
+
+TRANSACTION NO_SEQ READ WRITE &
+                   RESERVING FOR PROTECTED WRITE PDSEQ_BON_COMMAN IN DICT
+
+
+;-------------------------------------------------------------------------------
+;
+; Débute une transaction pour le sous-écran
+;
+
+USE ustrasse  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables pour la sécurité.
+;
+
+USE ussectmp  NOLIST
+    "PD190A"
+
+
+;-------------------------------------------------------------------------------
+;
+; Documentation de l'écran.
+;
+
+USE pd190a.hlp NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Actionbar standard
+;
+
+USE usactecr  NOLIST
+
+
+;-------------------------------------------------------------------------------
+;
+; Variables saisie ou affichée dans le menu.
+;
+
+TEMPORARY T_CIECLEMNU CHARACTER SIZE 4  RESET AT STARTUP ; Compagnie menu
+TEMPORARY T_CIENOM    CHARACTER SIZE 40 RESET AT STARTUP ; nom compagnie
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro et nom de la compagnie pour l'en-tête de l'écran.
+;
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = T_CIECLEMNU
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+
+;-------------------------------------------------------------------------------
+;
+; Bon de commande
+;
+
+FILE PDBON_COMMANDE    MASTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Produit bon commande
+;
+
+FILE PDPROD_BON_CMD PRIMARY &
+                    NOITEM &
+                    OCCURS 22 TIMES
+
+  ACCESS VIA     CIECLE,          &
+                 BCMNUMBCM        &
+         USING   T_CIECLEMNU,                          &
+                 BCMNUMBCM        OF PDBON_COMMANDE    &
+         ORDERBY CIECLE,          &
+                 PJTNUMPRO,       &
+                 DIANUM002,       &
+                 PRICODPRI
+
+
+  ITEM CIECLE           OF PDPROD_BON_CMD INITIAL T_CIECLEMNU
+  ITEM BCMNUMBCM        OF PDPROD_BON_CMD INITIAL &
+       BCMNUMBCM        OF PDBON_COMMANDE FIXED
+
+  ITEM PJTABR           OF PDPROD_BON_CMD INITIAL &
+       PJTABR           OF PDBON_COMMANDE FIXED
+
+  ITEM PJTANN           OF PDPROD_BON_CMD INITIAL &
+       PJTANN           OF PDBON_COMMANDE FIXED
+
+  ITEM PJTNUMSEQ        OF PDPROD_BON_CMD INITIAL &
+       PJTNUMSEQ        OF PDBON_COMMANDE FIXED
+
+   ITEM PJTNUMPRO        OF PDPROD_BON_CMD INITIAL &
+        PJTNUMPRO        OF PDBON_COMMANDE FIXED
+
+
+;-------------------------------------------------------------------------------
+;
+; Priorité diagramme
+;
+
+FILE PDPRIORITE_DIAG  SECONDARY &
+                      NOITEM &
+                      OCCURS WITH PDPROD_BON_CMD &
+                      NODELETE
+
+  ACCESS VIA     CIECLE,          &
+                 DIANUM002,       &
+                 PRICODPRI        &
+         USING   T_CIECLEMNU,                          &
+                 DIANUM002        OF PDPROD_BON_CMD,   &
+                 PRICODPRI        OF PDPROD_BON_CMD
+
+
+  ITEM CIECLE          OF PDPRIORITE_DIAG INITIAL T_CIECLEMNU
+  ITEM PBCQTECMDDBTUSC OF PDPROD_BON_CMD SUM NEGATIVE INTO PDGQTEPLACPEGRA OF PDPRIORITE_DIAG
+  ITEM PBCQTECMDFINUSC OF PDPROD_BON_CMD SUM NEGATIVE INTO PDGQTEPLAFINGRA OF PDPRIORITE_DIAG
+  ITEM PBCQTECMDDBTUSC OF PDPROD_BON_CMD SUM          INTO PDGQTEPLACPEUSC OF PDPRIORITE_DIAG
+  ITEM PBCQTECMDFINUSC OF PDPROD_BON_CMD SUM          INTO PDGQTEPLAFINUSC OF PDPRIORITE_DIAG
+
+
+;-------------------------------------------------------------------------------
+;
+; Diagramme
+;
+
+FILE PDDIAGRAMME      REFERENCE &
+                      OCCURS WITH PDPROD_BON_CMD
+
+  ACCESS VIA     CIECLE,          &
+                 DIANUM002        &
+         USING   T_CIECLEMNU,     &
+                 DIANUM002        OF PDPROD_BON_CMD
+
+
+;-------------------------------------------------------------------------------
+;
+; Détail bon de commande
+;
+
+FILE PDDET_BON_COMMAN DESIGNER OCCURS WITH PDPROD_BON_CMD
+
+
+;-------------------------------------------------------------------------------
+;
+; Réception
+;
+
+FILE PDRECEPTION      DESIGNER &
+                      ALIAS PDRECEPTION_VER_DEL &
+                      OCCURS WITH PDPROD_BON_CMD
+
+
+;-------------------------------------------------------------------------------
+;
+; Numéro séquentiel pour les bons de commande
+;
+
+FILE PDSEQ_BON_COMMAN DESIGNER &
+                      TRANSACTION NO_SEQ
+
+
+;-------------------------------------------------------------------------------
+;
+; Varialbles nécessaire au traitement
+;
+
+TEMPORARY T_SILENT CHARACTER SIZE 01 OCCURS WITH PDPROD_BON_CMD
+TEMPORARY T_NEWREC CHARACTER SIZE 01 RESET AT STARTUP
+TEMPORARY T_ALTREC CHARACTER SIZE 01 RESET AT STARTUP
+TEMPORARY T_TYPCMD CHARACTER SIZE 01 RESET AT STARTUP
+
+
+;-------------------------------------------------------------------------------
+;
+; Clés de recherche pour les popup de consultations et les sous écrans
+;
+
+TEMPORARY T_DIANUM002      CHARACTER SIZE 07
+TEMPORARY T_PRICODPRI      CHARACTER SIZE 02
+TEMPORARY T_QTEPLADBT      INTEGER   SIZE 04
+
+TEMPORARY T_PDDNUMLIG      INTEGER   SIZE 02
+
+;-------------------------------------------------------------------------------
+;
+;
+
+USE usdrwecr NOLIST ; Draw pour les écrans pleine page
+USE ustitstd NOLIST ; En-tête pour les écrans pleine page
+USE ushilite NOLIST ; Hilite pour tout les écrans
+
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      "Détail du P/O de transfert" &
+@ELSE
+      "%%%Détail du P/O transfert" &
+@ENDIF
+      CENTERED AT ,1
+
+
+SKIP TO LINE 5
+
+ALIGN (,3,19) (,31,47) (,54,70)
+
+
+FIELD BCMNUMBCM        OF PDBON_COMMANDE   &
+        DISPLAY                            &
+        FIXED
+
+
+FIELD FOUCLE           OF PDBON_COMMANDE   &
+        DISPLAY                            &
+        FIXED
+
+
+FIELD PJTNUMPRO        OF PDBON_COMMANDE   &
+        DISPLAY                            &
+        FIXED
+
+
+SKIP TO LINE 7
+
+DRAW 7,2 TO 7,78
+
+TITLE &
+@IF FRANCAIS
+      " Détail des produits semis-finis " &
+@ELSE
+      "%%%Détail des produits semis-finis " &
+@ENDIF
+      CENTERED AT ,1
+
+
+SKIP TO LINE 9
+
+
+USE ustitoff NOLIST           ; Pour placer le TITLE OFF
+
+
+TITLE &
+@IF FRANCAIS
+      "            * Débit. -* * Finit. -*                * Débit. -* * Finit. -* " &
+@ELSE
+      "%%%         * Débit. -* * Finit. -*                * Débit. -* * Finit. -* " &
+@ENDIF
+      AT ,2
+
+
+SKIP
+
+
+TITLE &
+@IF FRANCAIS
+      " Diagr.  Pr   Cmd   Rcu   Cmd   Rcu     Diagr.  Pr   Cmd   Rcu   Cmd   Rcu" &
+@ELSE
+      "%%%agr.  Pr   Cmd   Rcu   Cmd   Rcu     Diagr.  Pr   Cmd   Rcu   Cmd   Rcu" &
+@ENDIF
+      AT ,2
+
+
+SKIP
+
+
+DRAW 08,40 TO 22,40
+
+
+ALIGN (02,02,03) (,,11) (,,14) (,,20) (,,26) (,,32)
+
+
+CLUSTER VERTICAL OCCURS WITH PDPROD_BON_CMD FOR 1,39
+
+
+FIELD DIANUM002        OF PDPROD_BON_CMD   &
+        HIDDEN                             &
+        LABEL " "                          &
+        REQUIRED                           &
+        NOCHANGE                           &
+        LOOKUP ON PDDIAGRAMME              &
+          VIA     CIECLE,                  &
+                  DIANUM002                &
+          USING   T_CIECLEMNU,                        &
+                  DIANUM002        OF PDPROD_BON_CMD  &
+          MESSAGE 2998, & ; Ce numéro de diagramme n'existe pas
+               NOTON PDPROD_BON_CMD        &
+          VIA   CIECLE,                    &
+                BCMNUMBCM,                 &
+                DIANUM002,                 &
+                PRICODPRI                  &
+          USING T_CIECLEMNU,                 &
+                BCMNUMBCM OF PDBON_COMMANDE, &
+                DIANUM002 OF PDPROD_BON_CMD, &
+                PRICODPRI OF PDPROD_BON_CMD  &
+          MESSAGE 3118 ; Cette ligne de détail existe déjà
+
+
+FIELD PRICODPRI        OF PDPROD_BON_CMD   &
+        HIDDEN ID SAME                     &
+        REQUIRED                           &
+        NOCHANGE                           &
+        NUMERIC                            &
+        LOOKUP ON PDPRIORITE_DIAG          &
+          MESSAGE 3006, & ; Cette priorité pour ce diagramme n'existe pas
+               NOTON PDPROD_BON_CMD        &
+          VIA   CIECLE,                    &
+                BCMNUMBCM,                 &
+                DIANUM002,                 &
+                PRICODPRI                  &
+          USING T_CIECLEMNU,                 &
+                BCMNUMBCM OF PDBON_COMMANDE, &
+                DIANUM002 OF PDPROD_BON_CMD, &
+                PRICODPRI OF PDPROD_BON_CMD  &
+          MESSAGE 3218 ; Cette ligne de détail existe déjà
+
+
+FIELD PBCQTECMDDBTUSC  OF PDPROD_BON_CMD   &
+      HIDDEN ID SAME                       &
+      REQUIRED
+
+
+FIELD PBCQTERCUDBTUSC  OF PDPROD_BON_CMD   &
+      HIDDEN ID SAME                       &
+      DISPLAY
+
+
+FIELD PBCQTECMDFINUSC  OF PDPROD_BON_CMD   &
+      HIDDEN ID SAME                       &
+      REQUIRED
+
+
+FIELD PBCQTERCUFINUSC  OF PDPROD_BON_CMD   &
+      HIDDEN ID SAME                       &
+      DISPLAY
+
+
+CLUSTER
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide la sécurité d'accès de l'écran.
+;
+
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur pour le champ
+;
+
+PROCEDURE INPUT DIANUM002
+BEGIN
+  ;
+  ; Appel du dépisteur
+  ;
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_DIANUM002 = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd126 MODE F &
+                     PASSING T_DIANUM002, &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_DIANUM002 )
+  END
+  ;
+  ; Ajout du code de projet si l'utilisateur ne l'a pas saisit
+  ;
+  IF 5 = SIZE(TRUNCATE(FIELDTEXT)) &
+     AND &
+     7 <> SIZE(TRUNCATE(DIANUM002 OF PDPROD_BON_CMD))
+  THEN BEGIN
+    LET FIELDTEXT = PJTABR OF PDBON_COMMANDE + FIELDTEXT
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; VALIDATION POUR LE CHAMP
+;
+
+PROCEDURE EDIT DIANUM002
+BEGIN
+  IF DIANUM002 OF PDPROD_BON_CMD[1:2] <> PJTABR OF PDPROD_BON_CMD
+  THEN BEGIN
+    ERROR 3221 ; Le code de projet du diagramme ne correspond pas à celui du bon de commande
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+;
+
+PROCEDURE PROCESS DIANUM002
+BEGIN
+  LET PJTABR       OF PDPROD_BON_CMD = DIANUM002 OF PDPROD_BON_CMD[1:2]
+  LET DIANUMDIA002 OF PDPROD_BON_CMD = DIANUM002 OF PDPROD_BON_CMD[3:5]
+END
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur (pop-up) pour les priorités
+;
+
+PROCEDURE INPUT PRICODPRI
+BEGIN
+
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_DIANUM002    = DIANUM002 OF PDPROD_BON_CMD
+    LET T_PRICODPRI = FIELDTEXT[1:INDEX(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN pd123 MODE F                  &
+                     PASSING T_DIANUM002,    &
+                             T_PRICODPRI,    &
+                             T_QTEPLADBT,    &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( T_PRICODPRI )
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Appel du dépisteur pour le champ
+;
+
+PROCEDURE INPUT PBCQTECMDDBTUSC
+BEGIN
+  IF 0 <> INDEX(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_DIANUM002    = DIANUM002 OF PDPROD_BON_CMD
+    LET T_PRICODPRI    = PRICODPRI OF PDPROD_BON_CMD
+    RUN SCREEN pd123 MODE F                  &
+                     PASSING T_DIANUM002,    &
+                             T_PRICODPRI,    &
+                             T_QTEPLADBT,    &
+                             T_CIECLEMNU
+    LET FIELDTEXT = TRUNCATE( ASCII( T_QTEPLADBT ))
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que la qte planifier pour la priorité est suffisante pour la qte cmd
+;
+
+PROCEDURE EDIT PBCQTECMDDBTUSC
+BEGIN
+  IF FIELDVALUE > PDGQTEPLACPEGRA OF PDPRIORITE_DIAG
+  THEN BEGIN
+    ERROR 3168 ; La quantité commandé est inférieur à la quantité pour la priorité
+  END
+  IF FIELDVALUE < PBCQTERCUDBTUSC  OF PDPROD_BON_CMD
+  THEN BEGIN
+    ERROR 2120 ; La quantité reçue est plus grande que la quantité commandée
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide que la qte planifier pour la priorité est suffisante pour la qte cmd
+;
+
+PROCEDURE EDIT PBCQTECMDFINUSC
+BEGIN
+  IF FIELDVALUE > PDGQTEPLAFINGRA OF PDPRIORITE_DIAG
+  THEN BEGIN
+    ERROR 2068 ; La quantité commandé est inférieur à la quantité pour la priorité
+  END
+  IF FIELDVALUE < PBCQTERCUFINUSC  OF PDPROD_BON_CMD
+  THEN BEGIN
+    ERROR 2120 ; La quantité reçue est plus grande que la quantité commandée
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide si l'usager peut faire de la saisie.
+;
+
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Valide les traitements permis par écran et par usager.
+;
+
+PROCEDURE PREUPDATE
+BEGIN
+
+  FOR PDPROD_BON_CMD
+  BEGIN
+
+    ;
+    ; Validation de la destruction
+    ;
+    IF     DELETEDRECORD OF PDPROD_BON_CMD &
+       AND TZ_SECDEL = "0"
+    THEN ERROR 1
+
+    ;
+    ; Validation de la modification.
+    ;
+    IF     ALTEREDRECORD     OF PDPROD_BON_CMD &
+       AND NOT NEWRECORD     OF PDPROD_BON_CMD &
+       AND NOT DELETEDRECORD OF PDPROD_BON_CMD &
+       AND TZ_SECMOD = "0"
+    THEN ERROR 2
+
+    ;
+    ; Initialisation du timbre de mise à jour
+    ;
+    IF (NOT NEWRECORD OF PDPROD_BON_CMD &
+        AND &
+        ALTEREDRECORD OF PDPROD_BON_CMD) &
+       OR &
+       (NEWRECORD OF PDPROD_BON_CMD &
+        AND &
+        BCMNUMBCM        OF PDBON_COMMANDE <> 0) &
+       OR &
+        DELETEDRECORD OF PDPROD_BON_CMD
+    THEN BEGIN
+      LET BCMDATMAJ        OF PDBON_COMMANDE = SYSDATE
+      LET BCMHREMAJ        OF PDBON_COMMANDE = SYSTIME / 10000
+      LET BCMUSRMAJ        OF PDBON_COMMANDE = LOGONID
+    END
+
+  END
+
+
+  ;-----------------------------------------------------------------------------
+  ;
+  ; Incrémentation du numéro de séquence
+  ;
+  IF 0 = BCMNUMBCM OF PDBON_COMMANDE
+  THEN BEGIN
+    START TRANSACTION NO_SEQ
+    GET PDSEQ_BON_COMMAN OPTIONAL       &
+      VIA     CIECLE                    &
+      USING   T_CIECLEMNU
+    IF NOT ACCESSOK
+    THEN BEGIN
+      LET CIECLE    OF PDSEQ_BON_COMMAN = T_CIECLEMNU
+    END
+    LET BCQNUM    OF PDSEQ_BON_COMMAN = BCQNUM OF PDSEQ_BON_COMMAN + 1
+    LET BCMNUMBCM OF PDBON_COMMANDE   = BCQNUM OF PDSEQ_BON_COMMAN
+    PUT PDSEQ_BON_COMMAN
+    DISPLAY BCMNUMBCM OF PDBON_COMMANDE
+  END
+
+
+  LET T_NEWREC = "0"
+  LET T_ALTREC = "0"
+  LET T_TYPCMD = " "
+
+  FOR PDPROD_BON_CMD
+  BEGIN
+    IF NEWRECORD OF PDPROD_BON_CMD
+    THEN BEGIN
+      LET T_NEWREC = "1"
+    END
+    IF ALTEREDRECORD OF PDPROD_BON_CMD &
+       AND &
+       NOT NEWRECORD OF PDPROD_BON_CMD &
+       AND &
+       NOT DELETEDRECORD OF PDPROD_BON_CMD
+    THEN BEGIN
+      LET T_ALTREC = "1"
+    END
+
+    IF NOT DELETEDRECORD OF PDPROD_BON_CMD
+    THEN BEGIN
+      IF T_TYPCMD = " "
+      THEN BEGIN
+        IF PBCQTECMDFINUSC OF PDPROD_BON_CMD = 0 &
+           AND &
+           PBCQTERCUFINUSC OF PDPROD_BON_CMD = 0
+        THEN BEGIN
+          LET T_TYPCMD = "S"
+        END
+        ELSE BEGIN
+          LET T_TYPCMD = "F"
+        END
+      END
+      ELSE BEGIN
+        IF T_TYPCMD = "S" &
+           AND &
+           PBCQTECMDFINUSC OF PDPROD_BON_CMD <> 0 &
+           AND &
+           PBCQTERCUFINUSC OF PDPROD_BON_CMD <> 0
+        THEN BEGIN
+          LET T_TYPCMD = "M"
+        END
+        ELSE BEGIN
+          IF T_TYPCMD = "F" &
+             AND &
+             PBCQTECMDDBTUSC OF PDPROD_BON_CMD <> 0 &
+             AND &
+             PBCQTERCUDBTUSC OF PDPROD_BON_CMD <> 0
+          THEN BEGIN
+            LET T_TYPCMD = "M"
+          END
+        END
+      END
+    END
+  END
+
+  LET PBCTYP OF PDPROD_BON_CMD = T_TYPCMD
+
+  IF T_NEWREC = "1"
+  THEN BEGIN
+
+    LET T_PDDNUMLIG = 0
+
+    WHILE RETRIEVING PDDET_BON_COMMAN          &
+      VIA   CIECLE,                            &
+            BCMNUMBCM                          &
+      USING T_CIECLEMNU,                       &
+            BCMNUMBCM        OF PDBON_COMMANDE
+    BEGIN
+      LET   T_PDDNUMLIG      = PODNUMLIG        OF PDDET_BON_COMMAN
+    END
+
+    FOR PDPROD_BON_CMD
+    BEGIN
+      LET T_PDDNUMLIG = T_PDDNUMLIG + 1
+      LET CIECLE           OF PDDET_BON_COMMAN = T_CIECLEMNU
+      LET BCMNUMBCM        OF PDDET_BON_COMMAN = BCMNUMBCM        OF PDBON_COMMANDE
+      LET PODNUMLIG        OF PDDET_BON_COMMAN = T_PDDNUMLIG
+      LET TPDTYPPRD        OF PDDET_BON_COMMAN = "DI" ; Diagramme
+      LET TGRCODGRA        OF PDDET_BON_COMMAN = TGRCODGRA        OF PDDIAGRAMME
+      LET TYFCODFIN        OF PDDET_BON_COMMAN = TYFCODFIN        OF PDDIAGRAMME
+      LET PODLON           OF PDDET_BON_COMMAN = DIALON           OF PDDIAGRAMME
+      LET PODHAU           OF PDDET_BON_COMMAN = DIAHAU           OF PDDIAGRAMME
+      LET PODEPA           OF PDDET_BON_COMMAN = DIAEPA           OF PDDIAGRAMME
+      LET DIANUMDIA002     OF PDDET_BON_COMMAN = DIANUMDIA002     OF PDPROD_BON_CMD
+      LET PODRCU           OF PDDET_BON_COMMAN = "0"        ; Signifie que non
+      LET PODCPL           OF PDDET_BON_COMMAN = "0"        ; Signifie que non
+      LET PODTYPFINPRD     OF PDDET_BON_COMMAN = T_TYPCMD   ; Semis-finis, Fini, Mixte
+      IF PBCQTECMDDBTUSC  OF PDPROD_BON_CMD  > PBCQTECMDFINUSC  OF PDPROD_BON_CMD
+      THEN BEGIN
+        LET PODQTECMD        OF PDDET_BON_COMMAN = PBCQTECMDDBTUSC  OF PDPROD_BON_CMD
+        LET PODSURCMD        OF PDDET_BON_COMMAN = DIASURMC2        OF PDDIAGRAMME * &
+                                                   PBCQTECMDDBTUSC  OF PDPROD_BON_CMD
+        LET PODVOLCMD        OF PDDET_BON_COMMAN = DIAVOLMC3        OF PDDIAGRAMME * &
+                                                   PBCQTECMDDBTUSC  OF PDPROD_BON_CMD
+      END
+      ELSE BEGIN
+        LET PODQTECMD        OF PDDET_BON_COMMAN = PBCQTECMDFINUSC  OF PDPROD_BON_CMD
+        LET PODSURCMD        OF PDDET_BON_COMMAN = DIASURMC2        OF PDDIAGRAMME * &
+                                                   PBCQTECMDFINUSC  OF PDPROD_BON_CMD
+        LET PODVOLCMD        OF PDDET_BON_COMMAN = DIAVOLMC3        OF PDDIAGRAMME * &
+                                                   PBCQTECMDFINUSC  OF PDPROD_BON_CMD
+      END
+      LET PODQTERCU        OF PDDET_BON_COMMAN = 0
+
+      LET PODVOLRCU        OF PDDET_BON_COMMAN = 0.00
+
+      LET DIANUM002        OF PDDET_BON_COMMAN = DIANUM002        OF PDPROD_BON_CMD
+      LET PJTABR           OF PDDET_BON_COMMAN = DIANUM002        OF PDPROD_BON_CMD[1:2]
+      LET DIANUMDIA002     OF PDDET_BON_COMMAN = DIANUM002        OF PDPROD_BON_CMD[3:5]
+      LET PRICODPRI        OF PDDET_BON_COMMAN = PRICODPRI        OF PDPROD_BON_CMD
+      PUT    PDDET_BON_COMMAN RESET
+    END
+  END
+  ;
+  ; Si l'enregistrement a été modifié
+  ;
+  IF T_ALTREC = "1"
+  THEN BEGIN
+    GET PDDET_BON_COMMAN OPTIONAL &
+      VIA  CIECLE,    &
+           BCMNUMBCM, &
+           DIANUM002, &
+           PRICODPRI  &
+      USING T_CIECLEMNU,                 &
+            BCMNUMBCM OF PDBON_COMMANDE, &
+            DIANUM002 OF PDPROD_BON_CMD, &
+            PRICODPRI OF PDPROD_BON_CMD
+    IF ACCESSOK
+    THEN BEGIN
+      IF PBCQTECMDDBTUSC  OF PDPROD_BON_CMD  > PBCQTECMDFINUSC  OF PDPROD_BON_CMD
+      THEN BEGIN
+        LET PODQTECMD        OF PDDET_BON_COMMAN = PBCQTECMDDBTUSC  OF PDPROD_BON_CMD
+        LET PODVOLCMD        OF PDDET_BON_COMMAN = DIAVOLMC3        OF PDDIAGRAMME * &
+                                                   PBCQTECMDDBTUSC  OF PDPROD_BON_CMD
+      END
+      ELSE BEGIN
+        LET PODQTECMD        OF PDDET_BON_COMMAN = PBCQTECMDFINUSC  OF PDPROD_BON_CMD
+        LET PODVOLCMD        OF PDDET_BON_COMMAN = DIAVOLMC3        OF PDDIAGRAMME * &
+                                                   PBCQTECMDFINUSC  OF PDPROD_BON_CMD
+      END
+      PUT    PDDET_BON_COMMAN RESET
+    END
+    ELSE BEGIN
+      ERROR "Problème technique 1..."
+    END
+  END
+
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Procedure de destruction
+;
+
+PROCEDURE DELETE
+BEGIN
+  ;
+  ; Vérifie qu'il n'y a pas eu de réception pour ce bon de commande
+  ;
+  GET PDRECEPTION_VER_DEL                         &
+    VIA     CIECLE,                               &
+            BCMNUMBCM                             &
+    USING   T_CIECLEMNU,                          &
+            BCMNUMBCM        OF PDBON_COMMANDE OPTIONAL
+  IF NOT ACCESSOK
+  THEN BEGIN
+    ;
+    ; Destruction du détail du P/O (on ne peut pas détruire l'entete du P/O)
+    ;
+    FOR PDPROD_BON_CMD
+    BEGIN
+      ;
+      ; Recherche detail bon de commande
+      ;
+      GET PDDET_BON_COMMAN OPTIONAL    &
+        VIA   CIECLE,          &
+              BCMNUMBCM,       &
+              DIANUM002,       &
+              PRICODPRI        &
+        USING T_CIECLEMNU,                        &
+              BCMNUMBCM        OF PDBON_COMMANDE, &
+              DIANUM002        OF PDPROD_BON_CMD, &
+              PRICODPRI        OF PDPROD_BON_CMD
+      ;
+      ; Si retrouver alors on de détruit détail de bon de commande
+      ;
+      IF ACCESSOK
+      THEN BEGIN
+        DELETE PDDET_BON_COMMAN
+      END
+    END
+    ;
+    ; Destruction du détail du P/O
+    ;
+    DELETE PDPROD_BON_CMD
+  END
+END
+
+
+BUILD
+
+@IF FORMAT
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+***************************Détail du P/O de transfert***************************
+*                                                                              *
+* No de P/O.....: xxxxxxxxx   Fournisseur...: xxxxxx Num projet....: xxxxxxxxx *
+*                                                                              *
+*********************** Détail des produits semis-finis ********************** *
+*                                      *                                       *
+*            * Débit. -* * Finit. -*   *            * Débit. -* * Finit. -*    *
+* Diagr.  Pr   Cmd   Rcu   Cmd   Rcu   * Diagr.  Pr   Cmd   Rcu   Cmd   Rcu    *
+* xxxxxxx xx xxxxx xxxxx xxxxx xxxxx   * xxxxxxx xx xxxxx xxxxx xxxxx xxxxx    *
+* xxxxxxx xx xxxxx xxxxx xxxxx xxxxx   * xxxxxxx xx xxxxx xxxxx xxxxx xxxxx    *
+* xxxxxxx xx xxxxx xxxxx xxxxx xxxxx   * xxxxxxx xx xxxxx xxxxx xxxxx xxxxx    *
+* xxxxxxx xx xxxxx xxxxx xxxxx xxxxx   * xxxxxxx xx xxxxx xxxxx xxxxx xxxxx    *
+* xxxxxxx xx xxxxx xxxxx xxxxx xxxxx   * xxxxxxx xx xxxxx xxxxx xxxxx xxxxx    *
+* xxxxxxx xx xxxxx xxxxx xxxxx xxxxx   * xxxxxxx xx xxxxx xxxxx xxxxx xxxxx    *
+* xxxxxxx xx xxxxx xxxxx xxxxx xxxxx   * xxxxxxx xx xxxxx xxxxx xxxxx xxxxx    *
+* xxxxxxx xx xxxxx xxxxx xxxxx xxxxx   * xxxxxxx xx xxxxx xxxxx xxxxx xxxxx    *
+* xxxxxxx xx xxxxx xxxxx xxxxx xxxxx   * xxxxxxx xx xxxxx xxxxx xxxxx xxxxx    *
+* xxxxxxx xx xxxxx xxxxx xxxxx xxxxx   * xxxxxxx xx xxxxx xxxxx xxxxx xxxxx    *
+* xxxxxxx xx xxxxx xxxxx xxxxx xxxxx   * xxxxxxx xx xxxxx xxxxx xxxxx xxxxx    *
+*                                      *                                       *
+********************************************************************************
+@ENDIF

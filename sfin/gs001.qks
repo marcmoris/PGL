@@ -1,0 +1,309 @@
+;/T/ Gestion des usagers
+;
+;/P/ Programmeur..: Guy Chabot
+;    Date Création: 18-Feb-1992
+;
+;
+;    Description..: Cet écran permet de définir les usagers qui ont accès
+;                   au système.
+;
+;                   La date de fin permet de valider les accès au système
+;                   d'un usager à l'intérieur de tout l'application.
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN gs001 ACTIONBAR NOMODE NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_FLGHLDOK
+
+TEMPORARY T_FLGHLDOK CHARACTER SIZE 1 ; Si le Holding est présent.
+
+USE gs001.hlp NOLIST
+
+USE ussectmp  NOLIST
+    "GS001"
+
+USE usactecr NOLIST
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-Ecrans"
+  MENUITEM LABEL "Accès Menu             " ACTION DESIGNER D001
+  MENUITEM LABEL "Restriction écran      " ACTION DESIGNER D002
+  MENUITEM LABEL "Restriction rapport    " ACTION DESIGNER D003
+  MENUITEM LABEL "Restriction procédure  " ACTION DESIGNER D006
+  MENUITEM LABEL "Sécurité compagnie     " ACTION DESIGNER D004
+  MENUITEM LABEL "Copie d'un usager      " ACTION DESIGNER D005
+  MENUITEM LABEL "Sécurité des éléments  " ACTION DESIGNER D007
+@ELSE
+ACTIONMENU LABEL "Subscreens"
+  MENUITEM LABEL "Menu access          "   ACTION DESIGNER D001
+  MENUITEM LABEL "Screen restrictions  "   ACTION DESIGNER D002
+  MENUITEM LABEL "Report restrictions  "   ACTION DESIGNER D003
+  MENUITEM LABEL "Funct. restrictions  "   ACTION DESIGNER D006
+  MENUITEM LABEL "Companie security    "   ACTION DESIGNER D004
+  MENUITEM LABEL "Copy a user          "   ACTION DESIGNER D005
+  MENUITEM LABEL "%%%urité des éléments  " ACTION DESIGNER D007
+@ENDIF
+
+
+;-------------------------------------------------------------------------------
+;
+FILE GSUSAGER         PRIMARY
+  ACCESS REQUEST USRCLE OF GSUSAGER &
+         VIA     USRCLE             &
+         USING   USRCLE OF GSUSAGER &
+         ORDERED
+  ACCESS REQUEST USREMPNOM OF GSUSAGER &
+         VIA     USREMPNOM             &
+         USING   USREMPNOM OF GSUSAGER &
+         ORDERED
+  ACCESS SEQUENTIAL &
+         ORDERBY USRCLE
+
+;
+; Pour l'intégrité des données lors d'une destruction.
+;
+FILE GSUSAGER_PROG    DELETE &
+                      NOITEM
+ ACCESS VIA USRCLE USING USRCLE OF GSUSAGER
+
+;
+; Pour l'intégrité des données lors d'une destruction.
+;
+FILE GSSEC_USR        DELETE &
+                      NOITEM
+ ACCESS VIA USRCLE USING USRCLE OF GSUSAGER
+
+;
+; Pour l'intégrité des données lors d'une destruction.
+;
+FILE GSSEC_ELEMENT    DELETE &
+                      NOITEM
+ ACCESS VIA USRCLE USING USRCLE OF GSUSAGER
+
+;
+; Pour valider et afficher la langue.
+;
+FILE VCBI_DSC         DESIGNER OPEN READ
+
+;
+; Pour valider et afficher la localisation.
+;
+FILE VXLO_DSC         REFERENCE
+
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_COD    CHARACTER SIZE 1  ; Pour les sous-écrans de sécurité
+TEMPORARY T_XLOCLE CHARACTER SIZE 4  ; Consultation des localisations
+
+;-------------------------------------------------------------------------------
+;
+USE ushilite NOLIST
+
+DRAW 2,1  TO  10,80
+
+TITLE &
+@IF FRANCAIS
+      " Usagers " &
+@ELSE
+      " Users Management " &
+@ENDIF
+      CENTERED AT 2,1
+
+USE ustitoff NOLIST
+
+SKIP 1
+
+ALIGN(3,3,19)(,,32)
+FIELD USRCLE    OF GSUSAGER HIDDEN ID 05 &
+        REQUIRED NOCHANGE &
+label "Usager........:" &
+@IF VAXVMS                        ; --> MB941021
+        UPSHIFT &                 ; --> MB941021
+@ENDIF                            ; --> MB941021
+        LOOKUP NOTON GSUSAGER &
+          VIA USRCLE &
+          USING USRCLE OF GSUSAGER &
+          MESSAGE 3
+
+FIELD USREMPNOM OF GSUSAGER &
+        REQUIRED &
+        FOR 1,47
+
+FIELD USRDATFIN OF GSUSAGER  FORMAT YYYYMMDD PATTERN "####/##/##"&
+label "Date fin......:" &
+HIDDEN ID 10
+
+SKIP
+ALIGN(3,3,19)(,,24)
+
+FIELD XLOCLE OF GSUSAGER HIDDEN ID 15 &
+label "Localisation..:"&
+        LOOKUP ON VXLO_DSC &
+          VIA XLOCLE &
+          USING XLOCLE OF GSUSAGER &
+          MESSAGE 18 ; Ce code n'existe pas
+
+FIELD XLODSC OF VXLO_DSC DISPLAY
+
+
+FIELD USRSECMAN OF GSUSAGER &
+        HIDDEN ID 20 &
+        SIZE 3
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+; Si le Holding a été défini, alors on applique la sécurité standard,
+; sinon l'usager a accès à l'écran pour définir au miniumum un usager.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  IF T_FLGHLDOK = "1"
+  THEN BEGIN
+    USE ussececr NOLIST
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Pour la sécurité de saisie.
+;
+;
+PROCEDURE INPUT USRCLE
+BEGIN
+  USE ussecent NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+; Sous-écran des codes de localisations.
+;
+;
+PROCEDURE INPUT XLOCLE
+BEGIN
+ IF 0 <> IND(FIELDTEXT,"*")
+ THEN BEGIN
+   LET T_XLOCLE = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+   RUN SCREEN gs108 PASSING T_XLOCLE MODE F
+   LET FIELDTEXT = TRUNC(T_XLOCLE)
+ END
+END
+
+;-------------------------------------------------------------------------------
+;
+; Code universel (Oui/Non)
+;
+;
+PROCEDURE INPUT USRSECMAN
+BEGIN
+  USE usflginp NOLIST
+END
+;-------------------------------------------------------------------------------
+;
+; Code universel (Oui/Non)
+;
+;
+PROCEDURE OUTPUT USRSECMAN
+BEGIN
+  USE usflgout3 NOLIST
+END
+;-------------------------------------------------------------------------------
+;
+; Sous-ecran pour les acces au menu
+;
+PROCEDURE DESIGNER D001
+BEGIN
+  LET T_COD = "M"
+  RUN SCREEN gs001a PASSING T_COD, T_FLGHLDOK, GSUSAGER MODE SAME
+END
+
+;-------------------------------------------------------------------------------
+;
+; Sous-ecran pour les restriction d'ecran
+;
+PROCEDURE DESIGNER D002
+BEGIN
+  LET T_COD = "E"
+  RUN SCREEN gs001a PASSING T_COD, T_FLGHLDOK, GSUSAGER MODE SAME
+END
+
+;-------------------------------------------------------------------------------
+;
+; Sous-ecran pour la restriction aux rapports
+;
+PROCEDURE DESIGNER D003
+BEGIN
+  LET T_COD = "R"
+  RUN SCREEN gs001a PASSING T_COD, T_FLGHLDOK, GSUSAGER MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Sous-ecran pour la restriction aux procedures
+;
+PROCEDURE DESIGNER D006
+BEGIN
+  LET T_COD = "P"
+  RUN SCREEN gs001a PASSING T_COD, T_FLGHLDOK, GSUSAGER MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Sous-ecran pour la restriction aux Compagnies.
+;
+PROCEDURE DESIGNER D004
+BEGIN
+  RUN SCREEN gs001b PASSING GSUSAGER MODE SAME
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Sous-écran de copie d'un usager.
+;
+PROCEDURE DESIGNER D005
+BEGIN
+  RUN SCREEN gs001c PASSING GSUSAGER MODE E
+END
+
+
+;-------------------------------------------------------------------------------
+;
+; Sous-ecran pour la restriction aux donnée
+;
+PROCEDURE DESIGNER D007
+BEGIN
+  RUN SCREEN gs001d PASSING GSUSAGER MODE SAME
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF GSUSAGER &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD OF GSUSAGER &
+     AND NOT NEWRECORD OF GSUSAGER &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+END
+
+BUILD

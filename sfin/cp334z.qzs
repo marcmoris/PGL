@@ -1,0 +1,595 @@
+;/T/ Prévision des déboursés sommaire/détaillé
+;
+;/P/ Programmeur...: Thomas BRENNEUR
+;    Date Création.: 11 Aout 1993
+;
+;    Description...: Prévision des déboursés à effectuer. Ce rapport permet
+;                    de voir les paiements qui sont à faire en fonction de
+;                    l'intervalle donné en paramètre. Ce rapport est
+;                    l'inverse de l'age des comptes.
+;
+;                    Les transactions sont sélectionnées selon la période
+;                    demandée par l'usager, les soldes sont répartie dans la
+;                    bonne colonne selon la date due et la date de sélection.
+;
+;                    Les transactions doivent être journalisées.
+;
+;-------------------------------------------------------------------------------
+
+USE ussetqzs NOLIST
+
+
+ACCESS *WCP334 &
+  ;
+  ; Intervalle choisi par l'usager. Le code 2 identifie que c'est une
+  ; prévision des déboursés.
+  ;
+  LINK ( CAPCIECLE OF WCP334, &
+         "2"                , &
+         G_CIVCOD )           &
+    TO CIECLE , &
+       CIVTYP , &
+       CIVCOD                 OF CPINTERVALLE &
+  ;
+  ; Compte ctb à payer, pour avoir la description et la devise.
+  ;
+  LINK CAPCPTCAP OF WCP334 &
+    TO CPTCLE                 OF VCPT_DSC
+
+
+;
+; Titre du rapport.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+             "Prévision des déboursés / sommaire"
+@ELSE
+             "%%%vision des déboursés / sommaire"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = CIVDSC OF CPINTERVALLE
+
+;
+; Numéro du raport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "CP334A"
+
+;
+; Nom de la compagnie du menu.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM
+
+;
+; On calcul le nombre de jours entre la date due et la date de sélection
+;
+DEFINE D_DIF_DAT INTEGER SIZE 4 = DAYS(CPCDATDUE OF WCP334) - DAYS(G_DATDEB)
+
+;
+; Solde dû, ce sont les factures dont la date due est inférieure à la date
+; de sélection. Exemple, si on demande une prévision pour le 1er mai, alors
+; les factures jusqu'au 30 avril... sont dûes.
+;
+DEFINE  D_SLD_DU FLOAT SIZE 8 &
+        = T_SLD_TOT IF D_DIF_DAT < CIVDEB1 OF CPINTERVALLE
+
+;
+; Répartition du solde dans la bonne colonne selon les intervalles de la
+; table CPINTERVALLE.
+;
+DEFINE D_SLD_01     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= CIVDEB1 OF CPINTERVALLE &
+                                      AND D_DIF_DAT <= CIVFIN1 OF CPINTERVALLE
+;
+DEFINE D_SLD_02     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= CIVDEB2 OF CPINTERVALLE &
+                                      AND D_DIF_DAT <= CIVFIN2 OF CPINTERVALLE
+;
+DEFINE D_SLD_03     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= CIVDEB3 OF CPINTERVALLE &
+                                      AND D_DIF_DAT <= CIVFIN3 OF CPINTERVALLE
+;
+DEFINE D_SLD_04     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= CIVDEB4 OF CPINTERVALLE &
+                                      AND D_DIF_DAT <= CIVFIN4 OF CPINTERVALLE
+;
+DEFINE D_SLD_05     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= CIVDEB5 OF CPINTERVALLE
+
+
+
+SORTED ON CAPCIECLE OF WCP334 , & ; No compagnie
+          CAPCPTCAP OF WCP334 , & ; Compte ctb à payer
+          REFCLENUM OF WCP334     ; Numéro de fournisseur
+
+
+;
+; Impression de l'en-tête.
+;
+USE ustitstd NOLIST
+  SKIP &
+    TAB 061 &
+@IF FRANCAIS
+            "au" &
+@ELSE
+            "at" &
+@ENDIF
+    TAB 064 G_DATDEB &
+  SKIP 2 &
+    TAB 001 &
+@IF FRANCAIS
+            "Compte CAP.....:" &
+@ELSE
+            "Account payab..:" &
+@ENDIF
+    TAB 018 CAPCPTCAP OF WCP334 &
+    TAB 025 CPTDSC OF VCPT_DSC  &
+    TAB 068 &
+@IF FRANCAIS
+            "Devise.........:"  &
+@ELSE
+            "Currency.......:"  &
+@ENDIF
+    TAB 085 DEVCLE OF VCPT_DSC &
+  SKIP 2 &
+    TAB 001 &
+@IF FRANCAIS
+            "        Fournisseur          Cat.   Solde total    Solde dû     " &
+@ELSE
+            "%%%     Fournisseur          Cat.   Solde total    Solde dû     " &
+@ENDIF
+    TAB 065 CIVCOLTIT1 OF CPINTERVALLE &
+    TAB 079 CIVCOLTIT2 OF CPINTERVALLE &
+    TAB 093 CIVCOLTIT3 OF CPINTERVALLE &
+    TAB 107 CIVCOLTIT4 OF CPINTERVALLE &
+    TAB 121 CIVCOLTIT5 OF CPINTERVALLE &
+  SKIP &
+    TAB 001 &
+            "---------------------------  ----  ------------- ------------- ------------- ------------- ------------- ------------- -------------"
+
+
+FOOTING AT REFCLENUM &
+    TAB 001 REFCLENUM OF WCP334 &
+    TAB 008 RADNOMABR OF WCP334 &
+    TAB 030 FOUCAT    OF WCP334 &
+    TAB 036 T_SLD_TOT SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+    TAB 050 D_SLD_DU SUBTOTAL       &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+    TAB 064 D_SLD_01     SUBTOTAL   &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+    TAB 078 D_SLD_02     SUBTOTAL   &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+    TAB 092 D_SLD_03     SUBTOTAL   &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+    TAB 106 D_SLD_04     SUBTOTAL   &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+    TAB 120 D_SLD_05     SUBTOTAL   &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5
+
+
+FOOTING AT CAPCPTCAP &
+  SKIP 2 &
+    TAB 035 "--------------" &
+    TAB 050 "-------------"  &
+    TAB 064 "-------------"  &
+    TAB 078 "-------------"  &
+    TAB 092 "-------------"  &
+    TAB 106 "-------------"  &
+    TAB 120 "-------------"  &
+  SKIP 1 &
+    TAB 035 T_SLD_TOT    SUBTOTAL    &
+            PICTURE "^^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+    TAB 050 D_SLD_DU SUBTOTAL        &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+    TAB 064 D_SLD_01     SUBTOTAL    &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+    TAB 078 D_SLD_02     SUBTOTAL    &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+    TAB 092 D_SLD_03     SUBTOTAL    &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+    TAB 106 D_SLD_04     SUBTOTAL    &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+    TAB 120 D_SLD_05     SUBTOTAL    &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  SKIP &
+    TAB 035 "==============" &
+    TAB 050 "============="  &
+    TAB 064 "============="  &
+    TAB 078 "============="  &
+    TAB 092 "============="  &
+    TAB 106 "============="  &
+    TAB 120 "============="  &
+  SKIP PAGE
+
+
+BUILD cp334za
+
+
+;-------------------------------------------------------------------------------
+;
+; Prévision des paiements / détaillé
+;
+;
+ACCESS *WCP334 &
+  ;
+  ; Intervalle choisi par l'usager.
+  ;
+  LINK ( CAPCIECLE OF WCP334, &
+         "2"                , &
+         G_CIVCOD )           &
+    TO CIECLE , &
+       CIVTYP , &
+       CIVCOD               OF CPINTERVALLE &
+  ;
+  ; Compte ctb à payer, pour avoir la description et la devise.
+  ;
+  LINK CAPCPTCAP OF WCP334 &
+    TO CPTCLE               OF VCPT_DSC &
+  ;
+  ; Catégorie, pour avoir la description.
+  ;
+  LINK ("FOUCAT" , &
+        FOUCAT )   &
+    TO XELNOM, &
+       CBICLE                 OF VCBI_DSC OPTIONAL
+
+;
+; Titre du rapport.
+;
+DEFINE DZ_NOMRAP1 CHARACTER SIZE 60 = &
+@IF FRANCAIS
+             "Prévision des déboursés / détaillé"
+@ELSE
+             "%%%vision des déboursés / detailed"
+@ENDIF
+
+DEFINE DZ_NOMRAP2 CHARACTER SIZE 60 = CIVDSC OF CPINTERVALLE
+
+;
+; Numéro du raport.
+;
+DEFINE DZ_NUMRAP  CHARACTER SIZE 12 = "CP334B"
+
+;
+; Nom de la compagnie du menu.
+;
+DEFINE DZ_CIENOM  CHARACTER SIZE 40 = PARM
+
+;
+; On calcul le nombre de jours entre la date due et la date de sélection
+;
+DEFINE D_DIF_DAT INTEGER SIZE 4 = DAYS(CPCDATDUE OF WCP334) - DAYS(G_DATDEB)
+
+;
+; Solde dû, ce sont les factures dont la date due est inférieure à la date
+; de sélection. Exemple, si on demande une prévision pour le 1er mai, alors
+; les factures jusqu'au 30 avril... sont dûes.
+;
+DEFINE  D_SLD_DU FLOAT SIZE 8 &
+        = T_SLD_TOT IF D_DIF_DAT < CIVDEB1 OF CPINTERVALLE
+
+;
+; Répartition du solde dans la bonne colonne selon les intervalles de la
+; table CPINTERVALLE.
+;
+DEFINE D_SLD_01     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= CIVDEB1 OF CPINTERVALLE &
+                                      AND D_DIF_DAT <= CIVFIN1 OF CPINTERVALLE
+;
+DEFINE D_SLD_02     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= CIVDEB2 OF CPINTERVALLE &
+                                      AND D_DIF_DAT <= CIVFIN2 OF CPINTERVALLE
+;
+DEFINE D_SLD_03     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= CIVDEB3 OF CPINTERVALLE &
+                                      AND D_DIF_DAT <= CIVFIN3 OF CPINTERVALLE
+;
+DEFINE D_SLD_04     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= CIVDEB4 OF CPINTERVALLE &
+                                      AND D_DIF_DAT <= CIVFIN4 OF CPINTERVALLE
+;
+DEFINE D_SLD_05     FLOAT SIZE 8 = T_SLD_TOT &
+                                   IF     D_DIF_DAT >= CIVDEB5 OF CPINTERVALLE
+
+
+
+SORTED ON CAPCIECLE OF WCP334 , & ; No compagnie
+          CAPCPTCAP OF WCP334 , & ; Compte ctb à payer
+          REFCLENUM OF WCP334 , & ; Numéro de fournisseur
+          CAPCLE    OF WCP334 , & ; No facture
+          CPCCLELIG OF WCP334     ; No Cédule
+
+
+;
+; Impression de l'en-tête.
+;
+USE ustitstd NOLIST
+  SKIP &
+    TAB 061 &
+@IF FRANCAIS
+            "au" &
+@ELSE
+            "at" &
+@ENDIF
+    TAB 064 G_DATDEB &
+  SKIP 2 &
+    TAB 001 &
+@IF FRANCAIS
+            "Compte CAP.....:" &
+@ELSE
+            "Account payab..:" &
+@ENDIF
+    TAB 018 CAPCPTCAP OF WCP334 &
+    TAB 025 CPTDSC OF VCPT_DSC  &
+    TAB 068 &
+@IF FRANCAIS
+            "Devise.........:"  &
+@ELSE
+            "Currency.......:"  &
+@ENDIF
+    TAB 085 DEVCLE OF VCPT_DSC &
+  SKIP 2 &
+    TAB 001 &
+@IF FRANCAIS
+            "                  Date     Date" &
+@ELSE
+            "                  Date     Date" &
+@ENDIF
+  SKIP &
+    TAB 001 &
+@IF FRANCAIS
+            "   No facture   facture    Due      Solde total    Solde dû" &
+@ELSE
+            "%%%No facture   facture    Due      Solde total    Solde dû" &
+@ENDIF
+    TAB 065 CIVCOLTIT1 OF CPINTERVALLE &
+    TAB 079 CIVCOLTIT2 OF CPINTERVALLE &
+    TAB 093 CIVCOLTIT3 OF CPINTERVALLE &
+    TAB 107 CIVCOLTIT4 OF CPINTERVALLE &
+    TAB 121 CIVCOLTIT5 OF CPINTERVALLE &
+  SKIP &
+    TAB 001 &
+            "--------------- -------- --------  ------------- ------------- ------------- ------------- ------------- ------------- -------------"
+
+
+HEADING AT REFCLENUM &
+    TAB 001 " " &
+  SKIP 1 &
+    TAB 001 "Fournisseur.:" &
+    TAB 015 REFCLENUM OF WCP334 &
+    TAB 022 RADNOM    OF WCP334 &
+    TAB 064 &
+@IF FRANCAIS
+            "Catégorie:" &
+@ELSE
+            "Category.:" &
+@ENDIF
+    TAB 075 FOUCAT OF WCP334 &
+    TAB 080 CBIDSC OF VCBI_DSC &
+  SKIP 2
+
+
+REPORT &
+    TAB 001 CAPCLE    OF WCP334 &
+    TAB 017 CAPDAT    OF WCP334 &
+    TAB 026 CPCDATDUE OF WCP334 &
+    TAB 036 T_SLD_TOT SUBTOTAL      &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+    TAB 050 D_SLD_DU SUBTOTAL   &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+    TAB 064 D_SLD_01     SUBTOTAL   &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+    TAB 078 D_SLD_02     SUBTOTAL   &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+    TAB 092 D_SLD_03     SUBTOTAL   &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+    TAB 106 D_SLD_04     SUBTOTAL   &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5          &
+    TAB 120 D_SLD_05     SUBTOTAL   &
+            PICTURE "^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"       &
+            SIGNIFICANCE 5
+
+
+
+FOOTING AT REFCLENUM &
+    TAB 035 "--------------" &
+    TAB 050 "-------------"  &
+    TAB 064 "-------------"  &
+    TAB 078 "-------------"  &
+    TAB 092 "-------------"  &
+    TAB 106 "-------------"  &
+    TAB 120 "-------------"  &
+  SKIP 1 &
+    TAB 035 T_SLD_TOT    SUBTOTAL    &
+            PICTURE "^^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+    TAB 050 D_SLD_DU SUBTOTAL    &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+    TAB 064 D_SLD_01     SUBTOTAL    &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+    TAB 078 D_SLD_02     SUBTOTAL    &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+    TAB 092 D_SLD_03     SUBTOTAL    &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+    TAB 106 D_SLD_04     SUBTOTAL    &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+    TAB 120 D_SLD_05     SUBTOTAL    &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+  SKIP 2
+
+
+FOOTING AT CAPCPTCAP &
+  SKIP 2 &
+    TAB 035 "--------------" &
+    TAB 050 "-------------"  &
+    TAB 064 "-------------"  &
+    TAB 078 "-------------"  &
+    TAB 092 "-------------"  &
+    TAB 106 "-------------"  &
+    TAB 120 "-------------"  &
+  SKIP 1 &
+    TAB 035 T_SLD_TOT    SUBTOTAL    &
+            PICTURE "^^^^^^,^^^.^^ " &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+    TAB 050 D_SLD_DU SUBTOTAL    &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+    TAB 064 D_SLD_01     SUBTOTAL    &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+    TAB 078 D_SLD_02     SUBTOTAL    &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+    TAB 092 D_SLD_03     SUBTOTAL    &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+    TAB 106 D_SLD_04     SUBTOTAL    &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+    TAB 120 D_SLD_05     SUBTOTAL    &
+            PICTURE "^^^^^,^^^.^^ "  &
+            TRAILING SIGN "-"        &
+            SIGNIFICANCE 5           &
+SKIP &
+    TAB 035 "==============" &
+    TAB 050 "============="  &
+    TAB 064 "============="  &
+    TAB 078 "============="  &
+    TAB 092 "============="  &
+    TAB 106 "============="  &
+    TAB 120 "============="  &
+  SKIP PAGE
+
+
+BUILD cp334zb
+
+@IF FORMAT
+
+CP334A                                        xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                    Page: 9999
+99/99/99 HH:MM xxxxxxxxxxxx                     Prévision des déboursés / sommaire
+                                    XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                                                            au 99/99/99
+
+Compte CAP.....: XXXXXX XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX   Devise.........: xxx
+
+        Fournisseur          Cat.   Solde total    Solde dû     xxxxxxxxxxx   xxxxxxxxxxx   xxxxxxxxxxx   xxxxxxxxxxx   xxxxxxxxxxx
+---------------------------  ----  ------------- ------------- ------------- ------------- ------------- ------------- -------------
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456 xxxxxxxxxxxxxxxxxxxx  xxxx  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+                                  -------------- ------------- ------------- ------------- ------------- ------------- -------------
+                                  999999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+                                  ============== ============= ============= ============= ============= ============= =============
+
+CP334B                                        xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                                    Page: 9999
+99/99/99 HH:MM xxxxxxxxxxxx                     Prévision des déboursés / détaillé
+                                    XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                                                            au 99/99/99
+
+Compte CAP.....: XXXXXX XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX   Devise.........: xxx
+
+                  Date     Date
+   No facture   facture    Due      Solde total    Solde dû     xxxxxxxxxxx   xxxxxxxxxxx   xxxxxxxxxxx   xxxxxxxxxxx   xxxxxxxxxxx
+--------------- -------- --------  ------------- ------------- ------------- ------------- ------------- ------------- -------------
+
+Fournisseur.: 123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  Catégorie: xxxx xxxxxxxxxxxxxxxxxxxxxxxxx
+
+123456789012    99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456789012    99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456789012    99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456789012    99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456789012    99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456789012    99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456789012    99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456789012    99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456789012    99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456789012    99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+                                  -------------- ------------- ------------- ------------- ------------- ------------- -------------
+                                  999999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+
+
+Fournisseur.: 123456 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx  Catégorie: xxxx xxxxxxxxxxxxxxxxxxxxxxxxx
+
+123456789012    99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456789012    99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456789012    99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456789012    99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+123456789012    99/99/99 99/99/99  99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+                                  -------------- ------------- ------------- ------------- ------------- ------------- -------------
+                                  999999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+
+                                  -------------- ------------- ------------- ------------- ------------- ------------- -------------
+                                  999999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99- 99999,999.99-
+                                  ============== ============= ============= ============= ============= ============= =============
+@ENDIF

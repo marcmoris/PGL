@@ -1,0 +1,577 @@
+;/T/ Taxes gouvernementale
+;
+;/P/ Programmeur..: Guy Chabot
+;    Date Création: 26-Mar-1992
+;
+;    Description..: Gestion des taxes du gouvernements avec les comptes
+;                   affecter lors de transaction.
+;
+;    Programmeur..: Josée Bédard
+;    Date modif...: 27-Mai-94
+;
+;    Description..: Adaptation pour ajouter le couru à recevoir sur les taxes
+;                   lors de l'enregistrement de la dépense (Reception)
+;
+;-------------------------------------------------------------------------------
+
+;/V/ Écran vérifier pour le passage à l'an 2000
+
+
+SCREEN mc004 ACTIONBAR &
+             MODE LABEL "" AT 2,80 &
+             NOACTION FIELDMARK RETAIN STARTUP &
+             HELP POPUP FROM 4,9 TO 20,72 &
+             RECEIVING T_CIENOM
+
+USE ussectmp NOLIST
+    "MC004"
+
+USE mc004.hlp NOLIST
+
+USE usactecr NOLIST
+
+@IF FRANCAIS
+ACTIONMENU LABEL "Sous-Ecrans"
+  MENUITEM LABEL "Test - Calcul de taxe  " ACTION DESIGNER MC01
+@ELSE
+ACTIONMENU LABEL "Subscreen"
+  MENUITEM LABEL "%%%test                " ACTION DESIGNER MC01
+@ENDIF
+
+;-------------------------------------------------------------------------------
+;
+TEMPORARY T_CIENOM   CHARACTER SIZE 40; Nom de la compagnie-holding
+
+;-------------------------------------------------------------------------------
+;
+;
+FILE MCTAXE           PRIMARY
+  ACCESS REQUEST TAXCLETYP OF MCTAXE, &
+                 TAXCLECOD OF MCTAXE  &
+         VIA     TAXCLETYP, &
+                 TAXCLECOD  &
+         USING   TAXCLETYP OF MCTAXE, &
+                 TAXCLECOD OF MCTAXE  &
+         ORDERED
+  ACCESS REQUEST TAXCLETYP OF MCTAXE &
+         VIA     TAXCLETYP &
+         USING   TAXCLETYP OF MCTAXE &
+         ORDERBY TAXCLETYP, &
+                 TAXCLECOD
+  ACCESS SEQUENTIAL &
+         ORDERBY TAXCLETYP, &
+                 TAXCLECOD
+
+
+;
+; Sert à valider les codes bilingue et pour les sous-écrans de consultation
+;
+DEFINE    D_TAXCLETYP CHARACTER SIZE 16 = "TAXCLETYP"
+DEFINE    D_TAXFLGNET CHARACTER SIZE 16 = "TAXFLGNET"
+DEFINE    D_TAXMOD    CHARACTER SIZE 16 = "TAXMOD"
+
+TEMPORARY T_TAXCLETYP CHARACTER SIZE 4
+TEMPORARY T_TAXFLGNET CHARACTER SIZE 4
+TEMPORARY T_TAXMOD    CHARACTER SIZE 4
+
+;
+; Validation du type de gourvernement.
+;
+FILE VCBI_DSC         REFERENCE &
+                      ALIAS A_CBI_TYP
+  ACCESS VIA XELNOM, &
+             CBICLE  &
+         USING D_TAXCLETYP, &
+               TAXCLETYP OF MCTAXE
+
+;
+; Validation du mode de taxation.
+;
+FILE VCBI_DSC         REFERENCE &
+                      ALIAS A_CBI_MOD
+  ACCESS VIA XELNOM, &
+             CBICLE  &
+         USING D_TAXMOD, &
+               TAXMOD OF MCTAXE
+
+;
+; Validation du type de calcul(TAXFLGNET).
+;
+FILE VCBI_DSC         REFERENCE &
+                      ALIAS A_CBI_FLGNET
+  ACCESS VIA XELNOM, &
+             CBICLE  &
+         USING D_TAXFLGNET, &
+               TAXFLGNET OF MCTAXE
+
+;
+; Validation du compte ctb CTI.
+;
+FILE VCPT_DSC         REFERENCE &
+                      ALIAS A_CPT_CTI
+  ACCESS VIA CPTCLE &
+         USING TAXCPTCTICAP OF MCTAXE
+
+;
+; Validation du compte à payer de taxe.
+;
+FILE VCPT_DSC         REFERENCE &
+                      ALIAS A_CPT_CAR
+  ACCESS VIA CPTCLE &
+         USING TAXCPTCAR OF MCTAXE
+
+;
+; Validation du compte de couru de taxe.
+;
+FILE VCPT_DSC         REFERENCE &
+                      ALIAS A_CPT_COU
+  ACCESS VIA CPTCLE &
+         USING TAXCPTCOUCAR OF MCTAXE
+
+;-------------------------------------------------------------------------------
+
+TEMPORARY T_CPTCLE    CHARACTER SIZE 6 ; Popup sur les comptes
+TEMPORARY T_CPTTYPPAT CHARACTER SIZE 1 ; Popup sur les comptes
+TEMPORARY T_CPTCATPAT CHARACTER SIZE 8 ; Popup sur les comptes
+TEMPORARY T_PECCLE    CHARACTER SIZE 4 ; Popup sur les comptes
+
+TEMPORARY T_FLGDEL CHARACTER SIZE 1 ; Flag pour le sous-écran de destruction
+
+DEFINE DZ_CIECLE CHARACTER SIZE 4 = " "
+DEFINE DZ_CIENOM CHARACTER SIZE 40 = CENTER( T_CIENOM )
+
+;-------------------------------------------------------------------------------
+;
+USE usdrwecr NOLIST
+USE ustitstd NOLIST
+USE ushilite NOLIST
+
+SKIP
+
+TITLE &
+@IF FRANCAIS
+      " Taxes gouvernementales " &
+@ELSE
+      " Government taxes " &
+@ENDIF
+      CENTERED AT ,1
+
+USE ustitoff NOLIST
+
+SKIP 1
+
+ALIGN (3,3,19) (,,21) (,50,66)
+
+FIELD TAXCLETYP    OF MCTAXE HIDDEN ID 05 &
+        REQUIRED &
+        NOCHANGE &
+        LOOKUP ON A_CBI_TYP &
+          MESSAGE 112 ; Code invalide.
+
+FIELD CBIDSC OF A_CBI_TYP &
+        DISPLAY
+
+FIELD TAXCLECOD    OF MCTAXE &
+        REQUIRED &
+        NOCHANGE &
+        LOOKUP NOTON MCTAXE &
+          VIA TAXCLETYP, &
+              TAXCLECOD &
+          USING TAXCLETYP OF MCTAXE, &
+                TAXCLECOD OF MCTAXE &
+          MESSAGE 113 ; Ce code de taxe existe deja
+SKIP 1
+
+ALIGN (3,3,19)
+
+FIELD TAXDSCFRA    OF MCTAXE HIDDEN ID 10 &
+        REQUIRED
+SKIP 1
+FIELD TAXDSCANG    OF MCTAXE HIDDEN ID 15 &
+        DEFAULT TAXDSCFRA OF MCTAXE
+SKIP 1
+
+ALIGN (3,3,19) (,,21) (,45,58) (,,60)
+
+FIELD TAXMOD    OF MCTAXE HIDDEN ID 20 &
+        REQUIRED &
+        NOCHANGE &
+        LOOKUP ON A_CBI_MOD &
+          MESSAGE 114 ; Ce mode de taxation est invalide.
+
+FIELD CBIDSC OF A_CBI_MOD &
+        DISPLAY &
+        SIZE 20
+
+FIELD TAXFLGNET OF MCTAXE &
+@IF FRANCAIS
+        LABEL "Calculé sur:" &
+@ELSE
+        LABEL "%%%calculé.:" &
+@ENDIF
+        REQUIRED &
+        NOCHANGE &
+        LOOKUP ON A_CBI_FLGNET &
+          MESSAGE 112 ; Code invalide.
+
+FIELD CBIDSC OF A_CBI_FLGNET &
+        DISPLAY &
+        SIZE 20
+SKIP 1
+
+ALIGN (3,3,19)
+
+FIELD TAXPCT    OF MCTAXE HIDDEN ID 25 &
+        REQUIRED &
+        IF TAXMOD OF MCTAXE <> "E"
+
+SKIP 1
+
+FIELD TAXPCTCTI OF MCTAXE HIDDEN ID 30 &
+        REQUIRED &
+        IF TAXMOD OF MCTAXE <> "E"
+
+SKIP 1
+
+ALIGN (3,3,19) (,,26)
+
+FIELD TAXCPTCTICAP OF MCTAXE HIDDEN ID 35
+
+FIELD CPTDSC OF A_CPT_CTI &
+        DISPLAY
+
+SKIP 1
+
+FIELD TAXCPTCAR    OF MCTAXE HIDDEN ID 40
+
+FIELD CPTDSC OF A_CPT_CAR &
+        DISPLAY
+
+SKIP 1
+
+FIELD TAXCPTCOUCAR    OF MCTAXE HIDDEN ID 45
+
+FIELD CPTDSC OF A_CPT_COU &
+        DISPLAY
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide la sécurité d'accès de l'écran.
+;
+;
+PROCEDURE INITIALIZE
+BEGIN
+  USE ussececr NOLIST
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE INPUT TAXCLETYP
+BEGIN
+  ;
+  ; Popup sur le type de gouvernement.
+  ;
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TAXCLETYP = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_TAXCLETYP, T_TAXCLETYP
+    LET FIELDTEXT = TRUNC(T_TAXCLETYP)
+  END
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les modes de taxation.
+;
+;
+PROCEDURE INPUT TAXMOD
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TAXMOD = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_TAXMOD, T_TAXMOD
+    LET FIELDTEXT = TRUNC(T_TAXMOD)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Le code du net dépend du mode de taxation.
+;
+;
+PROCEDURE PROCESS TAXMOD
+BEGIN
+  IF ( TAXCLETYP OF MCTAXE = "F" &
+       AND ( TAXMOD OF MCTAXE = "S" OR &
+             TAXMOD OF MCTAXE = "E" ) &
+     ) &
+     OR &
+     ( TAXCLETYP OF MCTAXE = "P" &
+       AND TAXMOD OF MCTAXE = "E" )
+  THEN BEGIN
+    LET TAXFLGNET OF MCTAXE = "1"
+    DISPLAY TAXFLGNET OF MCTAXE
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les types de calcul.
+;
+;
+PROCEDURE INPUT TAXFLGNET
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_TAXFLGNET = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    RUN SCREEN mc102 MODE F PASSING D_TAXFLGNET, T_TAXFLGNET
+    LET FIELDTEXT = TRUNC(T_TAXFLGNET)
+  END
+  ;
+  ; Force la validation a cause du mode de taxation.
+  ;
+  IF NOT FINDMODE AND &
+     0 = SIZE(FIELDTEXT)
+  THEN LET FIELDTEXT = TAXFLGNET OF MCTAXE
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du code de net par rapport au mode de taxation.
+;
+;
+PROCEDURE EDIT TAXFLGNET
+BEGIN
+  IF ( TAXCLETYP OF MCTAXE = "F" &
+       AND (    ( TAXMOD OF MCTAXE = "I" AND ( FIELDTEXT = "1" OR FIELDTEXT = "3") ) &
+             OR ( TAXMOD OF MCTAXE = "S" AND FIELDTEXT = "1" ) &
+             OR ( TAXMOD OF MCTAXE = "E" AND FIELDTEXT = "1" ) &
+           ) &
+     ) &
+     OR &
+     ( TAXCLETYP OF MCTAXE = "P" &
+       AND (      TAXMOD OF MCTAXE = "I" &
+             OR ( TAXMOD OF MCTAXE = "S" AND ( FIELDTEXT = "1" OR FIELDTEXT = "2" ) ) &
+             OR ( TAXMOD OF MCTAXE = "E" AND FIELDTEXT = "1" ) &
+           ) &
+     )
+  THEN NULL
+  ELSE ERROR 149; Code invalide pour ce mode de taxation.
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Aide au choix du compte ou pour la consultaion
+;
+;
+PROCEDURE INPUT TAXCPTCTICAP
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE    = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    LET T_CPTTYPPAT = "R"
+    LET T_CPTCATPAT = "@"
+    LET T_PECCLE    = " "
+    RUN SCREEN mc103 PASSING T_CPTCLE, T_CPTTYPPAT, T_CPTCATPAT, T_PECCLE MODE F
+    LET FIELDTEXT = TRUNC(T_CPTCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du compte comptable, il est optionel.
+;
+;
+PROCEDURE EDIT TAXCPTCTICAP
+BEGIN
+  GET A_CPT_CTI OPTIONAL
+  IF NOT ACCESSOK AND 0 <> SIZE(TRUNCATE(FIELDTEXT))
+  THEN ERROR 111 ; Ce compte n'existe pas.
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les comptes.
+;
+;
+PROCEDURE INPUT TAXCPTCAR
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE    = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    LET T_CPTTYPPAT = "R"
+    LET T_CPTCATPAT = "@"
+    LET T_PECCLE    = " "
+    RUN SCREEN mc103 PASSING T_CPTCLE, T_CPTTYPPAT, T_CPTCATPAT, T_PECCLE MODE F
+    LET FIELDTEXT = TRUNC(T_CPTCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du compte comptable, il est optionel.
+;
+;
+PROCEDURE EDIT TAXCPTCAR
+BEGIN
+  GET A_CPT_CAR OPTIONAL
+  IF NOT ACCESSOK AND 0 <> SIZE(TRUNCATE(FIELDTEXT))
+  THEN ERROR 111 ; Ce compte n'existe pas.
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Popup sur les comptes.
+;
+;
+PROCEDURE INPUT TAXCPTCOUCAR
+BEGIN
+  IF 0 <> IND(FIELDTEXT,"*")
+  THEN BEGIN
+    LET T_CPTCLE    = FIELDTEXT[1:IND(FIELDTEXT,"*") - 1] + "@"
+    LET T_CPTTYPPAT = "R"
+    LET T_CPTCATPAT = "@"
+    LET T_PECCLE    = " "
+    RUN SCREEN mc103 PASSING T_CPTCLE, T_CPTTYPPAT, T_CPTCATPAT, T_PECCLE MODE F
+    LET FIELDTEXT = TRUNC(T_CPTCLE)
+  END
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Validation du compte comptable, il est optionel.
+;
+;
+PROCEDURE EDIT TAXCPTCOUCAR
+BEGIN
+  GET A_CPT_COU OPTIONAL
+  IF NOT ACCESSOK AND 0 <> SIZE(TRUNCATE(FIELDTEXT))
+  THEN ERROR 111 ; Ce compte n'existe pas.
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide si l'usager peut faire de la saisie.
+;
+;
+PROCEDURE PREENTRY
+BEGIN
+  USE ussecent NOLIST
+END
+
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE DESIGNER 25
+BEGIN
+  IF TAXMOD OF MCTAXE <> "E"
+  THEN ACCEPT TAXPCT OF MCTAXE
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE DESIGNER 30
+BEGIN
+  IF TAXMOD OF MCTAXE <> "E"
+  THEN ACCEPT TAXPCTCTI OF MCTAXE
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+PROCEDURE DESIGNER MC01 NODATA &
+                        HELP "Test du calcul des taxes"
+BEGIN
+  RUN SCREEN mc004a MODE E
+END
+
+;-------------------------------------------------------------------------------
+;
+;
+; Valide les traitements permis par écran et par usager.
+;
+;
+PROCEDURE PREUPDATE
+BEGIN
+  ;
+  ; Validation de la destruction
+  ;
+  IF     DELETEDRECORD OF MCTAXE &
+     AND TZ_SECDEL = "0"
+  THEN ERROR 1
+  ;
+  ; Validation de la modification.
+  ;
+  IF     ALTEREDRECORD     OF MCTAXE &
+     AND NOT NEWRECORD     OF MCTAXE &
+     AND NOT DELETEDRECORD OF MCTAXE &
+     AND TZ_SECMOD = "0"
+  THEN ERROR 2
+  ;
+  ; Destruction d'un code de taxe.
+  ;
+  IF DELETEDRECORD OF MCTAXE
+  THEN BEGIN
+    ;
+    ; On initialise le flag de retour pour savoir si le sous-écran a
+    ; bien fonctionné.
+    ;
+    LET T_FLGDEL = ""
+    ;
+    ; Appel du sous-écran qui valide si le code de taxe est référé.
+    ;
+    RUN SCREEN mc004x MODE SAME &
+                      PASSING MCTAXE , &
+                              T_FLGDEL
+    ;
+    ; Si la valeur de retour égale 1, cela indique que le sous-écran
+    ; n'a trouvé aucune référence pour l'identifiant demandé.
+    ;
+    IF T_FLGDEL = ""
+    THEN ERROR " "
+  END
+END
+
+BUILD
+@IF FORMAT
+
+
+xxxx                xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   x
+**************************** Taxes gouvernementales ****************************
+*                                                                              *
+* Gouvernement..: x xxxxxxxxxxxxxxxxxxxxxxxxx    Code de taxe..: xx            *
+*                                                                              *
+* Desc.française: xxxxxxxxxxxxxxxxxxxx                                         *
+*                                                                              *
+* Desc.anglaise.: xxxxxxxxxxxxxxxxxxxx                                         *
+*                                                                              *
+* Mode taxation.: x xxxxxxxxxxxxxxxxxxxx    Calculé sur: x xxxxxxxxxxxxxxxxxxxx*
+*                                                                              *
+* % de taxe.....: xxxxxx                                                       *
+*                                                                              *
+* % C.T.I. .....: xxxxxx                                                       *
+*                                                                              *
+* Compte C.T.I..: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   *
+*                                                                              *
+* Compte à payer: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   *
+*                                                                              *
+* Compte couru..: xxxxxx xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx                   *
+*                                                                              *
+********************************************************************************
+@ENDIF
